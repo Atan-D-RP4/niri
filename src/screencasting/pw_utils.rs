@@ -47,6 +47,10 @@ use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::gbm::Modifier;
+use smithay::reexports::rustix::fd::OwnedFd;
+use smithay::reexports::rustix::fs::{
+    fcntl_add_seals, ftruncate, memfd_create, MemfdFlags, SealFlags,
+};
 use smithay::utils::{Logical, Physical, Point, Scale, Size, Transform};
 use zbus::object_server::SignalEmitter;
 
@@ -61,6 +65,7 @@ use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
 // Give a 0.1 ms allowance for presentation time errors.
 const CAST_DELAY_ALLOWANCE: Duration = Duration::from_micros(100);
 const SHM_BLOCKS: usize = 1;
+const SHM_BYTES_PER_PIXEL: usize = 4;
 
 const CURSOR_FORMAT: spa_video_format = SPA_VIDEO_FORMAT_BGRA;
 const CURSOR_BPP: u32 = 4;
@@ -114,6 +119,7 @@ struct CastInner {
     refresh: u32,
     min_time_between_frames: Duration,
     dmabufs: HashMap<i64, Dmabuf>,
+    shmbufs: HashMap<i64, Shmbuf>,
     /// Buffers dequeued from PipeWire in process of rendering.
     ///
     /// This is an ordered list of buffers that we started rendering to and waiting for the
@@ -444,6 +450,7 @@ impl PipeWire {
             refresh,
             min_time_between_frames: Duration::ZERO,
             dmabufs: HashMap::new(),
+            shmbufs: HashMap::new(),
             rendering_buffers: Vec::new(),
         }));
 
@@ -854,7 +861,7 @@ impl PipeWire {
                         } => {
                             match dma_negotiation {
                                 Some(DmaNegotiation { modifier, .. }) => {
-                                    trace!("size={size:?}, alpha={alpha}, modifier={modifier:?}");
+                                    trace!("pw stream: add_buffer (dma), size={size:?}, alpha={alpha}, modifier={modifier:?}");
                                     unsafe {
                                         let spa_buffer = (*buffer).buffer;
 
@@ -914,7 +921,42 @@ impl PipeWire {
                                     }
                                 },
                                 None => {
-                                    warn!("pw stream: shared memory sharing hasn't been implemented")
+                                    trace!("pw stream: add_buffer (shm), size={size:?}, alpha={alpha}");
+                                    unsafe {
+                                        let spa_buffer = (*buffer).buffer;
+
+                                        let shmbuf = match allocate_shmbuf(size) {
+                                            Ok(x) => x,
+                                            Err(err) => {
+                                                warn!("error allocating shmbuf: {err:?}");
+                                                stop_cast();
+                                                return;
+                                            }
+                                        };
+
+                                        assert_eq!((*spa_buffer).n_datas as usize, SHM_BLOCKS);
+
+                                        let spa_data = (*spa_buffer).datas;
+                                        assert!((*spa_data).type_ & (1 << DataType::MemFd.as_raw()) > 0);
+
+                                        (*spa_data).type_ = DataType::MemFd.as_raw();
+                                        (*spa_data).maxsize = shmbuf.layout.size;
+                                        (*spa_data).fd = shmbuf.fd.as_raw_fd() as i64;
+                                        (*spa_data).flags = SPA_DATA_FLAG_READWRITE;
+
+                                        let chunk = (*spa_data).chunk;
+                                        (*chunk).stride = shmbuf.layout.stride;
+                                        (*chunk).offset = 0;
+
+                                        let fd = (*(*spa_buffer).datas).fd;
+                                        assert!(inner.shmbufs.insert(fd, shmbuf).is_none());
+                                    }
+
+                                    // During size re-negotiation, the stream sometimes just keeps running, in
+                                    // which case we may need to force a redraw once we got a newly sized buffer.
+                                    if inner.shmbufs.len() == 1 && stream.state() == StreamState::Streaming {
+                                        redraw_();
+                                    }
                                 }
                             }
                         },
@@ -927,7 +969,6 @@ impl PipeWire {
             .remove_buffer({
                 let inner = inner.clone();
                 move |_stream, (), buffer| {
-                    trace!(%stream_id, "remove_buffer");
                     let mut inner = inner.borrow_mut();
 
                     inner
@@ -937,10 +978,21 @@ impl PipeWire {
                     unsafe {
                         let spa_buffer = (*buffer).buffer;
                         let spa_data = (*spa_buffer).datas;
-                        assert!((*spa_buffer).n_datas > 0);
 
-                        let fd = (*spa_data).fd;
-                        inner.dmabufs.remove(&fd);
+                        if (*spa_data).type_ == DataType::DmaBuf.as_raw() {
+                            trace!(%stream_id, "pw stream: remove_buffer (dma)");
+                            assert!((*spa_buffer).n_datas > 0);
+
+                            let fd = (*spa_data).fd;
+                            inner.dmabufs.remove(&fd);
+                        } else if (*spa_data).type_ == DataType::MemFd.as_raw() {
+                            trace!(%stream_id, "pw stream: remove_buffer (shm)");
+                            assert_eq!((*spa_buffer).n_datas, SHM_BLOCKS as u32);
+                            let fd = (*spa_data).fd;
+                            inner.shmbufs.remove(&fd);
+                        } else {
+                            error!(%stream_id, "pw stream: remove_buffer (unknown): {:?}", (*spa_data).type_);
+                        }
                     }
                 }
             })
@@ -1471,6 +1523,51 @@ fn allocate_dmabuf(
     Ok(dmabuf)
 }
 
+#[derive(Debug, Clone)]
+pub struct Shmbuf {
+    fd: Rc<OwnedFd>,
+    layout: ShmLayout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ShmLayout {
+    stride: i32,
+    size: u32,
+}
+
+impl ShmLayout {
+    fn new(size: Size<u32, Physical>) -> anyhow::Result<Self> {
+        let stride = size
+            .w
+            .checked_mul(SHM_BYTES_PER_PIXEL as u32)
+            .context("SHM stride overflows u32")?;
+        let buffer_size = stride
+            .checked_mul(size.h)
+            .context("SHM buffer size overflows u32")?;
+
+        Ok(Self {
+            stride: stride.try_into().context("SHM stride exceeds i32")?,
+            size: buffer_size,
+        })
+    }
+}
+
+fn allocate_shmbuf(size: Size<u32, Physical>) -> anyhow::Result<Shmbuf> {
+    let layout = ShmLayout::new(size)?;
+    let fd = memfd_create(
+        "niri-pw-stream-memfd",
+        MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
+    )
+    .context("error creating memfd")?;
+    ftruncate(&fd, layout.size.into()).context("error setting size of the fd")?;
+    fcntl_add_seals(&fd, SealFlags::SEAL | SealFlags::SHRINK | SealFlags::GROW)
+        .context("error sealing the fd")?;
+    Ok(Shmbuf {
+        fd: fd.into(),
+        layout,
+    })
+}
+
 unsafe fn return_unused_buffer(stream: &Stream, pw_buffer: NonNull<pw_buffer>) {
     // pw_stream_return_buffer() requires too new PipeWire (1.4.0). So, mark as
     // corrupted and queue.
@@ -1666,5 +1763,20 @@ unsafe fn add_cursor_metadata(
         bitmap_meta.size.width = size.w as _;
         bitmap_meta.size.height = size.h as _;
         bitmap_meta.stride = size.w * CURSOR_BPP as i32;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shm_layout_uses_spa_representable_dimensions() {
+        let layout = ShmLayout::new(Size::from((3840, 2160))).unwrap();
+        assert_eq!(layout.stride, 15360);
+        assert_eq!(layout.size, 33_177_600);
+
+        assert!(ShmLayout::new(Size::from((536_870_912, 1))).is_err());
+        assert!(ShmLayout::new(Size::from((500_000_000, 3))).is_err());
     }
 }
