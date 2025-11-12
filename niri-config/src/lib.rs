@@ -526,25 +526,10 @@ impl ConfigPath {
                         || config_dir.join("init.lua").exists();
 
                     if lua_config_exists {
-                        // Lua config exists, load it in addition to KDL config
-                        info!("Lua config detected at {config_dir:?}, loading alongside KDL config");
+                        // Lua config exists, skip creating default KDL config
+                        info!("Lua config detected at {config_dir:?}, skipping default KDL config creation");
                         
-                        // First try to load/create the KDL config
-                        let kdl_path = match maybe_create(user_path.as_path(), system_path.as_path()) {
-                            Ok(x) => x,
-                            Err(err) => return ConfigParseResult::from_err(miette!(err)),
-                        };
-                        
-                        // Load the KDL config
-                        let config_parse_result = Config::load(kdl_path);
-                        let config = match config_parse_result.config {
-                            Ok(config) => config,
-                            Err(err) => return ConfigParseResult::from_err(miette!(err)),
-                        };
-                        
-                        // Now try to load the Lua config
-                        // Note: This is a simplified integration - in a full implementation,
-                        // the Lua config might modify the Config struct or provide additional functionality
+                        // Determine which Lua file to load
                         let lua_path = if config_dir.join("niri.lua").exists() {
                             config_dir.join("niri.lua")
                         } else if config_dir.join("init.lua").exists() {
@@ -554,15 +539,13 @@ impl ConfigPath {
                             return ConfigParseResult::from_err(miette!("Lua config file disappeared"));
                         };
                         
-                        // For now, just log that we're loading Lua config
-                        // In a full implementation, this would execute the Lua script
-                        info!("Would load Lua config from {}", lua_path.display());
+                        info!("Loading Lua config from {}", lua_path.display());
                         
-                        // Return the KDL config for now
-                        // TODO: Integrate Lua config execution here
+                        // Return a default config since Lua config will be loaded separately
+                        // The Lua config loading is handled in the main niri crate
                         return ConfigParseResult {
-                            config: Ok(config),
-                            includes: config_parse_result.includes,
+                            config: Ok(Config::default()),
+                            includes: Vec::new(),
                         };
                     }
 
@@ -2403,7 +2386,7 @@ mod tests {
     }
 
     #[test]
-    fn lua_config_loads_alongside_kdl() {
+    fn lua_config_skips_default_kdl_creation() {
         use std::fs;
         use tempfile::tempdir;
 
@@ -2420,9 +2403,12 @@ mod tests {
             system_path: PathBuf::from("/nonexistent/system/config.kdl"),
         };
 
-        // This should now succeed and create/load both configs
+        // When Lua config exists, it should load without creating a KDL config
         let result = config_path.load_or_create();
         assert!(result.1.config.is_ok());
-        assert!(result.0.is_some()); // Config should be created
+        // No KDL config should be created when Lua config exists
+        assert!(result.0.is_none(), "Default KDL config should not be created when Lua config exists");
+        // Verify the KDL file was not created
+        assert!(!config_dir.join("config.kdl").exists(), "KDL config file should not exist");
     }
 }

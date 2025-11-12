@@ -18,6 +18,7 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
+use niri::lua_extensions::LuaConfig;
 use niri::niri::State;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
@@ -154,6 +155,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Config::load_default()
     });
     let config_includes = config_load_result.includes;
+
+    // Try to load Lua config if it exists
+    if let ConfigPath::Regular { user_path, .. } = &config_path {
+        if let Some(config_dir) = user_path.parent() {
+            let lua_files = [
+                config_dir.join("niri.lua"),
+                config_dir.join("init.lua"),
+            ];
+            for lua_file in lua_files {
+                if lua_file.exists() {
+                    match LuaConfig::from_file(&lua_file) {
+                        Ok(_) => {
+                            info!("Loaded Lua config from {}", lua_file.display());
+                        }
+                        Err(e) => {
+                            warn!("Failed to load Lua config from {}: {}", lua_file.display(), e);
+                        }
+                    }
+                    break; // Only load the first one found
+                }
+            }
+        }
+    }
 
     let spawn_at_startup = mem::take(&mut config.spawn_at_startup);
     let spawn_sh_at_startup = mem::take(&mut config.spawn_sh_at_startup);
