@@ -15,6 +15,7 @@ pub mod input;
 pub mod ipc;
 pub mod layer;
 pub mod layout;
+pub mod lua_extensions;
 pub mod niri;
 pub mod protocols;
 pub mod render_helpers;

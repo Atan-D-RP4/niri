@@ -164,7 +164,19 @@ impl WatcherInner {
         }
     }
 
-    fn set_includes(&mut self, includes: Vec<PathBuf>) {
+    fn set_includes(&mut self, mut includes: Vec<PathBuf>) {
+        // Also watch Lua config files if they exist
+        if let ConfigPath::Regular { user_path, .. } = &self.path {
+            if let Some(config_dir) = user_path.parent() {
+                let lua_files = [config_dir.join("niri.lua"), config_dir.join("init.lua")];
+                for lua_file in lua_files {
+                    if lua_file.exists() {
+                        includes.push(lua_file);
+                    }
+                }
+            }
+        }
+        
         self.includes = includes
             .into_iter()
             .map(|path| {
