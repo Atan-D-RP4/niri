@@ -526,27 +526,14 @@ impl ConfigPath {
                         || config_dir.join("init.lua").exists();
 
                     if lua_config_exists {
-                        // Lua config exists, skip creating default KDL config
-                        info!("Lua config detected at {config_dir:?}, skipping default KDL config creation");
+                        // Lua config exists, but still load the default KDL config as a base
+                        // The Lua config will be loaded separately in main.rs and can extend/override this
+                        info!("Lua config detected at {config_dir:?}, using default KDL config as base");
                         
-                        // Determine which Lua file to load
-                        let lua_path = if config_dir.join("niri.lua").exists() {
-                            config_dir.join("niri.lua")
-                        } else if config_dir.join("init.lua").exists() {
-                            config_dir.join("init.lua")
-                        } else {
-                            // This shouldn't happen since we checked lua_config_exists
-                            return ConfigParseResult::from_err(miette!("Lua config file disappeared"));
-                        };
-                        
-                        info!("Loading Lua config from {}", lua_path.display());
-                        
-                        // Return a default config since Lua config will be loaded separately
-                        // The Lua config loading is handled in the main niri crate
-                        return ConfigParseResult {
-                            config: Ok(Config::default()),
-                            includes: Vec::new(),
-                        };
+                        // TODO: Once Lua configuration API is fully implemented, Lua configs
+                        // should be able to completely replace or extend the KDL configuration.
+                        // For now, we load the default KDL to ensure the user has a working config.
+                        // See: https://github.com/yalter/niri/issues/XXX
                     }
 
                     match maybe_create(user_path.as_path(), system_path.as_path()) {
@@ -2403,12 +2390,11 @@ mod tests {
             system_path: PathBuf::from("/nonexistent/system/config.kdl"),
         };
 
-        // When Lua config exists, it should load without creating a KDL config
+        // When Lua config exists, we still load a default KDL config
         let result = config_path.load_or_create();
-        assert!(result.1.config.is_ok());
-        // No KDL config should be created when Lua config exists
-        assert!(result.0.is_none(), "Default KDL config should not be created when Lua config exists");
-        // Verify the KDL file was not created
-        assert!(!config_dir.join("config.kdl").exists(), "KDL config file should not exist");
+        assert!(result.1.config.is_ok(), "Config should load successfully");
+        // The default KDL config will be created since no user config exists
+        let config = result.1.config.unwrap();
+        assert!(!config.binds.0.is_empty(), "Config should have default keybindings");
     }
 }
