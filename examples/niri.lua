@@ -1,10 +1,19 @@
--- Niri Lua Configuration
+-- Niri Lua Configuration (EXPERIMENTAL)
 -- Place this file at ~/.config/niri/niri.lua or ~/.config/niri/init.lua
 --
--- This is a comprehensive example equivalent to the default KDL configuration.
--- The Lua API is still being developed, so some features may be incomplete.
+-- ⚠️ WARNING: Lua configuration support is currently INCOMPLETE.
+--
+-- This example demonstrates the intended Lua configuration structure,
+-- but the configuration defined below is NOT yet applied to Niri.
+--
+-- Currently, this Lua file will be executed (so niri.log() calls work),
+-- but the configuration tables you define will not affect Niri's behavior.
+-- You must use KDL configuration (~/.config/niri/config.kdl) for now.
+--
+-- See LUA_CONFIG_STATUS.md for details on the current limitations and
+-- how to contribute to complete the Lua API implementation.
 
-niri.log("Loading Niri Lua configuration...")
+niri.log("Loading Niri Lua configuration (EXPERIMENTAL - NOT YET FUNCTIONAL)...")
 
 -- ============================================================================
 -- INPUT CONFIGURATION
