@@ -11,11 +11,13 @@
 //! ```
 
 pub mod config;
+pub mod config_converter;
 pub mod niri_api;
 pub mod runtime;
 
 use mlua::prelude::*;
 pub use config::LuaConfig;
+pub use config_converter::apply_lua_config;
 pub use niri_api::NiriApi;
 pub use runtime::LuaRuntime;
 

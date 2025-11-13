@@ -41,7 +41,8 @@ impl LuaConfig {
             .map_err(|e| anyhow::anyhow!("Failed to register Niri API: {}", e))?;
 
         // Load the configuration file
-        runtime
+        // The return value is discarded - we focus on side effects and global state
+        let _ = runtime
             .load_file(&path)
             .map_err(|e| anyhow::anyhow!("Failed to load Lua config file: {}", e))?;
 
@@ -77,7 +78,7 @@ impl LuaConfig {
             .map_err(|e| anyhow::anyhow!("Failed to register Niri API: {}", e))?;
 
         // Load and execute the code
-        runtime
+        let _ = runtime
             .load_string(code)
             .map_err(|e| anyhow::anyhow!("Failed to execute Lua code: {}", e))?;
 

@@ -18,7 +18,7 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
-use niri::lua_extensions::LuaConfig;
+use niri::lua_extensions::{LuaConfig, apply_lua_config};
 use niri::niri::State;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
@@ -166,8 +166,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for lua_file in lua_files {
                 if lua_file.exists() {
                     match LuaConfig::from_file(&lua_file) {
-                        Ok(_) => {
+                        Ok(lua_config) => {
                             info!("Loaded Lua config from {}", lua_file.display());
+                            // Apply Lua configuration to the loaded config
+                            let runtime = lua_config.runtime();
+                            match apply_lua_config(runtime, &mut config) {
+                                Ok(_) => {
+                                    info!("Applied Lua configuration successfully");
+                                }
+                                Err(e) => {
+                                    warn!("Failed to apply Lua config settings: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
                             warn!("Failed to load Lua config from {}: {}", lua_file.display(), e);
