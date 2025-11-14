@@ -6,6 +6,7 @@
 use mlua::prelude::*;
 use crate::lua_extensions::LuaComponent;
 use std::rc::Rc;
+use log::{info, debug, warn, error};
 
 /// Niri logging and utility functions for Lua.
 ///
@@ -77,7 +78,7 @@ impl LuaComponent for NiriApi {
             info!("Setting keymap: mode={}, key={}, callback=function", mode, key);
             // For now, just call the callback immediately as a test
             // In a full implementation, this would register the keybinding
-            let _ = cb.call::<_, ()>(());
+            let _ = cb.call::<()>(());
             Ok(())
         })?;
         keymap.set("set", keymap_set_fn)?;
@@ -141,7 +142,7 @@ impl LuaComponent for NiriApi {
                 LuaValue::Boolean(b) => b.to_string(),
                 LuaValue::Integer(i) => i.to_string(),
                 LuaValue::Number(n) => n.to_string(),
-                LuaValue::String(s) => format!("\"{}\"", s.to_str().unwrap_or("<invalid utf8>")),
+                LuaValue::String(s) => format!("\"{}\"", s.to_string_lossy()),
                 _ => format!("{:?}", value),
             };
             println!("{}", json_str);
@@ -157,12 +158,12 @@ impl LuaComponent for NiriApi {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Lua, LuaStdLib, NiriApi, LuaTable, LuaFunction, LuaComponent};
 
     #[test]
     fn test_niri_api_registration() {
         let lua = Lua::new();
-        lua.load_from_std_lib(LuaStdLib::ALL).unwrap();
+        lua.load_std_libs(LuaStdLib::ALL).unwrap();
 
         let result = NiriApi::register_to_lua(&lua, |action, args| {
             info!("Test action: {} with args {:?}", action, args);
@@ -172,14 +173,17 @@ mod tests {
 
         // Verify niri table exists
         let niri: LuaTable = lua.globals().get("niri").unwrap();
-        assert!(niri.get::<_, LuaFunction>("log").is_ok());
-        assert!(niri.get::<_, LuaFunction>("debug").is_ok());
+        let log_fn: LuaFunction = niri.get("log").unwrap();
+        let debug_fn: LuaFunction = niri.get("debug").unwrap();
+        // Just verify they're functions by successfully getting them
+        drop(log_fn);
+        drop(debug_fn);
     }
 
     #[test]
     fn test_niri_api_logging() {
         let lua = Lua::new();
-        lua.load_from_std_lib(LuaStdLib::ALL).unwrap();
+        lua.load_std_libs(LuaStdLib::ALL).unwrap();
         NiriApi::register_to_lua(&lua, |action, args| {
             info!("Test action: {} with args {:?}", action, args);
             Ok(())

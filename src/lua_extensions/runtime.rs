@@ -25,7 +25,7 @@ impl LuaRuntime {
         let lua = Lua::new();
 
         // Set up standard library with appropriate restrictions
-        lua.load_from_std_lib(LuaStdLib::ALL)?;
+        lua.load_std_libs(LuaStdLib::ALL_SAFE)?;
 
         Ok(Self { lua })
     }
@@ -70,7 +70,8 @@ impl LuaRuntime {
     /// Returns an error if the function doesn't exist or execution fails.
     pub fn call_function_void(&self, name: &str) -> LuaResult<()> {
         let func: LuaFunction = self.lua.globals().get(name)?;
-        func.call::<_, ()>(())
+        func.call::<()>(())?;
+        Ok(())
     }
 
     /// Check if a global variable exists in the Lua runtime.
@@ -81,7 +82,7 @@ impl LuaRuntime {
     pub fn has_global(&self, name: &str) -> bool {
         self.lua
             .globals()
-            .get::<_, LuaValue>(name)
+            .get::<LuaValue>(name)
             .is_ok()
     }
 
@@ -96,9 +97,9 @@ impl LuaRuntime {
     /// Returns Ok(Some(value)) if the variable exists and is a string,
     /// Ok(None) if the variable doesn't exist, or an error if it exists but isn't a string.
     pub fn get_global_string_opt(&self, name: &str) -> LuaResult<Option<String>> {
-        match self.lua.globals().get::<_, LuaValue>(name) {
+        match self.lua.globals().get::<LuaValue>(name) {
             Ok(LuaValue::Nil) => Ok(None),
-            Ok(LuaValue::String(s)) => Ok(Some(s.to_string_lossy().into_owned())),
+            Ok(LuaValue::String(s)) => Ok(Some(s.to_string_lossy().to_string())),
             Ok(_) => Err(LuaError::external(format!(
                 "Global '{}' is not a string",
                 name
@@ -118,7 +119,7 @@ impl LuaRuntime {
     /// Returns Ok(Some(value)) if the variable exists and is a boolean,
     /// Ok(None) if the variable doesn't exist, or an error if it exists but isn't a boolean.
     pub fn get_global_bool_opt(&self, name: &str) -> LuaResult<Option<bool>> {
-        match self.lua.globals().get::<_, LuaValue>(name) {
+        match self.lua.globals().get::<LuaValue>(name) {
             Ok(LuaValue::Nil) => Ok(None),
             Ok(LuaValue::Boolean(b)) => Ok(Some(b)),
             Ok(_) => Err(LuaError::external(format!(
@@ -140,7 +141,7 @@ impl LuaRuntime {
     /// Returns Ok(Some(value)) if the variable exists and is convertible to an integer,
     /// Ok(None) if the variable doesn't exist.
     pub fn get_global_int_opt(&self, name: &str) -> LuaResult<Option<i64>> {
-        match self.lua.globals().get::<_, LuaValue>(name) {
+        match self.lua.globals().get::<LuaValue>(name) {
             Ok(LuaValue::Nil) => Ok(None),
             Ok(LuaValue::Integer(i)) => Ok(Some(i)),
             Ok(LuaValue::Number(n)) => Ok(Some(n as i64)),

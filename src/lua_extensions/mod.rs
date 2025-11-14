@@ -41,6 +41,7 @@ mod tests {
     #[test]
     fn test_lua_runtime_creation() {
         let lua = Lua::new();
-        assert!(lua.globals().raw_get::<_, mlua::Value>("_G").is_ok());
+        let g: mlua::Value = lua.globals().raw_get("_G").unwrap();
+        assert!(!matches!(g, mlua::Value::Nil));
     }
 }

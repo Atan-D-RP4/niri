@@ -1,15 +1,15 @@
 -- Niri Lua Configuration (EXPERIMENTAL)
 -- Place this file at ~/.config/niri/niri.lua or ~/.config/niri/init.lua
---
+
 -- ⚠️ WARNING: Lua configuration support is currently INCOMPLETE.
---
+
 -- This example demonstrates the intended Lua configuration structure,
 -- but the configuration defined below is NOT yet applied to Niri.
---
+
 -- Currently, this Lua file will be executed (so niri.log() calls work),
 -- but the configuration tables you define will not affect Niri's behavior.
 -- You must use KDL configuration (~/.config/niri/config.kdl) for now.
---
+
 -- See LUA_CONFIG_STATUS.md for details on the current limitations and
 -- how to contribute to complete the Lua API implementation.
 
@@ -231,9 +231,9 @@ local binds = {
     { key = "Mod+Shift+Slash", action = "show-hotkey-overlay" },
 
     -- Applications
-    { key = "Mod+T", action = "spawn", args = { "alacritty" }, title = "Open Terminal" },
-    { key = "Mod+D", action = "spawn", args = { "fuzzel" }, title = "Run Application" },
-    { key = "Super+Alt+L", action = "spawn", args = { "swaylock" }, title = "Lock Screen" },
+    { key = "Mod+T", action = "spawn", args = { "kitty" }, title = "Open Terminal" },
+    { key = "Mod+D", action = "spawn", args = { "rofilaunch.sh" }, title = "Run Application" },
+    { key = "Super+Alt+L", action = "spawn", args = { "hyprlock" }, title = "Lock Screen" },
 
     -- Volume control (with PipeWire)
     { key = "XF86AudioRaiseVolume", action = "spawn-sh", args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+" }, allow_when_locked = true },

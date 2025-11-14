@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use std::path::Path;
+use log::{info, debug};
 use crate::lua_extensions::LuaRuntime;
 
 /// Configuration loaded from a Lua script.
@@ -29,8 +30,11 @@ impl LuaConfig {
     ///
     /// Returns an error if the runtime cannot be created or the file cannot be loaded.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path_ref = path.as_ref();
         let runtime = LuaRuntime::new()
-            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime from file: {}", e))?;
+
+        info!("Loading Lua config from {}", path_ref.display());
 
         // Register the Niri API component
         runtime
@@ -40,15 +44,17 @@ impl LuaConfig {
             })
             .map_err(|e| anyhow::anyhow!("Failed to register Niri API: {}", e))?;
 
+        debug!("Niri API registered successfully");
+
         // Load the configuration file
         // The return value is discarded - we focus on side effects and global state
         let _ = runtime
-            .load_file(&path)
+            .load_file(&path_ref)
             .map_err(|e| anyhow::anyhow!("Failed to load Lua config file: {}", e))?;
 
         info!(
-            "Loaded Lua configuration from {}",
-            path.as_ref().display()
+            "Successfully loaded Lua configuration from {}",
+            path_ref.display()
         );
 
         Ok(Self { runtime })
@@ -67,7 +73,7 @@ impl LuaConfig {
     /// Returns an error if the runtime cannot be created or the code cannot be executed.
     pub fn from_string(code: &str) -> Result<Self> {
         let runtime = LuaRuntime::new()
-            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime from string: {}", e))?;
 
         // Register the Niri API component
         runtime
@@ -121,6 +127,7 @@ mod tests {
         ).unwrap();
 
         // Verify it executed without error
-        assert!(config.runtime().inner().globals().get::<_, String>("version_str").is_ok());
+        let version_str: String = config.runtime().inner().globals().get("version_str").unwrap();
+        assert!(!version_str.is_empty());
     }
 }

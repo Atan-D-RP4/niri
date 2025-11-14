@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod lua_config_tests {
-    use niri::lua_extensions::{LuaConfig, apply_lua_config};
+    use crate::lua_extensions::{LuaConfig, apply_lua_config};
     use niri_config::Config;
 
     #[test]
@@ -32,9 +32,9 @@ mod lua_config_tests {
 
         // Default should be true, so we'll verify the setting is applied
         let original = config.prefer_no_csd;
-        
+
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
-        
+
         // The setting should be applied from Lua
         assert_eq!(config.prefer_no_csd, true);
     }
@@ -48,7 +48,7 @@ mod lua_config_tests {
         let mut config = Config::default();
 
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
-        
+
         assert_eq!(config.prefer_no_csd, false);
     }
 
@@ -62,7 +62,7 @@ mod lua_config_tests {
         let original = config.prefer_no_csd;
 
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
-        
+
         // Config should remain unchanged
         assert_eq!(config.prefer_no_csd, original);
     }
@@ -80,7 +80,7 @@ mod lua_config_tests {
         let mut config = Config::default();
 
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
-        
+
         // Only the supported setting should be applied
         assert_eq!(config.prefer_no_csd, true);
     }
@@ -90,10 +90,10 @@ mod lua_config_tests {
         // Test that Lua code with comments and whitespace is handled correctly
         let lua_code = r#"
             -- This is a comment
-            
+
             -- Configure Niri through Lua
             prefer_no_csd = true
-            
+
             -- More comments
             -- prefer_no_csd = false  -- This line is commented out
         "#;
@@ -102,7 +102,7 @@ mod lua_config_tests {
         let mut config = Config::default();
 
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
-        
+
         assert_eq!(config.prefer_no_csd, true);
     }
 
@@ -121,7 +121,7 @@ mod lua_config_tests {
         // This should not error, just skip the invalid setting
         let result = apply_lua_config(lua_config.runtime(), &mut config);
         assert!(result.is_ok());
-        
+
         // Config should not change since the type was wrong
         assert_eq!(config.prefer_no_csd, original);
     }
@@ -138,7 +138,7 @@ mod lua_config_tests {
         let mut config = Config::default();
 
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
-        
+
         // Verify the setting was applied
         assert_eq!(config.prefer_no_csd, true);
     }

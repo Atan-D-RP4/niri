@@ -6,7 +6,7 @@
 use super::LuaRuntime;
 use niri_config::Config;
 use anyhow::Result;
-use log::debug;
+use log::{debug, info, warn};
 
 /// Attempts to extract and apply Lua configuration values to the given Config.
 ///
@@ -28,12 +28,27 @@ use log::debug;
 /// apply_lua_config(&runtime, &mut config)?;
 /// ```
 pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()> {
-    debug!("Applying Lua configuration to Config");
+    debug!("=== Applying Lua configuration to Config ===");
 
     // Try to extract simple boolean settings
-    if let Ok(Some(prefer_no_csd)) = runtime.get_global_bool_opt("prefer_no_csd") {
-        debug!("Setting prefer_no_csd = {}", prefer_no_csd);
-        config.prefer_no_csd = prefer_no_csd;
+    debug!("Checking for prefer_no_csd in Lua globals");
+    if runtime.has_global("prefer_no_csd") {
+        info!("✓ Found prefer_no_csd in Lua globals");
+        match runtime.get_global_bool_opt("prefer_no_csd") {
+            Ok(Some(prefer_no_csd)) => {
+                info!("✓ Applying prefer_no_csd: {} → {} (changed: {})", 
+                    config.prefer_no_csd, prefer_no_csd, config.prefer_no_csd != prefer_no_csd);
+                config.prefer_no_csd = prefer_no_csd;
+            }
+            Ok(None) => {
+                warn!("⚠ prefer_no_csd was nil in Lua");
+            }
+            Err(e) => {
+                warn!("✗ Error getting prefer_no_csd: {}", e);
+            }
+        }
+    } else {
+        debug!("ℹ prefer_no_csd not found in Lua globals");
     }
 
     // Additional configuration options can be added here as they're implemented
@@ -43,6 +58,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
     // - Cursor settings
     // - etc.
 
+    debug!("=== Lua configuration application completed ===");
     Ok(())
 }
 
@@ -62,7 +78,7 @@ mod tests {
     fn test_apply_lua_config_with_values() {
         let runtime = LuaRuntime::new().unwrap();
         runtime
-            .load_string("prefer_no_csd = true")
+            .load_string("prefer_no_csd = false")
             .expect("Failed to load Lua code");
 
         let mut config = Config::default();
@@ -70,7 +86,7 @@ mod tests {
         
         apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
         
-        assert_eq!(config.prefer_no_csd, true);
+        assert_eq!(config.prefer_no_csd, false);
         assert_ne!(config.prefer_no_csd, original_value);
     }
 }
