@@ -4,9 +4,94 @@
 //! and applying them to Niri's Config struct.
 
 use super::LuaRuntime;
-use niri_config::Config;
+use niri_config::{Config, binds::{Bind, Key, Action}};
 use anyhow::Result;
 use log::{debug, info, warn};
+use std::str::FromStr;
+
+/// Represents a keybinding parsed from Lua configuration.
+///
+/// This is a simplified representation of a Niri keybinding that can be
+/// extracted from Lua and converted to a Niri Bind struct.
+#[derive(Debug, Clone)]
+pub struct LuaKeybinding {
+    /// The key combination (e.g., "Super+Return", "Ctrl+Alt+Delete")
+    pub key: String,
+    /// The action to perform (e.g., "spawn", "close-window")
+    pub action: String,
+    /// Optional arguments for the action (e.g., ["alacritty"] for spawn)
+    pub args: Vec<String>,
+    /// Whether the binding repeats when held
+    pub repeat: bool,
+}
+
+/// Convert a Lua keybinding to a Niri Bind struct.
+///
+/// This function takes a Lua keybinding representation and attempts to convert it
+/// to a Niri Bind struct. If the conversion fails, it logs a warning and returns None.
+fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
+    // Parse the key
+    let key: Key = match Key::from_str(&lua_binding.key) {
+        Ok(k) => k,
+        Err(e) => {
+            warn!("✗ Failed to parse key '{}': {}", lua_binding.key, e);
+            return None;
+        }
+    };
+
+    // Convert action string to Action enum
+    let action = match lua_binding.action.as_str() {
+        "spawn" => {
+            if lua_binding.args.is_empty() {
+                warn!("⚠ spawn action requires arguments");
+                return None;
+            }
+            Action::Spawn(lua_binding.args)
+        }
+        "spawn-sh" => {
+            if lua_binding.args.is_empty() {
+                warn!("⚠ spawn-sh action requires arguments");
+                return None;
+            }
+            // Join all args as a single shell command
+            let cmd = lua_binding.args.join(" ");
+            Action::SpawnSh(cmd)
+        }
+        "close-window" => Action::CloseWindow,
+        "fullscreen-window" => Action::FullscreenWindow,
+        "toggled-windowed-fullscreen" => Action::ToggleWindowedFullscreen,
+        "focus-window-or-workspace-down" => Action::FocusWindowOrWorkspaceDown,
+        "focus-window-or-workspace-up" => Action::FocusWindowOrWorkspaceUp,
+        "focus-column-left" => Action::FocusColumnLeft,
+        "focus-column-right" => Action::FocusColumnRight,
+        "focus-window-down" => Action::FocusWindowDown,
+        "focus-window-up" => Action::FocusWindowUp,
+        "move-column-left" => Action::MoveColumnLeft,
+        "move-column-right" => Action::MoveColumnRight,
+        "move-window-down" => Action::MoveWindowDown,
+        "move-window-up" => Action::MoveWindowUp,
+        "screenshot" => Action::Screenshot(true, None),
+        "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
+        "toggle-overview" => Action::ShowOverview,
+        "quit" => Action::Quit(false),
+        "suspend" => Action::Suspend,
+        _ => {
+            warn!("✗ Unknown action: '{}'", lua_binding.action);
+            return None;
+        }
+    };
+
+    Some(Bind {
+        key,
+        action,
+        repeat: lua_binding.repeat,
+        cooldown: None,
+        allow_when_locked: false,
+        allow_inhibiting: true,
+        hotkey_overlay_title: None,
+    })
+}
+
 
 /// Attempts to extract and apply Lua configuration values to the given Config.
 ///
@@ -49,6 +134,43 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
         }
     } else {
         debug!("ℹ prefer_no_csd not found in Lua globals");
+    }
+
+    // Extract and apply keybindings
+    debug!("Checking for keybindings in Lua globals");
+    match runtime.get_keybindings() {
+        Ok(raw_keybindings) => {
+            if raw_keybindings.is_empty() {
+                info!("ℹ No keybindings found in Lua configuration");
+            } else {
+                info!("✓ Found {} keybindings in Lua", raw_keybindings.len());
+                let mut converted_binds = Vec::new();
+
+                for (key, action, args) in raw_keybindings {
+                    let lua_binding = LuaKeybinding {
+                        key,
+                        action,
+                        args,
+                        repeat: true, // Default to true for now
+                    };
+
+                    if let Some(bind) = lua_keybinding_to_bind(lua_binding) {
+                        converted_binds.push(bind);
+                    }
+                }
+
+                if !converted_binds.is_empty() {
+                    info!("✓ Successfully converted {} keybindings", converted_binds.len());
+                    // Merge with existing binds or replace them
+                    config.binds.0.extend(converted_binds);
+                } else {
+                    warn!("⚠ No valid keybindings could be converted from Lua");
+                }
+            }
+        }
+        Err(e) => {
+            warn!("✗ Error extracting keybindings from Lua: {}", e);
+        }
     }
 
     // Additional configuration options can be added here as they're implemented

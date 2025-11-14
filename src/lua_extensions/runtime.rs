@@ -153,12 +153,135 @@ impl LuaRuntime {
         }
     }
 
-    /// Get a reference to the underlying Lua runtime for advanced use cases.
-    ///
-    /// This allows direct access to the mlua::Lua instance.
-    pub fn inner(&self) -> &Lua {
-        &self.lua
-    }
+     /// Get a table value from the Lua runtime globals.
+     ///
+     /// # Arguments
+     ///
+     /// * `name` - The name of the global variable
+     ///
+     /// # Returns
+     ///
+     /// Returns Ok(Some(table)) if the variable exists and is a table,
+     /// Ok(None) if the variable doesn't exist, or an error if it exists but isn't a table.
+     pub fn get_global_table_opt(&self, name: &str) -> LuaResult<Option<LuaTable>> {
+         match self.lua.globals().get::<LuaValue>(name) {
+             Ok(LuaValue::Nil) => Ok(None),
+             Ok(LuaValue::Table(t)) => Ok(Some(t)),
+             Ok(_) => Err(LuaError::external(format!(
+                 "Global '{}' is not a table",
+                 name
+             ))),
+             Err(_) => Ok(None),
+         }
+     }
+
+     /// Iterate over all entries in a Lua table and call a closure for each entry.
+     ///
+     /// # Arguments
+     ///
+     /// * `table` - The Lua table to iterate
+     /// * `f` - Closure that receives (key, value) for each entry
+     ///
+     /// # Returns
+     ///
+     /// Returns an error if iteration fails.
+     pub fn iterate_table<F>(&self, table: &LuaTable, mut f: F) -> LuaResult<()>
+     where
+         F: FnMut(LuaValue, LuaValue) -> LuaResult<()>,
+     {
+         let pairs_fn = self.lua.globals().get::<LuaFunction>("pairs")?;
+         let mut iter = pairs_fn.call::<LuaMultiValue>(table.clone())?;
+
+         loop {
+             let key_opt = iter.pop_front();
+             let val_opt = iter.pop_front();
+
+             match (key_opt, val_opt) {
+                 (Some(key), Some(value)) => f(key, value)?,
+                 (None, None) => break,
+                 _ => break,
+             }
+         }
+
+         Ok(())
+     }
+
+     /// Get a reference to the underlying Lua runtime for advanced use cases.
+     ///
+     /// This allows direct access to the mlua::Lua instance.
+     pub fn inner(&self) -> &Lua {
+         &self.lua
+     }
+
+     /// Extract all keybindings from the Lua globals.binds table.
+     ///
+     /// This method looks for a `binds` table in the Lua globals and extracts
+     /// all keybinding entries. Each entry should have a key, action, and optional
+     /// args field.
+     ///
+     /// # Returns
+     ///
+     /// Returns Ok(Vec of keybindings) or an error if extraction fails.
+     pub fn get_keybindings(&self) -> LuaResult<Vec<(String, String, Vec<String>)>> {
+         let mut keybindings = Vec::new();
+
+         // Get the binds table
+         match self.get_global_table_opt("binds")? {
+             Some(binds_table) => {
+                 // Iterate through each keybinding entry in the table
+                 let mut index = 1i64;
+                 loop {
+                     let binding: LuaValue = binds_table.get(index)?;
+                     if binding == LuaValue::Nil {
+                         break;
+                     }
+
+                     if let Some(binding_table) = binding.as_table() {
+                         // Extract key, action, and optional args
+                         let key: String = binding_table
+                             .get("key")
+                             .unwrap_or_else(|_| "".to_string());
+                         let action: String = binding_table
+                             .get("action")
+                             .unwrap_or_else(|_| "".to_string());
+
+                         let args: Vec<String> = if let Ok(args_table) =
+                             binding_table.get::<_, LuaTable>("args")
+                         {
+                             let mut args_vec = Vec::new();
+                             let mut arg_index = 1i64;
+                             loop {
+                                 let arg: LuaValue = args_table.get(arg_index)?;
+                                 if arg == LuaValue::Nil {
+                                     break;
+                                 }
+                                 if let Some(arg_str) = arg.as_string() {
+                                     args_vec.push(
+                                         arg_str.to_string_lossy().to_string()
+                                     );
+                                 }
+                                 arg_index += 1;
+                             }
+                             args_vec
+                         } else {
+                             Vec::new()
+                         };
+
+                         if !key.is_empty() && !action.is_empty() {
+                             keybindings.push((key, action, args));
+                         }
+                     }
+
+                     index += 1;
+                 }
+             }
+             None => {
+                 // No binds table found, return empty list
+             }
+         }
+
+         Ok(keybindings)
+     }
 }
 
 impl Default for LuaRuntime {
