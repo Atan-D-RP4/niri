@@ -245,9 +245,9 @@ impl LuaRuntime {
                              .get("action")
                              .unwrap_or_else(|_| "".to_string());
 
-                         let args: Vec<String> = if let Ok(args_table) =
-                             binding_table.get::<_, LuaTable>("args")
-                         {
+                          let args: Vec<String> = if let Ok(args_table) =
+                              binding_table.get::<LuaTable>("args")
+                          {
                              let mut args_vec = Vec::new();
                              let mut arg_index = 1i64;
                              loop {

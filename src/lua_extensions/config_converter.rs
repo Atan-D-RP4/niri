@@ -70,11 +70,11 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
         "move-column-right" => Action::MoveColumnRight,
         "move-window-down" => Action::MoveWindowDown,
         "move-window-up" => Action::MoveWindowUp,
-        "screenshot" => Action::Screenshot(true, None),
-        "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
-        "toggle-overview" => Action::ShowOverview,
-        "quit" => Action::Quit(false),
-        "suspend" => Action::Suspend,
+         "screenshot" => Action::Screenshot(true, None),
+         "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
+         "toggle-overview" => Action::ToggleOverview,
+         "quit" => Action::Quit(false),
+         "suspend" => Action::Suspend,
         _ => {
             warn!("✗ Unknown action: '{}'", lua_binding.action);
             return None;

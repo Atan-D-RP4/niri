@@ -2392,11 +2392,15 @@ mod tests {
             system_path: PathBuf::from("/nonexistent/system/config.kdl"),
         };
 
-        // When Lua config exists, we still load a default KDL config
+        // When Lua config exists, we skip creating the default KDL config
         let result = config_path.load_or_create();
         assert!(result.1.config.is_ok(), "Config should load successfully");
-        // The default KDL config will be created since no user config exists
+        // No KDL config file should be created since Lua config exists
         let config = result.1.config.unwrap();
-        assert!(!config.binds.0.is_empty(), "Config should have default keybindings");
+        // The config returned is an in-memory default Config with no keybindings
+        // (keybindings will be loaded from the Lua config in main.rs)
+        assert!(config.binds.0.is_empty(), "Default in-memory config should have no keybindings");
+        // Verify that no KDL config file was created
+        assert!(!config_dir.join("config.kdl").exists(), "KDL config file should not be created");
     }
 }

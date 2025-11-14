@@ -126,20 +126,166 @@ mod lua_config_tests {
         assert_eq!(config.prefer_no_csd, original);
     }
 
-    #[test]
-    fn test_multiple_settings() {
-        // Test that multiple settings can be applied from Lua
-        let lua_code = r#"
-            prefer_no_csd = true
-            -- Future: can add more settings here as they're implemented
-        "#;
+     #[test]
+     fn test_multiple_settings() {
+         // Test that multiple settings can be applied from Lua
+         let lua_code = r#"
+             prefer_no_csd = true
+             -- Future: can add more settings here as they're implemented
+         "#;
 
-        let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
-        let mut config = Config::default();
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
 
-        apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
 
-        // Verify the setting was applied
-        assert_eq!(config.prefer_no_csd, true);
-    }
+         // Verify the setting was applied
+         assert_eq!(config.prefer_no_csd, true);
+     }
+
+     #[test]
+     fn test_lua_keybindings_extracted() {
+         // Test that keybindings can be extracted from Lua configuration
+         let lua_code = r#"
+             binds = {
+                 {
+                     key = "Super+Return",
+                     action = "spawn",
+                     args = { "alacritty" }
+                 },
+                 {
+                     key = "Super+Q",
+                     action = "close-window",
+                     args = {}
+                 }
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 2 keybindings
+         assert_eq!(config.binds.0.len(), original_binds_count + 2);
+     }
+
+     #[test]
+     fn test_lua_keybinding_with_spawn_action() {
+         // Test that spawn action keybindings are correctly converted
+         let lua_code = r#"
+             binds = {
+                 {
+                     key = "Super+Return",
+                     action = "spawn",
+                     args = { "alacritty" }
+                 }
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 1 keybinding
+         assert_eq!(config.binds.0.len(), original_binds_count + 1);
+     }
+
+     #[test]
+     fn test_lua_keybinding_with_action_only() {
+         // Test that action-only keybindings (no args) work correctly
+         let lua_code = r#"
+             binds = {
+                 {
+                     key = "Super+J",
+                     action = "focus-window-down",
+                     args = {}
+                 }
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 1 keybinding
+         assert_eq!(config.binds.0.len(), original_binds_count + 1);
+     }
+
+     #[test]
+     fn test_lua_empty_binds_table() {
+         // Test that an empty binds table doesn't cause errors
+         let lua_code = "binds = {}";
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // No keybindings should be added
+         assert_eq!(config.binds.0.len(), original_binds_count);
+     }
+
+     #[test]
+     fn test_lua_keybinding_invalid_action_skipped() {
+         // Test that keybindings with invalid actions are skipped
+         let lua_code = r#"
+             binds = {
+                 {
+                     key = "Super+X",
+                     action = "invalid-action",
+                     args = {}
+                 }
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         // This should not error, just skip the invalid binding
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // No keybindings should be added
+         assert_eq!(config.binds.0.len(), original_binds_count);
+     }
+
+     #[test]
+     fn test_lua_multiple_valid_and_invalid_keybindings() {
+         // Test that valid keybindings are added even when some are invalid
+         let lua_code = r#"
+             binds = {
+                 {
+                     key = "Super+Return",
+                     action = "spawn",
+                     args = { "alacritty" }
+                 },
+                 {
+                     key = "Super+Invalid",
+                     action = "invalid-action",
+                     args = {}
+                 },
+                 {
+                     key = "Super+Q",
+                     action = "close-window",
+                     args = {}
+                 }
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 2 valid keybindings (the invalid one is skipped)
+         assert_eq!(config.binds.0.len(), original_binds_count + 2);
+     }
 }
