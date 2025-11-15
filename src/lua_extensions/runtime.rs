@@ -222,66 +222,73 @@ impl LuaRuntime {
      /// # Returns
      ///
      /// Returns Ok(Vec of keybindings) or an error if extraction fails.
-     pub fn get_keybindings(&self) -> LuaResult<Vec<(String, String, Vec<String>)>> {
-         let mut keybindings = Vec::new();
+      pub fn get_keybindings(&self) -> LuaResult<Vec<(String, String, Vec<String>)>> {
+          use log::debug;
+          let mut keybindings = Vec::new();
 
-         // Get the binds table
-         match self.get_global_table_opt("binds")? {
-             Some(binds_table) => {
-                 // Iterate through each keybinding entry in the table
-                 let mut index = 1i64;
-                 loop {
-                     let binding: LuaValue = binds_table.get(index)?;
-                     if binding == LuaValue::Nil {
-                         break;
-                     }
+          // Get the binds table
+          match self.get_global_table_opt("binds")? {
+              Some(binds_table) => {
+                  debug!("[get_keybindings] Found binds table");
+                  // Iterate through each keybinding entry in the table
+                  let mut index = 1i64;
+                  loop {
+                      let binding: LuaValue = binds_table.get(index)?;
+                      if binding == LuaValue::Nil {
+                          debug!("[get_keybindings] End of binds table at index {}", index);
+                          break;
+                      }
 
-                     if let Some(binding_table) = binding.as_table() {
-                         // Extract key, action, and optional args
-                         let key: String = binding_table
-                             .get("key")
-                             .unwrap_or_else(|_| "".to_string());
-                         let action: String = binding_table
-                             .get("action")
-                             .unwrap_or_else(|_| "".to_string());
+                      if let Some(binding_table) = binding.as_table() {
+                          // Extract key, action, and optional args
+                          let key: String = binding_table
+                              .get("key")
+                              .unwrap_or_else(|_| "".to_string());
+                          let action: String = binding_table
+                              .get("action")
+                              .unwrap_or_else(|_| "".to_string());
 
-                          let args: Vec<String> = if let Ok(args_table) =
-                              binding_table.get::<LuaTable>("args")
-                          {
-                             let mut args_vec = Vec::new();
-                             let mut arg_index = 1i64;
-                             loop {
-                                 let arg: LuaValue = args_table.get(arg_index)?;
-                                 if arg == LuaValue::Nil {
-                                     break;
-                                 }
-                                 if let Some(arg_str) = arg.as_string() {
-                                     args_vec.push(
-                                         arg_str.to_string_lossy().to_string()
-                                     );
-                                 }
-                                 arg_index += 1;
-                             }
-                             args_vec
-                         } else {
-                             Vec::new()
-                         };
+                          debug!("[get_keybindings] Binding {}: key='{}', action='{}'", index, key, action);
 
-                         if !key.is_empty() && !action.is_empty() {
-                             keybindings.push((key, action, args));
-                         }
-                     }
+                           let args: Vec<String> = if let Ok(args_table) =
+                               binding_table.get::<LuaTable>("args")
+                           {
+                              let mut args_vec = Vec::new();
+                              let mut arg_index = 1i64;
+                              loop {
+                                  let arg: LuaValue = args_table.get(arg_index)?;
+                                  if arg == LuaValue::Nil {
+                                      break;
+                                  }
+                                  if let Some(arg_str) = arg.as_string() {
+                                      args_vec.push(
+                                          arg_str.to_string_lossy().to_string()
+                                      );
+                                  }
+                                  arg_index += 1;
+                              }
+                              args_vec
+                          } else {
+                              Vec::new()
+                          };
 
-                     index += 1;
-                 }
-             }
-             None => {
-                 // No binds table found, return empty list
-             }
-         }
+                          if !key.is_empty() && !action.is_empty() {
+                              keybindings.push((key, action, args));
+                          }
+                      } else {
+                          debug!("[get_keybindings] Binding {} is not a table", index);
+                      }
 
-         Ok(keybindings)
-     }
+                      index += 1;
+                  }
+              }
+              None => {
+                  debug!("[get_keybindings] No binds table found in Lua globals");
+              }
+          }
+
+          Ok(keybindings)
+      }
 }
 
 impl Default for LuaRuntime {

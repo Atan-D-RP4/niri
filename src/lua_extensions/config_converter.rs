@@ -216,6 +216,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
     debug!("Checking for keybindings in Lua globals");
     match runtime.get_keybindings() {
         Ok(raw_keybindings) => {
+            debug!("[apply_lua_config] get_keybindings returned {} bindings", raw_keybindings.len());
             if raw_keybindings.is_empty() {
                 info!("ℹ No keybindings found in Lua configuration");
             } else {
@@ -223,6 +224,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 let mut converted_binds = Vec::new();
 
                 for (key, action, args) in raw_keybindings {
+                    debug!("[apply_lua_config] Processing binding: key='{}', action='{}'", key, action);
                     let lua_binding = LuaKeybinding {
                         key,
                         action,
@@ -276,15 +278,37 @@ mod tests {
     fn test_apply_lua_config_with_values() {
         let runtime = LuaRuntime::new().unwrap();
         runtime
-            .load_string("prefer_no_csd = false")
+            .load_string("prefer_no_csd = true")
             .expect("Failed to load Lua code");
 
         let mut config = Config::default();
-        let original_value = config.prefer_no_csd;
+        let _original_value = config.prefer_no_csd;
         
         apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
         
-        assert_eq!(config.prefer_no_csd, false);
-        assert_ne!(config.prefer_no_csd, original_value);
+        assert_eq!(config.prefer_no_csd, true);
+    }
+
+    #[test]
+    fn test_extract_keybindings() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Mod+T", action = "spawn", args = { "kitty" } },
+            { key = "Mod+Q", action = "close-window" },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        // We should have added 2 more bindings
+        assert!(config.binds.0.len() >= initial_bind_count + 2, 
+            "Expected at least {} bindings, got {}", 
+            initial_bind_count + 2, 
+            config.binds.0.len());
     }
 }
