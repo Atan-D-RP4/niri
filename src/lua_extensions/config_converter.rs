@@ -53,28 +53,104 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
                 warn!("⚠ spawn-sh action requires arguments");
                 return None;
             }
-            // Join all args as a single shell command
             let cmd = lua_binding.args.join(" ");
             Action::SpawnSh(cmd)
         }
+
+        // Window management
         "close-window" => Action::CloseWindow,
         "fullscreen-window" => Action::FullscreenWindow,
-        "toggled-windowed-fullscreen" => Action::ToggleWindowedFullscreen,
-        "focus-window-or-workspace-down" => Action::FocusWindowOrWorkspaceDown,
-        "focus-window-or-workspace-up" => Action::FocusWindowOrWorkspaceUp,
-        "focus-column-left" => Action::FocusColumnLeft,
-        "focus-column-right" => Action::FocusColumnRight,
+        "toggle-windowed-fullscreen" => Action::ToggleWindowedFullscreen,
+        "toggle-window-floating" => Action::ToggleWindowFloating,
+        "maximize-column" => Action::MaximizeColumn,
+        "center-column" => Action::CenterColumn,
+        "center-visible-columns" => Action::CenterVisibleColumns,
+
+        // Window focus
         "focus-window-down" => Action::FocusWindowDown,
         "focus-window-up" => Action::FocusWindowUp,
-        "move-column-left" => Action::MoveColumnLeft,
-        "move-column-right" => Action::MoveColumnRight,
+        "focus-window-or-workspace-down" => Action::FocusWindowOrWorkspaceDown,
+        "focus-window-or-workspace-up" => Action::FocusWindowOrWorkspaceUp,
+
+        // Column focus
+        "focus-column-left" => Action::FocusColumnLeft,
+        "focus-column-right" => Action::FocusColumnRight,
+        "focus-column-first" => Action::FocusColumnFirst,
+        "focus-column-last" => Action::FocusColumnLast,
+
+        // Window movement
         "move-window-down" => Action::MoveWindowDown,
         "move-window-up" => Action::MoveWindowUp,
-         "screenshot" => Action::Screenshot(true, None),
-         "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
-         "toggle-overview" => Action::ToggleOverview,
-         "quit" => Action::Quit(false),
-         "suspend" => Action::Suspend,
+
+        // Column movement
+        "move-column-left" => Action::MoveColumnLeft,
+        "move-column-right" => Action::MoveColumnRight,
+        "move-column-to-first" => Action::MoveColumnToFirst,
+        "move-column-to-last" => Action::MoveColumnToLast,
+
+        // Monitor focus
+        "focus-monitor-left" => Action::FocusMonitorLeft,
+        "focus-monitor-right" => Action::FocusMonitorRight,
+        "focus-monitor-down" => Action::FocusMonitorDown,
+        "focus-monitor-up" => Action::FocusMonitorUp,
+
+        // Monitor movement
+        "move-column-to-monitor-left" => Action::MoveColumnToMonitorLeft,
+        "move-column-to-monitor-right" => Action::MoveColumnToMonitorRight,
+        "move-column-to-monitor-down" => Action::MoveColumnToMonitorDown,
+        "move-column-to-monitor-up" => Action::MoveColumnToMonitorUp,
+
+        // Workspace focus
+        "focus-workspace-down" => Action::FocusWorkspaceDown,
+        "focus-workspace-up" => Action::FocusWorkspaceUp,
+
+        // Workspace movement
+        "move-workspace-down" => Action::MoveWorkspaceDown,
+        "move-workspace-up" => Action::MoveWorkspaceUp,
+        "move-column-to-workspace-down" => Action::MoveColumnToWorkspaceDown(true),
+        "move-column-to-workspace-up" => Action::MoveColumnToWorkspaceUp(true),
+
+         // Window operations
+         "consume-or-expel-window-left" => Action::ConsumeOrExpelWindowLeft,
+         "consume-or-expel-window-right" => Action::ConsumeOrExpelWindowRight,
+         "consume-window-into-column" => Action::ConsumeWindowIntoColumn,
+         "expel-window-from-column" => Action::ExpelWindowFromColumn,
+         "toggle-column-tabbed-display" => Action::ToggleColumnTabbedDisplay,
+         "switch-focus-between-floating-and-tiling" => Action::SwitchFocusBetweenFloatingAndTiling,
+
+        // Column operations
+        "reset-window-height" => Action::ResetWindowHeight,
+        "expand-column-to-available-width" => Action::ExpandColumnToAvailableWidth,
+        "switch-preset-column-width" => Action::SwitchPresetColumnWidth,
+        "switch-preset-window-height" => Action::SwitchPresetWindowHeight,
+
+        // Screenshots
+        "screenshot" => Action::Screenshot(true, None),
+        "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
+        "screenshot-window" => Action::ScreenshotWindow(true, None),
+
+        // Utilities
+        "toggle-overview" => Action::ToggleOverview,
+        "show-hotkey-overlay" => Action::ShowHotkeyOverlay,
+        "toggle-keyboard-shortcuts-inhibit" => Action::ToggleKeyboardShortcutsInhibit,
+        "power-off-monitors" => Action::PowerOffMonitors,
+
+        // System
+        "quit" => Action::Quit(false),
+        "suspend" => Action::Suspend,
+
+        // Actions that require arguments - log warning instead of skipping
+        "focus-workspace" |
+        "move-column-to-workspace" |
+        "set-column-width" |
+        "set-window-height" |
+        "move-column-to-monitor" |
+        "move-window-to-monitor" |
+        "focus-monitor" => {
+            warn!("⚠ Action '{}' requires arguments that aren't fully supported yet in Lua config", lua_binding.action);
+            return None;
+        }
+
         _ => {
             warn!("✗ Unknown action: '{}'", lua_binding.action);
             return None;

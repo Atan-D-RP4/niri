@@ -288,4 +288,45 @@ mod lua_config_tests {
          // Should have added 2 valid keybindings (the invalid one is skipped)
          assert_eq!(config.binds.0.len(), original_binds_count + 2);
      }
+
+     #[test]
+     #[ignore]  // Run with: cargo test -- --ignored --nocapture
+     fn test_real_config_keybinding_analysis() {
+         // Load test_config.lua and report statistics about keybinding extraction
+         use std::fs;
+         use std::path::Path;
+
+         let config_path = Path::new("test_config.lua");
+         if !config_path.exists() {
+            eprintln!("✗ test_config.lua not found");
+            return;
+         }
+
+         let lua_code = fs::read_to_string(config_path).expect("Failed to read test_config.lua");
+         let lua_config = match LuaConfig::from_string(&lua_code) {
+             Ok(c) => c,
+             Err(e) => {
+                 eprintln!("✗ Failed to load Lua config: {}", e);
+                 return;
+             }
+         };
+
+         let mut config = Config::default();
+         let original_binds_count = config.binds.0.len();
+
+         match apply_lua_config(lua_config.runtime(), &mut config) {
+             Ok(_) => {
+                 let new_binds_count = config.binds.0.len();
+                 let added = new_binds_count - original_binds_count;
+                 println!("\n=== Keybinding Extraction Analysis ===");
+                 println!("✓ Successfully loaded test_config.lua");
+                 println!("  Original bindings: {}", original_binds_count);
+                 println!("  New bindings: {}", new_binds_count);
+                 println!("  Extracted: {}", added);
+             }
+             Err(e) => {
+                 eprintln!("✗ Failed to apply Lua config: {}", e);
+             }
+         }
+     }
 }
