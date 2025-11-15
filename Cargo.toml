@@ -20,6 +20,7 @@ bitflags = "2.9.4"
 clap = { version = "4.5.48", features = ["derive"] }
 insta = "1.43.2"
 mlua = { version = "0.11.4", features = ["luajit", "vendored"] }
+regex = "1.10"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tracing = { version = "0.1.41", features = ["max_level_trace", "release_max_level_debug"] }
@@ -89,6 +90,7 @@ png = "0.18.0"
 portable-atomic = { version = "1.11.1", default-features = false, features = ["float"] }
 profiling = "1.0.17"
 sd-notify = "0.4.5"
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 smithay-drm-extras.workspace = true
@@ -126,6 +128,7 @@ insta.workspace = true
 proptest = "1.8.0"
 proptest-derive = { version = "0.6.0", features = ["boxed_union"] }
 rayon = "1.11.0"
+tempfile = "3.14.0"
 wayland-client = "0.31.11"
 xshell = "0.2.7"
 

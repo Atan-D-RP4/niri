@@ -15,11 +15,31 @@ pub mod config_converter;
 pub mod niri_api;
 pub mod runtime;
 
+// Tier 1: Foundation Layer - Core Lua scripting infrastructure
+pub mod module_loader;
+pub mod plugin_system;
+pub mod event_emitter;
+pub mod hot_reload;
+
+// Tier 2: Configuration API
+pub mod lua_types;
+pub mod validators;
+pub mod config_api;
+
 use mlua::prelude::*;
 pub use config::LuaConfig;
 pub use config_converter::apply_lua_config;
 pub use niri_api::NiriApi;
 pub use runtime::LuaRuntime;
+
+// Tier 1 exports
+pub use event_emitter::EventEmitter;
+pub use hot_reload::HotReloader;
+pub use module_loader::ModuleLoader;
+pub use plugin_system::PluginManager;
+
+// Tier 2 exports
+pub use lua_types::{LuaAnimation, LuaFilter, LuaWindowRule, LuaGesture};
 
 /// Trait for registering Lua components to the global context.
 ///

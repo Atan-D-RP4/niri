@@ -163,7 +163,8 @@ mod tests {
     #[test]
     fn test_niri_api_registration() {
         let lua = Lua::new();
-        lua.load_std_libs(LuaStdLib::ALL).unwrap();
+        // Load only safe standard libraries (exclude debug)
+        lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
 
         let result = NiriApi::register_to_lua(&lua, |action, args| {
             info!("Test action: {} with args {:?}", action, args);
@@ -183,7 +184,8 @@ mod tests {
     #[test]
     fn test_niri_api_logging() {
         let lua = Lua::new();
-        lua.load_std_libs(LuaStdLib::ALL).unwrap();
+        // Load only safe standard libraries (exclude debug)
+        lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
         NiriApi::register_to_lua(&lua, |action, args| {
             info!("Test action: {} with args {:?}", action, args);
             Ok(())

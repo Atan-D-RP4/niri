@@ -31,7 +31,7 @@ mod lua_config_tests {
         let mut config = Config::default();
 
         // Default should be true, so we'll verify the setting is applied
-        let original = config.prefer_no_csd;
+        let _original = config.prefer_no_csd;
 
         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
 
