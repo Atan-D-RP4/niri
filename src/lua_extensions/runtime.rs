@@ -5,7 +5,7 @@
 
 use mlua::prelude::*;
 use std::path::Path;
-use crate::lua_extensions::{LuaComponent, NiriApi};
+use crate::lua_extensions::{LuaComponent, NiriApi, ConfigApi};
 
 /// Manages a Lua runtime for Niri.
 ///
@@ -40,6 +40,17 @@ impl LuaRuntime {
         F: Fn(String, Vec<String>) -> LuaResult<()> + 'static,
     {
         NiriApi::register_to_lua(&self.lua, action_callback)
+    }
+
+    /// Register the configuration API to the runtime.
+    ///
+    /// This provides access to configuration settings through the niri.config table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration API registration fails.
+    pub fn register_config_api(&self) -> LuaResult<()> {
+        ConfigApi::register_to_lua(&self.lua)
     }
 
     /// Load and execute a Lua script from a file.
