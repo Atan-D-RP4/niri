@@ -474,4 +474,45 @@ mod lua_config_tests {
          // Should have added 3 startup commands
          assert!(config.spawn_at_startup.len() >= original_cmds + 3);
      }
+
+     #[test]
+     fn test_lua_config_with_returned_table() {
+         // Test that config can be returned from a Lua script
+         // This tests the new feature where local variables are returned
+         let lua_code = r#"
+             local binds = {
+                 { key = "Super+Return", action = "spawn", args = { "alacritty" } },
+                 { key = "Super+Q", action = "close-window", args = {} },
+             }
+             
+             local startup = {
+                 "waybar",
+                 "dunst",
+             }
+             
+             prefer_no_csd = true
+             
+             return {
+                 binds = binds,
+                 startup = startup,
+                 prefer_no_csd = prefer_no_csd,
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_binds = config.binds.0.len();
+         let original_cmds = config.spawn_at_startup.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Verify bindings were extracted from returned table
+         assert_eq!(config.binds.0.len(), original_binds + 2, "Should have 2 new bindings");
+         
+         // Verify startup commands were extracted from returned table
+         assert!(config.spawn_at_startup.len() >= original_cmds + 2, "Should have added startup commands");
+         
+         // Verify prefer_no_csd was applied
+         assert_eq!(config.prefer_no_csd, true, "prefer_no_csd should be true");
+     }
 }

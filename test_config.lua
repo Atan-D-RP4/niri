@@ -61,6 +61,54 @@ binds = {
         action = "screenshot",
         args = {}
     },
+    -- Exit application with Super+Alt+Q
+    {
+        key = "Super+Alt+Q",
+        action = "exit",
+        args = {}
+    },
+    -- Toggle overview with Super+O
+    {
+        key = "Super+O",
+        action = "overview-toggle",
+        args = {}
+    },
+    -- Show hotkey overlay with Super+F1
+    {
+        key = "Super+F1",
+        action = "hotkey-overlay-toggle",
+        args = {}
+    },
+    -- Suspend with Super+Alt+S
+    {
+        key = "Super+Alt+S",
+        action = "suspend",
+        args = {}
+    },
+    -- Switch preset column width with Mod+R
+    {
+        key = "Mod+R",
+        action = "switch-preset-column-width",
+        args = {}
+    },
+    -- Consume window left with Mod+BracketLeft
+    {
+        key = "Mod+BracketLeft",
+        action = "consume-or-expel-window-left",
+        args = {}
+    },
+    -- Consume window right with Mod+BracketRight
+    {
+        key = "Mod+BracketRight",
+        action = "consume-or-expel-window-right",
+        args = {}
+    },
+    -- Switch focus between floating and tiling with Mod+Shift+V
+    {
+        key = "Mod+Shift+V",
+        action = "switch-focus-between-floating-and-tiling",
+        args = {}
+    },
 }
 
 niri.log("Configuration loaded successfully with " .. #binds .. " keybindings")

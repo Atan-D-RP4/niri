@@ -66,6 +66,31 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
         "maximize-column" => Action::MaximizeColumn,
         "center-column" => Action::CenterColumn,
         "center-visible-columns" => Action::CenterVisibleColumns,
+        
+        // Window sizing and layout presets
+        "switch-preset-column-width" => Action::SwitchPresetColumnWidth,
+        "switch-preset-column-width-back" => Action::SwitchPresetColumnWidthBack,
+        "switch-preset-window-width" => Action::SwitchPresetWindowWidth,
+        "switch-preset-window-width-back" => Action::SwitchPresetWindowWidthBack,
+        "switch-preset-window-height" => Action::SwitchPresetWindowHeight,
+        "switch-preset-window-height-back" => Action::SwitchPresetWindowHeightBack,
+        
+        // Window consumption and expulsion
+        "consume-or-expel-window-left" => Action::ConsumeOrExpelWindowLeft,
+        "consume-or-expel-window-right" => Action::ConsumeOrExpelWindowRight,
+        "consume-window-into-column" => Action::ConsumeWindowIntoColumn,
+        "expel-window-from-column" => Action::ExpelWindowFromColumn,
+        
+        // Window and column organization
+        "swap-window-left" => Action::SwapWindowLeft,
+        "swap-window-right" => Action::SwapWindowRight,
+        "toggle-column-tabbed-display" => Action::ToggleColumnTabbedDisplay,
+        "center-window" => Action::CenterWindow,
+        "move-window-to-floating" => Action::MoveWindowToFloating,
+        "move-window-to-tiling" => Action::MoveWindowToTiling,
+        "focus-floating" => Action::FocusFloating,
+        "focus-tiling" => Action::FocusTiling,
+        "switch-focus-between-floating-and-tiling" => Action::SwitchFocusBetweenFloatingAndTiling,
 
         // Window focus
         "focus-window-down" => Action::FocusWindowDown,
@@ -493,6 +518,87 @@ mod tests {
             { key = "Super+O", action = "overview-toggle", args = {} },
             { key = "Super+F1", action = "show-hotkey-overlay", args = {} },
             { key = "Super+Alt+S", action = "suspend", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        // All 4 actions should be added
+        assert_eq!(config.binds.0.len(), initial_bind_count + 4);
+    }
+
+    #[test]
+    fn test_switch_preset_column_width_action() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Mod+R", action = "switch-preset-column-width", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 1);
+        let last_bind = &config.binds.0[initial_bind_count];
+        matches!(last_bind.action, niri_config::binds::Action::SwitchPresetColumnWidth);
+    }
+
+    #[test]
+    fn test_consume_or_expel_window_actions() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Mod+BracketLeft", action = "consume-or-expel-window-left", args = {} },
+            { key = "Mod+BracketRight", action = "consume-or-expel-window-right", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 2);
+    }
+
+    #[test]
+    fn test_switch_focus_between_floating_and_tiling() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Mod+Shift+V", action = "switch-focus-between-floating-and-tiling", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 1);
+        let last_bind = &config.binds.0[initial_bind_count];
+        matches!(last_bind.action, niri_config::binds::Action::SwitchFocusBetweenFloatingAndTiling);
+    }
+
+    #[test]
+    fn test_all_window_management_actions() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Mod+R", action = "switch-preset-column-width", args = {} },
+            { key = "Mod+BracketLeft", action = "consume-or-expel-window-left", args = {} },
+            { key = "Mod+BracketRight", action = "consume-or-expel-window-right", args = {} },
+            { key = "Mod+Shift+V", action = "switch-focus-between-floating-and-tiling", args = {} },
         }
         "#;
         runtime.load_string(code).expect("Failed to load Lua code");

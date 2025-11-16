@@ -230,12 +230,12 @@ local window_rules = {
 
 local binds = {
     -- Show hotkey overlay
-    { key = "Mod+Shift+Slash", action = "show-hotkey-overlay" },
+    { key = "Mod+Slash", action = "show-hotkey-overlay" },
 
     -- Applications
     { key = "Mod+T", action = "spawn", args = { "kitty" }, title = "Open Terminal" },
-    { key = "Mod+D", action = "spawn", args = { "rofilaunch.sh" }, title = "Run Application" },
-    { key = "Super+Alt+L", action = "spawn", args = { "hyprlock" }, title = "Lock Screen" },
+    { key = "Mod+D", action = "spawn-sh", args = { "hyde-shell rofilaunch.sh" }, title = "Run Application" },
+    { key = "Mod+Alt+L", action = "spawn", args = { "hyprlock" }, title = "Lock Screen" },
 
     -- Volume control (with PipeWire)
     { key = "XF86AudioRaiseVolume", action = "spawn-sh", args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+" }, allow_when_locked = true },
@@ -406,7 +406,6 @@ local binds = {
 
     -- Exit/shutdown
     { key = "Mod+Shift+E", action = "quit" },
-    { key = "Ctrl+Alt+Delete", action = "quit" },
 
     -- Power management
     { key = "Mod+Shift+P", action = "power-off-monitors" },
