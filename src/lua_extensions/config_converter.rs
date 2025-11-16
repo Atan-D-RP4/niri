@@ -168,6 +168,28 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
             }
         }
         
+        // Application control
+        "exit" => Action::Quit(false),
+        "quit" => Action::Quit(false),
+        "suspend" => Action::Suspend,
+        
+        // Screen and power
+        "power-off-monitors" => Action::PowerOffMonitors,
+        "power-on-monitors" => Action::PowerOnMonitors,
+        "do-screen-transition" => Action::DoScreenTransition(None),
+        
+        // UI overlays
+        "show-hotkey-overlay" | "hotkey-overlay-toggle" => Action::ShowHotkeyOverlay,
+        "toggle-overview" | "overview-toggle" => Action::ToggleOverview,
+        "open-overview" => Action::OpenOverview,
+        "close-overview" => Action::CloseOverview,
+        
+        // Screenshot actions
+        "screenshot" => Action::Screenshot(true, None),
+        "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
+        "screenshot-window" => Action::ScreenshotWindow(true, None),
+        
+        // Unsupported actions requiring arguments
         "move-column-to-monitor" |
         "move-window-to-monitor" |
         "focus-monitor" => {
@@ -380,5 +402,107 @@ mod tests {
             "Expected at least {} bindings, got {}", 
             initial_bind_count + 2, 
             config.binds.0.len());
+    }
+
+    #[test]
+    fn test_exit_action() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Super+Alt+Q", action = "exit", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 1);
+        let last_bind = &config.binds.0[initial_bind_count];
+        matches!(last_bind.action, niri_config::binds::Action::Quit(false));
+    }
+
+    #[test]
+    fn test_overview_toggle_action() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Super+O", action = "overview-toggle", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 1);
+        let last_bind = &config.binds.0[initial_bind_count];
+        matches!(last_bind.action, niri_config::binds::Action::ToggleOverview);
+    }
+
+    #[test]
+    fn test_hotkey_overlay_action() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Super+F1", action = "hotkey-overlay-toggle", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 1);
+        let last_bind = &config.binds.0[initial_bind_count];
+        matches!(last_bind.action, niri_config::binds::Action::ShowHotkeyOverlay);
+    }
+
+    #[test]
+    fn test_suspend_action() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Super+Alt+S", action = "suspend", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        assert_eq!(config.binds.0.len(), initial_bind_count + 1);
+        let last_bind = &config.binds.0[initial_bind_count];
+        matches!(last_bind.action, niri_config::binds::Action::Suspend);
+    }
+
+    #[test]
+    fn test_multiple_new_actions() {
+        let runtime = LuaRuntime::new().unwrap();
+        let code = r#"
+        binds = {
+            { key = "Super+Alt+Q", action = "exit", args = {} },
+            { key = "Super+O", action = "overview-toggle", args = {} },
+            { key = "Super+F1", action = "show-hotkey-overlay", args = {} },
+            { key = "Super+Alt+S", action = "suspend", args = {} },
+        }
+        "#;
+        runtime.load_string(code).expect("Failed to load Lua code");
+
+        let mut config = Config::default();
+        let initial_bind_count = config.binds.0.len();
+        
+        apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
+        
+        // All 4 actions should be added
+        assert_eq!(config.binds.0.len(), initial_bind_count + 4);
     }
 }
