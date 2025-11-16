@@ -13,12 +13,16 @@
 //! # Example
 //!
 //! ```
+//! use niri_lua::HotReloader;
+//! # fn main() -> anyhow::Result<()> {
 //! let mut watcher = HotReloader::new();
 //! watcher.watch("~/.config/niri/config.lua".into())?;
 //! if watcher.check_changes()? {
 //!     println!("Config changed, reloading...");
 //!     // Re-execute Lua code
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 use log::{debug, info, warn};

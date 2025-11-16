@@ -4,7 +4,7 @@
 //! Niri-specific functionality to Lua scripts.
 
 use mlua::prelude::*;
-use crate::lua_extensions::LuaComponent;
+use crate::LuaComponent;
 use std::rc::Rc;
 use log::{info, debug, warn, error};
 
@@ -55,7 +55,7 @@ impl LuaComponent for NiriApi {
 
         // Register version info function
         let version_fn = lua.create_function(|_, ()| {
-            Ok(format!("Niri {}", crate::utils::version()))
+            Ok(format!("Niri {}", env!("CARGO_PKG_VERSION")))
         })?;
         niri.set("version", version_fn)?;
 
@@ -64,7 +64,7 @@ impl LuaComponent for NiriApi {
 
         // Config helper: get Niri version
         let get_version_fn = lua.create_function(|_, ()| {
-            Ok(crate::utils::version().to_string())
+            Ok(env!("CARGO_PKG_VERSION").to_string())
         })?;
         config.set("version", get_version_fn)?;
 
@@ -159,6 +159,7 @@ impl LuaComponent for NiriApi {
 #[cfg(test)]
 mod tests {
     use super::{Lua, LuaStdLib, NiriApi, LuaTable, LuaFunction, LuaComponent};
+    use log::info;
 
     #[test]
     fn test_niri_api_registration() {

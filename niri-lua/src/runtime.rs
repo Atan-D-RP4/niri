@@ -6,7 +6,7 @@
 use mlua::prelude::*;
 use std::path::Path;
 use niri_config::Config;
-use crate::lua_extensions::{LuaComponent, NiriApi, config_api::ConfigApi};
+use crate::{LuaComponent, NiriApi, config_api::ConfigApi};
 
 /// Manages a Lua runtime for Niri.
 ///

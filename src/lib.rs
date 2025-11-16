@@ -15,7 +15,6 @@ pub mod input;
 pub mod ipc;
 pub mod layer;
 pub mod layout;
-pub mod lua_extensions;
 pub mod niri;
 pub mod protocols;
 pub mod render_helpers;
@@ -23,6 +22,9 @@ pub mod rubber_band;
 pub mod ui;
 pub mod utils;
 pub mod window;
+
+// Re-export niri-lua as lua_extensions for backward compatibility
+pub use niri_lua as lua_extensions;
 
 #[cfg(not(feature = "xdp-gnome-screencast"))]
 pub mod dummy_pw_utils;

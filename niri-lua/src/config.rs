@@ -6,7 +6,7 @@
 use anyhow::Result;
 use std::path::Path;
 use log::{info, debug};
-use crate::lua_extensions::LuaRuntime;
+use crate::LuaRuntime;
 use mlua::prelude::*;
 
 /// Configuration loaded from a Lua script.

@@ -2,6 +2,7 @@
 members = [
     "niri-config",
     "niri-ipc",
+    "niri-lua",
     "niri-visual-tests",
 ]
 
@@ -82,6 +83,7 @@ log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_de
 mlua.workspace = true
 niri-config = { version = "25.8.0", path = "niri-config" }
 niri-ipc = { version = "25.8.0", path = "niri-ipc", features = ["clap"] }
+niri-lua = { version = "25.8.0", path = "niri-lua" }
 ordered-float = "5.1.0"
 pango = { version = "0.20.12", features = ["v1_44"] }
 pangocairo = "0.20.10"

@@ -2462,6 +2462,7 @@ dependencies = [
  "mlua",
  "niri-config",
  "niri-ipc",
+ "niri-lua",
  "ordered-float",
  "pango",
  "pangocairo",
@@ -2518,6 +2519,20 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "niri-lua"
+version = "25.8.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "mlua",
+ "niri-config",
+ "niri-ipc",
+ "regex",
+ "serde",
+ "tempfile",
 ]
 
 [[package]]

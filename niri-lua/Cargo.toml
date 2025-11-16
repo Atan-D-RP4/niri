@@ -1,0 +1,21 @@
+[package]
+name = "niri-lua"
+version.workspace = true
+description = "Lua scripting API for Niri compositor"
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_debug"] }
+mlua.workspace = true
+niri-config = { version = "25.8.0", path = "../niri-config" }
+niri-ipc = { version = "25.8.0", path = "../niri-ipc" }
+regex.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14.0"
