@@ -5,7 +5,8 @@
 
 use mlua::prelude::*;
 use std::path::Path;
-use crate::lua_extensions::{LuaComponent, NiriApi, ConfigApi};
+use niri_config::Config;
+use crate::lua_extensions::{LuaComponent, NiriApi, config_api::ConfigApi};
 
 /// Manages a Lua runtime for Niri.
 ///
@@ -42,16 +43,20 @@ impl LuaRuntime {
         NiriApi::register_to_lua(&self.lua, action_callback)
     }
 
-    /// Register the configuration API to the runtime.
-    ///
-    /// This provides access to configuration settings through the niri.config table.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if configuration API registration fails.
-    pub fn register_config_api(&self) -> LuaResult<()> {
-        ConfigApi::register_to_lua(&self.lua)
-    }
+     /// Register the configuration API to the runtime.
+     ///
+     /// This provides access to configuration settings through the niri.config table.
+     ///
+     /// # Arguments
+     ///
+     /// * `config` - The current Niri configuration to expose to Lua
+     ///
+     /// # Errors
+     ///
+     /// Returns an error if configuration API registration fails.
+     pub fn register_config_api(&self, config: &Config) -> LuaResult<()> {
+         ConfigApi::register_to_lua(&self.lua, config)
+     }
 
     /// Load and execute a Lua script from a file.
     ///
@@ -224,82 +229,212 @@ impl LuaRuntime {
          &self.lua
      }
 
-     /// Extract all keybindings from the Lua globals.binds table.
-     ///
-     /// This method looks for a `binds` table in the Lua globals and extracts
-     /// all keybinding entries. Each entry should have a key, action, and optional
-     /// args field.
-     ///
-     /// # Returns
-     ///
-     /// Returns Ok(Vec of keybindings) or an error if extraction fails.
-      pub fn get_keybindings(&self) -> LuaResult<Vec<(String, String, Vec<String>)>> {
-          use log::debug;
-          let mut keybindings = Vec::new();
+    /// Extract all keybindings from the Lua globals.binds table (with compatibility).
+    ///
+    /// This method looks for a `binds` table in several locations and extracts
+    /// all keybinding entries. It checks, in order:
+    ///  - global `binds`
+    ///  - `niri.binds`
+    ///  - `niri.config.binds`
+    ///
+    /// Each entry should have a key, action, and optional args field.
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok(Vec of keybindings) or an error if extraction fails.
+    pub fn get_keybindings(&self) -> LuaResult<Vec<(String, String, Vec<String>)>> {
+        use log::debug;
+        let mut keybindings = Vec::new();
 
-          // Get the binds table
-          match self.get_global_table_opt("binds")? {
-              Some(binds_table) => {
-                  debug!("[get_keybindings] Found binds table");
-                  // Iterate through each keybinding entry in the table
-                  let mut index = 1i64;
-                  loop {
-                      let binding: LuaValue = binds_table.get(index)?;
-                      if binding == LuaValue::Nil {
-                          debug!("[get_keybindings] End of binds table at index {}", index);
-                          break;
-                      }
+        // Try multiple locations for binds table for compatibility with different configs
+        let binds_table_opt: Option<LuaTable> = if let Ok(Some(t)) = self.get_global_table_opt("binds") {
+            debug!("[get_keybindings] Found binds in global scope");
+            Some(t)
+        } else if let Ok(Some(niri_table)) = self.get_global_table_opt("niri") {
+            // Try niri.binds
+            match niri_table.get::<LuaValue>("binds") {
+                Ok(LuaValue::Table(t)) => {
+                    debug!("[get_keybindings] Found binds in niri table");
+                    Some(t)
+                }
+                _ => {
+                    // Try niri.config.binds
+                    match niri_table.get::<LuaValue>("config") {
+                        Ok(LuaValue::Table(config_table)) => match config_table.get::<LuaValue>("binds") {
+                            Ok(LuaValue::Table(t2)) => {
+                                debug!("[get_keybindings] Found binds in niri.config");
+                                Some(t2)
+                            }
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                }
+            }
+        } else {
+            None
+        };
 
-                      if let Some(binding_table) = binding.as_table() {
-                          // Extract key, action, and optional args
-                          let key: String = binding_table
-                              .get("key")
-                              .unwrap_or_else(|_| "".to_string());
-                          let action: String = binding_table
-                              .get("action")
-                              .unwrap_or_else(|_| "".to_string());
+        if let Some(binds_table) = binds_table_opt {
+            debug!("[get_keybindings] Iterating bindings");
+            let mut index = 1i64;
+            loop {
+                let binding: LuaValue = binds_table.get(index)?;
+                if binding == LuaValue::Nil {
+                    debug!("[get_keybindings] End of binds table at index {}", index);
+                    break;
+                }
 
-                          debug!("[get_keybindings] Binding {}: key='{}', action='{}'", index, key, action);
+                if let Some(binding_table) = binding.as_table() {
+                    // Extract key, action, and optional args
+                    let key: String = binding_table
+                        .get("key")
+                        .unwrap_or_else(|_| "".to_string());
+                    let action: String = binding_table
+                        .get("action")
+                        .unwrap_or_else(|_| "".to_string());
 
-                           let args: Vec<String> = if let Ok(args_table) =
-                               binding_table.get::<LuaTable>("args")
-                           {
-                              let mut args_vec = Vec::new();
-                              let mut arg_index = 1i64;
-                              loop {
-                                  let arg: LuaValue = args_table.get(arg_index)?;
-                                  if arg == LuaValue::Nil {
-                                      break;
-                                  }
-                                  if let Some(arg_str) = arg.as_string() {
-                                      args_vec.push(
-                                          arg_str.to_string_lossy().to_string()
-                                      );
-                                  }
-                                  arg_index += 1;
-                              }
-                              args_vec
-                          } else {
-                              Vec::new()
-                          };
+                    debug!("[get_keybindings] Binding {}: key='{}', action='{}'", index, key, action);
 
-                          if !key.is_empty() && !action.is_empty() {
-                              keybindings.push((key, action, args));
-                          }
-                      } else {
-                          debug!("[get_keybindings] Binding {} is not a table", index);
-                      }
+                    let args: Vec<String> = if let Ok(args_table) = binding_table.get::<LuaTable>("args") {
+                        let mut args_vec = Vec::new();
+                        let mut arg_index = 1i64;
+                        loop {
+                            let arg: LuaValue = args_table.get(arg_index)?;
+                            if arg == LuaValue::Nil {
+                                break;
+                            }
+                            // Handle both string and numeric arguments
+                            if let Some(arg_str) = arg.as_string() {
+                                args_vec.push(arg_str.to_string_lossy().to_string());
+                            } else if let Some(num) = arg.as_integer() {
+                                args_vec.push(num.to_string());
+                            } else if let Some(num) = arg.as_number() {
+                                args_vec.push(num.to_string());
+                            }
+                            arg_index += 1;
+                        }
+                        args_vec
+                    } else {
+                        Vec::new()
+                    };
 
-                      index += 1;
-                  }
-              }
-              None => {
-                  debug!("[get_keybindings] No binds table found in Lua globals");
-              }
-          }
+                    if !key.is_empty() && !action.is_empty() {
+                        keybindings.push((key, action, args));
+                    }
+                } else {
+                    debug!("[get_keybindings] Binding {} is not a table", index);
+                }
 
-          Ok(keybindings)
-      }
+                index += 1;
+            }
+        } else {
+            debug!("[get_keybindings] No binds table found in Lua globals or niri namespace");
+        }
+
+        Ok(keybindings)
+    }
+
+        /// Extract all startup commands from the Lua globals.startup table (with compatibility).
+        ///
+        /// This method looks for a `startup` table in several locations and extracts
+        /// all startup command entries. It checks, in order:
+        ///  - global `startup`
+        ///  - `niri.startup`
+        ///  - `niri.config.startup`
+        ///
+        /// Supports both simple string commands and structured command arrays.
+        ///
+        /// # Returns
+        ///
+        /// Returns Ok(Vec of commands) or an error if extraction fails.
+        pub fn get_startup_commands(&self) -> LuaResult<Vec<Vec<String>>> {
+            use log::debug;
+            let mut commands = Vec::new();
+
+            // Try multiple locations for startup table
+            let startup_table_opt: Option<LuaTable> = if let Ok(Some(t)) = self.get_global_table_opt("startup") {
+                debug!("[get_startup_commands] Found startup in global scope");
+                Some(t)
+            } else if let Ok(Some(niri_table)) = self.get_global_table_opt("niri") {
+                // Try niri.startup
+                match niri_table.get::<LuaValue>("startup") {
+                    Ok(LuaValue::Table(t)) => {
+                        debug!("[get_startup_commands] Found startup in niri table");
+                        Some(t)
+                    }
+                    _ => {
+                        // Try niri.config.startup
+                        match niri_table.get::<LuaValue>("config") {
+                            Ok(LuaValue::Table(config_table)) => match config_table.get::<LuaValue>("startup") {
+                                Ok(LuaValue::Table(t2)) => {
+                                    debug!("[get_startup_commands] Found startup in niri.config");
+                                    Some(t2)
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        }
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Some(startup_table) = startup_table_opt {
+                debug!("[get_startup_commands] Iterating startup entries");
+                // Iterate through each startup command entry in the table
+                let mut index = 1i64;
+                loop {
+                    let entry: LuaValue = startup_table.get(index)?;
+                    if entry == LuaValue::Nil {
+                        debug!("[get_startup_commands] End of startup table at index {}", index);
+                        break;
+                    }
+
+                    // Handle both simple strings and structured tables
+                    if let Some(cmd_str) = entry.as_string() {
+                        // Simple string command: just wrap it as a single command
+                        debug!("[get_startup_commands] Entry {}: simple string command: '{}'", index, cmd_str.to_string_lossy());
+                        commands.push(vec![cmd_str.to_string_lossy().to_string()]);
+                    } else if let Some(entry_table) = entry.as_table() {
+                        // Structured command table with "command" field
+                        if let Ok(cmd_table) = entry_table.get::<LuaTable>("command") {
+                            let mut cmd_vec = Vec::new();
+                            let mut cmd_index = 1i64;
+                            loop {
+                                let arg: LuaValue = cmd_table.get(cmd_index)?;
+                                if arg == LuaValue::Nil {
+                                    break;
+                                }
+                                // Handle both string and numeric arguments
+                                if let Some(arg_str) = arg.as_string() {
+                                    cmd_vec.push(arg_str.to_string_lossy().to_string());
+                                } else if let Some(num) = arg.as_integer() {
+                                    cmd_vec.push(num.to_string());
+                                } else if let Some(num) = arg.as_number() {
+                                    cmd_vec.push(num.to_string());
+                                }
+                                cmd_index += 1;
+                            }
+                            if !cmd_vec.is_empty() {
+                                debug!("[get_startup_commands] Entry {}: structured command: {:?}", index, cmd_vec);
+                                commands.push(cmd_vec);
+                            }
+                        }
+                    } else {
+                        debug!("[get_startup_commands] Entry {} is not a string or table", index);
+                    }
+
+                    index += 1;
+                }
+            } else {
+                debug!("[get_startup_commands] No startup table found in Lua globals or niri namespace");
+            }
+
+            Ok(commands)
+        }
+
 }
 
 impl Default for LuaRuntime {

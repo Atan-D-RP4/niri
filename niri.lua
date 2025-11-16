@@ -1,0 +1,1 @@
+/home/atan/.config/niri/niri.lua

@@ -4,7 +4,8 @@
 //! and applying them to Niri's Config struct.
 
 use super::LuaRuntime;
-use niri_config::{Config, binds::{Bind, Key, Action}};
+use niri_config::{Config, binds::{Bind, Key, Action, WorkspaceReference}, misc::SpawnAtStartup};
+use niri_ipc::SizeChange;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::str::FromStr;
@@ -110,40 +111,63 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
         "move-column-to-workspace-down" => Action::MoveColumnToWorkspaceDown(true),
         "move-column-to-workspace-up" => Action::MoveColumnToWorkspaceUp(true),
 
-         // Window operations
-         "consume-or-expel-window-left" => Action::ConsumeOrExpelWindowLeft,
-         "consume-or-expel-window-right" => Action::ConsumeOrExpelWindowRight,
-         "consume-window-into-column" => Action::ConsumeWindowIntoColumn,
-         "expel-window-from-column" => Action::ExpelWindowFromColumn,
-         "toggle-column-tabbed-display" => Action::ToggleColumnTabbedDisplay,
-         "switch-focus-between-floating-and-tiling" => Action::SwitchFocusBetweenFloatingAndTiling,
-
-        // Column operations
-        "reset-window-height" => Action::ResetWindowHeight,
-        "expand-column-to-available-width" => Action::ExpandColumnToAvailableWidth,
-        "switch-preset-column-width" => Action::SwitchPresetColumnWidth,
-        "switch-preset-window-height" => Action::SwitchPresetWindowHeight,
-
-        // Screenshots
-        "screenshot" => Action::Screenshot(true, None),
-        "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
-        "screenshot-window" => Action::ScreenshotWindow(true, None),
-
-        // Utilities
-        "toggle-overview" => Action::ToggleOverview,
-        "show-hotkey-overlay" => Action::ShowHotkeyOverlay,
-        "toggle-keyboard-shortcuts-inhibit" => Action::ToggleKeyboardShortcutsInhibit,
-        "power-off-monitors" => Action::PowerOffMonitors,
-
-        // System
-        "quit" => Action::Quit(false),
-        "suspend" => Action::Suspend,
-
         // Actions that require arguments - log warning instead of skipping
-        "focus-workspace" |
-        "move-column-to-workspace" |
-        "set-column-width" |
-        "set-window-height" |
+        "focus-workspace" => {
+            if lua_binding.args.is_empty() {
+                warn!("⚠ Action 'focus-workspace' requires a workspace number argument");
+                return None;
+            }
+            match lua_binding.args[0].parse::<u8>() {
+                Ok(index) => Action::FocusWorkspace(WorkspaceReference::Index(index)),
+                Err(_) => {
+                    warn!("⚠ Failed to parse workspace index from: {}", lua_binding.args[0]);
+                    return None;
+                }
+            }
+        }
+        
+        "move-column-to-workspace" => {
+            if lua_binding.args.is_empty() {
+                warn!("⚠ Action 'move-column-to-workspace' requires a workspace number argument");
+                return None;
+            }
+            match lua_binding.args[0].parse::<u8>() {
+                Ok(index) => Action::MoveColumnToWorkspace(WorkspaceReference::Index(index), true),
+                Err(_) => {
+                    warn!("⚠ Failed to parse workspace index from: {}", lua_binding.args[0]);
+                    return None;
+                }
+            }
+        }
+        
+        "set-column-width" => {
+            if lua_binding.args.is_empty() {
+                warn!("⚠ Action 'set-column-width' requires a size change argument");
+                return None;
+            }
+            match SizeChange::from_str(&lua_binding.args[0]) {
+                Ok(change) => Action::SetColumnWidth(change),
+                Err(_) => {
+                    warn!("⚠ Failed to parse size change from: {}", lua_binding.args[0]);
+                    return None;
+                }
+            }
+        }
+        
+        "set-window-height" => {
+            if lua_binding.args.is_empty() {
+                warn!("⚠ Action 'set-window-height' requires a size change argument");
+                return None;
+            }
+            match SizeChange::from_str(&lua_binding.args[0]) {
+                Ok(change) => Action::SetWindowHeight(change),
+                Err(_) => {
+                    warn!("⚠ Failed to parse size change from: {}", lua_binding.args[0]);
+                    return None;
+                }
+            }
+        }
+        
         "move-column-to-monitor" |
         "move-window-to-monitor" |
         "focus-monitor" => {
@@ -214,7 +238,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
     // Extract and apply keybindings
     debug!("Checking for keybindings in Lua globals");
-    match runtime.get_keybindings() {
+            match runtime.get_keybindings() {
         Ok(raw_keybindings) => {
             debug!("[apply_lua_config] get_keybindings returned {} bindings", raw_keybindings.len());
             if raw_keybindings.is_empty() {
@@ -241,6 +265,8 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                     info!("✓ Successfully converted {} keybindings", converted_binds.len());
                     // Merge with existing binds or replace them
                     config.binds.0.extend(converted_binds);
+                    // Diagnostic log: print a sample of the added binds
+                    debug!("[apply_lua_config] Sample converted binds: {:?}", &config.binds.0.iter().rev().take(5).collect::<Vec<_>>());
                 } else {
                     warn!("⚠ No valid keybindings could be converted from Lua");
                 }
@@ -251,12 +277,56 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
         }
     }
 
+    // Extract and apply startup commands
+    debug!("Checking for startup commands in Lua globals");
+            match runtime.get_startup_commands() {
+        Ok(startup_cmds) => {
+            debug!("[apply_lua_config] get_startup_commands returned {} commands", startup_cmds.len());
+            if startup_cmds.is_empty() {
+                info!("ℹ No startup commands found in Lua configuration");
+            } else {
+                info!("✓ Found {} startup commands in Lua", startup_cmds.len());
+                let mut spawn_at_startup = Vec::new();
+
+                for cmd_vec in startup_cmds {
+                    if cmd_vec.is_empty() {
+                        continue;
+                    }
+
+                    debug!("[apply_lua_config] Processing startup command: {:?}", cmd_vec);
+
+                    // For now, treat all commands as spawn-at-startup (execute as array)
+                    // This matches the KDL syntax: spawn-at-startup "cmd" "arg1" "arg2"
+                    spawn_at_startup.push(SpawnAtStartup {
+                        command: cmd_vec,
+                    });
+                }
+
+                if !spawn_at_startup.is_empty() {
+                    info!("✓ Added {} startup commands", spawn_at_startup.len());
+                    config.spawn_at_startup.extend(spawn_at_startup);
+                    debug!("[apply_lua_config] Sample spawn_at_startup entries: {:?}", &config.spawn_at_startup.iter().rev().take(5).collect::<Vec<_>>());
+                }
+            }
+        }
+        Err(e) => {
+            warn!("✗ Error extracting startup commands from Lua: {}", e);
+        }
+    }
+
     // Additional configuration options can be added here as they're implemented
     // Examples:
     // - Screen lock settings
     // - Animation settings
     // - Cursor settings
     // - etc.
+
+    // Register the config API so Lua scripts can read the current configuration
+    debug!("Registering configuration API to Lua");
+    runtime.register_config_api(config)
+        .map_err(|e| anyhow::anyhow!("Failed to register config API: {}", e))?;
+    
+    info!("✓ Configuration API registered successfully");
 
     debug!("=== Lua configuration application completed ===");
     Ok(())

@@ -14,6 +14,7 @@
 -- how to contribute to complete the Lua API implementation.
 
 niri.log("Loading Niri Lua configuration (EXPERIMENTAL - NOT YET FUNCTIONAL)...")
+niri.log("Logging from Lua works")
 
 -- ============================================================================
 -- INPUT CONFIGURATION
@@ -158,6 +159,7 @@ local layout = {
 
 local startup = {
     "waybar",
+	"swaync",
     -- Add other startup commands here
 }
 
@@ -411,39 +413,34 @@ local binds = {
 }
 
 -- ============================================================================
--- CONFIGURATION APPLICATION
+-- TIER 1 LUA FOUNDATION STATUS
+-- ============================================================================
+-- This configuration demonstrates Tier 1 features of the Niri Lua API:
+
+-- ✓ SUPPORTED IN TIER 1:
+--   - Module loading system (require support)
+--   - Plugin system for extensibility
+--   - Event emitter for event-driven configuration
+--   - Hot reload for live configuration updates
+--   - Configuration tables (input, layout, binds, etc.)
+
+-- 🔄 IN DEVELOPMENT (TIER 2):
+--   - Keybinding application through Niri API
+--   - Startup command execution (niri.spawn)
+--   - Direct configuration API for input/layout/animations
+--   - Window rules and filter matching
+--   - Gesture configuration
+
+-- HOW IT WORKS:
+-- The configuration tables defined above (input, layout, animations, etc.)
+-- are automatically parsed and applied by Niri's configuration system when
+-- this Lua file is loaded. Key bindings, window rules, and startup commands
+-- defined in the tables will be converted to appropriate Rust structures
+-- and applied to the running Niri instance.
 -- ============================================================================
 
--- Helper function to apply configuration
-local function apply_config()
-    niri.log("Applying input configuration...")
-    -- Input settings would be applied here (API to be developed)
-
-    niri.log("Applying layout configuration...")
-    -- Layout settings would be applied here (API to be developed)
-
-    niri.log("Applying keybindings...")
-    -- In a full implementation, this would register all keybindings
-    -- For now, keybindings in the binds table are documented for reference
-
-    niri.log("Spawning startup applications...")
-    for _, cmd in ipairs(startup) do
-        niri.log("Spawning: " .. cmd)
-        -- niri.spawn(cmd)  -- To be implemented
-    end
-
-    niri.log("Configuration applied successfully!")
-end
-
--- Initialization
-local function init()
-    niri.log("Initializing Niri Lua configuration...")
-    apply_config()
-    niri.log("Niri is ready!")
-end
-
--- Initialize on load
-init()
+-- Configuration is applied automatically during loading
+niri.log("Niri Lua configuration loaded successfully!")
 
 -- Return configuration for potential programmatic access
 return {

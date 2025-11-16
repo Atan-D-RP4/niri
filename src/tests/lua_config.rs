@@ -285,14 +285,93 @@ mod lua_config_tests {
 
          apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
 
-         // Should have added 2 valid keybindings (the invalid one is skipped)
-         assert_eq!(config.binds.0.len(), original_binds_count + 2);
-     }
+          // Should have added 2 valid keybindings (the invalid one is skipped)
+          assert_eq!(config.binds.0.len(), original_binds_count + 2);
+      }
 
-     #[test]
-     #[ignore]  // Run with: cargo test -- --ignored --nocapture
-     fn test_real_config_keybinding_analysis() {
-         // Load test_config.lua and report statistics about keybinding extraction
+      #[test]
+      fn test_lua_keybinding_focus_workspace() {
+          // Test that focus-workspace keybinding with numeric argument works
+          let lua_code = r#"
+              binds = {
+                  { key = "Super+1", action = "focus-workspace", args = { 1 } },
+                  { key = "Super+2", action = "focus-workspace", args = { 2 } },
+              }
+          "#;
+
+          let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+          let mut config = Config::default();
+          let original_binds_count = config.binds.0.len();
+
+          apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+          // Should have added 2 keybindings with workspace focus actions
+          assert!(config.binds.0.len() >= original_binds_count + 2);
+      }
+
+      #[test]
+      fn test_lua_keybinding_set_column_width() {
+          // Test that set-column-width keybinding with percentage argument works
+          let lua_code = r#"
+              binds = {
+                  { key = "Super+Plus", action = "set-column-width", args = { "+10%" } },
+                  { key = "Super+Minus", action = "set-column-width", args = { "-10%" } },
+              }
+          "#;
+
+          let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+          let mut config = Config::default();
+          let original_binds_count = config.binds.0.len();
+
+          apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+          // Should have added 2 keybindings with set-column-width actions
+          assert!(config.binds.0.len() >= original_binds_count + 2);
+      }
+
+      #[test]
+      fn test_lua_keybinding_set_window_height() {
+          // Test that set-window-height keybinding with percentage argument works
+          let lua_code = r#"
+              binds = {
+                  { key = "Super+Shift+Plus", action = "set-window-height", args = { "+5%" } },
+                  { key = "Super+Shift+Minus", action = "set-window-height", args = { "-5%" } },
+              }
+          "#;
+
+          let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+          let mut config = Config::default();
+          let original_binds_count = config.binds.0.len();
+
+          apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+          // Should have added 2 keybindings with set-window-height actions
+          assert!(config.binds.0.len() >= original_binds_count + 2);
+      }
+
+      #[test]
+      fn test_lua_keybinding_move_column_to_workspace() {
+          // Test that move-column-to-workspace keybinding with numeric argument works
+          let lua_code = r#"
+              binds = {
+                  { key = "Super+Ctrl+1", action = "move-column-to-workspace", args = { 1 } },
+              }
+          "#;
+
+          let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+          let mut config = Config::default();
+          let original_binds_count = config.binds.0.len();
+
+          apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+          // Should have added 1 keybinding with move-column-to-workspace action
+          assert!(config.binds.0.len() >= original_binds_count + 1);
+      }
+
+      #[test]
+      #[ignore]  // Run with: cargo test -- --ignored --nocapture
+      fn test_real_config_keybinding_analysis() {
+          // Load test_config.lua and report statistics about keybinding extraction
          use std::fs;
          use std::path::Path;
 
@@ -328,5 +407,71 @@ mod lua_config_tests {
                  eprintln!("✗ Failed to apply Lua config: {}", e);
              }
          }
+     }
+
+     #[test]
+     fn test_lua_startup_commands_simple_strings() {
+         // Test that simple startup commands as strings are extracted
+         let lua_code = r#"
+             startup = {
+                 "waybar",
+                 "dunst",
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_cmds = config.spawn_at_startup.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 2 startup commands
+         assert!(config.spawn_at_startup.len() >= original_cmds + 2);
+     }
+
+     #[test]
+     fn test_lua_startup_commands_with_args() {
+         // Test that startup commands with arguments are extracted
+         let lua_code = r#"
+             startup = {
+                 { command = { "alacritty", "-e", "bash" } },
+                 { command = { "firefox" } },
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_cmds = config.spawn_at_startup.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 2 startup commands
+         assert!(config.spawn_at_startup.len() >= original_cmds + 2);
+         // First command should have 3 parts
+         if let Some(first_cmd) = config.spawn_at_startup.get(original_cmds) {
+             assert_eq!(first_cmd.command.len(), 3);
+             assert_eq!(first_cmd.command[0], "alacritty");
+         }
+     }
+
+     #[test]
+     fn test_lua_mixed_startup_commands() {
+         // Test mixed startup commands (simple strings and structured)
+         let lua_code = r#"
+             startup = {
+                 "waybar",
+                 { command = { "alacritty", "-e", "tmux" } },
+                 "dunst",
+             }
+         "#;
+
+         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
+         let mut config = Config::default();
+         let original_cmds = config.spawn_at_startup.len();
+
+         apply_lua_config(lua_config.runtime(), &mut config).expect("Failed to apply config");
+
+         // Should have added 3 startup commands
+         assert!(config.spawn_at_startup.len() >= original_cmds + 3);
      }
 }
