@@ -47,7 +47,10 @@ pub struct IpcServer {
     /// This is `None` when creating `IpcServer` without a socket.
     pub socket_path: Option<PathBuf>,
     event_streams: Rc<RefCell<Vec<EventStreamSender>>>,
-    event_stream_state: Rc<RefCell<EventStreamState>>,
+    /// Cached state for IPC event streams.
+    ///
+    /// This is made public to allow the Lua runtime API to query the same cached state.
+    pub event_stream_state: Rc<RefCell<EventStreamState>>,
 }
 
 struct ClientCtx {

@@ -10,6 +10,8 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-channel = "2.3.1"
+calloop = "0.14.3"
 log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_debug"] }
 mlua.workspace = true
 niri-config = { version = "25.8.0", path = "../niri-config" }

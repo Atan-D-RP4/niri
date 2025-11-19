@@ -18,11 +18,12 @@ local input = {
 		-- XKB configuration for keyboard layout
 		-- Uncomment and modify to set custom keyboard layout:
 		xkb = {
-			-- layout = "us,ru",
+			layout = "us",
+			variant = "intl,phonetic"
 			-- options = "grp:win_space_toggle,compose:ralt,ctrl:nocaps",
 		},
 		-- Enable numlock on startup (omit to disable)
-		numlock = true,
+		numlock = false,
 	},
 
 	-- Next sections include libinput settings.
@@ -114,6 +115,8 @@ local outputs = {
 local layout = {
 	-- Set gaps around windows in logical pixels.
 	gaps = 16,
+
+	backgroud_color = "transparent",
 
 	-- When to center a column when changing focus
 	-- Options: "never" (default), "always", "on-overflow"
@@ -269,6 +272,8 @@ local layout = {
 local startup_commands = {
 	-- This line starts waybar, a commonly used bar for Wayland compositors.
 	"waybar",
+	"swaync",
+	"kitty",
 
 	-- To run a shell command (with variables, pipes, etc.), use spawn-sh:
 	-- "sh -c 'qs -c ~/source/qs/MyAwesomeShell'",
@@ -302,7 +307,7 @@ local hotkey_overlay = {
 -- The path is formatted with strftime(3) to give you the screenshot date and time.
 
 local screenshot = {
-	path = "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png",
+	path = "~/Media/images/Screenshots/Screenshot_from_%Y-%m-%d %H-%M-%S.png",
 	-- You can also set this to null to disable saving screenshots to disk.
 	-- path = nil,
 }
@@ -390,7 +395,7 @@ local binds = {
 	-- Show hotkey overlay
 	-- Mod-Shift-/, which is usually the same as Mod-?,
 	-- shows a list of important hotkeys.
-	{ key = "Mod+Shift+Slash", action = "show-hotkey-overlay" },
+	{ key = "Mod+Slash", action = "show-hotkey-overlay" },
 
 	-- Suggested binds for running programs: terminal, app launcher, screen locker.
 	{
@@ -403,13 +408,13 @@ local binds = {
 		key = "Mod+D",
 		action = "spawn-sh",
 		args = { "hyde-shell rofilaunch.sh" },
-		title = "Run an Application: fuzzel",
+		title = "Run an Application: HyDE Rofi",
 	},
 	{
 		key = "Super+Alt+L",
 		action = "spawn-sh",
 		args = { "hyde-shell hyprlock.sh" },
-		title = "Lock the Screen: swaylock",
+		title = "Lock the Screen: HyDE Hyprlock",
 	},
 
 	-- Use spawn-sh to run a shell command. Do this if you need pipes, multiple commands, etc.

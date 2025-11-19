@@ -405,6 +405,12 @@ pub struct Niri {
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,
 
+    /// Lua runtime for scripting support.
+    ///
+    /// This runtime is kept alive for the duration of the compositor session to enable
+    /// runtime state access and event handling from Lua scripts.
+    pub lua_runtime: Option<niri_lua::LuaRuntime>,
+
     pub satellite: Option<Satellite>,
 
     // Casts are dropped before PipeWire to prevent a double-free (yay).
@@ -2822,6 +2828,8 @@ impl Niri {
 
             ipc_server,
             ipc_outputs_changed: false,
+
+            lua_runtime: None,
 
             satellite: None,
 
@@ -6583,5 +6591,47 @@ niri_render_elements! {
         Texture = PrimaryGpuTextureRenderElement,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
+    }
+}
+
+// Implementation of CompositorState trait for Lua runtime API.
+//
+// This allows the Lua runtime to query the current state of the compositor by accessing the same
+// cached state used by the IPC event stream system.
+impl niri_lua::CompositorState for State {
+    fn get_windows(&self) -> Vec<niri_ipc::Window> {
+        let Some(server) = &self.niri.ipc_server else {
+            return Vec::new();
+        };
+
+        let state = server.event_stream_state.borrow();
+        state.windows.windows.values().cloned().collect()
+    }
+
+    fn get_focused_window(&self) -> Option<niri_ipc::Window> {
+        let Some(server) = &self.niri.ipc_server else {
+            return None;
+        };
+
+        let state = server.event_stream_state.borrow();
+        state.windows.windows.values().find(|w| w.is_focused).cloned()
+    }
+
+    fn get_workspaces(&self) -> Vec<niri_ipc::Workspace> {
+        let Some(server) = &self.niri.ipc_server else {
+            return Vec::new();
+        };
+
+        let state = server.event_stream_state.borrow();
+        state.workspaces.workspaces.values().cloned().collect()
+    }
+
+    fn get_outputs(&self) -> Vec<niri_ipc::Output> {
+        self.backend.ipc_outputs()
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
     }
 }

@@ -26,6 +26,10 @@ pub mod lua_types;
 pub mod validators;
 pub mod config_api;
 
+// Tier 3: Runtime State Access
+pub mod ipc_bridge;
+pub mod runtime_api;
+
 use mlua::prelude::*;
 pub use config::LuaConfig;
 pub use config_converter::apply_lua_config;
@@ -40,6 +44,9 @@ pub use plugin_system::PluginManager;
 
 // Tier 2 exports
 pub use lua_types::{LuaAnimation, LuaFilter, LuaWindowRule, LuaGesture};
+
+// Tier 3 exports
+pub use runtime_api::{CompositorState, RuntimeApi, register_runtime_api};
 
 /// Trait for registering Lua components to the global context.
 ///

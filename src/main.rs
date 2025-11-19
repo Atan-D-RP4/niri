@@ -156,6 +156,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let config_includes = config_load_result.includes;
 
+    // Variable to hold the Lua runtime if a config file is loaded
+    let mut lua_runtime: Option<niri_lua::LuaRuntime> = None;
+
     // Try to load Lua config if it exists
     if let ConfigPath::Regular { user_path, .. } = &config_path {
         if let Some(config_dir) = user_path.parent() {
@@ -185,6 +188,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         (binds_after as i32 - binds_before as i32),
                                         startup_after,
                                         (startup_after as i32 - startup_before as i32));
+                                    
+                                    // Store the runtime for later use
+                                    lua_runtime = Some(lua_config.into_runtime());
                                 }
                                 Err(e) => {
                                     warn!("Failed to apply Lua config settings: {}", e);
@@ -226,6 +232,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.session,
     )
     .unwrap();
+
+    // Store the Lua runtime in the compositor state to keep it alive
+    // This enables runtime state access and event handling from Lua scripts
+    state.niri.lua_runtime = lua_runtime;
+
+    // Register the runtime API with the Lua runtime if present
+    // This allows Lua scripts to query live compositor state (windows, workspaces, etc.)
+    if let Some(ref runtime) = state.niri.lua_runtime {
+        let runtime_api = niri_lua::RuntimeApi::new(event_loop.handle());
+        if let Err(e) = runtime.register_runtime_api(runtime_api) {
+            warn!("Failed to register Lua runtime API: {}", e);
+        }
+    }
 
     // Set WAYLAND_DISPLAY for children.
     let socket_name = state.niri.socket_name.as_deref().unwrap();

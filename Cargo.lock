@@ -2526,6 +2526,8 @@ name = "niri-lua"
 version = "25.8.0"
 dependencies = [
  "anyhow",
+ "async-channel",
+ "calloop 0.14.3",
  "log",
  "mlua",
  "niri-config",

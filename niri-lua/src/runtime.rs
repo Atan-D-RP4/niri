@@ -58,6 +58,29 @@ impl LuaRuntime {
          ConfigApi::register_to_lua(&self.lua, config)
      }
 
+     /// Register the runtime API to the runtime.
+     ///
+     /// This provides access to live compositor state through the niri.runtime table.
+     /// The runtime API allows querying windows, workspaces, outputs, and other dynamic state.
+     ///
+     /// # Type Parameters
+     ///
+     /// * `S` - The compositor state type that implements `CompositorState`
+     ///
+     /// # Arguments
+     ///
+     /// * `api` - The RuntimeApi instance connected to the compositor's event loop
+     ///
+     /// # Errors
+     ///
+     /// Returns an error if runtime API registration fails.
+     pub fn register_runtime_api<S>(&self, api: crate::RuntimeApi<S>) -> LuaResult<()>
+     where
+         S: crate::CompositorState + 'static,
+     {
+         crate::register_runtime_api(&self.lua, api)
+     }
+
     /// Load and execute a Lua script from a file.
     ///
     /// # Errors
