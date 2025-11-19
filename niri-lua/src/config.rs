@@ -61,14 +61,24 @@ impl LuaConfig {
              // This allows scripts to use local variables and return a config table
              let globals = runtime.inner().globals();
              
-             // Extract common configuration tables
-             for &field_name in &["binds", "startup", "input", "layout", "animations", "hotkey_overlay", "screenshot", "window_rules", "prefer_no_csd"] {
+              // Extract common configuration tables
+              for &field_name in &["binds", "startup", "input", "outputs", "layout", "animations", "gestures", "clipboard", "hotkey_overlay", "config_notification", "screenshot", "window_rules", "prefer_no_csd", "cursor", "screenshot_path", "environment", "debug", "workspaces"] {
                  if let Ok(value) = config_table.get::<LuaValue>(field_name) {
                      if value != LuaValue::Nil {
                          debug!("Extracting returned config field: {}", field_name);
                          if let Err(e) = globals.set(field_name, value) {
                              debug!("Failed to set global {}: {}", field_name, e);
                          }
+                     }
+                 }
+             }
+             
+             // Also check for startup_commands and map it to startup
+             if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
+                 if value != LuaValue::Nil {
+                     debug!("Extracting returned config field: startup_commands (mapping to startup)");
+                     if let Err(e) = globals.set("startup", value) {
+                         debug!("Failed to set global startup from startup_commands: {}", e);
                      }
                  }
              }
@@ -117,14 +127,24 @@ impl LuaConfig {
               // Extract fields from returned table and set as globals
               let globals = runtime.inner().globals();
               
-              // Extract common configuration tables
-              for &field_name in &["binds", "startup", "input", "layout", "animations", "hotkey_overlay", "screenshot", "window_rules", "prefer_no_csd"] {
+               // Extract common configuration tables
+               for &field_name in &["binds", "startup", "input", "outputs", "layout", "animations", "gestures", "clipboard", "hotkey_overlay", "config_notification", "screenshot", "window_rules", "prefer_no_csd", "cursor", "screenshot_path", "environment", "debug", "workspaces"] {
                   if let Ok(value) = config_table.get::<LuaValue>(field_name) {
                       if value != LuaValue::Nil {
                           debug!("Extracting returned config field: {}", field_name);
                           if let Err(e) = globals.set(field_name, value) {
                               debug!("Failed to set global {}: {}", field_name, e);
                           }
+                      }
+                  }
+              }
+              
+              // Also check for startup_commands and map it to startup
+              if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
+                  if value != LuaValue::Nil {
+                      debug!("Extracting returned config field: startup_commands (mapping to startup)");
+                      if let Err(e) = globals.set("startup", value) {
+                          debug!("Failed to set global startup from startup_commands: {}", e);
                       }
                   }
               }
@@ -138,6 +158,14 @@ impl LuaConfig {
     /// This allows advanced users to access the full mlua API.
     pub fn runtime(&self) -> &LuaRuntime {
         &self.runtime
+    }
+
+    /// Take ownership of the underlying Lua runtime.
+    ///
+    /// This consumes the LuaConfig and returns the runtime, allowing it to be
+    /// stored in the compositor state for runtime access.
+    pub fn into_runtime(self) -> LuaRuntime {
+        self.runtime
     }
 }
 
