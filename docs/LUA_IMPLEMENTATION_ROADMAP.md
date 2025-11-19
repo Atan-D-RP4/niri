@@ -1,461 +1,479 @@
-# Lua API Implementation Roadmap
-
-**Status:** Planning Complete | **Start Date:** November 15, 2025 | **Estimated Duration:** 12 weeks
-
-This document outlines a comprehensive 12-week plan to implement a full-featured Lua scripting API for Niri, achieving feature parity with established window managers and terminal emulators like AwesomeWM, Neovim, and Wezterm.
+# Niri Lua Implementation Roadmap
 
 ## Executive Summary
 
-Niri will gain a powerful Lua ecosystem consisting of:
-- **Module system** with plugins and automatic hot reload
-- **Full configuration API** for all Niri settings
-- **Runtime state queries** for windows, workspaces, and monitors
-- **Event-driven architecture** with Niri core integration
-- **Plugin ecosystem** with dependency management and registry
-- **Type definitions, LSP support, and comprehensive documentation**
+This document outlines the complete 12-week implementation plan to bring Niri's Lua API to **ecosystem parity with AwesomeWM, Neovim, and Wezterm**. The plan is organized into 6 tiers, each focusing on specific functionality and building upon the previous tier.
 
-**Estimated Implementation:** 4500-5000 lines of Rust + 2000+ lines of documentation
+**Current Status:** Lua 5.2 with LuaJIT (matching Neovim), basic config/keybinding support
+**Target Status:** Full hackable ecosystem with modules, plugins, events, state access, and excellent DX
+**Estimated Time:** 12 weeks
+
+---
+
+## Lua Version Decision
+
+**Selected:** Lua 5.2 with LuaJIT
+**Rationale:**
+- Matches Neovim's setup for consistency and community knowledge
+- LuaJIT provides near-native performance (15-40x faster than standard Lua)
+- Lua 5.2 features:
+  - `_ENV` for true sandboxing
+  - `require()` with better module loading
+  - Goto statements (useful for optimization)
+  - Bit operations (mlua provides via bit library)
+  - Table serialization improvements
+- mlua 0.11.4 with `luajit` feature and vendored build
+- No external Lua installation required (vendored)
 
 ---
 
 ## Architecture Overview
 
-### Core Stack
-- **Lua Version:** Lua 5.2 with LuaJIT (via mlua 0.11.4 with vendored build)
-- **Performance:** 15-40x faster than standard Lua
-- **Integration:** Direct IPC with Niri daemon
-- **Plugin Isolation:** Environment-based sandboxing (lightweight)
-
-### Module Hierarchy
 ```
-niri (root module)
-├── config          → Configuration management
-├── state            → Runtime state queries
-├── events           → Event system
-├── plugins          → Plugin management
-├── window           → Window operations
-├── workspace        → Workspace operations
-├── monitor          → Monitor queries
-└── layout           → Layout operations
+niri/
+├── src/lua_extensions/
+│   ├── mod.rs                     # Module root, LuaComponent trait
+│   ├── runtime.rs                 # Lua VM management
+│   ├── niri_api.rs                # Core Niri API (logging, version)
+│   ├── config.rs                  # Configuration loading
+│   ├── config_converter.rs        # Config/keybinding conversion
+│   │
+│   ├── module_loader.rs           # [Tier 1] Module system
+│   ├── plugin_system.rs           # [Tier 1] Plugin discovery/loading
+│   ├── event_emitter.rs           # [Tier 1/4] Event infrastructure
+│   ├── hot_reload.rs              # [Tier 1] File watching & reload
+│   │
+│   ├── config_api.rs              # [Tier 2] Configuration API tables
+│   ├── lua_types.rs               # [Tier 2] Complex type definitions
+│   ├── validators.rs              # [Tier 2] Config validation
+│   │
+│   ├── window_api.rs              # [Tier 3] Window queries
+│   ├── workspace_api.rs           # [Tier 3] Workspace queries
+│   ├── monitor_api.rs             # [Tier 3] Monitor queries
+│   ├── layout_query_api.rs        # [Tier 3] Layout introspection
+│   │
+│   ├── event_handlers.rs          # [Tier 4] Handler management
+│   ├── event_system.rs            # [Tier 4] Event dispatch
+│   │
+│   ├── plugin_manager.rs          # [Tier 5] Plugin lifecycle
+│   ├── plugin_sandbox.rs          # [Tier 5] Plugin isolation
+│   ├── plugin_api.rs              # [Tier 5] Plugin-specific APIs
+│   └── plugin_registry.rs         # [Tier 5] Plugin discovery/versioning
+│
+├── src/handlers/
+│   └── lua_event_hooks.rs         # [Tier 4] Integration points in Niri core
+│
+├── examples/
+│   ├── niri.lua                   # Example config
+│   ├── plugins/                   # [Tier 5] Example plugins
+│   └── automation/                # [Tier 5] Example scripts
+│
+├── docs/
+│   ├── LUA_TIER1_SPEC.md          # Tier 1 detailed spec
+│   ├── LUA_TIER2_SPEC.md          # Tier 2 detailed spec
+│   ├── LUA_TIER3_SPEC.md          # Tier 3 detailed spec
+│   ├── LUA_TIER4_SPEC.md          # Tier 4 detailed spec
+│   ├── LUA_TIER5_SPEC.md          # Tier 5 detailed spec
+│   ├── LUA_TIER6_SPEC.md          # Tier 6 detailed spec
+│   └── LUA_IMPLEMENTATION_GUIDE.md # Implementation how-to
+│
+├── tools/
+│   ├── lua-types/                 # [Tier 6] Luau type definitions
+│   ├── lua-lsp/                   # [Tier 6] LSP stubs
+│   └── lua-tests/                 # [Tier 6] Testing framework
+│
+└── test_config.lua                # Test file updated with all examples
 ```
 
 ---
 
-## 6-Tier Implementation Strategy
+## Timeline & Milestones
 
-### Tier 1: Foundation (Week 1-2) ✅ Planned
-**Focus:** Plugin system infrastructure and event foundation
+### Phase 1: Module System & Plugin Foundation (Weeks 1-2)
+**Goal:** Enable modular Lua code and plugin discovery
 
 **Deliverables:**
-- Module loader with custom search paths (`~/.config/niri/plugins`, `/usr/share/niri/plugins`)
-- Plugin metadata system (name, version, author, dependencies)
-- Event emitter with `niri.on()`, `niri.once()`, `niri.off()` API
-- Hot reload with change detection and callback cleanup
-- Basic plugin lifecycle (load → initialize → run → unload)
-
-**Files to Create:** 4
-- `src/lua_extensions/module_loader.rs` - Custom require() implementation
-- `src/lua_extensions/plugin_system.rs` - Plugin loading and lifecycle
-- `src/lua_extensions/event_emitter.rs` - Event registration and dispatch
-- `src/lua_extensions/hot_reload.rs` - File watching and reload logic
-
-**Estimated LOC:** 1200
+- Module loader with `require()` support
+- Plugin directory structure and metadata
+- Basic event emitter
+- Hot reload capability
+- All tests passing
 
 **Success Criteria:**
-- [x] Design module system
-- [ ] Implement module loader
-- [ ] Implement plugin system
-- [ ] Implement event emitter
-- [ ] Write comprehensive tests
-- [ ] Create Tier 1 example plugin
+- Users can create multi-file plugins
+- Plugins load from `~/.config/niri/plugins/`
+- Changes to config reload automatically
+- 120+ lines of new code
+
+**Files to Create:**
+- `src/lua_extensions/module_loader.rs`
+- `src/lua_extensions/plugin_system.rs`
+- `src/lua_extensions/event_emitter.rs` (foundation)
+- `src/lua_extensions/hot_reload.rs`
+- `docs/LUA_TIER1_SPEC.md`
 
 ---
 
-### Tier 2: Configuration API (Week 3-4) ✅ Planned
-**Focus:** Full configuration access via Lua
+### Phase 2: Full Configuration API (Weeks 3-4)
+**Goal:** Support all Niri settings from Lua
 
 **Deliverables:**
-- Configuration read/write API for all settings
-- Validators and type checking
-- Schema introspection
-- Integration with existing KDL config (reading)
-- Lua config as alternative to KDL
-
-**Supported Settings:**
-- `niri.config.animations` - Animation timing (spring, linear, etc.)
-- `niri.config.input` - Keyboard/mouse/touchpad settings
-- `niri.config.layout` - Tiling algorithm, gaps, borders
-- `niri.config.gestures` - Gesture detection and response
-- `niri.config.appearance` - Theme, borders, backgrounds
-- `niri.config.outputs` - Monitor configuration
-- `niri.config.binds` - Keybindings (read/write)
-
-**Files to Create:** 3
-- `src/lua_extensions/config_api.rs` - Configuration getters/setters
-- `src/lua_extensions/lua_types.rs` - Type definitions and schemas
-- `src/lua_extensions/validators.rs` - Input validation
-
-**Estimated LOC:** 1300
+- Configuration modules for all settings
+- Complex type support (animations, gestures, etc.)
+- Type validation and error messages
+- Complete configuration parity with KDL
 
 **Success Criteria:**
-- [ ] Implement config read API
-- [ ] Implement config write API
-- [ ] Add validators for all settings
-- [ ] Write schema introspection
-- [ ] Test with real configs
+- Every Niri setting accessible from Lua
+- Type checking catches config errors early
+- Migration guide from KDL to Lua
+- 200+ lines of new code
+
+**Files to Create:**
+- `src/lua_extensions/config_api.rs`
+- `src/lua_extensions/lua_types.rs`
+- `src/lua_extensions/validators.rs`
+- `docs/LUA_TIER2_SPEC.md`
 
 ---
 
-### Tier 3: Runtime State Queries (Week 5-6) ✅ Planned
-**Focus:** Read-only access to Niri's runtime state
-
-**Deliverables:**
-- Window query API (active, by ID, by workspace, by criteria)
-- Workspace query API (active, by name, list all)
-- Monitor query API (active, by index, physical properties)
-- Layout state query API
-- Workspace/window tree introspection
-
-**API Examples:**
-```lua
--- Window queries
-windows = niri.state.windows()
-active_window = niri.state.active_window()
-windows_on_workspace = niri.state.windows_on_workspace(workspace_id)
-
--- Workspace queries
-workspaces = niri.state.workspaces()
-active_workspace = niri.state.active_workspace()
-workspace_by_name = niri.state.workspace_by_name("1")
-
--- Monitor queries
-monitors = niri.state.monitors()
-active_monitor = niri.state.active_monitor()
-```
-
-**Files to Create:** 4
-- `src/lua_extensions/window_api.rs` - Window queries
-- `src/lua_extensions/workspace_api.rs` - Workspace queries
-- `src/lua_extensions/monitor_api.rs` - Monitor queries
-- `src/lua_extensions/layout_query_api.rs` - Layout introspection
-
-**Estimated LOC:** 1100
-
-**Success Criteria:**
-- [ ] Implement window query API
-- [ ] Implement workspace query API
-- [ ] Implement monitor query API
-- [ ] Write comprehensive filter examples
-- [ ] Performance test with 50+ windows
-
----
-
-### Tier 4: Event Integration (Week 7-8) ✅ Planned
-**Focus:** Deep event integration with Niri core
-
-**Deliverables:**
-- Event type definitions (window, workspace, focus, action)
-- Handler registration with priority queue
-- Integration hooks in Niri core (xdg_shell, compositor, layout)
-- Error handling and event ordering
-- Event filtering and metadata
-
-**Event Types:**
-```lua
-niri.on("window:open", function(ev) end)           -- Window opened
-niri.on("window:close", function(ev) end)          -- Window closed
-niri.on("window:focus", function(ev) end)          -- Window focus changed
-niri.on("workspace:enter", function(ev) end)       -- Workspace activated
-niri.on("workspace:leave", function(ev) end)       -- Workspace deactivated
-niri.on("layout:changed", function(ev) end)        -- Layout mode changed
-niri.on("action", function(ev) end)                -- Action executed
-niri.on("monitor:connect", function(ev) end)       -- Monitor added
-niri.on("monitor:disconnect", function(ev) end)    -- Monitor removed
-```
-
-**Niri Core Integration Points:**
-- `src/handlers/xdg_shell.rs` - Window events
-- `src/handlers/compositor.rs` - Compositor events
-- `src/layout/mod.rs` - Layout/workspace events
-- `src/backend/mod.rs` - Monitor hotplug events
-
-**Files to Create:** 3
-- `src/lua_extensions/event_handlers.rs` - Handler registration
-- `src/lua_extensions/event_system.rs` - Event dispatch system
-- `src/lua_extensions/lua_event_hooks.rs` - Hooks for Niri core
-
-**Files to Modify:** 4
-- `src/handlers/xdg_shell.rs` - Add window event hooks
-- `src/handlers/compositor.rs` - Add compositor hooks
-- `src/layout/mod.rs` - Add workspace/layout hooks
-- `src/backend/mod.rs` - Add monitor hotplug hooks
-
-**Estimated LOC:** 900 (new) + 400 (modified)
-
-**Success Criteria:**
-- [ ] Define all event types
-- [ ] Implement event dispatch
-- [ ] Add Niri core hooks
-- [ ] Test event ordering
-- [ ] Write event handler examples
-
----
-
-### Tier 5: Plugin Ecosystem (Week 9-10) ✅ Planned
-**Focus:** Full plugin ecosystem with dependency management
-
-**Deliverables:**
-- Plugin manager with install/uninstall
-- Dependency resolver (declarative dependencies)
-- Plugin registry (local + remote)
-- Plugin state persistence (JSON in `~/.local/share/niri/plugins/`)
-- Lifecycle hooks (init, enable, disable, remove)
-- Plugin sandbox improvements
-
-**Plugin Manifest Format:**
-```lua
--- plugin.lua or plugin-manifest.toml
-{
-  name = "example-plugin",
-  version = "1.0.0",
-  author = "Author Name",
-  description = "Does something useful",
-  dependencies = {
-    "core-utils >= 1.0.0",
-  },
-  exports = {
-    setup = function() end,
-    on_init = function() end,
-  }
-}
-```
-
-**Files to Create:** 4
-- `src/lua_extensions/plugin_manager.rs` - Plugin install/uninstall
-- `src/lua_extensions/plugin_sandbox.rs` - Enhanced sandboxing
-- `src/lua_extensions/plugin_api.rs` - Plugin API
-- `src/lua_extensions/plugin_registry.rs` - Registry management
-
-**Estimated LOC:** 1200
-
-**Success Criteria:**
-- [ ] Implement plugin manager
-- [ ] Implement dependency resolver
-- [ ] Add state persistence
-- [ ] Write registry system
-- [ ] Create 5+ example plugins
-
----
-
-### Tier 6: Developer Experience (Week 11-12) ✅ Planned
-**Focus:** LSP, type definitions, documentation, and tooling
-
-**Deliverables:**
-- Luau type definitions (`.d.lua` files for IDE support)
-- LSP stub generation for Neovim/VS Code
-- Comprehensive documentation with examples
-- Interactive REPL for testing
-- Debugger hooks
-- Testing framework for plugins
-
-**Type Definitions:**
-```lua
--- niri.d.lua (Luau type stubs)
-declare module "niri" do
-  function log(msg: string, level?: string)
-  namespace config do
-    function get_animations(): AnimationConfig
-    function set_animations(config: AnimationConfig)
-  end
-  namespace state do
-    function windows(): Window[]
-    function active_window(): Window?
-  end
-  namespace events do
-    function on(event: string, callback: function)
-    function off(event: string, callback: function)
-  end
-end
-```
+### Phase 3: Runtime State Access (Weeks 5-6) ⚙️ **IN PROGRESS**
+**Goal:** Query Niri's state from Lua
 
 **Documentation:**
-- `LUA_GUIDE.md` - Comprehensive user guide
-- `LUA_QUICKSTART.md` - 5-minute quick start
-- `LUA_EMBEDDING.md` - Architecture and integration details
-- Example plugins with source code walkthroughs
-- Video tutorial outline
+- 📘 [Complete Implementation Guide](PHASE3_IMPLEMENTATION_GUIDE.md) - Step-by-step instructions
+- 📋 [Quick Reference Card](PHASE3_QUICK_REFERENCE.md) - API surface and checklist
 
-**Files to Create:** 4
-- `docs/niri.d.lua` - Luau type definitions
-- `tools/generate-lsp-stubs.rs` - LSP stub generator
-- `examples/plugins/` - 5+ example plugins with full source
-- `docs/testing-framework.md` - Plugin testing guide
+**Current Implementation Plan:**
+We're implementing runtime state access via **Event Loop Message Passing** pattern (same as IPC server uses).
 
-**Estimated LOC:** 800 (code) + 500+ (examples)
+**Architecture:**
+```rust
+// Pattern: Event loop message passing for safe state access
+let (tx, rx) = mpsc::channel();
+event_loop.insert_idle(move |state| {
+    let result = /* query state */;
+    tx.send(result).unwrap();
+});
+rx.recv()  // Blocks until compositor processes
+```
+
+**Implementation Phases:**
+1. **Phase 1: Infrastructure** (Tasks 1-3)
+   - Add `lua_runtime: Option<LuaRuntime>` to `Niri` struct
+   - Keep runtime alive in `main.rs` instead of dropping
+   - Verify compositor starts successfully
+
+2. **Phase 2: IPC Bridge** (Tasks 4-6)
+   - Create `niri-lua/src/ipc_bridge.rs`
+   - Convert `Window`, `Workspace`, `Output` → Lua tables
+   - Write conversion tests
+
+3. **Phase 3: Runtime API Core** (Tasks 7-10)
+   - Create `niri-lua/src/runtime_api.rs` with generic `RuntimeApi<S>`
+   - Implement `get_windows()` and `get_focused_window()`
+   - Test message passing mechanism
+
+4. **Phase 4: Integration** (Tasks 11-14)
+   - Wire up `register_runtime_api()` in `LuaRuntime`
+   - Export modules in `lib.rs`
+   - Call from `main.rs` after State creation
+   - End-to-end test with live Lua script
+
+5. **Phase 5: API Expansion** (Tasks 15-17)
+   - Add workspace queries
+   - Add action execution (close, focus, move)
+   - Document usage
+
+6. **Phase 6: IPC Lua REPL (Bonus)** (Tasks 18-22)
+   - Add `Request::Lua` and `Response::LuaResult` to IPC types
+   - Implement Lua code execution handler in IPC server
+   - Add `execute_string()` method to `LuaRuntime`
+   - Add CLI command `niri msg action lua`
+   - Implement interactive REPL mode
+   - Document usage, examples, and security considerations
+
+**Current Status:** Planning complete, ready for implementation
+
+**Deliverables:**
+- [ ] Window query API (`niri.windows.get_all()`, `niri.windows.get_focused()`)
+- [ ] Workspace query API (`niri.workspaces.get_all()`, `niri.workspaces.get_active()`)
+- [ ] Monitor/Output query API (`niri.outputs.get_all()`)
+- [ ] Layout introspection (basic queries)
+- [ ] IPC Bridge conversion layer (Window/Workspace/Output → Lua tables)
+- [ ] Runtime API with event loop integration (message passing pattern)
+- [ ] **Bonus:** IPC Lua REPL (`niri msg action lua`) for interactive debugging and scripting
 
 **Success Criteria:**
-- [ ] Create type definitions
-- [ ] Generate LSP stubs
-- [ ] Write comprehensive docs
-- [ ] Create 5+ example plugins
-- [ ] Write testing framework guide
+- Scripts can query all open windows/workspaces/monitors ✅ Planned
+- Window properties accessible (title, geometry, floating, etc.) ✅ Planned
+- State changes reflected in queries ✅ Planned
+- Zero unsafe code, no lifetime issues ✅ Architecture confirmed
+- Synchronous API from Lua's perspective ✅ Architecture confirmed
+- 300+ lines of new code
+
+**Files to Create:**
+- `niri-lua/src/ipc_bridge.rs` (~150 lines) - Convert IPC types to Lua tables
+- `niri-lua/src/runtime_api.rs` (~250 lines) - Generic RuntimeApi<S> with event loop integration
+- `niri-lua/tests/runtime_api_tests.rs` (~100 lines) - Integration tests
+- `docs/LUA_TIER3_SPEC.md` - Complete API documentation
+
+**Files to Modify:**
+- `src/niri.rs` (+1 line at ~line 200: `pub lua_runtime: Option<niri_lua::LuaRuntime>`)
+- `src/main.rs` (+15 lines at ~lines 175-220: keep runtime, call register_runtime_api)
+- `niri-lua/src/lib.rs` (+7 lines: export runtime_api and ipc_bridge modules)
+- `niri-lua/src/runtime.rs` (+20 lines at ~line 60: add register_runtime_api method)
+- `niri-lua/Cargo.toml` (verify calloop dependency exists)
 
 ---
 
-## Timeline
+### Phase 4: Event Handling System (Weeks 7-8)
+**Goal:** React to Niri events from Lua
 
-| Week | Tier | Tasks | Estimated LOC |
-|------|------|-------|---------------|
-| 1-2 | 1 | Module loader, plugins, events, hot reload | 1200 |
-| 3-4 | 2 | Config API, validators, schemas | 1300 |
-| 5-6 | 3 | Window/workspace/monitor queries | 1100 |
-| 7-8 | 4 | Event integration with Niri core | 1300 |
-| 9-10 | 5 | Plugin manager, registry, state persistence | 1200 |
-| 11-12 | 6 | Type defs, LSP, docs, examples, REPL | 1300 |
-| **Total** | **All** | **Full Implementation** | **~7400** |
+**Event System Architecture Decision: Custom User Events (Neovim-style)**
+
+We will implement **Option B: Custom User Events** to enable a rich plugin ecosystem from the start.
+
+**Rationale:**
+- Compositor plugins need inter-plugin communication (e.g., window rules + layout managers)
+- Easier to implement upfront than retrofit later
+- Aligns with "extensible compositor" goal
+- Minimal additional complexity given event system is already planned
+- Matches Neovim's proven pattern for extensibility
+
+**Event Types:**
+1. **Built-in System Events:**
+   - `window_opened`, `window_closed`, `window_focused`
+   - `workspace_changed`, `workspace_created`
+   - `output_added`, `output_removed`
+   - `layout_changed`, `fullscreen_toggled`
+   - `key_pressed`, `mouse_moved`
+
+2. **Custom User Events:**
+   - Plugins emit: `niri.emit('PluginName::EventName', data)`
+   - Plugins listen: `niri.on('PluginName::EventName', handler)`
+   - Enables plugin-to-plugin communication
+   - Namespaced to avoid conflicts
+
+**Example Usage:**
+```lua
+-- Plugin A: Window manager
+niri.on('window_opened', function(window)
+  if window.app_id == 'firefox' then
+    niri.emit('WindowManager::BrowserOpened', { id = window.id })
+  end
+end)
+
+-- Plugin B: Browser controller
+niri.on('WindowManager::BrowserOpened', function(data)
+  niri.windows.move_to_workspace(data.id, 'browser')
+end)
+```
+
+**Deliverables:**
+- Comprehensive built-in event types ✅
+- Custom event emission/listening API ✅
+- Event handler registration with error recovery
+- Integration points in Niri core
+- Event namespacing and validation
+- Handler priority/ordering system
+
+**Success Criteria:**
+- Plugins can listen to window/workspace/input events
+- Plugins can emit and listen to custom events
+- Event namespacing prevents conflicts
+- Handlers fire at appropriate times
+- Event handler errors don't crash Niri
+- 350+ lines of new code (increased due to custom events)
+
+**Files to Create:**
+- `niri-lua/src/event_handlers.rs` - Handler registration and management
+- `niri-lua/src/event_system.rs` - Event dispatch and custom events
+- `src/handlers/lua_event_hooks.rs` - Integration points in Niri core
+- `docs/LUA_TIER4_SPEC.md`
 
 ---
 
-## Risk Assessment
+### Phase 5: Plugin Ecosystem (Weeks 9-10)
+**Goal:** Full plugin lifecycle and management
 
-### Technical Risks
+**Deliverables:**
+- Plugin manager with dependencies
+- Plugin lifecycle hooks
+- Plugin state persistence
+- Plugin registry and versioning
 
-| Risk | Impact | Mitigation |
-|------|--------|-----------|
-| Event ordering race conditions | High | Comprehensive testing, use channels for ordering |
-| Plugin sandbox escape | Medium | Regular security audit, use environment tables only |
-| Performance regression | Medium | Benchmark event dispatch, lazy-load heavy features |
-| Breaking changes to IPC | High | Version Niri API, use semver |
-| Lua/LuaJIT compatibility | Low | Use mlua's abstraction layer, test both |
+**Success Criteria:**
+- Plugins can enable/disable
+- Plugin dependencies resolved correctly
+- Plugin state survives reloads
+- IPC commands for plugin management
+- 300+ lines of new code
 
-### Operational Risks
+**Files to Create:**
+- `src/lua_extensions/plugin_manager.rs`
+- `src/lua_extensions/plugin_sandbox.rs`
+- `src/lua_extensions/plugin_api.rs`
+- `src/lua_extensions/plugin_registry.rs`
+- `docs/LUA_TIER5_SPEC.md`
+- Example plugins
 
-| Risk | Impact | Mitigation |
-|------|--------|-----------|
-| Scope creep | Medium | Stick to spec, defer advanced features |
-| Maintainability burden | Medium | Excellent documentation, automated tests |
-| Community adoption | Medium | Write great examples, create plugin template |
-| Documentation lag | Medium | Write docs as code is written, not after |
+---
+
+### Phase 6: Developer Experience (Weeks 11-12)
+**Goal:** Excellent tooling and documentation
+
+**Deliverables:**
+- Luau type definitions for LSP
+- LSP support
+- Comprehensive documentation
+- Example gallery
+- Testing framework
+- Interactive REPL
+
+**Success Criteria:**
+- IDE autocomplete works
+- All APIs documented
+- 10+ example plugins
+- Testing framework functional
+- 1000+ lines of documentation
+
+**Files to Create:**
+- `tools/lua-types/*.d.lua`
+- `docs/LUA_TIER6_SPEC.md`
+- `docs/LUA_API_REFERENCE.md`
+- `docs/LUA_BEST_PRACTICES.md`
+- `tools/lua-tests/`
+- Example plugins and scripts
+
+---
+
+## Implementation Principles
+
+### 1. Non-Breaking
+- All new features are additive
+- Existing code continues to work
+- Deprecation warnings for breaking changes
+
+### 2. Performance-Focused
+- Profile all event paths
+- Async event delivery where possible
+- Lazy loading of modules
+- LuaJIT optimization guidelines followed
+
+### 3. User-Centric
+- Clear error messages
+- Comprehensive documentation
+- Examples for common patterns
+- Migration guides for AwesomeWM/Neovim users
+
+### 4. Well-Tested
+- Unit tests for all modules
+- Integration tests for major features
+- Mock State for testing without running Niri
+- Performance benchmarks
+
+### 5. Security-Conscious
+- Input validation
+- Plugin sandboxing investigation
+- Permission model
+- No eval() style dynamic execution (unless explicitly sandboxed)
+
+---
+
+## Tier Comparison Matrix
+
+| Feature | Tier | Scope | Complexity | LOC |
+|---------|------|-------|------------|-----|
+| Module loading | 1 | Standard require() | Medium | 150 |
+| Plugin discovery | 1 | Directory scanning | Low | 100 |
+| Basic events | 1 | Event infrastructure | Medium | 120 |
+| Hot reload | 1 | File watcher | Medium | 100 |
+| Configuration API | 2 | All settings | High | 400 |
+| Type definitions | 2 | Complex types | Medium | 200 |
+| State queries | 3 | Window/WS/monitor | High | 350 |
+| Event handlers | 4 | Full event system | High | 300 |
+| Event integration | 4 | Core hooks | High | 200 |
+| Plugin lifecycle | 5 | Complete manager | High | 300 |
+| Plugin registry | 5 | Versioning/deps | High | 250 |
+| Type definitions | 6 | LSP support | Medium | 300 |
+| Documentation | 6 | Complete guide | Low | 2000 |
+| Tooling | 6 | REPL, testing | Medium | 200 |
+
+**Total Estimated LOC:** ~4500-5000 lines of new Rust code + 2000+ lines of documentation
+
+---
+
+## Risk Assessment & Mitigation
+
+### High Risk: Performance Impact
+**Mitigation:**
+- Profile event delivery performance
+- Async event handling where possible
+- Lazy initialization of Lua components
+- No synchronous blocking in hot paths
+
+### High Risk: Plugin Conflicts
+**Mitigation:**
+- Namespace isolation via environment tables
+- Dependency resolution
+- Plugin conflict detection
+- Clear error messages
+
+### Medium Risk: Lua API Instability
+**Mitigation:**
+- Semantic versioning
+- Deprecation warnings
+- Compatibility layer for breaking changes
+- Extensive testing
+
+### Medium Risk: User Confusion
+**Mitigation:**
+- Excellent documentation
+- Migration guides
+- Many examples
+- Clear error messages
+
+### Low Risk: Security Issues
+**Mitigation:**
+- Input validation
+- Sandboxing investigation
+- Regular security review
+- Minimal C code
 
 ---
 
 ## Success Metrics
 
-### Quantitative
-
-- **Adoption:** 50+ users creating custom plugins within 6 months
-- **Plugin Registry:** 20+ community plugins available
-- **Performance:** < 5% impact on event delivery latency
-- **Coverage:** 100% API endpoint coverage with tests
-- **Documentation:** 1000+ downloads/views of example plugins
-
-### Qualitative
-
-- Plugin ecosystem parity with AwesomeWM/Neovim
-- Community feedback indicates API is intuitive
-- Plugin developers report rapid development iteration
-- No critical security issues in plugin system
+- ✅ All Tier 1 features working
+- ✅ 50+ users creating custom plugins
+- ✅ Performance impact < 5% on event delivery
+- ✅ 1000+ downloads/views of example plugins
+- ✅ Community plugin registry with 20+ plugins
+- ✅ LSP integration working in VS Code/Neovim
+- ✅ Ecosystem parity with AwesomeWM/Neovim achieved
 
 ---
 
 ## Next Steps
 
-### Phase 1: Documentation (Completed)
-- ✅ Create tier specifications (5 documents)
-- ⏳ Create implementation roadmap
-- ⏳ Create comprehensive guides
+Each tier has a detailed specification document:
+- [Tier 1 Specification](LUA_TIER1_SPEC.md)
+- [Tier 2 Specification](LUA_TIER2_SPEC.md)
+- [Tier 3 Specification](LUA_TIER3_SPEC.md)
+- [Tier 4 Specification](LUA_TIER4_SPEC.md)
+- [Tier 5 Specification](LUA_TIER5_SPEC.md)
+- [Tier 6 Specification](LUA_TIER6_SPEC.md)
 
-### Phase 2: Core Implementation (Weeks 1-8)
-- [ ] Implement Tiers 1-4 (module system, config, queries, events)
-- [ ] Add Niri core integration hooks
-- [ ] Write integration tests
-
-### Phase 3: Plugin Ecosystem (Weeks 9-10)
-- [ ] Implement plugin manager and registry
-- [ ] Write 5+ example plugins
-- [ ] Create plugin template
-
-### Phase 4: Polish & Documentation (Weeks 11-12)
-- [ ] Add type definitions and LSP support
-- [ ] Write comprehensive guides
-- [ ] Create video tutorial outline
-
----
-
-## File Structure
-
-```
-/home/atan/Develop/repos/niri/
-├── src/lua_extensions/
-│   ├── module_loader.rs              # Tier 1
-│   ├── plugin_system.rs              # Tier 1
-│   ├── event_emitter.rs              # Tier 1
-│   ├── hot_reload.rs                 # Tier 1
-│   ├── config_api.rs                 # Tier 2
-│   ├── lua_types.rs                  # Tier 2
-│   ├── validators.rs                 # Tier 2
-│   ├── window_api.rs                 # Tier 3
-│   ├── workspace_api.rs              # Tier 3
-│   ├── monitor_api.rs                # Tier 3
-│   ├── layout_query_api.rs           # Tier 3
-│   ├── event_handlers.rs             # Tier 4
-│   ├── event_system.rs               # Tier 4
-│   ├── lua_event_hooks.rs            # Tier 4
-│   ├── plugin_manager.rs             # Tier 5
-│   ├── plugin_sandbox.rs             # Tier 5
-│   ├── plugin_api.rs                 # Tier 5
-│   ├── plugin_registry.rs            # Tier 5
-│   └── mod.rs                        # Updated
-│
-├── docs/
-│   ├── LUA_TIER1_SPEC.md             # ✅ Complete
-│   ├── LUA_TIER2_SPEC.md             # ✅ Complete
-│   ├── LUA_TIER3_SPEC.md             # ✅ Complete
-│   ├── LUA_TIER4_SPEC.md             # ✅ Complete
-│   ├── LUA_TIER5_SPEC.md             # ✅ Complete
-│   ├── LUA_TIER6_SPEC.md             # ⏳ Pending
-│   ├── LUA_IMPLEMENTATION_ROADMAP.md # ⏳ Creating
-│   ├── LUA_GUIDE.md                  # ⏳ Pending
-│   ├── LUA_QUICKSTART.md             # ⏳ Pending
-│   ├── LUA_EMBEDDING.md              # ⏳ Pending
-│   └── niri.d.lua                    # ⏳ Pending (Tier 6)
-│
-└── examples/
-    └── plugins/
-        ├── example-statusbar/        # ⏳ Pending
-        ├── example-keybind-helper/   # ⏳ Pending
-        ├── example-layout-switcher/  # ⏳ Pending
-        ├── example-window-matcher/   # ⏳ Pending
-        └── example-workspace-tabs/   # ⏳ Pending
-```
-
----
-
-## Definition of Done
-
-A tier is considered complete when:
-
-1. ✅ All specified APIs are implemented
-2. ✅ Comprehensive unit and integration tests exist
-3. ✅ Documentation is complete with examples
-4. ✅ Performance benchmarks are recorded
-5. ✅ At least one example/use case is provided
-6. ✅ Code review completed (if in team environment)
-7. ✅ Changes committed to repository
+Implementation guide: [LUA_IMPLEMENTATION_GUIDE.md](LUA_IMPLEMENTATION_GUIDE.md)
 
 ---
 
 ## References
 
-- **LUA_TIER1_SPEC.md** - Foundation layer specification
-- **LUA_TIER2_SPEC.md** - Configuration API specification
-- **LUA_TIER3_SPEC.md** - State queries specification
-- **LUA_TIER4_SPEC.md** - Event system specification
-- **LUA_TIER5_SPEC.md** - Plugin ecosystem specification
-- **LUA_CONFIG_STATUS.md** - Current Lua implementation status
-
----
-
-**Document Version:** 1.0  
-**Last Updated:** November 15, 2025  
-**Author:** OpenCode Assistant
+- [Neovim Lua API](https://neovim.io/doc/user/lua.html)
+- [AwesomeWM Documentation](https://awesomewm.org/doc/)
+- [Wezterm Lua Configuration](https://wezfurlong.org/wezterm/config/lua.html)
+- [mlua Documentation](https://docs.rs/mlua/)
+- [Lua 5.2 Manual](https://www.lua.org/manual/5.2/)
+- [LuaJIT 2.1 Documentation](https://luajit.org/index.html)
