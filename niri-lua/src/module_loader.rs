@@ -24,10 +24,11 @@
 //! local plugin = require "plugins.myplugin"   -- Load plugins/myplugin.lua
 //! ```
 
-use mlua::prelude::*;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
+
 use log::{debug, error, warn};
+use mlua::prelude::*;
 
 /// Module loader for custom search paths.
 #[derive(Debug, Clone)]
@@ -105,9 +106,7 @@ impl ModuleLoader {
                 match fs::read_to_string(&path) {
                     Ok(source) => {
                         // Execute module code
-                        lua.load(&source)
-                            .set_name(module_name)
-                            .eval()
+                        lua.load(&source).set_name(module_name).eval()
                     }
                     Err(e) => {
                         error!("Failed to read module {}: {}", module_name, e);
@@ -139,7 +138,10 @@ impl ModuleLoader {
 
         lua.globals().set("require", require)?;
 
-        debug!("Registered custom module loader with {} search paths", self.search_paths.len());
+        debug!(
+            "Registered custom module loader with {} search paths",
+            self.search_paths.len()
+        );
         for (i, path) in self.search_paths.iter().enumerate() {
             debug!("  [{}] {}", i + 1, path.display());
         }
@@ -156,19 +158,21 @@ impl Default for ModuleLoader {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
     use std::io::Write;
+
     use tempfile::TempDir;
 
+    use super::*;
+
     #[test]
-    fn test_module_loader_creation() {
+    fn module_loader_creation() {
         let loader = ModuleLoader::new();
         assert!(!loader.search_paths.is_empty());
     }
 
     #[test]
-    fn test_find_module_lua_file() {
+    fn find_module_lua_file() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path().to_path_buf();
 
@@ -185,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_module_init_file() {
+    fn find_module_init_file() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path().to_path_buf();
 
@@ -204,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_module_not_found() {
+    fn find_module_not_found() {
         let temp_dir = TempDir::new().unwrap();
         let loader = ModuleLoader::with_paths(vec![temp_dir.path().to_path_buf()]);
         let found = loader.find_module("nonexistent");
@@ -213,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_module_lua() {
+    fn load_module_lua() {
         let lua = Lua::new();
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path().to_path_buf();
@@ -234,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_register_custom_require() {
+    fn register_custom_require() {
         let lua = Lua::new();
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path().to_path_buf();
@@ -257,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn test_module_not_found_error() {
+    fn module_not_found_error() {
         let lua = Lua::new();
         let temp_dir = TempDir::new().unwrap();
 

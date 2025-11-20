@@ -108,17 +108,16 @@ impl ConfigValidator {
                         .unwrap()
                         .is_match(&s)
                     {
-                        return Err(mlua::Error::RuntimeError(
-                            format!("Invalid color format: {}. Use #RRGGBB or #RRGGBBAA", s),
-                        ));
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "Invalid color format: {}. Use #RRGGBB or #RRGGBBAA",
+                            s
+                        )));
                     }
                     Ok(())
                 } else {
                     // For named colors, just check it's a reasonable string
                     if s.len() > 32 {
-                        return Err(mlua::Error::RuntimeError(
-                            "Color name too long".to_string(),
-                        ));
+                        return Err(mlua::Error::RuntimeError("Color name too long".to_string()));
                     }
                     Ok(())
                 }
@@ -340,79 +339,79 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_gaps_valid() {
+    fn validate_gaps_valid() {
         let value = LuaValue::Integer(8);
         assert!(ConfigValidator::validate_gaps(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_gaps_invalid() {
+    fn validate_gaps_invalid() {
         let value = LuaValue::Integer(150);
         assert!(ConfigValidator::validate_gaps(&value).is_err());
     }
 
     #[test]
-    fn test_validate_border_width_valid() {
+    fn validate_border_width_valid() {
         let value = LuaValue::Integer(2);
         assert!(ConfigValidator::validate_border_width(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_border_width_invalid() {
+    fn validate_border_width_invalid() {
         let value = LuaValue::Integer(50);
         assert!(ConfigValidator::validate_border_width(&value).is_err());
     }
 
     #[test]
-    fn test_validate_duration_valid() {
+    fn validate_duration_valid() {
         let value = LuaValue::Integer(200);
         assert!(ConfigValidator::validate_duration(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_duration_invalid_zero() {
+    fn validate_duration_invalid_zero() {
         let value = LuaValue::Integer(0);
         assert!(ConfigValidator::validate_duration(&value).is_err());
     }
 
     #[test]
-    fn test_validate_duration_invalid_too_large() {
+    fn validate_duration_invalid_too_large() {
         let value = LuaValue::Integer(6000);
         assert!(ConfigValidator::validate_duration(&value).is_err());
     }
 
     #[test]
-    fn test_validate_repeat_delay_valid() {
+    fn validate_repeat_delay_valid() {
         let value = LuaValue::Integer(300);
         assert!(ConfigValidator::validate_repeat_delay(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_repeat_delay_too_low() {
+    fn validate_repeat_delay_too_low() {
         let value = LuaValue::Integer(10);
         assert!(ConfigValidator::validate_repeat_delay(&value).is_err());
     }
 
     #[test]
-    fn test_validate_scale_valid() {
+    fn validate_scale_valid() {
         let value = LuaValue::Number(2.0);
         assert!(ConfigValidator::validate_scale(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_scale_invalid() {
+    fn validate_scale_invalid() {
         let value = LuaValue::Number(5.0);
         assert!(ConfigValidator::validate_scale(&value).is_err());
     }
 
     #[test]
-    fn test_validate_percentage_valid() {
+    fn validate_percentage_valid() {
         let value = LuaValue::Number(50.0);
         assert!(ConfigValidator::validate_percentage(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_percentage_invalid() {
+    fn validate_percentage_invalid() {
         let value = LuaValue::Number(150.0);
         assert!(ConfigValidator::validate_percentage(&value).is_err());
     }
@@ -422,7 +421,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_config_table() {
+    fn validate_config_table() {
         let lua = mlua::Lua::new();
         let table = lua.create_table().unwrap();
         let value = LuaValue::Table(table);
@@ -430,19 +429,19 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_config_non_table() {
+    fn validate_config_non_table() {
         let value = LuaValue::Integer(42);
         assert!(ConfigValidator::validate_config(&value).is_err());
     }
 
     #[test]
-    fn test_validate_setting_gaps() {
+    fn validate_setting_gaps() {
         let value = LuaValue::Integer(10);
         assert!(ConfigValidator::validate_setting("gaps", &value).is_ok());
     }
 
     #[test]
-    fn test_validate_setting_unknown_key() {
+    fn validate_setting_unknown_key() {
         let value = LuaValue::Integer(10);
         assert!(ConfigValidator::validate_setting("unknown_setting", &value).is_err());
     }
@@ -452,7 +451,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_color_valid_hex() {
+    fn validate_color_valid_hex() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("#FF0000").unwrap();
         let value = LuaValue::String(s);
@@ -460,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_color_invalid_type() {
+    fn validate_color_invalid_type() {
         let value = LuaValue::Integer(42);
         assert!(ConfigValidator::validate_color(&value).is_err());
     }
@@ -470,19 +469,19 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_bool_true() {
+    fn validate_bool_true() {
         let value = LuaValue::Boolean(true);
         assert!(ConfigValidator::validate_bool(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_bool_false() {
+    fn validate_bool_false() {
         let value = LuaValue::Boolean(false);
         assert!(ConfigValidator::validate_bool(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_bool_invalid_type() {
+    fn validate_bool_invalid_type() {
         let value = LuaValue::Integer(1);
         assert!(ConfigValidator::validate_bool(&value).is_err());
     }
@@ -492,7 +491,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_curve_linear() {
+    fn validate_curve_linear() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("linear").unwrap();
         let value = LuaValue::String(s);
@@ -500,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_curve_ease_in_out_cubic() {
+    fn validate_curve_ease_in_out_cubic() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("ease_in_out_cubic").unwrap();
         let value = LuaValue::String(s);
@@ -508,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_curve_ease_out_cubic() {
+    fn validate_curve_ease_out_cubic() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("ease_out_cubic").unwrap();
         let value = LuaValue::String(s);
@@ -516,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_curve_invalid() {
+    fn validate_curve_invalid() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("invalid_curve").unwrap();
         let value = LuaValue::String(s);
@@ -524,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_curve_wrong_type() {
+    fn validate_curve_wrong_type() {
         let value = LuaValue::Integer(42);
         assert!(ConfigValidator::validate_curve(&value).is_err());
     }
@@ -534,25 +533,25 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_repeat_rate_valid() {
+    fn validate_repeat_rate_valid() {
         let value = LuaValue::Integer(50);
         assert!(ConfigValidator::validate_repeat_rate(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_repeat_rate_zero() {
+    fn validate_repeat_rate_zero() {
         let value = LuaValue::Integer(0);
         assert!(ConfigValidator::validate_repeat_rate(&value).is_err());
     }
 
     #[test]
-    fn test_validate_repeat_rate_too_high() {
+    fn validate_repeat_rate_too_high() {
         let value = LuaValue::Integer(2000);
         assert!(ConfigValidator::validate_repeat_rate(&value).is_err());
     }
 
     #[test]
-    fn test_validate_repeat_rate_wrong_type() {
+    fn validate_repeat_rate_wrong_type() {
         let value = LuaValue::Number(50.5);
         assert!(ConfigValidator::validate_repeat_rate(&value).is_err());
     }
@@ -562,37 +561,37 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_accel_speed_valid_number() {
+    fn validate_accel_speed_valid_number() {
         let value = LuaValue::Number(2.5);
         assert!(ConfigValidator::validate_accel_speed(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_accel_speed_valid_integer() {
+    fn validate_accel_speed_valid_integer() {
         let value = LuaValue::Integer(2);
         assert!(ConfigValidator::validate_accel_speed(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_accel_speed_zero() {
+    fn validate_accel_speed_zero() {
         let value = LuaValue::Number(0.0);
         assert!(ConfigValidator::validate_accel_speed(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_accel_speed_too_high() {
+    fn validate_accel_speed_too_high() {
         let value = LuaValue::Number(15.0);
         assert!(ConfigValidator::validate_accel_speed(&value).is_err());
     }
 
     #[test]
-    fn test_validate_accel_speed_negative() {
+    fn validate_accel_speed_negative() {
         let value = LuaValue::Number(-1.0);
         assert!(ConfigValidator::validate_accel_speed(&value).is_err());
     }
 
     #[test]
-    fn test_validate_accel_speed_wrong_type() {
+    fn validate_accel_speed_wrong_type() {
         let value = LuaValue::Boolean(true);
         assert!(ConfigValidator::validate_accel_speed(&value).is_err());
     }
@@ -602,7 +601,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_accel_profile_flat() {
+    fn validate_accel_profile_flat() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("flat").unwrap();
         let value = LuaValue::String(s);
@@ -610,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_accel_profile_adaptive() {
+    fn validate_accel_profile_adaptive() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("adaptive").unwrap();
         let value = LuaValue::String(s);
@@ -618,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_accel_profile_invalid() {
+    fn validate_accel_profile_invalid() {
         let lua = mlua::Lua::new();
         let s = lua.create_string("invalid").unwrap();
         let value = LuaValue::String(s);
@@ -626,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_accel_profile_wrong_type() {
+    fn validate_accel_profile_wrong_type() {
         let value = LuaValue::Integer(42);
         assert!(ConfigValidator::validate_accel_profile(&value).is_err());
     }
@@ -636,43 +635,43 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_refresh_rate_valid_number() {
+    fn validate_refresh_rate_valid_number() {
         let value = LuaValue::Number(60.0);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_refresh_rate_valid_integer() {
+    fn validate_refresh_rate_valid_integer() {
         let value = LuaValue::Integer(144);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_refresh_rate_low_boundary() {
+    fn validate_refresh_rate_low_boundary() {
         let value = LuaValue::Integer(30);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_refresh_rate_high_boundary() {
+    fn validate_refresh_rate_high_boundary() {
         let value = LuaValue::Integer(240);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_refresh_rate_too_low() {
+    fn validate_refresh_rate_too_low() {
         let value = LuaValue::Integer(20);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_err());
     }
 
     #[test]
-    fn test_validate_refresh_rate_too_high() {
+    fn validate_refresh_rate_too_high() {
         let value = LuaValue::Integer(300);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_err());
     }
 
     #[test]
-    fn test_validate_refresh_rate_wrong_type() {
+    fn validate_refresh_rate_wrong_type() {
         let value = LuaValue::Boolean(true);
         assert!(ConfigValidator::validate_refresh_rate(&value).is_err());
     }
@@ -682,37 +681,37 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_scale_boundary_low() {
+    fn validate_scale_boundary_low() {
         let value = LuaValue::Number(0.5);
         assert!(ConfigValidator::validate_scale(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_scale_boundary_high() {
+    fn validate_scale_boundary_high() {
         let value = LuaValue::Number(4.0);
         assert!(ConfigValidator::validate_scale(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_scale_too_low() {
+    fn validate_scale_too_low() {
         let value = LuaValue::Number(0.25);
         assert!(ConfigValidator::validate_scale(&value).is_err());
     }
 
     #[test]
-    fn test_validate_scale_too_high() {
+    fn validate_scale_too_high() {
         let value = LuaValue::Number(5.0);
         assert!(ConfigValidator::validate_scale(&value).is_err());
     }
 
     #[test]
-    fn test_validate_scale_with_integer() {
+    fn validate_scale_with_integer() {
         let value = LuaValue::Integer(2);
         assert!(ConfigValidator::validate_scale(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_scale_wrong_type() {
+    fn validate_scale_wrong_type() {
         let value = LuaValue::Boolean(true);
         assert!(ConfigValidator::validate_scale(&value).is_err());
     }
@@ -722,25 +721,25 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_gaps_boundary_zero() {
+    fn validate_gaps_boundary_zero() {
         let value = LuaValue::Integer(0);
         assert!(ConfigValidator::validate_gaps(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_gaps_boundary_max() {
+    fn validate_gaps_boundary_max() {
         let value = LuaValue::Integer(100);
         assert!(ConfigValidator::validate_gaps(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_gaps_negative() {
+    fn validate_gaps_negative() {
         let value = LuaValue::Integer(-1);
         assert!(ConfigValidator::validate_gaps(&value).is_err());
     }
 
     #[test]
-    fn test_validate_gaps_wrong_type() {
+    fn validate_gaps_wrong_type() {
         let value = LuaValue::Number(8.5);
         assert!(ConfigValidator::validate_gaps(&value).is_err());
     }
@@ -750,25 +749,25 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_border_width_boundary_zero() {
+    fn validate_border_width_boundary_zero() {
         let value = LuaValue::Integer(0);
         assert!(ConfigValidator::validate_border_width(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_border_width_boundary_max() {
+    fn validate_border_width_boundary_max() {
         let value = LuaValue::Integer(20);
         assert!(ConfigValidator::validate_border_width(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_border_width_negative() {
+    fn validate_border_width_negative() {
         let value = LuaValue::Integer(-1);
         assert!(ConfigValidator::validate_border_width(&value).is_err());
     }
 
     #[test]
-    fn test_validate_border_width_wrong_type() {
+    fn validate_border_width_wrong_type() {
         let value = LuaValue::Number(2.5);
         assert!(ConfigValidator::validate_border_width(&value).is_err());
     }
@@ -778,31 +777,31 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_validate_percentage_boundary_zero() {
+    fn validate_percentage_boundary_zero() {
         let value = LuaValue::Number(0.0);
         assert!(ConfigValidator::validate_percentage(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_percentage_boundary_max() {
+    fn validate_percentage_boundary_max() {
         let value = LuaValue::Number(100.0);
         assert!(ConfigValidator::validate_percentage(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_percentage_negative() {
+    fn validate_percentage_negative() {
         let value = LuaValue::Number(-0.1);
         assert!(ConfigValidator::validate_percentage(&value).is_err());
     }
 
     #[test]
-    fn test_validate_percentage_with_integer() {
+    fn validate_percentage_with_integer() {
         let value = LuaValue::Integer(75);
         assert!(ConfigValidator::validate_percentage(&value).is_ok());
     }
 
     #[test]
-    fn test_validate_percentage_wrong_type() {
+    fn validate_percentage_wrong_type() {
         let value = LuaValue::Boolean(true);
         assert!(ConfigValidator::validate_percentage(&value).is_err());
     }
@@ -813,54 +812,57 @@ mod tests {
     // These examples demonstrate how to use snapshot testing for complex
     // assertions. Snapshots are useful for testing output that's lengthy
     // or complex to manually verify.
-    //
+
     // To update snapshots: cargo insta review
     // To regenerate: cargo test --package niri-lua -- --nocapture
 
     #[test]
-    fn test_validate_config_snapshot() {
+    fn validate_config_snapshot() {
         use insta::assert_snapshot;
-        
+
         // Example: Verify validation result format matches expected output
         let lua = mlua::Lua::new();
         let table = lua.create_table().unwrap();
         let value = LuaValue::Table(table);
         let result = ConfigValidator::validate_config(&value);
-        
+
         // Instead of manual assertions, use snapshot
         assert_snapshot!(format!("{:?}", result));
     }
 
     #[test]
-    fn test_validate_scale_range_snapshot() {
+    fn validate_scale_range_snapshot() {
         // Snapshot common scale values to ensure consistent behavior
         let scales = vec![0.5, 1.0, 1.5, 2.0, 4.0];
-        let results: Vec<bool> = scales.iter()
+        let results: Vec<bool> = scales
+            .iter()
             .map(|&s| ConfigValidator::validate_scale(&LuaValue::Number(s)).is_ok())
             .collect();
-        
+
         insta::assert_debug_snapshot!("scale_validation_results", &results);
     }
 
     #[test]
-    fn test_validate_percentage_range_snapshot() {
+    fn validate_percentage_range_snapshot() {
         // Snapshot common percentage values
         let percentages = vec![0.0, 25.0, 50.0, 75.0, 100.0];
-        let results: Vec<bool> = percentages.iter()
+        let results: Vec<bool> = percentages
+            .iter()
             .map(|&p| ConfigValidator::validate_percentage(&LuaValue::Number(p)).is_ok())
             .collect();
-        
+
         insta::assert_debug_snapshot!("percentage_validation_results", &results);
     }
 
     #[test]
-    fn test_validate_gaps_range_snapshot() {
+    fn validate_gaps_range_snapshot() {
         // Snapshot common gap values
         let gaps = vec![0, 5, 10, 20, 50];
-        let results: Vec<bool> = gaps.iter()
+        let results: Vec<bool> = gaps
+            .iter()
             .map(|&g| ConfigValidator::validate_gaps(&LuaValue::Integer(g as i64)).is_ok())
             .collect();
-        
+
         insta::assert_debug_snapshot!("gaps_validation_results", &results);
     }
 }

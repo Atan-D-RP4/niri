@@ -1,4 +1,4 @@
-use niri::lua_extensions::{LuaConfig, apply_lua_config};
+use niri::lua_extensions::{apply_lua_config, LuaConfig};
 use niri_config::Config;
 
 /* test_keybinds.lua content:
@@ -31,7 +31,13 @@ fn main() {
                 Ok(bindings) => {
                     println!("✓ Found {} keybindings", bindings.len());
                     for (i, (key, action, args)) in bindings.iter().enumerate() {
-                        println!("  Binding {}: key='{}', action='{}', args={:?}", i+1, key, action, args);
+                        println!(
+                            "  Binding {}: key='{}', action='{}', args={:?}",
+                            i + 1,
+                            key,
+                            action,
+                            args
+                        );
                     }
                 }
                 Err(e) => {

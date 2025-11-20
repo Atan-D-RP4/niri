@@ -18,9 +18,10 @@ pub struct LuaAnimation {
 impl LuaAnimation {
     pub fn new(name: String, duration_ms: i32, curve: String) -> LuaResult<Self> {
         if duration_ms <= 0 || duration_ms > 5000 {
-            return Err(mlua::Error::RuntimeError(
-                format!("Duration must be between 1 and 5000 ms, got {}", duration_ms),
-            ));
+            return Err(mlua::Error::RuntimeError(format!(
+                "Duration must be between 1 and 5000 ms, got {}",
+                duration_ms
+            )));
         }
 
         let valid_curves = ["linear", "ease_in_out_cubic", "ease_out_cubic"];
@@ -46,9 +47,10 @@ impl UserData for LuaAnimation {
 
         methods.add_method("with_duration", |_, this, ms: i32| {
             if ms <= 0 || ms > 5000 {
-                return Err(mlua::Error::RuntimeError(
-                    format!("Duration must be between 1 and 5000 ms, got {}", ms),
-                ));
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Duration must be between 1 and 5000 ms, got {}",
+                    ms
+                )));
             }
             let mut new_anim = this.clone();
             new_anim.duration_ms = ms;
@@ -58,9 +60,10 @@ impl UserData for LuaAnimation {
         methods.add_method("with_curve", |_, this, curve: String| {
             let valid_curves = ["linear", "ease_in_out_cubic", "ease_out_cubic"];
             if !valid_curves.contains(&curve.as_str()) {
-                return Err(mlua::Error::RuntimeError(
-                    format!("Unknown curve: {}", curve),
-                ));
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Unknown curve: {}",
+                    curve
+                )));
             }
             let mut new_anim = this.clone();
             new_anim.curve = curve;
@@ -98,9 +101,7 @@ impl LuaFilter {
         let regex_app_id = regex_app_id
             .map(|r| Regex::new(&r))
             .transpose()
-            .map_err(|e| {
-                mlua::Error::RuntimeError(format!("Invalid regex for app_id: {}", e))
-            })?;
+            .map_err(|e| mlua::Error::RuntimeError(format!("Invalid regex for app_id: {}", e)))?;
 
         let regex_title = regex_title
             .map(|r| Regex::new(&r))
@@ -218,15 +219,17 @@ impl LuaGesture {
     pub fn new(gesture_type: String, fingers: u32, action: String) -> LuaResult<Self> {
         let valid_types = ["swipe", "pinch", "hold"];
         if !valid_types.contains(&gesture_type.as_str()) {
-            return Err(mlua::Error::RuntimeError(
-                format!("Unknown gesture type: {}. Valid types: swipe, pinch, hold", gesture_type),
-            ));
+            return Err(mlua::Error::RuntimeError(format!(
+                "Unknown gesture type: {}. Valid types: swipe, pinch, hold",
+                gesture_type
+            )));
         }
 
         if fingers == 0 || fingers > 10 {
-            return Err(mlua::Error::RuntimeError(
-                format!("Fingers must be between 1 and 10, got {}", fingers),
-            ));
+            return Err(mlua::Error::RuntimeError(format!(
+                "Fingers must be between 1 and 10, got {}",
+                fingers
+            )));
         }
 
         Ok(LuaGesture {
@@ -248,9 +251,10 @@ impl UserData for LuaGesture {
         methods.add_method("with_direction", |_, this, direction: String| {
             let valid_directions = ["up", "down", "left", "right"];
             if !valid_directions.contains(&direction.as_str()) {
-                return Err(mlua::Error::RuntimeError(
-                    format!("Invalid direction: {}", direction),
-                ));
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Invalid direction: {}",
+                    direction
+                )));
             }
             let mut new_gesture = this.clone();
             new_gesture.direction = Some(direction);
@@ -326,7 +330,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_animation_creation() {
+    fn animation_creation() {
         let anim = LuaAnimation::new("test".to_string(), 100, "linear".to_string());
         assert!(anim.is_ok());
         let anim = anim.unwrap();
@@ -335,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn test_animation_invalid_duration() {
+    fn animation_invalid_duration() {
         let anim = LuaAnimation::new("test".to_string(), 0, "linear".to_string());
         assert!(anim.is_err());
 
@@ -344,44 +348,44 @@ mod tests {
     }
 
     #[test]
-    fn test_animation_invalid_curve() {
+    fn animation_invalid_curve() {
         let anim = LuaAnimation::new("test".to_string(), 100, "invalid_curve".to_string());
         assert!(anim.is_err());
     }
 
     #[test]
-    fn test_filter_creation() {
+    fn filter_creation() {
         let filter = LuaFilter::new(Some("firefox".to_string()), None, None, None);
         assert!(filter.is_ok());
     }
 
     #[test]
-    fn test_filter_no_conditions() {
+    fn filter_no_conditions() {
         let filter = LuaFilter::new(None, None, None, None);
         assert!(filter.is_err());
     }
 
     #[test]
-    fn test_filter_matches() {
+    fn filter_matches() {
         let filter = LuaFilter::new(Some("firefox".to_string()), None, None, None).unwrap();
         assert!(filter.matches("firefox", ""));
         assert!(!filter.matches("chrome", ""));
     }
 
     #[test]
-    fn test_gesture_creation() {
+    fn gesture_creation() {
         let gesture = LuaGesture::new("swipe".to_string(), 3, "focus_left".to_string());
         assert!(gesture.is_ok());
     }
 
     #[test]
-    fn test_gesture_invalid_type() {
+    fn gesture_invalid_type() {
         let gesture = LuaGesture::new("invalid".to_string(), 3, "focus_left".to_string());
         assert!(gesture.is_err());
     }
 
     #[test]
-    fn test_gesture_invalid_fingers() {
+    fn gesture_invalid_fingers() {
         let gesture = LuaGesture::new("swipe".to_string(), 0, "focus_left".to_string());
         assert!(gesture.is_err());
 

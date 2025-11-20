@@ -25,11 +25,12 @@
 //! # }
 //! ```
 
-use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+
+use log::{debug, info, warn};
 
 /// File metadata for change detection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,7 +130,10 @@ impl HotReloader {
                     }
                 }
                 None => {
-                    warn!("File was deleted or became inaccessible: {}", path.display());
+                    warn!(
+                        "File was deleted or became inaccessible: {}",
+                        path.display()
+                    );
                     // Don't remove from watched_files, in case it comes back
                 }
             }
@@ -169,24 +173,29 @@ impl Default for HotReloader {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
     use std::io::Write;
     use std::thread;
     use std::time::Duration;
+
     use tempfile::TempDir;
 
+    use super::*;
+
     #[test]
-    fn test_hot_reloader_creation() {
+    fn hot_reloader_creation() {
         let reloader = HotReloader::new();
         assert_eq!(reloader.watched_count(), 0);
     }
 
     #[test]
-    fn test_watch_file() {
+    fn watch_file() {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.lua");
-        File::create(&test_file).unwrap().write_all(b"test").unwrap();
+        File::create(&test_file)
+            .unwrap()
+            .write_all(b"test")
+            .unwrap();
 
         let mut reloader = HotReloader::new();
         reloader.watch(test_file.clone()).unwrap();
@@ -195,10 +204,13 @@ mod tests {
     }
 
     #[test]
-    fn test_unwatch_file() {
+    fn unwatch_file() {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.lua");
-        File::create(&test_file).unwrap().write_all(b"test").unwrap();
+        File::create(&test_file)
+            .unwrap()
+            .write_all(b"test")
+            .unwrap();
 
         let mut reloader = HotReloader::new();
         reloader.watch(test_file.clone()).unwrap();
@@ -208,10 +220,13 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_file_change() {
+    fn detect_file_change() {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.lua");
-        File::create(&test_file).unwrap().write_all(b"original").unwrap();
+        File::create(&test_file)
+            .unwrap()
+            .write_all(b"original")
+            .unwrap();
 
         let mut reloader = HotReloader::new();
         reloader.watch(test_file.clone()).unwrap();
@@ -232,10 +247,13 @@ mod tests {
     }
 
     #[test]
-    fn test_read_file() {
+    fn read_file() {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.lua");
-        File::create(&test_file).unwrap().write_all(b"content").unwrap();
+        File::create(&test_file)
+            .unwrap()
+            .write_all(b"content")
+            .unwrap();
 
         let reloader = HotReloader::new();
         let content = reloader.read_file(&test_file).unwrap();
@@ -244,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_metadata_comparison() {
+    fn file_metadata_comparison() {
         let metadata1 = FileMetadata {
             modified: 100,
             size: 50,
@@ -263,13 +281,19 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_all() {
+    fn clear_all() {
         let temp_dir = TempDir::new().unwrap();
         let test_file1 = temp_dir.path().join("test1.lua");
         let test_file2 = temp_dir.path().join("test2.lua");
 
-        File::create(&test_file1).unwrap().write_all(b"test").unwrap();
-        File::create(&test_file2).unwrap().write_all(b"test").unwrap();
+        File::create(&test_file1)
+            .unwrap()
+            .write_all(b"test")
+            .unwrap();
+        File::create(&test_file2)
+            .unwrap()
+            .write_all(b"test")
+            .unwrap();
 
         let mut reloader = HotReloader::new();
         reloader.watch(test_file1).unwrap();
@@ -283,13 +307,19 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_file_changes() {
+    fn multiple_file_changes() {
         let temp_dir = TempDir::new().unwrap();
         let test_file1 = temp_dir.path().join("test1.lua");
         let test_file2 = temp_dir.path().join("test2.lua");
 
-        File::create(&test_file1).unwrap().write_all(b"test1").unwrap();
-        File::create(&test_file2).unwrap().write_all(b"test2").unwrap();
+        File::create(&test_file1)
+            .unwrap()
+            .write_all(b"test1")
+            .unwrap();
+        File::create(&test_file2)
+            .unwrap()
+            .write_all(b"test2")
+            .unwrap();
 
         let mut reloader = HotReloader::new();
         reloader.watch(test_file1.clone()).unwrap();
@@ -301,8 +331,14 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         // Modify both files
-        File::create(&test_file1).unwrap().write_all(b"modified1").unwrap();
-        File::create(&test_file2).unwrap().write_all(b"modified2").unwrap();
+        File::create(&test_file1)
+            .unwrap()
+            .write_all(b"modified1")
+            .unwrap();
+        File::create(&test_file2)
+            .unwrap()
+            .write_all(b"modified2")
+            .unwrap();
 
         // Both should be detected
         assert!(reloader.check_changes().unwrap());

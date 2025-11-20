@@ -528,9 +528,12 @@ impl ConfigPath {
                     if lua_config_exists {
                         // Lua config exists as the only config file
                         // Return the default Config in-memory without creating a KDL file
-                        // The Lua config will be loaded separately in main.rs and can extend/override this
-                        info!("Lua config detected at {config_dir:?}, using in-memory default config");
-                        
+                        // The Lua config will be loaded separately in main.rs and can
+                        // extend/override this
+                        info!(
+                            "Lua config detected at {config_dir:?}, using in-memory default config"
+                        );
+
                         // Return a default Config without trying to load or create a KDL file
                         return ConfigParseResult {
                             config: Ok(Config::default()),
@@ -2377,6 +2380,7 @@ mod tests {
     #[test]
     fn lua_config_skips_default_kdl_creation() {
         use std::fs;
+
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
@@ -2399,8 +2403,14 @@ mod tests {
         let config = result.1.config.unwrap();
         // The config returned is an in-memory default Config with no keybindings
         // (keybindings will be loaded from the Lua config in main.rs)
-        assert!(config.binds.0.is_empty(), "Default in-memory config should have no keybindings");
+        assert!(
+            config.binds.0.is_empty(),
+            "Default in-memory config should have no keybindings"
+        );
         // Verify that no KDL config file was created
-        assert!(!config_dir.join("config.kdl").exists(), "KDL config file should not be created");
+        assert!(
+            !config_dir.join("config.kdl").exists(),
+            "KDL config file should not be created"
+        );
     }
 }

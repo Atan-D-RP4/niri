@@ -3,10 +3,12 @@
 //! This module demonstrates how to create a Lua component that exposes
 //! Niri-specific functionality to Lua scripts.
 
-use mlua::prelude::*;
-use crate::LuaComponent;
 use std::rc::Rc;
-use log::{info, debug, warn, error};
+
+use log::{debug, error, info, warn};
+use mlua::prelude::*;
+
+use crate::LuaComponent;
 
 /// Niri logging and utility functions for Lua.
 ///
@@ -54,18 +56,16 @@ impl LuaComponent for NiriApi {
         niri.set("error", error_fn)?;
 
         // Register version info function
-        let version_fn = lua.create_function(|_, ()| {
-            Ok(format!("Niri {}", env!("CARGO_PKG_VERSION")))
-        })?;
+        let version_fn =
+            lua.create_function(|_, ()| Ok(format!("Niri {}", env!("CARGO_PKG_VERSION"))))?;
         niri.set("version", version_fn)?;
 
         // Register a table with configuration helper functions
         let config = lua.create_table()?;
 
         // Config helper: get Niri version
-        let get_version_fn = lua.create_function(|_, ()| {
-            Ok(env!("CARGO_PKG_VERSION").to_string())
-        })?;
+        let get_version_fn =
+            lua.create_function(|_, ()| Ok(env!("CARGO_PKG_VERSION").to_string()))?;
         config.set("version", get_version_fn)?;
 
         niri.set("config", config)?;
@@ -74,13 +74,17 @@ impl LuaComponent for NiriApi {
         let keymap = lua.create_table()?;
 
         // Keymap set function - currently just accepts and logs the keybinding
-        let keymap_set_fn = lua.create_function(|_, (mode, key, cb): (String, String, mlua::Function)| {
-            info!("Setting keymap: mode={}, key={}, callback=function", mode, key);
-            // For now, just call the callback immediately as a test
-            // In a full implementation, this would register the keybinding
-            let _ = cb.call::<()>(());
-            Ok(())
-        })?;
+        let keymap_set_fn =
+            lua.create_function(|_, (mode, key, cb): (String, String, mlua::Function)| {
+                info!(
+                    "Setting keymap: mode={}, key={}, callback=function",
+                    mode, key
+                );
+                // For now, just call the callback immediately as a test
+                // In a full implementation, this would register the keybinding
+                let _ = cb.call::<()>(());
+                Ok(())
+            })?;
         keymap.set("set", keymap_set_fn)?;
 
         niri.set("keymap", keymap)?;
@@ -118,7 +122,10 @@ impl LuaComponent for NiriApi {
         let callback_clone = callback.clone();
         let screenshot_full_fn = lua.create_function(move |_, ()| {
             info!("Taking full screenshot");
-            callback_clone("screenshot".to_string(), vec!["true".to_string(), "".to_string()])
+            callback_clone(
+                "screenshot".to_string(),
+                vec!["true".to_string(), "".to_string()],
+            )
         })?;
         screenshot.set("full", screenshot_full_fn)?;
 
@@ -158,11 +165,12 @@ impl LuaComponent for NiriApi {
 
 #[cfg(test)]
 mod tests {
-    use super::{Lua, LuaStdLib, NiriApi, LuaTable, LuaFunction, LuaComponent};
     use log::info;
 
+    use super::{Lua, LuaComponent, LuaFunction, LuaStdLib, LuaTable, NiriApi};
+
     #[test]
-    fn test_niri_api_registration() {
+    fn niri_api_registration() {
         let lua = Lua::new();
         // Load only safe standard libraries (exclude debug)
         lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
@@ -183,21 +191,26 @@ mod tests {
     }
 
     #[test]
-    fn test_niri_api_logging() {
+    fn niri_api_logging() {
         let lua = Lua::new();
         // Load only safe standard libraries (exclude debug)
         lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
         NiriApi::register_to_lua(&lua, |action, args| {
             info!("Test action: {} with args {:?}", action, args);
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
 
-        let result = lua.load(r#"
+        let result = lua
+            .load(
+                r#"
             niri.log("Test message")
             niri.debug("Debug message")
             niri.warn("Warning message")
             niri.error("Error message")
-        "#).exec();
+        "#,
+            )
+            .exec();
 
         assert!(result.is_ok());
     }

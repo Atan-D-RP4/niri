@@ -18,7 +18,7 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
-use niri::lua_extensions::{LuaConfig, apply_lua_config};
+use niri::lua_extensions::{apply_lua_config, LuaConfig};
 use niri::niri::State;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
@@ -162,10 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Try to load Lua config if it exists
     if let ConfigPath::Regular { user_path, .. } = &config_path {
         if let Some(config_dir) = user_path.parent() {
-            let lua_files = [
-                config_dir.join("niri.lua"),
-                config_dir.join("init.lua"),
-            ];
+            let lua_files = [config_dir.join("niri.lua"), config_dir.join("init.lua")];
             for lua_file in lua_files {
                 if lua_file.exists() {
                     match LuaConfig::from_file(&lua_file) {
@@ -175,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let binds_before = config.binds.0.len();
                             let startup_before = config.spawn_at_startup.len();
                             info!("Config state BEFORE Lua application: {} binds, {} startup commands", binds_before, startup_before);
-                            
+
                             // Apply Lua configuration to the loaded config
                             let runtime = lua_config.runtime();
                             match apply_lua_config(runtime, &mut config) {
@@ -183,12 +180,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let binds_after = config.binds.0.len();
                                     let startup_after = config.spawn_at_startup.len();
                                     info!("Applied Lua configuration successfully");
-                                    info!("Config state AFTER Lua application: {} binds (+{}), {} startup commands (+{})", 
-                                        binds_after, 
+                                    info!(
+                                        "Config state AFTER Lua application: {} binds (+{}), {} startup commands (+{})",
+                                        binds_after,
                                         (binds_after as i32 - binds_before as i32),
                                         startup_after,
                                         (startup_after as i32 - startup_before as i32));
-                                    
+
                                     // Store the runtime for later use
                                     lua_runtime = Some(lua_config.into_runtime());
                                 }
@@ -198,7 +196,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         Err(e) => {
-                            warn!("Failed to load Lua config from {}: {}", lua_file.display(), e);
+                            warn!(
+                                "Failed to load Lua config from {}: {}",
+                                lua_file.display(),
+                                e
+                            );
                         }
                     }
                     break; // Only load the first one found
@@ -211,18 +213,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let spawn_sh_at_startup = mem::take(&mut config.spawn_sh_at_startup);
     *CHILD_ENV.write().unwrap() = mem::take(&mut config.environment);
 
-     store_and_increase_nofile_rlimit();
- 
-     // Create the main event loop.
-     let mut event_loop = EventLoop::<State>::try_new().unwrap();
- 
-     // Handle Ctrl+C and other signals.
-     niri::utils::signals::listen(&event_loop.handle());
- 
-     // Create the compositor.
-     let display = Display::new().unwrap();
-     info!("About to create State with config containing {} binds", config.binds.0.len());
-     let mut state = State::new(
+    store_and_increase_nofile_rlimit();
+
+    // Create the main event loop.
+    let mut event_loop = EventLoop::<State>::try_new().unwrap();
+
+    // Handle Ctrl+C and other signals.
+    niri::utils::signals::listen(&event_loop.handle());
+
+    // Create the compositor.
+    let display = Display::new().unwrap();
+    info!(
+        "About to create State with config containing {} binds",
+        config.binds.0.len()
+    );
+    let mut state = State::new(
         config,
         event_loop.handle(),
         event_loop.get_signal(),

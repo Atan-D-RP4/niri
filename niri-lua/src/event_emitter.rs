@@ -25,9 +25,10 @@
 //! niri.events.off("action", handler_id)
 //! ```
 
-use mlua::prelude::*;
 use std::collections::HashMap;
+
 use log::{debug, error, warn};
+use mlua::prelude::*;
 
 /// Event handler ID
 pub type HandlerId = u64;
@@ -59,11 +60,7 @@ impl EventEmitter {
     }
 
     /// Register an event handler
-    pub fn on(
-        &mut self,
-        event_name: &str,
-        handler: EventHandler,
-    ) -> HandlerId {
+    pub fn on(&mut self, event_name: &str, handler: EventHandler) -> HandlerId {
         let handler_id = self.next_handler_id;
         self.next_handler_id += 1;
 
@@ -78,16 +75,15 @@ impl EventEmitter {
             .or_insert_with(Vec::new)
             .push(entry);
 
-        debug!("Registered event handler for '{}' with ID {}", event_name, handler_id);
+        debug!(
+            "Registered event handler for '{}' with ID {}",
+            event_name, handler_id
+        );
         handler_id
     }
 
     /// Register a one-time event handler
-    pub fn once(
-        &mut self,
-        event_name: &str,
-        handler: EventHandler,
-    ) -> HandlerId {
+    pub fn once(&mut self, event_name: &str, handler: EventHandler) -> HandlerId {
         let handler_id = self.next_handler_id;
         self.next_handler_id += 1;
 
@@ -190,11 +186,13 @@ impl EventEmitter {
         // Use thread-local storage or a RefCell for mutable access
         // For now, we'll use a global table to store handlers
         let event_handlers = lua.create_table()?;
-        lua.globals().set("__niri_event_handlers", event_handlers.clone())?;
+        lua.globals()
+            .set("__niri_event_handlers", event_handlers.clone())?;
 
         let next_handler_id = lua.create_table()?;
         next_handler_id.set("value", 1_u64)?;
-        lua.globals().set("__niri_next_handler_id", next_handler_id)?;
+        lua.globals()
+            .set("__niri_next_handler_id", next_handler_id)?;
 
         // Register on() function
         events.set(
@@ -319,13 +317,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_event_emitter_creation() {
+    fn event_emitter_creation() {
         let emitter = EventEmitter::new();
         assert_eq!(emitter.total_handlers(), 0);
     }
 
     #[test]
-    fn test_handler_registration() {
+    fn handler_registration() {
         let lua = Lua::new();
         let mut emitter = EventEmitter::new();
 
@@ -339,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn test_one_time_handler() {
+    fn one_time_handler() {
         let lua = Lua::new();
         let mut emitter = EventEmitter::new();
 
@@ -350,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn test_handler_removal() {
+    fn handler_removal() {
         let lua = Lua::new();
         let mut emitter = EventEmitter::new();
 
@@ -363,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_event() {
+    fn clear_event() {
         let lua = Lua::new();
         let mut emitter = EventEmitter::new();
 
@@ -377,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_all_handlers() {
+    fn clear_all_handlers() {
         let lua = Lua::new();
         let mut emitter = EventEmitter::new();
 
@@ -391,9 +389,9 @@ mod tests {
     }
 
     #[test]
-    fn test_register_to_lua() {
+    fn register_to_lua() {
         let lua = Lua::new();
-        
+
         // Create niri namespace
         let niri = lua.create_table().unwrap();
         lua.globals().set("niri", niri).unwrap();
@@ -404,7 +402,7 @@ mod tests {
         // Check that events namespace was created
         let niri: LuaTable = lua.globals().get("niri").unwrap();
         let events: LuaTable = niri.get("events").unwrap();
-        
+
         // Check that required functions exist
         let _on: LuaFunction = events.get("on").unwrap();
         let _off: LuaFunction = events.get("off").unwrap();

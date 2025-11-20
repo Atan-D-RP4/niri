@@ -14,11 +14,12 @@
 
 #![cfg(test)]
 
+use std::collections::HashMap;
+
 use mlua::prelude::*;
 use mlua::Result as LuaResult;
-use niri_ipc::{Output, Transform, Window, WindowLayout, Workspace, LogicalOutput};
 use niri_config::Config;
-use std::collections::HashMap;
+use niri_ipc::{LogicalOutput, Output, Transform, Window, WindowLayout, Workspace};
 
 /// Helper to create a test Lua environment with a table
 pub fn create_test_lua_table() -> (Lua, LuaTable) {
@@ -151,7 +152,7 @@ pub fn create_test_runtime() -> LuaResult<Lua> {
 }
 
 /// Helper to load and run Lua code in a test environment
-/// 
+///
 /// This function with #[track_caller] provides better error messages
 /// when assertions fail by showing the caller's location.
 #[track_caller]
@@ -162,7 +163,7 @@ pub fn load_lua_code(code: &str) -> LuaResult<Lua> {
 }
 
 /// Helper to extract a value from Lua environment
-/// 
+///
 /// Simplifies test code by providing a consistent pattern for accessing
 /// global variables with automatic type conversion.
 #[track_caller]
@@ -176,7 +177,7 @@ pub fn get_lua_global<T: mlua::FromLua>(lua: &Lua, name: &str) -> LuaResult<T> {
 #[track_caller]
 pub fn create_config_lua_env() -> LuaResult<Lua> {
     use crate::config_api::ConfigApi;
-    
+
     let lua = create_test_runtime()?;
     ConfigApi::register_to_lua(&lua, &Config::default())?;
     Ok(lua)
@@ -193,7 +194,7 @@ where
 {
     use crate::niri_api::NiriApi;
     use crate::LuaComponent;
-    
+
     let lua = create_test_runtime()?;
     NiriApi::register_to_lua(&lua, callback)?;
     Ok(lua)
@@ -251,7 +252,11 @@ pub fn assert_lua_table_value_eq<T: mlua::FromLua + PartialEq + std::fmt::Debug>
     let actual: T = table.get(key).unwrap_or_else(|_| {
         panic!("Failed to get Lua table value: {}", key);
     });
-    assert_eq!(actual, expected, "Lua table value mismatch for key '{}'", key);
+    assert_eq!(
+        actual, expected,
+        "Lua table value mismatch for key '{}'",
+        key
+    );
 }
 
 /// Helper to build test data with a builder pattern
@@ -326,13 +331,13 @@ impl Default for TestDataBuilder {
 #[track_caller]
 pub fn lua_table_to_map(table: &LuaTable) -> LuaResult<HashMap<String, String>> {
     let mut map = HashMap::new();
-    
+
     for pair in table.pairs::<String, mlua::Value>() {
         let (key, value) = pair?;
         let value_str = format!("{:?}", value);
         map.insert(key, value_str);
     }
-    
+
     Ok(map)
 }
 
@@ -464,7 +469,7 @@ mod tests {
         let table = lua.create_table().unwrap();
         table.set("key1", "value1").unwrap();
         table.set("key2", 42).unwrap();
-        
+
         let map = lua_table_to_map(&table).unwrap();
         assert_eq!(map.len(), 2);
         assert!(map.contains_key("key1"));

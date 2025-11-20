@@ -3,11 +3,12 @@
 //! This module provides utilities for extracting complex configuration structures
 //! from Lua tables and converting them to Niri config types.
 
-use mlua::prelude::*;
-use niri_config::{
-    animations::*, appearance::*, misc::*,
-};
 use std::str::FromStr;
+
+use mlua::prelude::*;
+use niri_config::animations::*;
+use niri_config::appearance::*;
+use niri_config::misc::*;
 
 /// Helper to extract an optional string field from a Lua table.
 pub fn extract_string_opt(table: &LuaTable, field: &str) -> LuaResult<Option<String>> {
@@ -52,10 +53,7 @@ pub fn extract_float_opt(table: &LuaTable, field: &str) -> LuaResult<Option<f64>
 }
 
 /// Helper to extract an optional table field from a Lua table.
-pub fn extract_table_opt<'lua>(
-    table: &'lua LuaTable,
-    field: &str,
-) -> LuaResult<Option<LuaTable>> {
+pub fn extract_table_opt<'lua>(table: &'lua LuaTable, field: &str) -> LuaResult<Option<LuaTable>> {
     match table.get::<LuaValue>(field) {
         Ok(LuaValue::Nil) => Ok(None),
         Ok(LuaValue::Table(t)) => Ok(Some(t)),
@@ -242,7 +240,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_string_opt_with_value() {
+    fn extract_string_opt_with_value() {
         let (_lua, table) = create_test_table();
         table.set("key", "hello").unwrap();
         let result = extract_string_opt(&table, "key").unwrap();
@@ -250,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_string_opt_with_nil() {
+    fn extract_string_opt_with_nil() {
         let (_lua, table) = create_test_table();
         table.set("key", mlua::Nil).unwrap();
         let result = extract_string_opt(&table, "key").unwrap();
@@ -258,14 +256,14 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_string_opt_missing_key() {
+    fn extract_string_opt_missing_key() {
         let (_lua, table) = create_test_table();
         let result = extract_string_opt(&table, "nonexistent").unwrap();
         assert_eq!(result, None);
     }
 
     #[test]
-    fn test_extract_string_opt_wrong_type_number() {
+    fn extract_string_opt_wrong_type_number() {
         let (_lua, table) = create_test_table();
         table.set("key", 42).unwrap();
         let result = extract_string_opt(&table, "key").unwrap();
@@ -273,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_string_opt_wrong_type_bool() {
+    fn extract_string_opt_wrong_type_bool() {
         let (_lua, table) = create_test_table();
         table.set("key", true).unwrap();
         let result = extract_string_opt(&table, "key").unwrap();
@@ -285,7 +283,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_bool_opt_true() {
+    fn extract_bool_opt_true() {
         let (_lua, table) = create_test_table();
         table.set("key", true).unwrap();
         let result = extract_bool_opt(&table, "key").unwrap();
@@ -293,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_bool_opt_false() {
+    fn extract_bool_opt_false() {
         let (_lua, table) = create_test_table();
         table.set("key", false).unwrap();
         let result = extract_bool_opt(&table, "key").unwrap();
@@ -301,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_bool_opt_nil() {
+    fn extract_bool_opt_nil() {
         let (_lua, table) = create_test_table();
         table.set("key", mlua::Nil).unwrap();
         let result = extract_bool_opt(&table, "key").unwrap();
@@ -309,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_bool_opt_wrong_type_string() {
+    fn extract_bool_opt_wrong_type_string() {
         let (_lua, table) = create_test_table();
         table.set("key", "true").unwrap();
         let result = extract_bool_opt(&table, "key").unwrap();
@@ -317,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_bool_opt_wrong_type_number() {
+    fn extract_bool_opt_wrong_type_number() {
         let (_lua, table) = create_test_table();
         table.set("key", 1).unwrap();
         let result = extract_bool_opt(&table, "key").unwrap();
@@ -329,7 +327,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_int_opt_positive() {
+    fn extract_int_opt_positive() {
         let (_lua, table) = create_test_table();
         table.set("key", 42i64).unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -337,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_int_opt_negative() {
+    fn extract_int_opt_negative() {
         let (_lua, table) = create_test_table();
         table.set("key", -100i64).unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -345,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_int_opt_zero() {
+    fn extract_int_opt_zero() {
         let (_lua, table) = create_test_table();
         table.set("key", 0i64).unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -353,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_int_opt_from_number() {
+    fn extract_int_opt_from_number() {
         let (_lua, table) = create_test_table();
         table.set("key", 42.0).unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -361,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_int_opt_from_float_truncate() {
+    fn extract_int_opt_from_float_truncate() {
         let (_lua, table) = create_test_table();
         table.set("key", 42.9).unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -369,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_int_opt_nil() {
+    fn extract_int_opt_nil() {
         let (_lua, table) = create_test_table();
         table.set("key", mlua::Nil).unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -377,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_int_opt_wrong_type_string() {
+    fn extract_int_opt_wrong_type_string() {
         let (_lua, table) = create_test_table();
         table.set("key", "42").unwrap();
         let result = extract_int_opt(&table, "key").unwrap();
@@ -389,7 +387,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_float_opt_decimal() {
+    fn extract_float_opt_decimal() {
         let (_lua, table) = create_test_table();
         table.set("key", 3.14).unwrap();
         let result = extract_float_opt(&table, "key").unwrap();
@@ -397,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_float_opt_negative() {
+    fn extract_float_opt_negative() {
         let (_lua, table) = create_test_table();
         table.set("key", -2.5).unwrap();
         let result = extract_float_opt(&table, "key").unwrap();
@@ -405,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_float_opt_from_integer() {
+    fn extract_float_opt_from_integer() {
         let (_lua, table) = create_test_table();
         table.set("key", 42i64).unwrap();
         let result = extract_float_opt(&table, "key").unwrap();
@@ -413,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_float_opt_nil() {
+    fn extract_float_opt_nil() {
         let (_lua, table) = create_test_table();
         table.set("key", mlua::Nil).unwrap();
         let result = extract_float_opt(&table, "key").unwrap();
@@ -421,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_float_opt_wrong_type() {
+    fn extract_float_opt_wrong_type() {
         let (_lua, table) = create_test_table();
         table.set("key", "3.14").unwrap();
         let result = extract_float_opt(&table, "key").unwrap();
@@ -433,7 +431,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_table_opt_with_table() {
+    fn extract_table_opt_with_table() {
         let (lua, table) = create_test_table();
         let inner = lua.create_table().unwrap();
         inner.set("inner_key", "inner_value").unwrap();
@@ -447,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_table_opt_empty_table() {
+    fn extract_table_opt_empty_table() {
         let (lua, table) = create_test_table();
         let inner = lua.create_table().unwrap();
         table.set("key", inner).unwrap();
@@ -460,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_table_opt_nil() {
+    fn extract_table_opt_nil() {
         let (_lua, table) = create_test_table();
         table.set("key", mlua::Nil).unwrap();
         let result = extract_table_opt(&table, "key").unwrap();
@@ -468,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_table_opt_wrong_type_string() {
+    fn extract_table_opt_wrong_type_string() {
         let (_lua, table) = create_test_table();
         table.set("key", "not a table").unwrap();
         let result = extract_table_opt(&table, "key").unwrap();
@@ -476,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_table_opt_wrong_type_number() {
+    fn extract_table_opt_wrong_type_number() {
         let (_lua, table) = create_test_table();
         table.set("key", 42).unwrap();
         let result = extract_table_opt(&table, "key").unwrap();
@@ -488,44 +486,44 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_color_6digit_hex() {
+    fn extract_color_6digit_hex() {
         let color = extract_color("#FF0000");
         assert!(color.is_some());
     }
 
     #[test]
-    fn test_extract_color_8digit_hex() {
+    fn extract_color_8digit_hex() {
         let color = extract_color("#FF0000FF");
         assert!(color.is_some());
     }
 
     #[test]
-    fn test_extract_color_lowercase() {
+    fn extract_color_lowercase() {
         let color = extract_color("#ff0000");
         assert!(color.is_some());
     }
 
     #[test]
-    fn test_extract_color_mixed_case() {
+    fn extract_color_mixed_case() {
         let color = extract_color("#Ff00Ff");
         assert!(color.is_some());
     }
 
     #[test]
-    fn test_extract_color_invalid_hex_chars() {
+    fn extract_color_invalid_hex_chars() {
         let color = extract_color("#GGGGGG");
         assert!(color.is_none());
     }
 
     #[test]
-    fn test_extract_color_missing_hash() {
+    fn extract_color_missing_hash() {
         let color = extract_color("FF0000");
         // CSS color parser accepts colors without hash
         assert!(color.is_some());
     }
 
     #[test]
-    fn test_extract_color_short_hex() {
+    fn extract_color_short_hex() {
         let color = extract_color("#F00");
         // CSS color parser accepts short hex formats
         assert!(color.is_some());
@@ -536,7 +534,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_color_opt_valid() {
+    fn extract_color_opt_valid() {
         let (_lua, table) = create_test_table();
         table.set("color", "#FF0000").unwrap();
         let result = extract_color_opt(&table, "color").unwrap();
@@ -544,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_color_opt_invalid() {
+    fn extract_color_opt_invalid() {
         let (_lua, table) = create_test_table();
         table.set("color", "#GGGGGG").unwrap();
         let result = extract_color_opt(&table, "color").unwrap();
@@ -552,14 +550,14 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_color_opt_missing() {
+    fn extract_color_opt_missing() {
         let (_lua, table) = create_test_table();
         let result = extract_color_opt(&table, "color").unwrap();
         assert_eq!(result, None);
     }
 
     #[test]
-    fn test_extract_color_opt_nil() {
+    fn extract_color_opt_nil() {
         let (_lua, table) = create_test_table();
         table.set("color", mlua::Nil).unwrap();
         let result = extract_color_opt(&table, "color").unwrap();
@@ -571,16 +569,19 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_screenshot_path_with_string() {
+    fn extract_screenshot_path_with_string() {
         let (_lua, table) = create_test_table();
         table.set("path", "/home/user/screenshots").unwrap();
         let result = extract_screenshot_path(&table).unwrap();
         assert!(result.is_some());
-        assert_eq!(result.unwrap().0, Some("/home/user/screenshots".to_string()));
+        assert_eq!(
+            result.unwrap().0,
+            Some("/home/user/screenshots".to_string())
+        );
     }
 
     #[test]
-    fn test_extract_screenshot_path_disabled_with_false() {
+    fn extract_screenshot_path_disabled_with_false() {
         let (_lua, table) = create_test_table();
         table.set("path", false).unwrap();
         let result = extract_screenshot_path(&table).unwrap();
@@ -589,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_screenshot_path_missing() {
+    fn extract_screenshot_path_missing() {
         let (_lua, table) = create_test_table();
         let result = extract_screenshot_path(&table).unwrap();
         assert_eq!(result, None);
@@ -600,7 +601,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_hotkey_overlay_with_values() {
+    fn extract_hotkey_overlay_with_values() {
         let (_lua, table) = create_test_table();
         table.set("skip_at_startup", true).unwrap();
         table.set("hide_not_bound", false).unwrap();
@@ -612,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_hotkey_overlay_both_true() {
+    fn extract_hotkey_overlay_both_true() {
         let (_lua, table) = create_test_table();
         table.set("skip_at_startup", true).unwrap();
         table.set("hide_not_bound", true).unwrap();
@@ -624,14 +625,14 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_hotkey_overlay_empty() {
+    fn extract_hotkey_overlay_empty() {
         let (_lua, table) = create_test_table();
         let result = extract_hotkey_overlay(&table).unwrap();
         assert_eq!(result, None);
     }
 
     #[test]
-    fn test_extract_hotkey_overlay_both_false() {
+    fn extract_hotkey_overlay_both_false() {
         let (_lua, table) = create_test_table();
         table.set("skip_at_startup", false).unwrap();
         table.set("hide_not_bound", false).unwrap();
@@ -644,7 +645,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_cursor_with_all_fields() {
+    fn extract_cursor_with_all_fields() {
         let (_lua, table) = create_test_table();
         table.set("xcursor_theme", "default").unwrap();
         table.set("xcursor_size", 32i64).unwrap();
@@ -661,7 +662,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_cursor_partial_fields() {
+    fn extract_cursor_partial_fields() {
         let (_lua, table) = create_test_table();
         table.set("xcursor_theme", "default").unwrap();
 
@@ -672,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_cursor_empty() {
+    fn extract_cursor_empty() {
         let (_lua, table) = create_test_table();
         let result = extract_cursor(&table).unwrap();
         assert_eq!(result, None);
@@ -683,7 +684,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_animations_with_off() {
+    fn extract_animations_with_off() {
         let (_lua, table) = create_test_table();
         table.set("off", true).unwrap();
         let result = extract_animations(&table).unwrap();
@@ -692,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_animations_with_slowdown() {
+    fn extract_animations_with_slowdown() {
         let (_lua, table) = create_test_table();
         table.set("slowdown", 2.0).unwrap();
         let result = extract_animations(&table).unwrap();
@@ -701,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_animations_on_overrides_off() {
+    fn extract_animations_on_overrides_off() {
         let (_lua, table) = create_test_table();
         table.set("off", true).unwrap();
         table.set("on", true).unwrap();
@@ -711,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_animations_empty() {
+    fn extract_animations_empty() {
         let (_lua, table) = create_test_table();
         let result = extract_animations(&table).unwrap();
         assert_eq!(result, None);
@@ -722,7 +723,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_prefer_no_csd_true() {
+    fn extract_prefer_no_csd_true() {
         let (_lua, table) = create_test_table();
         table.set("prefer_no_csd", true).unwrap();
         let result = extract_prefer_no_csd(&table).unwrap();
@@ -730,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_prefer_no_csd_false() {
+    fn extract_prefer_no_csd_false() {
         let (_lua, table) = create_test_table();
         table.set("prefer_no_csd", false).unwrap();
         let result = extract_prefer_no_csd(&table).unwrap();
@@ -742,7 +743,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_clipboard_with_true() {
+    fn extract_clipboard_with_true() {
         let (_lua, table) = create_test_table();
         table.set("disable_primary", true).unwrap();
         let result = extract_clipboard(&table).unwrap();
@@ -751,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_clipboard_with_false() {
+    fn extract_clipboard_with_false() {
         let (_lua, table) = create_test_table();
         table.set("disable_primary", false).unwrap();
         let result = extract_clipboard(&table).unwrap();
@@ -760,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_clipboard_empty() {
+    fn extract_clipboard_empty() {
         let (_lua, table) = create_test_table();
         let result = extract_clipboard(&table).unwrap();
         assert_eq!(result, None);
@@ -771,7 +772,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_overview_with_zoom() {
+    fn extract_overview_with_zoom() {
         let (_lua, table) = create_test_table();
         table.set("zoom", 0.5).unwrap();
         let result = extract_overview(&table).unwrap();
@@ -780,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_overview_with_backdrop_color() {
+    fn extract_overview_with_backdrop_color() {
         let (_lua, table) = create_test_table();
         table.set("backdrop_color", "#000000").unwrap();
         let result = extract_overview(&table).unwrap();
@@ -788,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_overview_with_both() {
+    fn extract_overview_with_both() {
         let (_lua, table) = create_test_table();
         table.set("zoom", 0.7).unwrap();
         table.set("backdrop_color", "#111111").unwrap();
@@ -799,7 +800,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_overview_empty() {
+    fn extract_overview_empty() {
         let (_lua, table) = create_test_table();
         let result = extract_overview(&table).unwrap();
         assert_eq!(result, None);
@@ -810,7 +811,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_environment_with_variables() {
+    fn extract_environment_with_variables() {
         let (_lua, table) = create_test_table();
         table.set("VAR1", "value1").unwrap();
         table.set("VAR2", "value2").unwrap();
@@ -822,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_environment_with_nil_value() {
+    fn extract_environment_with_nil_value() {
         let (_lua, table) = create_test_table();
         table.set("VAR1", "value1").unwrap();
         table.set("VAR2", mlua::Nil).unwrap();
@@ -839,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_environment_ignores_non_string_values() {
+    fn extract_environment_ignores_non_string_values() {
         let (_lua, table) = create_test_table();
         table.set("VAR1", "value1").unwrap();
         table.set("VAR2", 42).unwrap();
@@ -853,14 +854,14 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_environment_empty() {
+    fn extract_environment_empty() {
         let (_lua, table) = create_test_table();
         let result = extract_environment(&table).unwrap();
         assert_eq!(result, None);
     }
 
     #[test]
-    fn test_extract_environment_all_non_string_values() {
+    fn extract_environment_all_non_string_values() {
         let (_lua, table) = create_test_table();
         table.set("VAR1", 42).unwrap();
         table.set("VAR2", true).unwrap();

@@ -1,13 +1,13 @@
 //! Configuration API module for exposing Niri settings to Lua.
 //!
-//! This module provides the `niri.config` API that allows Lua scripts to read and configure Niri settings.
-//! Implements Tier 2 configuration parity with KDL.
+//! This module provides the `niri.config` API that allows Lua scripts to read and configure Niri
+//! settings. Implements Tier 2 configuration parity with KDL.
 
 use mlua::prelude::*;
+use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
 use niri_config::{
-    Animations, Config, Cursor, Gestures, Input, Layout, Outputs, Overview, Debug, Clipboard,
-    HotkeyOverlay, ConfigNotification, XwaylandSatellite,
-    animations::{Kind, EasingParams, Curve, SpringParams},
+    Animations, Clipboard, Config, ConfigNotification, Cursor, Debug, Gestures, HotkeyOverlay,
+    Input, Layout, Outputs, Overview, XwaylandSatellite,
 };
 
 /// Main configuration API handler
@@ -49,7 +49,11 @@ impl ConfigApi {
     }
 
     /// Register animations configuration
-    fn register_animations(lua: &Lua, config_table: &LuaTable, anim_config: &Animations) -> LuaResult<()> {
+    fn register_animations(
+        lua: &Lua,
+        config_table: &LuaTable,
+        anim_config: &Animations,
+    ) -> LuaResult<()> {
         let animations = lua.create_table()?;
 
         // Global animation settings
@@ -97,12 +101,20 @@ impl ConfigApi {
 
         // Config notification animation
         let cfg_notif = lua.create_table()?;
-        Self::set_animation_values(lua, &cfg_notif, &anim_config.config_notification_open_close.0)?;
+        Self::set_animation_values(
+            lua,
+            &cfg_notif,
+            &anim_config.config_notification_open_close.0,
+        )?;
         animations.set("config_notification_open_close", cfg_notif)?;
 
         // Exit confirmation animation
         let exit_confirm = lua.create_table()?;
-        Self::set_animation_values(lua, &exit_confirm, &anim_config.exit_confirmation_open_close.0)?;
+        Self::set_animation_values(
+            lua,
+            &exit_confirm,
+            &anim_config.exit_confirmation_open_close.0,
+        )?;
         animations.set("exit_confirmation_open_close", exit_confirm)?;
 
         // Screenshot UI animation
@@ -120,7 +132,11 @@ impl ConfigApi {
     }
 
     /// Helper to set animation values (off flag and animation kind)
-    fn set_animation_values(lua: &Lua, table: &LuaTable, anim: &niri_config::Animation) -> LuaResult<()> {
+    fn set_animation_values(
+        lua: &Lua,
+        table: &LuaTable,
+        anim: &niri_config::Animation,
+    ) -> LuaResult<()> {
         table.set("off", anim.off)?;
 
         match anim.kind {
@@ -166,7 +182,7 @@ impl ConfigApi {
         let keyboard = lua.create_table()?;
         keyboard.set("repeat_delay", input_config.keyboard.repeat_delay)?;
         keyboard.set("repeat_rate", input_config.keyboard.repeat_rate)?;
-        
+
         let xkb = lua.create_table()?;
         xkb.set("layout", input_config.keyboard.xkb.layout.clone())?;
         xkb.set("variant", input_config.keyboard.xkb.variant.clone())?;
@@ -182,22 +198,34 @@ impl ConfigApi {
         // Mouse settings
         let mouse = lua.create_table()?;
         mouse.set("accel_speed", input_config.mouse.accel_speed.0)?;
-        mouse.set("accel_profile", format!("{:?}", input_config.mouse.accel_profile))?;
+        mouse.set(
+            "accel_profile",
+            format!("{:?}", input_config.mouse.accel_profile),
+        )?;
         input.set("mouse", mouse)?;
 
         // Touchpad settings
         let touchpad = lua.create_table()?;
         touchpad.set("accel_speed", input_config.touchpad.accel_speed.0)?;
-        touchpad.set("accel_profile", format!("{:?}", input_config.touchpad.accel_profile))?;
+        touchpad.set(
+            "accel_profile",
+            format!("{:?}", input_config.touchpad.accel_profile),
+        )?;
         touchpad.set("tap", input_config.touchpad.tap)?;
-        touchpad.set("tap_button_map", format!("{:?}", input_config.touchpad.tap_button_map))?;
+        touchpad.set(
+            "tap_button_map",
+            format!("{:?}", input_config.touchpad.tap_button_map),
+        )?;
         touchpad.set("natural_scroll", input_config.touchpad.natural_scroll)?;
         input.set("touchpad", touchpad)?;
 
         // Trackpoint settings
         let trackpoint = lua.create_table()?;
         trackpoint.set("accel_speed", input_config.trackpoint.accel_speed.0)?;
-        trackpoint.set("accel_profile", format!("{:?}", input_config.trackpoint.accel_profile))?;
+        trackpoint.set(
+            "accel_profile",
+            format!("{:?}", input_config.trackpoint.accel_profile),
+        )?;
         trackpoint.set("natural_scroll", input_config.trackpoint.natural_scroll)?;
         input.set("trackpoint", trackpoint)?;
 
@@ -220,7 +248,11 @@ impl ConfigApi {
     }
 
     /// Register layout configuration
-    fn register_layout(lua: &Lua, config_table: &LuaTable, layout_config: &Layout) -> LuaResult<()> {
+    fn register_layout(
+        lua: &Lua,
+        config_table: &LuaTable,
+        layout_config: &Layout,
+    ) -> LuaResult<()> {
         let layout = lua.create_table()?;
 
         layout.set("gaps", layout_config.gaps)?;
@@ -237,18 +269,36 @@ impl ConfigApi {
         let focus_ring = lua.create_table()?;
         focus_ring.set("off", layout_config.focus_ring.off)?;
         focus_ring.set("width", layout_config.focus_ring.width)?;
-        focus_ring.set("active_color", Self::color_to_hex(&layout_config.focus_ring.active_color))?;
-        focus_ring.set("inactive_color", Self::color_to_hex(&layout_config.focus_ring.inactive_color))?;
-        focus_ring.set("urgent_color", Self::color_to_hex(&layout_config.focus_ring.urgent_color))?;
+        focus_ring.set(
+            "active_color",
+            Self::color_to_hex(&layout_config.focus_ring.active_color),
+        )?;
+        focus_ring.set(
+            "inactive_color",
+            Self::color_to_hex(&layout_config.focus_ring.inactive_color),
+        )?;
+        focus_ring.set(
+            "urgent_color",
+            Self::color_to_hex(&layout_config.focus_ring.urgent_color),
+        )?;
         layout.set("focus_ring", focus_ring)?;
 
         // Border configuration
         let border = lua.create_table()?;
         border.set("off", layout_config.border.off)?;
         border.set("width", layout_config.border.width)?;
-        border.set("active_color", Self::color_to_hex(&layout_config.border.active_color))?;
-        border.set("inactive_color", Self::color_to_hex(&layout_config.border.inactive_color))?;
-        border.set("urgent_color", Self::color_to_hex(&layout_config.border.urgent_color))?;
+        border.set(
+            "active_color",
+            Self::color_to_hex(&layout_config.border.active_color),
+        )?;
+        border.set(
+            "inactive_color",
+            Self::color_to_hex(&layout_config.border.inactive_color),
+        )?;
+        border.set(
+            "urgent_color",
+            Self::color_to_hex(&layout_config.border.urgent_color),
+        )?;
         layout.set("border", border)?;
 
         // Shadow configuration
@@ -261,7 +311,10 @@ impl ConfigApi {
         offset.set("y", layout_config.shadow.offset.y.0)?;
         shadow.set("offset", offset)?;
         shadow.set("color", Self::color_to_hex(&layout_config.shadow.color))?;
-        shadow.set("draw_behind_window", layout_config.shadow.draw_behind_window)?;
+        shadow.set(
+            "draw_behind_window",
+            layout_config.shadow.draw_behind_window,
+        )?;
         layout.set("shadow", shadow)?;
 
         // Tab indicator configuration
@@ -282,15 +335,30 @@ impl ConfigApi {
         // Insert hint configuration
         let insert_hint = lua.create_table()?;
         insert_hint.set("off", layout_config.insert_hint.off)?;
-        insert_hint.set("color", Self::color_to_hex(&layout_config.insert_hint.color))?;
+        insert_hint.set(
+            "color",
+            Self::color_to_hex(&layout_config.insert_hint.color),
+        )?;
         layout.set("insert_hint", insert_hint)?;
 
         // Column and window settings
-        layout.set("center_focused_column", format!("{:?}", layout_config.center_focused_column).to_lowercase())?;
-        layout.set("always_center_single_column", layout_config.always_center_single_column)?;
-        layout.set("empty_workspace_above_first", layout_config.empty_workspace_above_first)?;
-        layout.set("default_column_display", format!("{:?}", layout_config.default_column_display).to_lowercase())?;
-        
+        layout.set(
+            "center_focused_column",
+            format!("{:?}", layout_config.center_focused_column).to_lowercase(),
+        )?;
+        layout.set(
+            "always_center_single_column",
+            layout_config.always_center_single_column,
+        )?;
+        layout.set(
+            "empty_workspace_above_first",
+            layout_config.empty_workspace_above_first,
+        )?;
+        layout.set(
+            "default_column_display",
+            format!("{:?}", layout_config.default_column_display).to_lowercase(),
+        )?;
+
         // Preset column widths
         let preset_widths = lua.create_table()?;
         for (i, size) in layout_config.preset_column_widths.iter().enumerate() {
@@ -300,7 +368,10 @@ impl ConfigApi {
 
         // Default column width
         if let Some(default_width) = layout_config.default_column_width {
-            layout.set("default_column_width", Self::preset_size_to_lua_string(&default_width))?;
+            layout.set(
+                "default_column_width",
+                Self::preset_size_to_lua_string(&default_width),
+            )?;
         }
 
         // Preset window heights
@@ -310,14 +381,21 @@ impl ConfigApi {
         }
         layout.set("preset_window_heights", preset_heights)?;
 
-        layout.set("background_color", Self::color_to_hex(&layout_config.background_color))?;
+        layout.set(
+            "background_color",
+            Self::color_to_hex(&layout_config.background_color),
+        )?;
 
         config_table.set("layout", layout)?;
         Ok(())
     }
 
     /// Register cursor configuration
-    fn register_cursor(lua: &Lua, config_table: &LuaTable, cursor_config: &Cursor) -> LuaResult<()> {
+    fn register_cursor(
+        lua: &Lua,
+        config_table: &LuaTable,
+        cursor_config: &Cursor,
+    ) -> LuaResult<()> {
         let cursor = lua.create_table()?;
 
         cursor.set("xcursor_theme", cursor_config.xcursor_theme.clone())?;
@@ -337,19 +415,19 @@ impl ConfigApi {
 
         for output in &outputs.0 {
             let output_config = lua.create_table()?;
-            
+
             // Set output name and basic properties
             output_config.set("off", output.off)?;
-            
+
             if let Some(scale) = output.scale {
                 output_config.set("scale", scale.0)?;
             }
-            
+
             if let Some(position) = &output.position {
                 output_config.set("x", position.x)?;
                 output_config.set("y", position.y)?;
             }
-            
+
             if let Some(mode) = &output.mode {
                 output_config.set("mode_custom", mode.custom)?;
             }
@@ -362,21 +440,37 @@ impl ConfigApi {
     }
 
     /// Register gestures configuration
-    fn register_gestures(lua: &Lua, config_table: &LuaTable, gestures_config: &Gestures) -> LuaResult<()> {
+    fn register_gestures(
+        lua: &Lua,
+        config_table: &LuaTable,
+        gestures_config: &Gestures,
+    ) -> LuaResult<()> {
         let gestures = lua.create_table()?;
 
         // Drag and drop edge view scroll
         let dnd_edge_view_scroll = lua.create_table()?;
-        dnd_edge_view_scroll.set("trigger_width", gestures_config.dnd_edge_view_scroll.trigger_width)?;
+        dnd_edge_view_scroll.set(
+            "trigger_width",
+            gestures_config.dnd_edge_view_scroll.trigger_width,
+        )?;
         dnd_edge_view_scroll.set("delay_ms", gestures_config.dnd_edge_view_scroll.delay_ms)?;
         dnd_edge_view_scroll.set("max_speed", gestures_config.dnd_edge_view_scroll.max_speed)?;
         gestures.set("dnd_edge_view_scroll", dnd_edge_view_scroll)?;
 
         // Drag and drop edge workspace switch
         let dnd_edge_ws_switch = lua.create_table()?;
-        dnd_edge_ws_switch.set("trigger_height", gestures_config.dnd_edge_workspace_switch.trigger_height)?;
-        dnd_edge_ws_switch.set("delay_ms", gestures_config.dnd_edge_workspace_switch.delay_ms)?;
-        dnd_edge_ws_switch.set("max_speed", gestures_config.dnd_edge_workspace_switch.max_speed)?;
+        dnd_edge_ws_switch.set(
+            "trigger_height",
+            gestures_config.dnd_edge_workspace_switch.trigger_height,
+        )?;
+        dnd_edge_ws_switch.set(
+            "delay_ms",
+            gestures_config.dnd_edge_workspace_switch.delay_ms,
+        )?;
+        dnd_edge_ws_switch.set(
+            "max_speed",
+            gestures_config.dnd_edge_workspace_switch.max_speed,
+        )?;
         gestures.set("dnd_edge_workspace_switch", dnd_edge_ws_switch)?;
 
         // Hot corners
@@ -393,12 +487,19 @@ impl ConfigApi {
     }
 
     /// Register overview configuration
-    fn register_overview(lua: &Lua, config_table: &LuaTable, overview_config: &Overview) -> LuaResult<()> {
+    fn register_overview(
+        lua: &Lua,
+        config_table: &LuaTable,
+        overview_config: &Overview,
+    ) -> LuaResult<()> {
         let overview = lua.create_table()?;
-        
+
         overview.set("zoom", overview_config.zoom)?;
-        overview.set("backdrop_color", Self::color_to_hex_noalpha(&overview_config.backdrop_color))?;
-        
+        overview.set(
+            "backdrop_color",
+            Self::color_to_hex_noalpha(&overview_config.backdrop_color),
+        )?;
+
         // Workspace shadow configuration
         let ws_shadow = lua.create_table()?;
         ws_shadow.set("off", overview_config.workspace_shadow.off)?;
@@ -408,9 +509,12 @@ impl ConfigApi {
         shadow_offset.set("x", overview_config.workspace_shadow.offset.x.0)?;
         shadow_offset.set("y", overview_config.workspace_shadow.offset.y.0)?;
         ws_shadow.set("offset", shadow_offset)?;
-        ws_shadow.set("color", Self::color_to_hex(&overview_config.workspace_shadow.color))?;
+        ws_shadow.set(
+            "color",
+            Self::color_to_hex(&overview_config.workspace_shadow.color),
+        )?;
         overview.set("workspace_shadow", ws_shadow)?;
-        
+
         config_table.set("overview", overview)?;
         Ok(())
     }
@@ -418,44 +522,87 @@ impl ConfigApi {
     /// Register debug configuration
     fn register_debug(lua: &Lua, config_table: &LuaTable, debug_config: &Debug) -> LuaResult<()> {
         let debug = lua.create_table()?;
-        
+
         if let Some(preview) = &debug_config.preview_render {
             debug.set("preview_render", format!("{:?}", preview))?;
         }
-        debug.set("dbus_interfaces_in_non_session_instances", debug_config.dbus_interfaces_in_non_session_instances)?;
-        debug.set("wait_for_frame_completion_before_queueing", debug_config.wait_for_frame_completion_before_queueing)?;
+        debug.set(
+            "dbus_interfaces_in_non_session_instances",
+            debug_config.dbus_interfaces_in_non_session_instances,
+        )?;
+        debug.set(
+            "wait_for_frame_completion_before_queueing",
+            debug_config.wait_for_frame_completion_before_queueing,
+        )?;
         debug.set("enable_overlay_planes", debug_config.enable_overlay_planes)?;
         debug.set("disable_cursor_plane", debug_config.disable_cursor_plane)?;
-        debug.set("disable_direct_scanout", debug_config.disable_direct_scanout)?;
-        debug.set("keep_max_bpc_unchanged", debug_config.keep_max_bpc_unchanged)?;
-        debug.set("restrict_primary_scanout_to_matching_format", debug_config.restrict_primary_scanout_to_matching_format)?;
+        debug.set(
+            "disable_direct_scanout",
+            debug_config.disable_direct_scanout,
+        )?;
+        debug.set(
+            "keep_max_bpc_unchanged",
+            debug_config.keep_max_bpc_unchanged,
+        )?;
+        debug.set(
+            "restrict_primary_scanout_to_matching_format",
+            debug_config.restrict_primary_scanout_to_matching_format,
+        )?;
         if let Some(device) = &debug_config.render_drm_device {
             debug.set("render_drm_device", device.to_string_lossy().to_string())?;
         }
-        debug.set("force_pipewire_invalid_modifier", debug_config.force_pipewire_invalid_modifier)?;
-        debug.set("emulate_zero_presentation_time", debug_config.emulate_zero_presentation_time)?;
-        debug.set("disable_resize_throttling", debug_config.disable_resize_throttling)?;
+        debug.set(
+            "force_pipewire_invalid_modifier",
+            debug_config.force_pipewire_invalid_modifier,
+        )?;
+        debug.set(
+            "emulate_zero_presentation_time",
+            debug_config.emulate_zero_presentation_time,
+        )?;
+        debug.set(
+            "disable_resize_throttling",
+            debug_config.disable_resize_throttling,
+        )?;
         debug.set("disable_transactions", debug_config.disable_transactions)?;
-        debug.set("keep_laptop_panel_on_when_lid_is_closed", debug_config.keep_laptop_panel_on_when_lid_is_closed)?;
+        debug.set(
+            "keep_laptop_panel_on_when_lid_is_closed",
+            debug_config.keep_laptop_panel_on_when_lid_is_closed,
+        )?;
         debug.set("disable_monitor_names", debug_config.disable_monitor_names)?;
-        debug.set("strict_new_window_focus_policy", debug_config.strict_new_window_focus_policy)?;
-        debug.set("honor_xdg_activation_with_invalid_serial", debug_config.honor_xdg_activation_with_invalid_serial)?;
-        debug.set("deactivate_unfocused_windows", debug_config.deactivate_unfocused_windows)?;
-        debug.set("skip_cursor_only_updates_during_vrr", debug_config.skip_cursor_only_updates_during_vrr)?;
-        
+        debug.set(
+            "strict_new_window_focus_policy",
+            debug_config.strict_new_window_focus_policy,
+        )?;
+        debug.set(
+            "honor_xdg_activation_with_invalid_serial",
+            debug_config.honor_xdg_activation_with_invalid_serial,
+        )?;
+        debug.set(
+            "deactivate_unfocused_windows",
+            debug_config.deactivate_unfocused_windows,
+        )?;
+        debug.set(
+            "skip_cursor_only_updates_during_vrr",
+            debug_config.skip_cursor_only_updates_during_vrr,
+        )?;
+
         // Ignored DRM devices
         let ignored_devices = lua.create_table()?;
         for (i, device) in debug_config.ignored_drm_devices.iter().enumerate() {
             ignored_devices.set(i + 1, device.to_string_lossy().to_string())?;
         }
         debug.set("ignored_drm_devices", ignored_devices)?;
-        
+
         config_table.set("debug", debug)?;
         Ok(())
     }
 
     /// Register clipboard configuration
-    fn register_clipboard(lua: &Lua, config_table: &LuaTable, clipboard_config: &Clipboard) -> LuaResult<()> {
+    fn register_clipboard(
+        lua: &Lua,
+        config_table: &LuaTable,
+        clipboard_config: &Clipboard,
+    ) -> LuaResult<()> {
         let clipboard = lua.create_table()?;
         clipboard.set("disable_primary", clipboard_config.disable_primary)?;
         config_table.set("clipboard", clipboard)?;
@@ -463,7 +610,11 @@ impl ConfigApi {
     }
 
     /// Register hotkey overlay configuration
-    fn register_hotkey_overlay(lua: &Lua, config_table: &LuaTable, hotkey_config: &HotkeyOverlay) -> LuaResult<()> {
+    fn register_hotkey_overlay(
+        lua: &Lua,
+        config_table: &LuaTable,
+        hotkey_config: &HotkeyOverlay,
+    ) -> LuaResult<()> {
         let hotkey = lua.create_table()?;
         hotkey.set("skip_at_startup", hotkey_config.skip_at_startup)?;
         hotkey.set("hide_not_bound", hotkey_config.hide_not_bound)?;
@@ -472,7 +623,11 @@ impl ConfigApi {
     }
 
     /// Register config notification configuration
-    fn register_config_notification(lua: &Lua, config_table: &LuaTable, notif_config: &ConfigNotification) -> LuaResult<()> {
+    fn register_config_notification(
+        lua: &Lua,
+        config_table: &LuaTable,
+        notif_config: &ConfigNotification,
+    ) -> LuaResult<()> {
         let notif = lua.create_table()?;
         notif.set("disable_failed", notif_config.disable_failed)?;
         config_table.set("config_notification", notif)?;
@@ -480,7 +635,11 @@ impl ConfigApi {
     }
 
     /// Register xwayland satellite configuration
-    fn register_xwayland_satellite(lua: &Lua, config_table: &LuaTable, xwayland_config: &XwaylandSatellite) -> LuaResult<()> {
+    fn register_xwayland_satellite(
+        lua: &Lua,
+        config_table: &LuaTable,
+        xwayland_config: &XwaylandSatellite,
+    ) -> LuaResult<()> {
         let xwayland = lua.create_table()?;
         xwayland.set("off", xwayland_config.off)?;
         xwayland.set("path", xwayland_config.path.clone())?;
@@ -489,7 +648,11 @@ impl ConfigApi {
     }
 
     /// Register miscellaneous configuration
-    fn register_miscellaneous(lua: &Lua, config_table: &LuaTable, config: &Config) -> LuaResult<()> {
+    fn register_miscellaneous(
+        lua: &Lua,
+        config_table: &LuaTable,
+        config: &Config,
+    ) -> LuaResult<()> {
         // Spawn at startup commands
         let spawn_at_startup = lua.create_table()?;
         for (i, spawn) in config.spawn_at_startup.iter().enumerate() {
@@ -540,26 +703,30 @@ impl ConfigApi {
 
     /// Helper to convert Color to hex string
     fn color_to_hex(color: &niri_config::Color) -> String {
-        format!("#{:02x}{:02x}{:02x}{:02x}", 
+        format!(
+            "#{:02x}{:02x}{:02x}{:02x}",
             (color.r * 255.) as u8,
             (color.g * 255.) as u8,
             (color.b * 255.) as u8,
-            (color.a * 255.) as u8)
+            (color.a * 255.) as u8
+        )
     }
 
     /// Helper to convert Color to hex string without alpha
     fn color_to_hex_noalpha(color: &niri_config::Color) -> String {
-        format!("#{:02x}{:02x}{:02x}", 
+        format!(
+            "#{:02x}{:02x}{:02x}",
             (color.r * 255.) as u8,
             (color.g * 255.) as u8,
-            (color.b * 255.) as u8)
+            (color.b * 255.) as u8
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{create_config_lua_env, get_lua_global, assert_lua_table_has_key};
+    use crate::test_utils::{assert_lua_table_has_key, create_config_lua_env, get_lua_global};
 
     /// Helper to setup config API and get the config table
     #[track_caller]
@@ -571,9 +738,9 @@ mod tests {
     }
 
     #[test]
-    fn test_config_api_registration() {
+    fn config_api_registration() {
         let (_lua, config_table) = setup_config_api();
-        
+
         // Verify all subsystems are registered
         assert!(config_table.get::<LuaTable>("animations").is_ok());
         assert!(config_table.get::<LuaTable>("input").is_ok());
@@ -590,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn test_animations_api() {
+    fn animations_api() {
         let (_lua, config_table) = setup_config_api();
         let animations: LuaTable = config_table.get("animations").unwrap();
 
@@ -605,18 +772,18 @@ mod tests {
     }
 
     #[test]
-    fn test_animations_api_snapshot() {
+    fn animations_api_snapshot() {
         let (_lua, config_table) = setup_config_api();
         let animations: LuaTable = config_table.get("animations").unwrap();
-        
+
         let off: bool = animations.get("off").unwrap();
         let slowdown: f64 = animations.get("slowdown").unwrap();
-        
+
         insta::assert_debug_snapshot!("animations_global", (off, slowdown));
     }
 
     #[test]
-    fn test_layout_api() {
+    fn layout_api() {
         let (_lua, config_table) = setup_config_api();
         let layout: LuaTable = config_table.get("layout").unwrap();
 
@@ -630,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn test_input_api() {
+    fn input_api() {
         let (_lua, config_table) = setup_config_api();
         let input: LuaTable = config_table.get("input").unwrap();
 
@@ -642,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn test_overview_api() {
+    fn overview_api() {
         let (_lua, config_table) = setup_config_api();
         let overview: LuaTable = config_table.get("overview").unwrap();
 
@@ -652,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn test_gestures_api() {
+    fn gestures_api() {
         let (_lua, config_table) = setup_config_api();
         let gestures: LuaTable = config_table.get("gestures").unwrap();
 
@@ -663,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cursor_api() {
+    fn cursor_api() {
         let (_lua, config_table) = setup_config_api();
         let cursor: LuaTable = config_table.get("cursor").unwrap();
 
@@ -674,7 +841,7 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_api() {
+    fn debug_api() {
         let (_lua, config_table) = setup_config_api();
         let debug: LuaTable = config_table.get("debug").unwrap();
 
@@ -684,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clipboard_api() {
+    fn clipboard_api() {
         let (_lua, config_table) = setup_config_api();
         let clipboard: LuaTable = config_table.get("clipboard").unwrap();
 
@@ -693,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hotkey_overlay_api() {
+    fn hotkey_overlay_api() {
         let (_lua, config_table) = setup_config_api();
         let hotkey: LuaTable = config_table.get("hotkey_overlay").unwrap();
 
@@ -703,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_notification_api() {
+    fn config_notification_api() {
         let (_lua, config_table) = setup_config_api();
         let notif: LuaTable = config_table.get("config_notification").unwrap();
 
@@ -712,7 +879,7 @@ mod tests {
     }
 
     #[test]
-    fn test_xwayland_satellite_api() {
+    fn xwayland_satellite_api() {
         let (_lua, config_table) = setup_config_api();
         let xwayland: LuaTable = config_table.get("xwayland_satellite").unwrap();
 

@@ -100,10 +100,7 @@ pub trait CompositorState {
 ///     print("Focused:", focused.title)
 /// end
 /// ```
-pub fn register_runtime_api<S>(
-    lua: &Lua,
-    api: RuntimeApi<S>,
-) -> Result<()>
+pub fn register_runtime_api<S>(lua: &Lua, api: RuntimeApi<S>) -> Result<()>
 where
     S: CompositorState + 'static,
 {
@@ -124,11 +121,15 @@ where
     {
         let api = api.event_loop.clone();
         let get_windows = lua.create_function(move |lua, ()| {
-            let runtime_api = RuntimeApi { event_loop: api.clone() };
-            let windows: Vec<Window> = runtime_api.query(|state, tx| {
-                let windows = state.get_windows();
-                let _ = tx.send_blocking(windows);
-            }).map_err(mlua::Error::external)?;
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let windows: Vec<Window> = runtime_api
+                .query(|state, tx| {
+                    let windows = state.get_windows();
+                    let _ = tx.send_blocking(windows);
+                })
+                .map_err(mlua::Error::external)?;
 
             windows_to_lua(lua, &windows)
         })?;
@@ -139,11 +140,15 @@ where
     {
         let api = api.event_loop.clone();
         let get_focused_window = lua.create_function(move |lua, ()| {
-            let runtime_api = RuntimeApi { event_loop: api.clone() };
-            let window = runtime_api.query(|state, tx| {
-                let window = state.get_focused_window();
-                let _ = tx.send_blocking(window);
-            }).map_err(mlua::Error::external)?;
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let window = runtime_api
+                .query(|state, tx| {
+                    let window = state.get_focused_window();
+                    let _ = tx.send_blocking(window);
+                })
+                .map_err(mlua::Error::external)?;
 
             match window {
                 Some(win) => window_to_lua(lua, &win).map(Value::Table),
@@ -157,11 +162,15 @@ where
     {
         let api = api.event_loop.clone();
         let get_workspaces = lua.create_function(move |lua, ()| {
-            let runtime_api = RuntimeApi { event_loop: api.clone() };
-            let workspaces: Vec<Workspace> = runtime_api.query(|state, tx| {
-                let workspaces = state.get_workspaces();
-                let _ = tx.send_blocking(workspaces);
-            }).map_err(mlua::Error::external)?;
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let workspaces: Vec<Workspace> = runtime_api
+                .query(|state, tx| {
+                    let workspaces = state.get_workspaces();
+                    let _ = tx.send_blocking(workspaces);
+                })
+                .map_err(mlua::Error::external)?;
 
             workspaces_to_lua(lua, &workspaces)
         })?;
@@ -172,11 +181,15 @@ where
     {
         let api = api.event_loop;
         let get_outputs = lua.create_function(move |lua, ()| {
-            let runtime_api = RuntimeApi { event_loop: api.clone() };
-            let outputs: Vec<Output> = runtime_api.query(|state, tx| {
-                let outputs = state.get_outputs();
-                let _ = tx.send_blocking(outputs);
-            }).map_err(mlua::Error::external)?;
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let outputs: Vec<Output> = runtime_api
+                .query(|state, tx| {
+                    let outputs = state.get_outputs();
+                    let _ = tx.send_blocking(outputs);
+                })
+                .map_err(mlua::Error::external)?;
 
             // Convert Vec<Output> to Lua array
             let table = lua.create_table()?;
@@ -230,7 +243,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_runtime_api_construction() {
+    fn runtime_api_construction() {
         // We can test that RuntimeApi can be constructed
         // Full testing requires a real event loop which is integration-level
         // This test verifies the type system works correctly
@@ -242,7 +255,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_mock_state_get_windows_empty() {
+    fn mock_state_get_windows_empty() {
         let state = MockState {
             windows: vec![],
             workspaces: vec![],
@@ -254,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_state_get_focused_window_none() {
+    fn mock_state_get_focused_window_none() {
         let state = MockState {
             windows: vec![],
             workspaces: vec![],
@@ -266,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_state_get_workspaces_empty() {
+    fn mock_state_get_workspaces_empty() {
         let state = MockState {
             windows: vec![],
             workspaces: vec![],
@@ -278,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_state_get_outputs_empty() {
+    fn mock_state_get_outputs_empty() {
         let state = MockState {
             windows: vec![],
             workspaces: vec![],
@@ -294,7 +307,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_compositor_state_trait_object() {
+    fn compositor_state_trait_object() {
         let state = MockState {
             windows: vec![],
             workspaces: vec![],
@@ -313,7 +326,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_compositor_state_get_windows_returns_vec() {
+    fn compositor_state_get_windows_returns_vec() {
         // Ensures get_windows returns a Vec that can be checked for length
         let state = MockState {
             windows: vec![],
@@ -325,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compositor_state_get_focused_window_returns_option() {
+    fn compositor_state_get_focused_window_returns_option() {
         // Ensures get_focused_window returns an Option that can be checked
         let state = MockState {
             windows: vec![],
@@ -337,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compositor_state_get_workspaces_returns_vec() {
+    fn compositor_state_get_workspaces_returns_vec() {
         // Ensures get_workspaces returns a Vec that can be checked for length
         let state = MockState {
             windows: vec![],
@@ -349,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compositor_state_get_outputs_returns_vec() {
+    fn compositor_state_get_outputs_returns_vec() {
         // Ensures get_outputs returns a Vec that can be checked for length
         let state = MockState {
             windows: vec![],
@@ -365,7 +378,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_runtime_api_generic_constraint() {
+    fn runtime_api_generic_constraint() {
         // This test verifies that RuntimeApi can work with any type implementing
         // CompositorState, not just MockState
         fn create_runtime_api<S: CompositorState + 'static>(_state: &S) {
@@ -385,7 +398,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_compositor_state_cloning_preserves_data() {
+    fn compositor_state_cloning_preserves_data() {
         // Verify that cloning state preserves empty collections correctly
         let state1 = MockState {
             windows: vec![],
@@ -404,7 +417,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_focused_window_filter_consistency() {
+    fn focused_window_filter_consistency() {
         // Verify that get_focused_window filters correctly from get_windows
         let state = MockState {
             windows: vec![],

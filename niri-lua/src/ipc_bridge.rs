@@ -1,7 +1,7 @@
 //! Bridge between niri IPC types and Lua tables.
 //!
-//! This module provides conversion functions from niri's IPC types (Window, Workspace, Output, etc.)
-//! into Lua tables that can be accessed from Lua scripts.
+//! This module provides conversion functions from niri's IPC types (Window, Workspace, Output,
+//! etc.) into Lua tables that can be accessed from Lua scripts.
 
 use mlua::{Lua, Result, Table, Value};
 use niri_ipc::{Output, Window, Workspace};
@@ -172,7 +172,10 @@ pub fn output_to_lua(lua: &Lua, output: &Output) -> Result<Table> {
         logical_table.set("width", logical.width)?;
         logical_table.set("height", logical.height)?;
         logical_table.set("scale", logical.scale)?;
-        logical_table.set("transform", format!("{:?}", logical.transform).to_lowercase())?;
+        logical_table.set(
+            "transform",
+            format!("{:?}", logical.transform).to_lowercase(),
+        )?;
         table.set("logical", logical_table)?;
     } else {
         table.set("logical", Value::Nil)?;
@@ -203,9 +206,10 @@ pub fn workspaces_to_lua(lua: &Lua, workspaces: &[Workspace]) -> Result<Table> {
 
 #[cfg(test)]
 mod tests {
+    use niri_ipc::WindowLayout;
+
     use super::*;
     use crate::test_utils::{create_test_window, create_test_workspace};
-    use niri_ipc::WindowLayout;
 
     #[test]
     fn test_window_to_lua() {
@@ -233,10 +237,7 @@ mod tests {
 
         // Verify basic fields
         assert_eq!(table.get::<u64>("id").unwrap(), 123);
-        assert_eq!(
-            table.get::<String>("title").unwrap(),
-            "Test Window"
-        );
+        assert_eq!(table.get::<String>("title").unwrap(), "Test Window");
         assert_eq!(table.get::<bool>("is_focused").unwrap(), true);
 
         // Verify layout exists
@@ -368,7 +369,7 @@ mod tests {
     #[test]
     fn test_output_to_lua() {
         use niri_ipc::{LogicalOutput, Transform};
-        
+
         let lua = Lua::new();
         let output = Output {
             name: "HDMI-1".to_string(),
@@ -400,7 +401,7 @@ mod tests {
     #[test]
     fn test_output_to_lua_no_logical() {
         use mlua::prelude::LuaValue;
-        
+
         let lua = Lua::new();
         let output = Output {
             name: "DP-1".to_string(),
@@ -460,7 +461,7 @@ mod tests {
 
         let table = windows_to_lua(&lua, &windows).unwrap();
         assert_eq!(table.len().unwrap(), 1);
-        
+
         let first_window: Table = table.get(1).unwrap();
         assert_eq!(first_window.get::<u64>("id").unwrap(), 1);
     }
@@ -476,7 +477,7 @@ mod tests {
 
         let table = windows_to_lua(&lua, &windows).unwrap();
         assert_eq!(table.len().unwrap(), 3);
-        
+
         let second_window: Table = table.get(2).unwrap();
         assert_eq!(second_window.get::<u64>("id").unwrap(), 2);
     }
@@ -511,7 +512,7 @@ mod tests {
 
         let table = workspaces_to_lua(&lua, &workspaces).unwrap();
         assert_eq!(table.len().unwrap(), 1);
-        
+
         let first_workspace: Table = table.get(1).unwrap();
         assert_eq!(first_workspace.get::<u64>("id").unwrap(), 1);
     }
@@ -528,7 +529,7 @@ mod tests {
 
         let table = workspaces_to_lua(&lua, &workspaces).unwrap();
         assert_eq!(table.len().unwrap(), 4);
-        
+
         let third_workspace: Table = table.get(3).unwrap();
         assert_eq!(third_workspace.get::<u64>("id").unwrap(), 3);
     }

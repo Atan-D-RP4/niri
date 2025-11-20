@@ -176,7 +176,7 @@ impl WatcherInner {
                 }
             }
         }
-        
+
         self.includes = includes
             .into_iter()
             .map(|path| {

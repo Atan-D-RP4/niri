@@ -6614,7 +6614,12 @@ impl niri_lua::CompositorState for State {
         };
 
         let state = server.event_stream_state.borrow();
-        state.windows.windows.values().find(|w| w.is_focused).cloned()
+        state
+            .windows
+            .windows
+            .values()
+            .find(|w| w.is_focused)
+            .cloned()
     }
 
     fn get_workspaces(&self) -> Vec<niri_ipc::Workspace> {
@@ -6627,7 +6632,8 @@ impl niri_lua::CompositorState for State {
     }
 
     fn get_outputs(&self) -> Vec<niri_ipc::Output> {
-        self.backend.ipc_outputs()
+        self.backend
+            .ipc_outputs()
             .lock()
             .unwrap()
             .values()

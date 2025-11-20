@@ -3,18 +3,16 @@
 //! This module provides utilities for extracting configuration values from a Lua runtime
 //! and applying them to Niri's Config struct.
 
-use super::LuaRuntime;
-use niri_config::{
-    Config, 
-    binds::{Bind, Key, Action, WorkspaceReference}, 
-    misc::SpawnAtStartup,
-    input,
-    FloatOrInt,
-};
-use niri_ipc::SizeChange;
+use std::str::FromStr;
+
 use anyhow::Result;
 use log::{debug, info, warn};
-use std::str::FromStr;
+use niri_config::binds::{Action, Bind, Key, WorkspaceReference};
+use niri_config::misc::SpawnAtStartup;
+use niri_config::{input, Config, FloatOrInt};
+use niri_ipc::SizeChange;
+
+use super::LuaRuntime;
 
 /// Represents a keybinding parsed from Lua configuration.
 ///
@@ -151,7 +149,10 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
             match lua_binding.args[0].parse::<u8>() {
                 Ok(index) => Action::FocusWorkspace(WorkspaceReference::Index(index)),
                 Err(_) => {
-                    warn!("⚠ Failed to parse workspace index from: {}", lua_binding.args[0]);
+                    warn!(
+                        "⚠ Failed to parse workspace index from: {}",
+                        lua_binding.args[0]
+                    );
                     return None;
                 }
             }
@@ -165,7 +166,10 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
             match lua_binding.args[0].parse::<u8>() {
                 Ok(index) => Action::MoveColumnToWorkspace(WorkspaceReference::Index(index), true),
                 Err(_) => {
-                    warn!("⚠ Failed to parse workspace index from: {}", lua_binding.args[0]);
+                    warn!(
+                        "⚠ Failed to parse workspace index from: {}",
+                        lua_binding.args[0]
+                    );
                     return None;
                 }
             }
@@ -179,7 +183,10 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
             match SizeChange::from_str(&lua_binding.args[0]) {
                 Ok(change) => Action::SetColumnWidth(change),
                 Err(_) => {
-                    warn!("⚠ Failed to parse size change from: {}", lua_binding.args[0]);
+                    warn!(
+                        "⚠ Failed to parse size change from: {}",
+                        lua_binding.args[0]
+                    );
                     return None;
                 }
             }
@@ -193,7 +200,10 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
             match SizeChange::from_str(&lua_binding.args[0]) {
                 Ok(change) => Action::SetWindowHeight(change),
                 Err(_) => {
-                    warn!("⚠ Failed to parse size change from: {}", lua_binding.args[0]);
+                    warn!(
+                        "⚠ Failed to parse size change from: {}",
+                        lua_binding.args[0]
+                    );
                     return None;
                 }
             }
@@ -221,10 +231,11 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
         "screenshot-window" => Action::ScreenshotWindow(true, None),
 
         // Unsupported actions requiring arguments
-        "move-column-to-monitor" |
-        "move-window-to-monitor" |
-        "focus-monitor" => {
-            warn!("⚠ Action '{}' requires arguments that aren't fully supported yet in Lua config", lua_binding.action);
+        "move-column-to-monitor" | "move-window-to-monitor" | "focus-monitor" => {
+            warn!(
+                "⚠ Action '{}' requires arguments that aren't fully supported yet in Lua config",
+                lua_binding.action
+            );
             return None;
         }
 
@@ -244,7 +255,6 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
         hotkey_overlay_title: None,
     })
 }
-
 
 /// Attempts to extract and apply Lua configuration values to the given Config.
 ///
@@ -269,7 +279,7 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
 /// Helper function to parse hex color strings like "#1e1e2e" or "#1e1e2eff"
 fn parse_hex_color(s: &str) -> Option<niri_config::Color> {
     let s = s.trim_start_matches('#');
-    
+
     // Support both RGB and RGBA formats
     if s.len() == 6 {
         // RGB format - assume full opacity
@@ -290,10 +300,11 @@ fn parse_hex_color(s: &str) -> Option<niri_config::Color> {
 }
 
 /// Helper function to parse preset size from Lua value
-/// Accepts either a number (for proportion 0.0-1.0) or a table with { proportion = 0.5 } or { fixed = 800 }
+/// Accepts either a number (for proportion 0.0-1.0) or a table with { proportion = 0.5 } or { fixed
+/// = 800 }
 fn parse_preset_size(value: &mlua::Value) -> Option<niri_config::layout::PresetSize> {
     use niri_config::layout::PresetSize;
-    
+
     match value {
         mlua::Value::Number(n) => {
             // Direct number is interpreted as proportion (0.0 to 1.0)
@@ -343,7 +354,15 @@ fn parse_color_value(value: &mlua::Value) -> Option<niri_config::Color> {
 
 /// Helper function to parse border-like configuration (focus_ring, border)
 /// These share the same structure: off, width, active/inactive/urgent colors/gradients
-fn parse_border_config(table: &mlua::Table) -> Result<(bool, Option<f64>, Option<niri_config::Color>, Option<niri_config::Color>, Option<niri_config::Color>)> {
+fn parse_border_config(
+    table: &mlua::Table,
+) -> Result<(
+    bool,
+    Option<f64>,
+    Option<niri_config::Color>,
+    Option<niri_config::Color>,
+    Option<niri_config::Color>,
+)> {
     let mut off = false;
     let mut on = false;
     let mut width = None;
@@ -386,15 +405,22 @@ fn parse_border_config(table: &mlua::Table) -> Result<(bool, Option<f64>, Option
 /// Helper function to parse animation curve from Lua table
 /// Returns either a Spring or Easing curve based on the provided parameters
 fn parse_animation_curve(table: &mlua::Table) -> niri_config::animations::Kind {
-    use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
     use mlua::Value;
+    use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
 
     // Check if this is a spring animation (has damping_ratio, stiffness, epsilon)
     // We need to check that the value exists AND is not Nil
-    let has_spring_params = matches!(table.get::<Value>("damping_ratio"), Ok(Value::Number(_)) | Ok(Value::Integer(_)))
-        || matches!(table.get::<Value>("stiffness"), Ok(Value::Number(_)) | Ok(Value::Integer(_)))
-        || matches!(table.get::<Value>("epsilon"), Ok(Value::Number(_)) | Ok(Value::Integer(_)));
-    
+    let has_spring_params = matches!(
+        table.get::<Value>("damping_ratio"),
+        Ok(Value::Number(_)) | Ok(Value::Integer(_))
+    ) || matches!(
+        table.get::<Value>("stiffness"),
+        Ok(Value::Number(_)) | Ok(Value::Integer(_))
+    ) || matches!(
+        table.get::<Value>("epsilon"),
+        Ok(Value::Number(_)) | Ok(Value::Integer(_))
+    );
+
     if has_spring_params {
         let damping_ratio = table.get::<f64>("damping_ratio").unwrap_or(1.0);
         let stiffness = table.get::<u32>("stiffness").unwrap_or(1000);
@@ -405,11 +431,13 @@ fn parse_animation_curve(table: &mlua::Table) -> niri_config::animations::Kind {
             stiffness,
             epsilon,
         })
-    } 
+    }
     // Check if this is an easing animation (has duration_ms, curve)
-    else if table.get::<mlua::Value>("duration_ms").is_ok() || table.get::<mlua::Value>("curve").is_ok() {
+    else if table.get::<mlua::Value>("duration_ms").is_ok()
+        || table.get::<mlua::Value>("curve").is_ok()
+    {
         let duration_ms = table.get::<u32>("duration_ms").unwrap_or(150);
-        
+
         // Parse curve type (default to ease-out-expo)
         let curve = if let Ok(curve_str) = table.get::<String>("curve") {
             match curve_str.to_lowercase().as_str() {
@@ -418,7 +446,10 @@ fn parse_animation_curve(table: &mlua::Table) -> niri_config::animations::Kind {
                 "ease-out-cubic" | "ease_out_cubic" => Curve::EaseOutCubic,
                 "ease-out-expo" | "ease_out_expo" => Curve::EaseOutExpo,
                 other => {
-                    warn!("Unknown curve type '{}', defaulting to ease-out-expo", other);
+                    warn!(
+                        "Unknown curve type '{}', defaulting to ease-out-expo",
+                        other
+                    );
                     Curve::EaseOutExpo
                 }
             }
@@ -426,10 +457,7 @@ fn parse_animation_curve(table: &mlua::Table) -> niri_config::animations::Kind {
             Curve::EaseOutExpo
         };
 
-        Kind::Easing(EasingParams {
-            duration_ms,
-            curve,
-        })
+        Kind::Easing(EasingParams { duration_ms, curve })
     } else {
         // Default to spring if no parameters specified
         Kind::Spring(SpringParams {
@@ -471,7 +499,6 @@ fn parse_animation(table: &mlua::Table) -> niri_config::animations::Animation {
     Animation { off, kind }
 }
 
-
 pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()> {
     debug!("=== Applying Lua configuration to Config ===");
 
@@ -481,8 +508,12 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
         info!("✓ Found prefer_no_csd in Lua globals");
         match runtime.get_global_bool_opt("prefer_no_csd") {
             Ok(Some(prefer_no_csd)) => {
-                info!("✓ Applying prefer_no_csd: {} → {} (changed: {})",
-                    config.prefer_no_csd, prefer_no_csd, config.prefer_no_csd != prefer_no_csd);
+                info!(
+                    "✓ Applying prefer_no_csd: {} → {} (changed: {})",
+                    config.prefer_no_csd,
+                    prefer_no_csd,
+                    config.prefer_no_csd != prefer_no_csd
+                );
                 config.prefer_no_csd = prefer_no_csd;
             }
             Ok(None) => {
@@ -498,9 +529,12 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
     // Extract and apply keybindings
     debug!("Checking for keybindings in Lua globals");
-            match runtime.get_keybindings() {
+    match runtime.get_keybindings() {
         Ok(raw_keybindings) => {
-            debug!("[apply_lua_config] get_keybindings returned {} bindings", raw_keybindings.len());
+            debug!(
+                "[apply_lua_config] get_keybindings returned {} bindings",
+                raw_keybindings.len()
+            );
             if raw_keybindings.is_empty() {
                 info!("ℹ No keybindings found in Lua configuration");
             } else {
@@ -508,7 +542,10 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 let mut converted_binds = Vec::new();
 
                 for (key, action, args) in raw_keybindings {
-                    debug!("[apply_lua_config] Processing binding: key='{}', action='{}'", key, action);
+                    debug!(
+                        "[apply_lua_config] Processing binding: key='{}', action='{}'",
+                        key, action
+                    );
                     let lua_binding = LuaKeybinding {
                         key,
                         action,
@@ -522,11 +559,17 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 }
 
                 if !converted_binds.is_empty() {
-                    info!("✓ Successfully converted {} keybindings", converted_binds.len());
+                    info!(
+                        "✓ Successfully converted {} keybindings",
+                        converted_binds.len()
+                    );
                     // Merge with existing binds or replace them
                     config.binds.0.extend(converted_binds);
                     // Diagnostic log: print a sample of the added binds
-                    debug!("[apply_lua_config] Sample converted binds: {:?}", &config.binds.0.iter().rev().take(5).collect::<Vec<_>>());
+                    debug!(
+                        "[apply_lua_config] Sample converted binds: {:?}",
+                        &config.binds.0.iter().rev().take(5).collect::<Vec<_>>()
+                    );
                 } else {
                     warn!("⚠ No valid keybindings could be converted from Lua");
                 }
@@ -539,9 +582,12 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
     // Extract and apply startup commands
     debug!("Checking for startup commands in Lua globals");
-            match runtime.get_startup_commands() {
+    match runtime.get_startup_commands() {
         Ok(startup_cmds) => {
-            debug!("[apply_lua_config] get_startup_commands returned {} commands", startup_cmds.len());
+            debug!(
+                "[apply_lua_config] get_startup_commands returned {} commands",
+                startup_cmds.len()
+            );
             if startup_cmds.is_empty() {
                 info!("ℹ No startup commands found in Lua configuration");
             } else {
@@ -553,19 +599,28 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         continue;
                     }
 
-                    debug!("[apply_lua_config] Processing startup command: {:?}", cmd_vec);
+                    debug!(
+                        "[apply_lua_config] Processing startup command: {:?}",
+                        cmd_vec
+                    );
 
                     // For now, treat all commands as spawn-at-startup (execute as array)
                     // This matches the KDL syntax: spawn-at-startup "cmd" "arg1" "arg2"
-                    spawn_at_startup.push(SpawnAtStartup {
-                        command: cmd_vec,
-                    });
+                    spawn_at_startup.push(SpawnAtStartup { command: cmd_vec });
                 }
 
                 if !spawn_at_startup.is_empty() {
                     info!("✓ Added {} startup commands", spawn_at_startup.len());
                     config.spawn_at_startup.extend(spawn_at_startup);
-                    debug!("[apply_lua_config] Sample spawn_at_startup entries: {:?}", &config.spawn_at_startup.iter().rev().take(5).collect::<Vec<_>>());
+                    debug!(
+                        "[apply_lua_config] Sample spawn_at_startup entries: {:?}",
+                        &config
+                            .spawn_at_startup
+                            .iter()
+                            .rev()
+                            .take(5)
+                            .collect::<Vec<_>>()
+                    );
                 }
             }
         }
@@ -700,40 +755,43 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
                     if let Ok(accel_profile) = touchpad_table.get::<String>("accel_profile") {
                         debug!("Applying touchpad.accel_profile: {}", accel_profile);
-                        config.input.touchpad.accel_profile = match accel_profile.to_lowercase().as_str() {
-                            "flat" => Some(input::AccelProfile::Flat),
-                            "adaptive" => Some(input::AccelProfile::Adaptive),
-                            _ => {
-                                warn!("Invalid accel_profile value: {}", accel_profile);
-                                None
-                            }
-                        };
+                        config.input.touchpad.accel_profile =
+                            match accel_profile.to_lowercase().as_str() {
+                                "flat" => Some(input::AccelProfile::Flat),
+                                "adaptive" => Some(input::AccelProfile::Adaptive),
+                                _ => {
+                                    warn!("Invalid accel_profile value: {}", accel_profile);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(scroll_method) = touchpad_table.get::<String>("scroll_method") {
                         debug!("Applying touchpad.scroll_method: {}", scroll_method);
-                        config.input.touchpad.scroll_method = match scroll_method.to_lowercase().replace("-", "").as_str() {
-                            "noscroll" => Some(input::ScrollMethod::NoScroll),
-                            "twofinger" => Some(input::ScrollMethod::TwoFinger),
-                            "edge" => Some(input::ScrollMethod::Edge),
-                            "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
-                            _ => {
-                                warn!("Invalid scroll_method value: {}", scroll_method);
-                                None
-                            }
-                        };
+                        config.input.touchpad.scroll_method =
+                            match scroll_method.to_lowercase().replace("-", "").as_str() {
+                                "noscroll" => Some(input::ScrollMethod::NoScroll),
+                                "twofinger" => Some(input::ScrollMethod::TwoFinger),
+                                "edge" => Some(input::ScrollMethod::Edge),
+                                "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
+                                _ => {
+                                    warn!("Invalid scroll_method value: {}", scroll_method);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(click_method) = touchpad_table.get::<String>("click_method") {
                         debug!("Applying touchpad.click_method: {}", click_method);
-                        config.input.touchpad.click_method = match click_method.to_lowercase().replace("-", "").as_str() {
-                            "clickfinger" => Some(input::ClickMethod::Clickfinger),
-                            "buttonareas" => Some(input::ClickMethod::ButtonAreas),
-                            _ => {
-                                warn!("Invalid click_method value: {}", click_method);
-                                None
-                            }
-                        };
+                        config.input.touchpad.click_method =
+                            match click_method.to_lowercase().replace("-", "").as_str() {
+                                "clickfinger" => Some(input::ClickMethod::Clickfinger),
+                                "buttonareas" => Some(input::ClickMethod::ButtonAreas),
+                                _ => {
+                                    warn!("Invalid click_method value: {}", click_method);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(left_handed) = touchpad_table.get::<bool>("left_handed") {
@@ -746,21 +804,26 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         config.input.touchpad.scroll_button = Some(scroll_button);
                     }
 
-                    if let Ok(scroll_button_lock) = touchpad_table.get::<bool>("scroll_button_lock") {
-                        debug!("Applying touchpad.scroll_button_lock: {}", scroll_button_lock);
+                    if let Ok(scroll_button_lock) = touchpad_table.get::<bool>("scroll_button_lock")
+                    {
+                        debug!(
+                            "Applying touchpad.scroll_button_lock: {}",
+                            scroll_button_lock
+                        );
                         config.input.touchpad.scroll_button_lock = scroll_button_lock;
                     }
 
                     if let Ok(tap_button_map) = touchpad_table.get::<String>("tap_button_map") {
                         debug!("Applying touchpad.tap_button_map: {}", tap_button_map);
-                        config.input.touchpad.tap_button_map = match tap_button_map.to_lowercase().replace("-", "").as_str() {
-                            "leftrightmiddle" => Some(input::TapButtonMap::LeftRightMiddle),
-                            "leftmiddleright" => Some(input::TapButtonMap::LeftMiddleRight),
-                            _ => {
-                                warn!("Invalid tap_button_map value: {}", tap_button_map);
-                                None
-                            }
-                        };
+                        config.input.touchpad.tap_button_map =
+                            match tap_button_map.to_lowercase().replace("-", "").as_str() {
+                                "leftrightmiddle" => Some(input::TapButtonMap::LeftRightMiddle),
+                                "leftmiddleright" => Some(input::TapButtonMap::LeftMiddleRight),
+                                _ => {
+                                    warn!("Invalid tap_button_map value: {}", tap_button_map);
+                                    None
+                                }
+                            };
                     }
 
                     info!("✓ Applied touchpad configuration from Lua");
@@ -787,28 +850,30 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
                     if let Ok(accel_profile) = mouse_table.get::<String>("accel_profile") {
                         debug!("Applying mouse.accel_profile: {}", accel_profile);
-                        config.input.mouse.accel_profile = match accel_profile.to_lowercase().as_str() {
-                            "flat" => Some(input::AccelProfile::Flat),
-                            "adaptive" => Some(input::AccelProfile::Adaptive),
-                            _ => {
-                                warn!("Invalid accel_profile value: {}", accel_profile);
-                                None
-                            }
-                        };
+                        config.input.mouse.accel_profile =
+                            match accel_profile.to_lowercase().as_str() {
+                                "flat" => Some(input::AccelProfile::Flat),
+                                "adaptive" => Some(input::AccelProfile::Adaptive),
+                                _ => {
+                                    warn!("Invalid accel_profile value: {}", accel_profile);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(scroll_method) = mouse_table.get::<String>("scroll_method") {
                         debug!("Applying mouse.scroll_method: {}", scroll_method);
-                        config.input.mouse.scroll_method = match scroll_method.to_lowercase().replace("-", "").as_str() {
-                            "noscroll" => Some(input::ScrollMethod::NoScroll),
-                            "twofinger" => Some(input::ScrollMethod::TwoFinger),
-                            "edge" => Some(input::ScrollMethod::Edge),
-                            "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
-                            _ => {
-                                warn!("Invalid scroll_method value: {}", scroll_method);
-                                None
-                            }
-                        };
+                        config.input.mouse.scroll_method =
+                            match scroll_method.to_lowercase().replace("-", "").as_str() {
+                                "noscroll" => Some(input::ScrollMethod::NoScroll),
+                                "twofinger" => Some(input::ScrollMethod::TwoFinger),
+                                "edge" => Some(input::ScrollMethod::Edge),
+                                "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
+                                _ => {
+                                    warn!("Invalid scroll_method value: {}", scroll_method);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(left_handed) = mouse_table.get::<bool>("left_handed") {
@@ -855,28 +920,30 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
                     if let Ok(accel_profile) = trackpoint_table.get::<String>("accel_profile") {
                         debug!("Applying trackpoint.accel_profile: {}", accel_profile);
-                        config.input.trackpoint.accel_profile = match accel_profile.to_lowercase().as_str() {
-                            "flat" => Some(input::AccelProfile::Flat),
-                            "adaptive" => Some(input::AccelProfile::Adaptive),
-                            _ => {
-                                warn!("Invalid accel_profile value: {}", accel_profile);
-                                None
-                            }
-                        };
+                        config.input.trackpoint.accel_profile =
+                            match accel_profile.to_lowercase().as_str() {
+                                "flat" => Some(input::AccelProfile::Flat),
+                                "adaptive" => Some(input::AccelProfile::Adaptive),
+                                _ => {
+                                    warn!("Invalid accel_profile value: {}", accel_profile);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(scroll_method) = trackpoint_table.get::<String>("scroll_method") {
                         debug!("Applying trackpoint.scroll_method: {}", scroll_method);
-                        config.input.trackpoint.scroll_method = match scroll_method.to_lowercase().replace("-", "").as_str() {
-                            "noscroll" => Some(input::ScrollMethod::NoScroll),
-                            "twofinger" => Some(input::ScrollMethod::TwoFinger),
-                            "edge" => Some(input::ScrollMethod::Edge),
-                            "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
-                            _ => {
-                                warn!("Invalid scroll_method value: {}", scroll_method);
-                                None
-                            }
-                        };
+                        config.input.trackpoint.scroll_method =
+                            match scroll_method.to_lowercase().replace("-", "").as_str() {
+                                "noscroll" => Some(input::ScrollMethod::NoScroll),
+                                "twofinger" => Some(input::ScrollMethod::TwoFinger),
+                                "edge" => Some(input::ScrollMethod::Edge),
+                                "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
+                                _ => {
+                                    warn!("Invalid scroll_method value: {}", scroll_method);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(left_handed) = trackpoint_table.get::<bool>("left_handed") {
@@ -894,8 +961,13 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         config.input.trackpoint.scroll_button = Some(scroll_button);
                     }
 
-                    if let Ok(scroll_button_lock) = trackpoint_table.get::<bool>("scroll_button_lock") {
-                        debug!("Applying trackpoint.scroll_button_lock: {}", scroll_button_lock);
+                    if let Ok(scroll_button_lock) =
+                        trackpoint_table.get::<bool>("scroll_button_lock")
+                    {
+                        debug!(
+                            "Applying trackpoint.scroll_button_lock: {}",
+                            scroll_button_lock
+                        );
                         config.input.trackpoint.scroll_button_lock = scroll_button_lock;
                     }
 
@@ -923,28 +995,30 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
                     if let Ok(accel_profile) = trackball_table.get::<String>("accel_profile") {
                         debug!("Applying trackball.accel_profile: {}", accel_profile);
-                        config.input.trackball.accel_profile = match accel_profile.to_lowercase().as_str() {
-                            "flat" => Some(input::AccelProfile::Flat),
-                            "adaptive" => Some(input::AccelProfile::Adaptive),
-                            _ => {
-                                warn!("Invalid accel_profile value: {}", accel_profile);
-                                None
-                            }
-                        };
+                        config.input.trackball.accel_profile =
+                            match accel_profile.to_lowercase().as_str() {
+                                "flat" => Some(input::AccelProfile::Flat),
+                                "adaptive" => Some(input::AccelProfile::Adaptive),
+                                _ => {
+                                    warn!("Invalid accel_profile value: {}", accel_profile);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(scroll_method) = trackball_table.get::<String>("scroll_method") {
                         debug!("Applying trackball.scroll_method: {}", scroll_method);
-                        config.input.trackball.scroll_method = match scroll_method.to_lowercase().replace("-", "").as_str() {
-                            "noscroll" => Some(input::ScrollMethod::NoScroll),
-                            "twofinger" => Some(input::ScrollMethod::TwoFinger),
-                            "edge" => Some(input::ScrollMethod::Edge),
-                            "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
-                            _ => {
-                                warn!("Invalid scroll_method value: {}", scroll_method);
-                                None
-                            }
-                        };
+                        config.input.trackball.scroll_method =
+                            match scroll_method.to_lowercase().replace("-", "").as_str() {
+                                "noscroll" => Some(input::ScrollMethod::NoScroll),
+                                "twofinger" => Some(input::ScrollMethod::TwoFinger),
+                                "edge" => Some(input::ScrollMethod::Edge),
+                                "onbuttondown" => Some(input::ScrollMethod::OnButtonDown),
+                                _ => {
+                                    warn!("Invalid scroll_method value: {}", scroll_method);
+                                    None
+                                }
+                            };
                     }
 
                     if let Ok(left_handed) = trackball_table.get::<bool>("left_handed") {
@@ -962,8 +1036,13 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         config.input.trackball.scroll_button = Some(scroll_button);
                     }
 
-                    if let Ok(scroll_button_lock) = trackball_table.get::<bool>("scroll_button_lock") {
-                        debug!("Applying trackball.scroll_button_lock: {}", scroll_button_lock);
+                    if let Ok(scroll_button_lock) =
+                        trackball_table.get::<bool>("scroll_button_lock")
+                    {
+                        debug!(
+                            "Applying trackball.scroll_button_lock: {}",
+                            scroll_button_lock
+                        );
                         config.input.trackball.scroll_button_lock = scroll_button_lock;
                     }
 
@@ -989,7 +1068,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         config.input.tablet.map_to_output = Some(map_to_output);
                     }
 
-                    if let Ok(calibration_matrix) = tablet_table.get::<mlua::Table>("calibration_matrix") {
+                    if let Ok(calibration_matrix) =
+                        tablet_table.get::<mlua::Table>("calibration_matrix")
+                    {
                         let mut matrix = Vec::new();
                         if let Ok(len) = calibration_matrix.len() {
                             for i in 1..=len {
@@ -1021,7 +1102,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         config.input.touch.map_to_output = Some(map_to_output);
                     }
 
-                    if let Ok(calibration_matrix) = touch_table.get::<mlua::Table>("calibration_matrix") {
+                    if let Ok(calibration_matrix) =
+                        touch_table.get::<mlua::Table>("calibration_matrix")
+                    {
                         let mut matrix = Vec::new();
                         if let Ok(len) = calibration_matrix.len() {
                             for i in 1..=len {
@@ -1040,13 +1123,19 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 }
 
                 // Extract global input settings
-                if let Ok(disable_power_key) = input_table.get::<bool>("disable_power_key_handling") {
+                if let Ok(disable_power_key) = input_table.get::<bool>("disable_power_key_handling")
+                {
                     debug!("Applying disable_power_key_handling: {}", disable_power_key);
                     config.input.disable_power_key_handling = disable_power_key;
                 }
 
-                if let Ok(workspace_auto_back_and_forth) = input_table.get::<bool>("workspace_auto_back_and_forth") {
-                    debug!("Applying workspace_auto_back_and_forth: {}", workspace_auto_back_and_forth);
+                if let Ok(workspace_auto_back_and_forth) =
+                    input_table.get::<bool>("workspace_auto_back_and_forth")
+                {
+                    debug!(
+                        "Applying workspace_auto_back_and_forth: {}",
+                        workspace_auto_back_and_forth
+                    );
                     config.input.workspace_auto_back_and_forth = workspace_auto_back_and_forth;
                 }
 
@@ -1054,7 +1143,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 if let Ok(warp_table) = input_table.get::<mlua::Table>("warp_mouse_to_focus") {
                     debug!("Processing warp_mouse_to_focus configuration");
                     let mut warp_config = input::WarpMouseToFocus { mode: None };
-                    
+
                     if let Ok(mode) = warp_table.get::<String>("mode") {
                         debug!("Applying warp_mouse_to_focus.mode: {}", mode);
                         warp_config.mode = match mode.to_lowercase().replace("-", "").as_str() {
@@ -1066,69 +1155,80 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             }
                         };
                     }
-                    
+
                     config.input.warp_mouse_to_focus = Some(warp_config);
                     info!("✓ Applied warp_mouse_to_focus configuration from Lua");
                 } else if let Ok(enabled) = input_table.get::<bool>("warp_mouse_to_focus") {
                     // Support simple boolean format: warp_mouse_to_focus = true
                     if enabled {
                         debug!("Applying warp_mouse_to_focus: enabled (default mode)");
-                        config.input.warp_mouse_to_focus = Some(input::WarpMouseToFocus { mode: None });
+                        config.input.warp_mouse_to_focus =
+                            Some(input::WarpMouseToFocus { mode: None });
                     }
                 }
 
                 // Extract focus_follows_mouse
                 if let Ok(focus_table) = input_table.get::<mlua::Table>("focus_follows_mouse") {
                     debug!("Processing focus_follows_mouse configuration");
-                    let mut focus_config = input::FocusFollowsMouse { max_scroll_amount: None };
-                    
+                    let mut focus_config = input::FocusFollowsMouse {
+                        max_scroll_amount: None,
+                    };
+
                     if let Ok(max_scroll) = focus_table.get::<f64>("max_scroll_amount") {
-                        debug!("Applying focus_follows_mouse.max_scroll_amount: {}", max_scroll);
-                        focus_config.max_scroll_amount = Some(niri_config::utils::Percent(max_scroll));
+                        debug!(
+                            "Applying focus_follows_mouse.max_scroll_amount: {}",
+                            max_scroll
+                        );
+                        focus_config.max_scroll_amount =
+                            Some(niri_config::utils::Percent(max_scroll));
                     }
-                    
+
                     config.input.focus_follows_mouse = Some(focus_config);
                     info!("✓ Applied focus_follows_mouse configuration from Lua");
                 } else if let Ok(enabled) = input_table.get::<bool>("focus_follows_mouse") {
                     // Support simple boolean format: focus_follows_mouse = true
                     if enabled {
                         debug!("Applying focus_follows_mouse: enabled");
-                        config.input.focus_follows_mouse = Some(input::FocusFollowsMouse { max_scroll_amount: None });
+                        config.input.focus_follows_mouse = Some(input::FocusFollowsMouse {
+                            max_scroll_amount: None,
+                        });
                     }
                 }
 
                 // Extract mod_key
                 if let Ok(mod_key_str) = input_table.get::<String>("mod_key") {
                     debug!("Applying mod_key: {}", mod_key_str);
-                    config.input.mod_key = match mod_key_str.to_lowercase().replace("-", "").as_str() {
-                        "ctrl" => Some(input::ModKey::Ctrl),
-                        "shift" => Some(input::ModKey::Shift),
-                        "alt" => Some(input::ModKey::Alt),
-                        "super" => Some(input::ModKey::Super),
-                        "isolevel3shift" => Some(input::ModKey::IsoLevel3Shift),
-                        "isolevel5shift" => Some(input::ModKey::IsoLevel5Shift),
-                        _ => {
-                            warn!("Invalid mod_key value: {}", mod_key_str);
-                            None
-                        }
-                    };
+                    config.input.mod_key =
+                        match mod_key_str.to_lowercase().replace("-", "").as_str() {
+                            "ctrl" => Some(input::ModKey::Ctrl),
+                            "shift" => Some(input::ModKey::Shift),
+                            "alt" => Some(input::ModKey::Alt),
+                            "super" => Some(input::ModKey::Super),
+                            "isolevel3shift" => Some(input::ModKey::IsoLevel3Shift),
+                            "isolevel5shift" => Some(input::ModKey::IsoLevel5Shift),
+                            _ => {
+                                warn!("Invalid mod_key value: {}", mod_key_str);
+                                None
+                            }
+                        };
                 }
 
                 // Extract mod_key_nested
                 if let Ok(mod_key_nested_str) = input_table.get::<String>("mod_key_nested") {
                     debug!("Applying mod_key_nested: {}", mod_key_nested_str);
-                    config.input.mod_key_nested = match mod_key_nested_str.to_lowercase().replace("-", "").as_str() {
-                        "ctrl" => Some(input::ModKey::Ctrl),
-                        "shift" => Some(input::ModKey::Shift),
-                        "alt" => Some(input::ModKey::Alt),
-                        "super" => Some(input::ModKey::Super),
-                        "isolevel3shift" => Some(input::ModKey::IsoLevel3Shift),
-                        "isolevel5shift" => Some(input::ModKey::IsoLevel5Shift),
-                        _ => {
-                            warn!("Invalid mod_key_nested value: {}", mod_key_nested_str);
-                            None
-                        }
-                    };
+                    config.input.mod_key_nested =
+                        match mod_key_nested_str.to_lowercase().replace("-", "").as_str() {
+                            "ctrl" => Some(input::ModKey::Ctrl),
+                            "shift" => Some(input::ModKey::Shift),
+                            "alt" => Some(input::ModKey::Alt),
+                            "super" => Some(input::ModKey::Super),
+                            "isolevel3shift" => Some(input::ModKey::IsoLevel3Shift),
+                            "isolevel5shift" => Some(input::ModKey::IsoLevel5Shift),
+                            _ => {
+                                warn!("Invalid mod_key_nested value: {}", mod_key_nested_str);
+                                None
+                            }
+                        };
                 }
             }
             Err(e) => {
@@ -1145,7 +1245,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
         match runtime.inner().globals().get::<mlua::Value>("outputs") {
             Ok(mlua::Value::Table(outputs_array)) => {
                 debug!("Processing outputs array");
-                
+
                 for pair in outputs_array.pairs::<mlua::Value, mlua::Table>() {
                     let (_idx, output_table) = match pair {
                         Ok(p) => p,
@@ -1154,7 +1254,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             continue;
                         }
                     };
-                    
+
                     // Extract output name (required)
                     let name: String = match output_table.get("name") {
                         Ok(name) => name,
@@ -1163,24 +1263,24 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             continue;
                         }
                     };
-                    
+
                     debug!("Processing output: {}", name);
-                    
+
                     let mut output = niri_config::output::Output::default();
                     output.name = name.clone();
-                    
+
                     // Extract off setting
                     if let Ok(off) = output_table.get::<bool>("off") {
                         debug!("  off: {}", off);
                         output.off = off;
                     }
-                    
+
                     // Extract scale
                     if let Ok(scale) = output_table.get::<f64>("scale") {
                         debug!("  scale: {}", scale);
                         output.scale = Some(FloatOrInt(scale));
                     }
-                    
+
                     // Extract transform
                     if let Ok(transform_str) = output_table.get::<String>("transform") {
                         debug!("  transform: {}", transform_str);
@@ -1199,15 +1299,17 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             }
                         };
                     }
-                    
+
                     // Extract position
                     if let Ok(pos_table) = output_table.get::<mlua::Table>("position") {
-                        if let (Ok(x), Ok(y)) = (pos_table.get::<i32>("x"), pos_table.get::<i32>("y")) {
+                        if let (Ok(x), Ok(y)) =
+                            (pos_table.get::<i32>("x"), pos_table.get::<i32>("y"))
+                        {
                             debug!("  position: x={}, y={}", x, y);
                             output.position = Some(niri_config::output::Position { x, y });
                         }
                     }
-                    
+
                     // Extract mode (resolution and refresh rate)
                     if let Ok(mode_str) = output_table.get::<String>("mode") {
                         debug!("  mode: {}", mode_str);
@@ -1218,7 +1320,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                                 if let (Ok(width), Ok(height), Ok(refresh)) = (
                                     width_str.parse::<u16>(),
                                     height_str.parse::<u16>(),
-                                    refresh_str.parse::<f64>()
+                                    refresh_str.parse::<f64>(),
                                 ) {
                                     output.mode = Some(niri_config::output::Mode {
                                         custom: false,
@@ -1232,10 +1334,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             }
                         } else if let Some((width_str, height_str)) = mode_str.split_once('x') {
                             // No refresh rate specified
-                            if let (Ok(width), Ok(height)) = (
-                                width_str.parse::<u16>(),
-                                height_str.parse::<u16>()
-                            ) {
+                            if let (Ok(width), Ok(height)) =
+                                (width_str.parse::<u16>(), height_str.parse::<u16>())
+                            {
                                 output.mode = Some(niri_config::output::Mode {
                                     custom: false,
                                     mode: niri_ipc::ConfiguredMode {
@@ -1247,9 +1348,10 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             }
                         }
                     }
-                    
+
                     // Extract variable refresh rate
-                    if let Ok(vrr_table) = output_table.get::<mlua::Table>("variable_refresh_rate") {
+                    if let Ok(vrr_table) = output_table.get::<mlua::Table>("variable_refresh_rate")
+                    {
                         let on_demand = vrr_table.get::<bool>("on_demand").unwrap_or(false);
                         debug!("  variable_refresh_rate.on_demand: {}", on_demand);
                         output.variable_refresh_rate = Some(niri_config::output::Vrr { on_demand });
@@ -1257,21 +1359,25 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                         // Support simple boolean format
                         if vrr_bool {
                             debug!("  variable_refresh_rate: enabled");
-                            output.variable_refresh_rate = Some(niri_config::output::Vrr { on_demand: false });
+                            output.variable_refresh_rate =
+                                Some(niri_config::output::Vrr { on_demand: false });
                         }
                     }
-                    
+
                     // Extract focus_at_startup
                     if let Ok(focus) = output_table.get::<bool>("focus_at_startup") {
                         debug!("  focus_at_startup: {}", focus);
                         output.focus_at_startup = focus;
                     }
-                    
+
                     info!("✓ Configured output: {}", name);
                     config.outputs.0.push(output);
                 }
-                
-                info!("✓ Applied {} output configuration(s) from Lua", config.outputs.0.len());
+
+                info!(
+                    "✓ Applied {} output configuration(s) from Lua",
+                    config.outputs.0.len()
+                );
             }
             Ok(_) => {
                 warn!("✗ outputs is not a table");
@@ -1327,7 +1433,8 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract default_column_display
                 if let Ok(display_str) = layout_table.get::<String>("default_column_display") {
                     debug!("  default_column_display: {}", display_str);
-                    config.layout.default_column_display = match display_str.to_lowercase().as_str() {
+                    config.layout.default_column_display = match display_str.to_lowercase().as_str()
+                    {
                         "normal" => niri_ipc::ColumnDisplay::Normal,
                         "tab" | "tabbed" => niri_ipc::ColumnDisplay::Tabbed,
                         _ => {
@@ -1388,7 +1495,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 if let Ok(widths_table) = layout_table.get::<mlua::Table>("preset_column_widths") {
                     debug!("Processing preset_column_widths configuration");
                     let mut widths = Vec::new();
-                    
+
                     // Iterate over the array
                     for pair in widths_table.pairs::<mlua::Value, mlua::Value>() {
                         match pair {
@@ -1405,17 +1512,18 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             }
                         }
                     }
-                    
+
                     if !widths.is_empty() {
                         config.layout.preset_column_widths = widths;
                     }
                 }
 
                 // Extract preset_window_heights
-                if let Ok(heights_table) = layout_table.get::<mlua::Table>("preset_window_heights") {
+                if let Ok(heights_table) = layout_table.get::<mlua::Table>("preset_window_heights")
+                {
                     debug!("Processing preset_window_heights configuration");
                     let mut heights = Vec::new();
-                    
+
                     // Iterate over the array
                     for pair in heights_table.pairs::<mlua::Value, mlua::Value>() {
                         match pair {
@@ -1432,14 +1540,16 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             }
                         }
                     }
-                    
+
                     if !heights.is_empty() {
                         config.layout.preset_window_heights = heights;
                     }
                 }
 
                 // Extract default_column_width
-                if let Ok(default_width_value) = layout_table.get::<mlua::Value>("default_column_width") {
+                if let Ok(default_width_value) =
+                    layout_table.get::<mlua::Value>("default_column_width")
+                {
                     if let Some(preset_size) = parse_preset_size(&default_width_value) {
                         debug!("  default_column_width: {:?}", preset_size);
                         config.layout.default_column_width = Some(preset_size);
@@ -1451,7 +1561,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract focus_ring configuration
                 if let Ok(focus_ring_table) = layout_table.get::<mlua::Table>("focus_ring") {
                     debug!("Processing focus_ring configuration");
-                    if let Ok((off, width, active_color, inactive_color, urgent_color)) = parse_border_config(&focus_ring_table) {
+                    if let Ok((off, width, active_color, inactive_color, urgent_color)) =
+                        parse_border_config(&focus_ring_table)
+                    {
                         config.layout.focus_ring.off = off;
                         if let Some(w) = width {
                             config.layout.focus_ring.width = w;
@@ -1474,7 +1586,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract border configuration
                 if let Ok(border_table) = layout_table.get::<mlua::Table>("border") {
                     debug!("Processing border configuration");
-                    if let Ok((off, width, active_color, inactive_color, urgent_color)) = parse_border_config(&border_table) {
+                    if let Ok((off, width, active_color, inactive_color, urgent_color)) =
+                        parse_border_config(&border_table)
+                    {
                         config.layout.border.off = off;
                         if let Some(w) = width {
                             config.layout.border.width = w;
@@ -1497,7 +1611,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract insert_hint configuration
                 if let Ok(hint_table) = layout_table.get::<mlua::Table>("insert_hint") {
                     debug!("Processing insert_hint configuration");
-                    
+
                     if let Ok(off_value) = hint_table.get::<bool>("off") {
                         config.layout.insert_hint.off = off_value;
                     }
@@ -1506,7 +1620,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             config.layout.insert_hint.off = false;
                         }
                     }
-                    
+
                     if let Ok(color_value) = hint_table.get::<mlua::Value>("color") {
                         if let Some(color) = parse_color_value(&color_value) {
                             config.layout.insert_hint.color = color;
@@ -1518,43 +1632,43 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract shadow configuration
                 if let Ok(shadow_table) = layout_table.get::<mlua::Table>("shadow") {
                     debug!("Processing shadow configuration");
-                    
+
                     if let Ok(off_value) = shadow_table.get::<bool>("off") {
                         config.layout.shadow.on = !off_value;
                     }
                     if let Ok(on_value) = shadow_table.get::<bool>("on") {
                         config.layout.shadow.on = on_value;
                     }
-                    
+
                     if let Ok(softness) = shadow_table.get::<f64>("softness") {
                         config.layout.shadow.softness = softness;
                         debug!("  shadow.softness: {}", softness);
                     }
-                    
+
                     if let Ok(spread) = shadow_table.get::<f64>("spread") {
                         config.layout.shadow.spread = spread;
                         debug!("  shadow.spread: {}", spread);
                     }
-                    
+
                     if let Ok(draw_behind) = shadow_table.get::<bool>("draw_behind_window") {
                         config.layout.shadow.draw_behind_window = draw_behind;
                         debug!("  shadow.draw_behind_window: {}", draw_behind);
                     }
-                    
+
                     if let Ok(color_value) = shadow_table.get::<mlua::Value>("color") {
                         if let Some(color) = parse_color_value(&color_value) {
                             config.layout.shadow.color = color;
                             debug!("  shadow.color set");
                         }
                     }
-                    
+
                     if let Ok(color_value) = shadow_table.get::<mlua::Value>("inactive_color") {
                         if let Some(color) = parse_color_value(&color_value) {
                             config.layout.shadow.inactive_color = Some(color);
                             debug!("  shadow.inactive_color set");
                         }
                     }
-                    
+
                     // Extract shadow offset
                     if let Ok(offset_table) = shadow_table.get::<mlua::Table>("offset") {
                         use niri_config::FloatOrInt;
@@ -1648,15 +1762,13 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 for pair in env_table.pairs::<String, mlua::Value>() {
                     if let Ok((name, value)) = pair {
                         let value_str = match value {
-                            mlua::Value::String(s) => {
-                                match s.to_str() {
-                                    Ok(str_val) => Some(str_val.to_string()),
-                                    Err(_) => {
-                                        warn!("Invalid UTF-8 in environment variable {}", name);
-                                        continue;
-                                    }
+                            mlua::Value::String(s) => match s.to_str() {
+                                Ok(str_val) => Some(str_val.to_string()),
+                                Err(_) => {
+                                    warn!("Invalid UTF-8 in environment variable {}", name);
+                                    continue;
                                 }
-                            }
+                            },
                             mlua::Value::Nil => None,
                             _ => {
                                 warn!("Invalid environment variable value for {}", name);
@@ -1671,10 +1783,16 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                     }
                 }
 
-                info!("✓ Applied {} environment variable(s) from Lua", config.environment.0.len());
+                info!(
+                    "✓ Applied {} environment variable(s) from Lua",
+                    config.environment.0.len()
+                );
             }
             Err(e) => {
-                warn!("✗ Error extracting environment configuration from Lua: {}", e);
+                warn!(
+                    "✗ Error extracting environment configuration from Lua: {}",
+                    e
+                );
             }
         }
     } else {
@@ -1703,11 +1821,15 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 }
 
                 // Extract boolean flags
-                if let Ok(value) = debug_table.get::<bool>("dbus_interfaces_in_non_session_instances") {
+                if let Ok(value) =
+                    debug_table.get::<bool>("dbus_interfaces_in_non_session_instances")
+                {
                     debug!("  dbus_interfaces_in_non_session_instances: {}", value);
                     config.debug.dbus_interfaces_in_non_session_instances = value;
                 }
-                if let Ok(value) = debug_table.get::<bool>("wait_for_frame_completion_before_queueing") {
+                if let Ok(value) =
+                    debug_table.get::<bool>("wait_for_frame_completion_before_queueing")
+                {
                     debug!("  wait_for_frame_completion_before_queueing: {}", value);
                     config.debug.wait_for_frame_completion_before_queueing = value;
                 }
@@ -1727,7 +1849,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                     debug!("  keep_max_bpc_unchanged: {}", value);
                     config.debug.keep_max_bpc_unchanged = value;
                 }
-                if let Ok(value) = debug_table.get::<bool>("restrict_primary_scanout_to_matching_format") {
+                if let Ok(value) =
+                    debug_table.get::<bool>("restrict_primary_scanout_to_matching_format")
+                {
                     debug!("  restrict_primary_scanout_to_matching_format: {}", value);
                     config.debug.restrict_primary_scanout_to_matching_format = value;
                 }
@@ -1747,7 +1871,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                     debug!("  disable_transactions: {}", value);
                     config.debug.disable_transactions = value;
                 }
-                if let Ok(value) = debug_table.get::<bool>("keep_laptop_panel_on_when_lid_is_closed") {
+                if let Ok(value) =
+                    debug_table.get::<bool>("keep_laptop_panel_on_when_lid_is_closed")
+                {
                     debug!("  keep_laptop_panel_on_when_lid_is_closed: {}", value);
                     config.debug.keep_laptop_panel_on_when_lid_is_closed = value;
                 }
@@ -1759,7 +1885,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                     debug!("  strict_new_window_focus_policy: {}", value);
                     config.debug.strict_new_window_focus_policy = value;
                 }
-                if let Ok(value) = debug_table.get::<bool>("honor_xdg_activation_with_invalid_serial") {
+                if let Ok(value) =
+                    debug_table.get::<bool>("honor_xdg_activation_with_invalid_serial")
+                {
                     debug!("  honor_xdg_activation_with_invalid_serial: {}", value);
                     config.debug.honor_xdg_activation_with_invalid_serial = value;
                 }
@@ -1782,11 +1910,14 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 if let Ok(devices_table) = debug_table.get::<mlua::Table>("ignored_drm_devices") {
                     debug!("Processing ignored_drm_devices");
                     config.debug.ignored_drm_devices.clear();
-                    
+
                     for pair in devices_table.pairs::<usize, String>() {
                         if let Ok((_, device_path)) = pair {
                             debug!("  ignored device: {}", device_path);
-                            config.debug.ignored_drm_devices.push(std::path::PathBuf::from(device_path));
+                            config
+                                .debug
+                                .ignored_drm_devices
+                                .push(std::path::PathBuf::from(device_path));
                         }
                     }
                 }
@@ -1815,7 +1946,7 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                             // Extract workspace name (required)
                             if let Ok(name) = ws_table.get::<String>("name") {
                                 debug!("  Processing workspace: {}", name);
-                                
+
                                 let mut workspace = niri_config::workspace::Workspace {
                                     name: niri_config::workspace::WorkspaceName(name.clone()),
                                     open_on_output: None,
@@ -1829,8 +1960,9 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                                 }
 
                                 // Note: workspace layout is a subset of the main layout config
-                                // For now, we skip layout parsing as it requires complex LayoutPart handling
-                                // This can be added later if needed
+                                // For now, we skip layout parsing as it requires complex LayoutPart
+                                // handling This can be added later
+                                // if needed
 
                                 config.workspaces.push(workspace);
                             } else {
@@ -1850,10 +1982,16 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                     }
                 }
 
-                info!("✓ Applied {} workspace(s) from Lua", config.workspaces.len());
+                info!(
+                    "✓ Applied {} workspace(s) from Lua",
+                    config.workspaces.len()
+                );
             }
             Err(e) => {
-                warn!("✗ Error extracting workspaces configuration from Lua: {}", e);
+                warn!(
+                    "✗ Error extracting workspaces configuration from Lua: {}",
+                    e
+                );
             }
         }
     } else {
@@ -1882,24 +2020,30 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 }
 
                 // Extract workspace_switch animation
-                if let Ok(ws_switch_table) = animations_table.get::<mlua::Table>("workspace_switch") {
+                if let Ok(ws_switch_table) = animations_table.get::<mlua::Table>("workspace_switch")
+                {
                     debug!("  Processing workspace_switch animation");
                     let anim = parse_animation(&ws_switch_table);
-                    config.animations.workspace_switch = niri_config::animations::WorkspaceSwitchAnim(anim);
+                    config.animations.workspace_switch =
+                        niri_config::animations::WorkspaceSwitchAnim(anim);
                 }
 
                 // Extract horizontal_view_movement animation
-                if let Ok(hvm_table) = animations_table.get::<mlua::Table>("horizontal_view_movement") {
+                if let Ok(hvm_table) =
+                    animations_table.get::<mlua::Table>("horizontal_view_movement")
+                {
                     debug!("  Processing horizontal_view_movement animation");
                     let anim = parse_animation(&hvm_table);
-                    config.animations.horizontal_view_movement = niri_config::animations::HorizontalViewMovementAnim(anim);
+                    config.animations.horizontal_view_movement =
+                        niri_config::animations::HorizontalViewMovementAnim(anim);
                 }
 
                 // Extract window_movement animation
                 if let Ok(wm_table) = animations_table.get::<mlua::Table>("window_movement") {
                     debug!("  Processing window_movement animation");
                     let anim = parse_animation(&wm_table);
-                    config.animations.window_movement = niri_config::animations::WindowMovementAnim(anim);
+                    config.animations.window_movement =
+                        niri_config::animations::WindowMovementAnim(anim);
                 }
 
                 // Extract window_open animation (with optional custom_shader)
@@ -1936,37 +2080,48 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 }
 
                 // Extract config_notification_open_close animation
-                if let Ok(cn_table) = animations_table.get::<mlua::Table>("config_notification_open_close") {
+                if let Ok(cn_table) =
+                    animations_table.get::<mlua::Table>("config_notification_open_close")
+                {
                     debug!("  Processing config_notification_open_close animation");
                     let anim = parse_animation(&cn_table);
-                    config.animations.config_notification_open_close = niri_config::animations::ConfigNotificationOpenCloseAnim(anim);
+                    config.animations.config_notification_open_close =
+                        niri_config::animations::ConfigNotificationOpenCloseAnim(anim);
                 }
 
                 // Extract exit_confirmation_open_close animation
-                if let Ok(ec_table) = animations_table.get::<mlua::Table>("exit_confirmation_open_close") {
+                if let Ok(ec_table) =
+                    animations_table.get::<mlua::Table>("exit_confirmation_open_close")
+                {
                     debug!("  Processing exit_confirmation_open_close animation");
                     let anim = parse_animation(&ec_table);
-                    config.animations.exit_confirmation_open_close = niri_config::animations::ExitConfirmationOpenCloseAnim(anim);
+                    config.animations.exit_confirmation_open_close =
+                        niri_config::animations::ExitConfirmationOpenCloseAnim(anim);
                 }
 
                 // Extract screenshot_ui_open animation
                 if let Ok(su_table) = animations_table.get::<mlua::Table>("screenshot_ui_open") {
                     debug!("  Processing screenshot_ui_open animation");
                     let anim = parse_animation(&su_table);
-                    config.animations.screenshot_ui_open = niri_config::animations::ScreenshotUiOpenAnim(anim);
+                    config.animations.screenshot_ui_open =
+                        niri_config::animations::ScreenshotUiOpenAnim(anim);
                 }
 
                 // Extract overview_open_close animation
                 if let Ok(oo_table) = animations_table.get::<mlua::Table>("overview_open_close") {
                     debug!("  Processing overview_open_close animation");
                     let anim = parse_animation(&oo_table);
-                    config.animations.overview_open_close = niri_config::animations::OverviewOpenCloseAnim(anim);
+                    config.animations.overview_open_close =
+                        niri_config::animations::OverviewOpenCloseAnim(anim);
                 }
 
                 info!("✓ Applied animations configuration from Lua");
             }
             Err(e) => {
-                warn!("✗ Error extracting animations configuration from Lua: {}", e);
+                warn!(
+                    "✗ Error extracting animations configuration from Lua: {}",
+                    e
+                );
             }
         }
     } else {
@@ -1983,17 +2138,17 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract dnd_edge_view_scroll settings
                 if let Ok(devs_table) = gestures_table.get::<mlua::Table>("dnd_edge_view_scroll") {
                     debug!("  Processing dnd_edge_view_scroll");
-                    
+
                     if let Ok(trigger_width) = devs_table.get::<f64>("trigger_width") {
                         debug!("    trigger_width: {}", trigger_width);
                         config.gestures.dnd_edge_view_scroll.trigger_width = trigger_width;
                     }
-                    
+
                     if let Ok(delay_ms) = devs_table.get::<u16>("delay_ms") {
                         debug!("    delay_ms: {}", delay_ms);
                         config.gestures.dnd_edge_view_scroll.delay_ms = delay_ms;
                     }
-                    
+
                     if let Ok(max_speed) = devs_table.get::<f64>("max_speed") {
                         debug!("    max_speed: {}", max_speed);
                         config.gestures.dnd_edge_view_scroll.max_speed = max_speed;
@@ -2001,19 +2156,21 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 }
 
                 // Extract dnd_edge_workspace_switch settings
-                if let Ok(dews_table) = gestures_table.get::<mlua::Table>("dnd_edge_workspace_switch") {
+                if let Ok(dews_table) =
+                    gestures_table.get::<mlua::Table>("dnd_edge_workspace_switch")
+                {
                     debug!("  Processing dnd_edge_workspace_switch");
-                    
+
                     if let Ok(trigger_height) = dews_table.get::<f64>("trigger_height") {
                         debug!("    trigger_height: {}", trigger_height);
                         config.gestures.dnd_edge_workspace_switch.trigger_height = trigger_height;
                     }
-                    
+
                     if let Ok(delay_ms) = dews_table.get::<u16>("delay_ms") {
                         debug!("    delay_ms: {}", delay_ms);
                         config.gestures.dnd_edge_workspace_switch.delay_ms = delay_ms;
                     }
-                    
+
                     if let Ok(max_speed) = dews_table.get::<f64>("max_speed") {
                         debug!("    max_speed: {}", max_speed);
                         config.gestures.dnd_edge_workspace_switch.max_speed = max_speed;
@@ -2023,27 +2180,27 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 // Extract hot_corners settings
                 if let Ok(hot_corners_table) = gestures_table.get::<mlua::Table>("hot_corners") {
                     debug!("  Processing hot_corners");
-                    
+
                     if let Ok(off) = hot_corners_table.get::<bool>("off") {
                         debug!("    off: {}", off);
                         config.gestures.hot_corners.off = off;
                     }
-                    
+
                     if let Ok(top_left) = hot_corners_table.get::<bool>("top_left") {
                         debug!("    top_left: {}", top_left);
                         config.gestures.hot_corners.top_left = top_left;
                     }
-                    
+
                     if let Ok(top_right) = hot_corners_table.get::<bool>("top_right") {
                         debug!("    top_right: {}", top_right);
                         config.gestures.hot_corners.top_right = top_right;
                     }
-                    
+
                     if let Ok(bottom_left) = hot_corners_table.get::<bool>("bottom_left") {
                         debug!("    bottom_left: {}", bottom_left);
                         config.gestures.hot_corners.bottom_left = bottom_left;
                     }
-                    
+
                     if let Ok(bottom_right) = hot_corners_table.get::<bool>("bottom_right") {
                         debug!("    bottom_right: {}", bottom_right);
                         config.gestures.hot_corners.bottom_right = bottom_right;
@@ -2085,7 +2242,11 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
     // Extract hotkey_overlay configuration
     if runtime.has_global("hotkey_overlay") {
         debug!("Found hotkey_overlay configuration in Lua globals");
-        match runtime.inner().globals().get::<mlua::Table>("hotkey_overlay") {
+        match runtime
+            .inner()
+            .globals()
+            .get::<mlua::Table>("hotkey_overlay")
+        {
             Ok(hotkey_table) => {
                 debug!("Processing hotkey_overlay configuration");
 
@@ -2102,7 +2263,10 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 info!("✓ Applied hotkey_overlay configuration from Lua");
             }
             Err(e) => {
-                warn!("✗ Error extracting hotkey_overlay configuration from Lua: {}", e);
+                warn!(
+                    "✗ Error extracting hotkey_overlay configuration from Lua: {}",
+                    e
+                );
             }
         }
     } else {
@@ -2112,7 +2276,11 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
     // Extract config_notification configuration
     if runtime.has_global("config_notification") {
         debug!("Found config_notification configuration in Lua globals");
-        match runtime.inner().globals().get::<mlua::Table>("config_notification") {
+        match runtime
+            .inner()
+            .globals()
+            .get::<mlua::Table>("config_notification")
+        {
             Ok(config_notif_table) => {
                 debug!("Processing config_notification configuration");
 
@@ -2124,7 +2292,10 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 info!("✓ Applied config_notification configuration from Lua");
             }
             Err(e) => {
-                warn!("✗ Error extracting config_notification configuration from Lua: {}", e);
+                warn!(
+                    "✗ Error extracting config_notification configuration from Lua: {}",
+                    e
+                );
             }
         }
     } else {
@@ -2133,7 +2304,8 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
 
     // Register the config API so Lua scripts can read the current configuration
     debug!("Registering configuration API to Lua");
-    runtime.register_config_api(config)
+    runtime
+        .register_config_api(config)
         .map_err(|e| anyhow::anyhow!("Failed to register config API: {}", e))?;
 
     info!("✓ Configuration API registered successfully");
@@ -2147,7 +2319,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_apply_lua_config_empty() {
+    fn apply_lua_config_empty() {
         let runtime = LuaRuntime::new().unwrap();
         let mut config = Config::default();
         let result = apply_lua_config(&runtime, &mut config);
@@ -2155,7 +2327,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_lua_config_with_values() {
+    fn apply_lua_config_with_values() {
         let runtime = LuaRuntime::new().unwrap();
         runtime
             .load_string("prefer_no_csd = true")
@@ -2170,7 +2342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_lua_config_with_startup_commands_from_return() {
+    fn apply_lua_config_with_startup_commands_from_return() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         local startup_commands = { "waybar", "swaync" }
@@ -2185,7 +2357,9 @@ mod tests {
             let globals = runtime.inner().globals();
             if let Ok(value) = config_table.get::<mlua::Value>("startup_commands") {
                 if value != mlua::Value::Nil {
-                    globals.set("startup", value).expect("Failed to set startup global");
+                    globals
+                        .set("startup", value)
+                        .expect("Failed to set startup global");
                 }
             }
         }
@@ -2201,7 +2375,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lua_config_from_string_with_startup_commands() {
+    fn lua_config_from_string_with_startup_commands() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2226,16 +2400,25 @@ mod tests {
 
         // Verify startup commands were applied
         assert_eq!(config.spawn_at_startup.len(), initial_startup_count + 3);
-        assert_eq!(config.spawn_at_startup[initial_startup_count].command, vec!["waybar"]);
-        assert_eq!(config.spawn_at_startup[initial_startup_count + 1].command, vec!["swaync"]);
-        assert_eq!(config.spawn_at_startup[initial_startup_count + 2].command, vec!["nm-applet"]);
+        assert_eq!(
+            config.spawn_at_startup[initial_startup_count].command,
+            vec!["waybar"]
+        );
+        assert_eq!(
+            config.spawn_at_startup[initial_startup_count + 1].command,
+            vec!["swaync"]
+        );
+        assert_eq!(
+            config.spawn_at_startup[initial_startup_count + 2].command,
+            vec!["nm-applet"]
+        );
 
         // Verify keybindings were also applied
         assert!(config.binds.0.len() >= initial_bind_count + 1);
     }
 
     #[test]
-    fn test_extract_keybindings() {
+    fn extract_keybindings() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2251,14 +2434,16 @@ mod tests {
         apply_lua_config(&runtime, &mut config).expect("Failed to apply config");
 
         // We should have added 2 more bindings
-        assert!(config.binds.0.len() >= initial_bind_count + 2,
+        assert!(
+            config.binds.0.len() >= initial_bind_count + 2,
             "Expected at least {} bindings, got {}",
             initial_bind_count + 2,
-            config.binds.0.len());
+            config.binds.0.len()
+        );
     }
 
     #[test]
-    fn test_exit_action() {
+    fn exit_action() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2278,7 +2463,7 @@ mod tests {
     }
 
     #[test]
-    fn test_overview_toggle_action() {
+    fn overview_toggle_action() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2298,7 +2483,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hotkey_overlay_action() {
+    fn hotkey_overlay_action() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2314,11 +2499,14 @@ mod tests {
 
         assert_eq!(config.binds.0.len(), initial_bind_count + 1);
         let last_bind = &config.binds.0[initial_bind_count];
-        matches!(last_bind.action, niri_config::binds::Action::ShowHotkeyOverlay);
+        matches!(
+            last_bind.action,
+            niri_config::binds::Action::ShowHotkeyOverlay
+        );
     }
 
     #[test]
-    fn test_suspend_action() {
+    fn suspend_action() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2338,7 +2526,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_new_actions() {
+    fn multiple_new_actions() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2360,7 +2548,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_preset_column_width_action() {
+    fn switch_preset_column_width_action() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2376,11 +2564,14 @@ mod tests {
 
         assert_eq!(config.binds.0.len(), initial_bind_count + 1);
         let last_bind = &config.binds.0[initial_bind_count];
-        matches!(last_bind.action, niri_config::binds::Action::SwitchPresetColumnWidth);
+        matches!(
+            last_bind.action,
+            niri_config::binds::Action::SwitchPresetColumnWidth
+        );
     }
 
     #[test]
-    fn test_consume_or_expel_window_actions() {
+    fn consume_or_expel_window_actions() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2399,7 +2590,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_focus_between_floating_and_tiling() {
+    fn switch_focus_between_floating_and_tiling() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2415,11 +2606,14 @@ mod tests {
 
         assert_eq!(config.binds.0.len(), initial_bind_count + 1);
         let last_bind = &config.binds.0[initial_bind_count];
-        matches!(last_bind.action, niri_config::binds::Action::SwitchFocusBetweenFloatingAndTiling);
+        matches!(
+            last_bind.action,
+            niri_config::binds::Action::SwitchFocusBetweenFloatingAndTiling
+        );
     }
 
     #[test]
-    fn test_all_window_management_actions() {
+    fn all_window_management_actions() {
         let runtime = LuaRuntime::new().unwrap();
         let code = r#"
         binds = {
@@ -2441,7 +2635,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_input_keyboard_xkb_config() {
+    fn apply_input_keyboard_xkb_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2477,7 +2671,10 @@ mod tests {
         // Verify that xkb settings were applied
         assert_eq!(config.input.keyboard.xkb.layout, "us");
         assert_eq!(config.input.keyboard.xkb.variant, "dvorak");
-        assert_eq!(config.input.keyboard.xkb.options, Some("ctrl:nocaps,compose:ralt".to_string()));
+        assert_eq!(
+            config.input.keyboard.xkb.options,
+            Some("ctrl:nocaps,compose:ralt".to_string())
+        );
         assert_eq!(config.input.keyboard.xkb.model, "pc105");
         assert_eq!(config.input.keyboard.xkb.rules, "evdev");
 
@@ -2491,7 +2688,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_partial_input_config() {
+    fn apply_partial_input_config() {
         use crate::LuaConfig;
 
         // Test that we can apply only some xkb settings
@@ -2530,7 +2727,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_example_config_input() {
+    fn apply_example_config_input() {
         use crate::LuaConfig;
 
         // Test with the actual example config's input settings
@@ -2561,7 +2758,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_touchpad_config() {
+    fn apply_touchpad_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2593,8 +2790,14 @@ mod tests {
         assert_eq!(config.input.touchpad.tap, true);
         assert_eq!(config.input.touchpad.natural_scroll, true);
         assert_eq!(config.input.touchpad.accel_speed.0, 0.5);
-        assert_eq!(config.input.touchpad.accel_profile, Some(input::AccelProfile::Flat));
-        assert_eq!(config.input.touchpad.scroll_method, Some(input::ScrollMethod::TwoFinger));
+        assert_eq!(
+            config.input.touchpad.accel_profile,
+            Some(input::AccelProfile::Flat)
+        );
+        assert_eq!(
+            config.input.touchpad.scroll_method,
+            Some(input::ScrollMethod::TwoFinger)
+        );
         assert_eq!(config.input.touchpad.dwt, true);
         assert_eq!(config.input.touchpad.dwtp, false);
         assert_eq!(config.input.touchpad.drag, Some(true));
@@ -2603,7 +2806,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_mouse_config() {
+    fn apply_mouse_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2629,13 +2832,16 @@ mod tests {
         // Verify mouse configuration was applied
         assert_eq!(config.input.mouse.natural_scroll, false);
         assert_eq!(config.input.mouse.accel_speed.0, 0.3);
-        assert_eq!(config.input.mouse.accel_profile, Some(input::AccelProfile::Adaptive));
+        assert_eq!(
+            config.input.mouse.accel_profile,
+            Some(input::AccelProfile::Adaptive)
+        );
         assert_eq!(config.input.mouse.left_handed, true);
         assert_eq!(config.input.mouse.middle_emulation, true);
     }
 
     #[test]
-    fn test_apply_combined_input_config() {
+    fn apply_combined_input_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2671,17 +2877,17 @@ mod tests {
         assert_eq!(config.input.keyboard.xkb.layout, "us,ru");
         assert_eq!(config.input.keyboard.xkb.variant, "dvorak,");
         assert_eq!(config.input.keyboard.numlock, true);
-        
+
         assert_eq!(config.input.touchpad.tap, true);
         assert_eq!(config.input.touchpad.natural_scroll, true);
         assert_eq!(config.input.touchpad.accel_speed.0, 0.2);
-        
+
         assert_eq!(config.input.mouse.natural_scroll, false);
         assert_eq!(config.input.mouse.accel_speed.0, -0.1);
     }
 
     #[test]
-    fn test_apply_input_enum_values() {
+    fn apply_input_enum_values() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2708,17 +2914,35 @@ mod tests {
         apply_lua_config(runtime, &mut config).expect("Failed to apply config");
 
         // Verify all enum values were correctly parsed
-        assert_eq!(config.input.touchpad.accel_profile, Some(input::AccelProfile::Adaptive));
-        assert_eq!(config.input.touchpad.scroll_method, Some(input::ScrollMethod::Edge));
-        assert_eq!(config.input.touchpad.click_method, Some(input::ClickMethod::ButtonAreas));
-        assert_eq!(config.input.touchpad.tap_button_map, Some(input::TapButtonMap::LeftMiddleRight));
-        
-        assert_eq!(config.input.mouse.accel_profile, Some(input::AccelProfile::Flat));
-        assert_eq!(config.input.mouse.scroll_method, Some(input::ScrollMethod::OnButtonDown));
+        assert_eq!(
+            config.input.touchpad.accel_profile,
+            Some(input::AccelProfile::Adaptive)
+        );
+        assert_eq!(
+            config.input.touchpad.scroll_method,
+            Some(input::ScrollMethod::Edge)
+        );
+        assert_eq!(
+            config.input.touchpad.click_method,
+            Some(input::ClickMethod::ButtonAreas)
+        );
+        assert_eq!(
+            config.input.touchpad.tap_button_map,
+            Some(input::TapButtonMap::LeftMiddleRight)
+        );
+
+        assert_eq!(
+            config.input.mouse.accel_profile,
+            Some(input::AccelProfile::Flat)
+        );
+        assert_eq!(
+            config.input.mouse.scroll_method,
+            Some(input::ScrollMethod::OnButtonDown)
+        );
     }
 
     #[test]
-    fn test_apply_trackpoint_trackball_config() {
+    fn apply_trackpoint_trackball_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2763,8 +2987,14 @@ mod tests {
         assert_eq!(config.input.trackpoint.middle_emulation, true);
         assert_eq!(config.input.trackpoint.scroll_button_lock, false);
         assert_eq!(config.input.trackpoint.accel_speed.0, 0.3);
-        assert_eq!(config.input.trackpoint.accel_profile, Some(input::AccelProfile::Flat));
-        assert_eq!(config.input.trackpoint.scroll_method, Some(input::ScrollMethod::OnButtonDown));
+        assert_eq!(
+            config.input.trackpoint.accel_profile,
+            Some(input::AccelProfile::Flat)
+        );
+        assert_eq!(
+            config.input.trackpoint.scroll_method,
+            Some(input::ScrollMethod::OnButtonDown)
+        );
         assert_eq!(config.input.trackpoint.scroll_button, Some(9));
 
         // Verify trackball settings
@@ -2774,13 +3004,19 @@ mod tests {
         assert_eq!(config.input.trackball.middle_emulation, false);
         assert_eq!(config.input.trackball.scroll_button_lock, true);
         assert_eq!(config.input.trackball.accel_speed.0, -0.2);
-        assert_eq!(config.input.trackball.accel_profile, Some(input::AccelProfile::Adaptive));
-        assert_eq!(config.input.trackball.scroll_method, Some(input::ScrollMethod::NoScroll));
+        assert_eq!(
+            config.input.trackball.accel_profile,
+            Some(input::AccelProfile::Adaptive)
+        );
+        assert_eq!(
+            config.input.trackball.scroll_method,
+            Some(input::ScrollMethod::NoScroll)
+        );
         assert_eq!(config.input.trackball.scroll_button, Some(8));
     }
 
     #[test]
-    fn test_apply_tablet_touch_config() {
+    fn apply_tablet_touch_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2810,17 +3046,26 @@ mod tests {
         // Verify tablet settings
         assert_eq!(config.input.tablet.off, false);
         assert_eq!(config.input.tablet.left_handed, true);
-        assert_eq!(config.input.tablet.map_to_output, Some("HDMI-1".to_string()));
-        assert_eq!(config.input.tablet.calibration_matrix, Some(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]));
+        assert_eq!(
+            config.input.tablet.map_to_output,
+            Some("HDMI-1".to_string())
+        );
+        assert_eq!(
+            config.input.tablet.calibration_matrix,
+            Some(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+        );
 
         // Verify touch settings
         assert_eq!(config.input.touch.off, false);
         assert_eq!(config.input.touch.map_to_output, Some("eDP-1".to_string()));
-        assert_eq!(config.input.touch.calibration_matrix, Some(vec![0.9, 0.0, 0.1, 0.0, 0.9, 0.1]));
+        assert_eq!(
+            config.input.touch.calibration_matrix,
+            Some(vec![0.9, 0.0, 0.1, 0.0, 0.9, 0.1])
+        );
     }
 
     #[test]
-    fn test_apply_global_input_settings() {
+    fn apply_global_input_settings() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2864,7 +3109,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_bool_warp_and_focus_follows() {
+    fn apply_bool_warp_and_focus_follows() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2893,7 +3138,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_output_basic_config() {
+    fn apply_output_basic_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2932,7 +3177,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_output_transform() {
+    fn apply_output_transform() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2962,12 +3207,15 @@ mod tests {
 
         // Verify transforms
         assert_eq!(config.outputs.0[0].transform, niri_ipc::Transform::_90);
-        assert_eq!(config.outputs.0[1].transform, niri_ipc::Transform::Flipped180);
+        assert_eq!(
+            config.outputs.0[1].transform,
+            niri_ipc::Transform::Flipped180
+        );
         assert_eq!(config.outputs.0[2].transform, niri_ipc::Transform::Normal);
     }
 
     #[test]
-    fn test_apply_output_position_and_mode() {
+    fn apply_output_position_and_mode() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -2994,14 +3242,20 @@ mod tests {
         apply_lua_config(runtime, &mut config).expect("Failed to apply config");
 
         // Verify first output
-        assert_eq!(config.outputs.0[0].position, Some(niri_config::output::Position { x: 0, y: 0 }));
+        assert_eq!(
+            config.outputs.0[0].position,
+            Some(niri_config::output::Position { x: 0, y: 0 })
+        );
         let mode1 = config.outputs.0[0].mode.as_ref().unwrap();
         assert_eq!(mode1.mode.width, 1920);
         assert_eq!(mode1.mode.height, 1080);
         assert_eq!(mode1.mode.refresh, Some(60.0));
 
         // Verify second output
-        assert_eq!(config.outputs.0[1].position, Some(niri_config::output::Position { x: 1920, y: 0 }));
+        assert_eq!(
+            config.outputs.0[1].position,
+            Some(niri_config::output::Position { x: 1920, y: 0 })
+        );
         let mode2 = config.outputs.0[1].mode.as_ref().unwrap();
         assert_eq!(mode2.mode.width, 3840);
         assert_eq!(mode2.mode.height, 2160);
@@ -3009,7 +3263,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_output_vrr_and_focus() {
+    fn apply_output_vrr_and_focus() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3037,17 +3291,31 @@ mod tests {
 
         // Verify first output - VRR with on_demand
         assert!(config.outputs.0[0].variable_refresh_rate.is_some());
-        assert_eq!(config.outputs.0[0].variable_refresh_rate.as_ref().unwrap().on_demand, true);
+        assert_eq!(
+            config.outputs.0[0]
+                .variable_refresh_rate
+                .as_ref()
+                .unwrap()
+                .on_demand,
+            true
+        );
         assert_eq!(config.outputs.0[0].focus_at_startup, true);
 
         // Verify second output - VRR boolean shorthand
         assert!(config.outputs.0[1].variable_refresh_rate.is_some());
-        assert_eq!(config.outputs.0[1].variable_refresh_rate.as_ref().unwrap().on_demand, false);
+        assert_eq!(
+            config.outputs.0[1]
+                .variable_refresh_rate
+                .as_ref()
+                .unwrap()
+                .on_demand,
+            false
+        );
         assert_eq!(config.outputs.0[1].focus_at_startup, false);
     }
 
     #[test]
-    fn test_apply_output_disabled() {
+    fn apply_output_disabled() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3073,7 +3341,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_basic_config() {
+    fn apply_layout_basic_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3099,7 +3367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_center_and_display() {
+    fn apply_layout_center_and_display() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3119,12 +3387,18 @@ mod tests {
 
         // Verify enum values
         use niri_config::layout::CenterFocusedColumn;
-        assert_eq!(config.layout.center_focused_column, CenterFocusedColumn::OnOverflow);
-        assert_eq!(config.layout.default_column_display, niri_ipc::ColumnDisplay::Tabbed);
+        assert_eq!(
+            config.layout.center_focused_column,
+            CenterFocusedColumn::OnOverflow
+        );
+        assert_eq!(
+            config.layout.default_column_display,
+            niri_ipc::ColumnDisplay::Tabbed
+        );
     }
 
     #[test]
-    fn test_apply_layout_background_color_rgba() {
+    fn apply_layout_background_color_rgba() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3149,7 +3423,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_hex_color() {
+    fn apply_layout_hex_color() {
         use crate::LuaConfig;
 
         let code = r##"
@@ -3174,7 +3448,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_struts() {
+    fn apply_layout_struts() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3199,9 +3473,10 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_preset_column_widths() {
-        use crate::LuaConfig;
+    fn apply_layout_preset_column_widths() {
         use niri_config::layout::PresetSize;
+
+        use crate::LuaConfig;
 
         let code = r#"
         local layout = {
@@ -3219,15 +3494,23 @@ mod tests {
 
         // Verify preset widths
         assert_eq!(config.layout.preset_column_widths.len(), 3);
-        assert!(matches!(config.layout.preset_column_widths[0], PresetSize::Proportion(p) if (p - 0.33).abs() < 0.01));
-        assert!(matches!(config.layout.preset_column_widths[1], PresetSize::Proportion(p) if (p - 0.5).abs() < 0.01));
-        assert!(matches!(config.layout.preset_column_widths[2], PresetSize::Fixed(800)));
+        assert!(
+            matches!(config.layout.preset_column_widths[0], PresetSize::Proportion(p) if (p - 0.33).abs() < 0.01)
+        );
+        assert!(
+            matches!(config.layout.preset_column_widths[1], PresetSize::Proportion(p) if (p - 0.5).abs() < 0.01)
+        );
+        assert!(matches!(
+            config.layout.preset_column_widths[2],
+            PresetSize::Fixed(800)
+        ));
     }
 
     #[test]
-    fn test_apply_layout_preset_window_heights() {
-        use crate::LuaConfig;
+    fn apply_layout_preset_window_heights() {
         use niri_config::layout::PresetSize;
+
+        use crate::LuaConfig;
 
         let code = r#"
         local layout = {
@@ -3245,15 +3528,23 @@ mod tests {
 
         // Verify preset heights
         assert_eq!(config.layout.preset_window_heights.len(), 3);
-        assert!(matches!(config.layout.preset_window_heights[0], PresetSize::Proportion(p) if (p - 0.25).abs() < 0.01));
-        assert!(matches!(config.layout.preset_window_heights[1], PresetSize::Proportion(p) if (p - 0.5).abs() < 0.01));
-        assert!(matches!(config.layout.preset_window_heights[2], PresetSize::Fixed(600)));
+        assert!(
+            matches!(config.layout.preset_window_heights[0], PresetSize::Proportion(p) if (p - 0.25).abs() < 0.01)
+        );
+        assert!(
+            matches!(config.layout.preset_window_heights[1], PresetSize::Proportion(p) if (p - 0.5).abs() < 0.01)
+        );
+        assert!(matches!(
+            config.layout.preset_window_heights[2],
+            PresetSize::Fixed(600)
+        ));
     }
 
     #[test]
-    fn test_apply_layout_default_column_width() {
-        use crate::LuaConfig;
+    fn apply_layout_default_column_width() {
         use niri_config::layout::PresetSize;
+
+        use crate::LuaConfig;
 
         let code = r#"
         local layout = {
@@ -3270,11 +3561,13 @@ mod tests {
         apply_lua_config(runtime, &mut config).expect("Failed to apply config");
 
         // Verify default column width
-        assert!(matches!(config.layout.default_column_width, Some(PresetSize::Proportion(p)) if (p - 0.6).abs() < 0.01));
+        assert!(
+            matches!(config.layout.default_column_width, Some(PresetSize::Proportion(p)) if (p - 0.6).abs() < 0.01)
+        );
     }
 
     #[test]
-    fn test_apply_layout_focus_ring() {
+    fn apply_layout_focus_ring() {
         use crate::LuaConfig;
 
         let code = r##"
@@ -3306,7 +3599,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_border() {
+    fn apply_layout_border() {
         use crate::LuaConfig;
 
         let code = r##"
@@ -3336,7 +3629,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_insert_hint() {
+    fn apply_layout_insert_hint() {
         use crate::LuaConfig;
 
         let code = r##"
@@ -3364,7 +3657,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_layout_shadow() {
+    fn apply_layout_shadow() {
         use crate::LuaConfig;
 
         let code = r##"
@@ -3401,7 +3694,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_cursor_config() {
+    fn apply_cursor_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3429,7 +3722,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_screenshot_path_config() {
+    fn apply_screenshot_path_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3451,7 +3744,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_environment_config() {
+    fn apply_environment_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3473,13 +3766,29 @@ mod tests {
 
         // Verify environment variables
         assert_eq!(config.environment.0.len(), 4);
-        
+
         // Check that all expected variables exist
-        let has_display = config.environment.0.iter().any(|v| v.name == "DISPLAY" && v.value == Some(":0".to_string()));
-        let has_wayland = config.environment.0.iter().any(|v| v.name == "WAYLAND_DISPLAY" && v.value == Some("wayland-1".to_string()));
-        let has_session = config.environment.0.iter().any(|v| v.name == "XDG_SESSION_TYPE" && v.value == Some("wayland".to_string()));
-        let has_editor = config.environment.0.iter().any(|v| v.name == "EDITOR" && v.value == Some("nvim".to_string()));
-        
+        let has_display = config
+            .environment
+            .0
+            .iter()
+            .any(|v| v.name == "DISPLAY" && v.value == Some(":0".to_string()));
+        let has_wayland = config
+            .environment
+            .0
+            .iter()
+            .any(|v| v.name == "WAYLAND_DISPLAY" && v.value == Some("wayland-1".to_string()));
+        let has_session = config
+            .environment
+            .0
+            .iter()
+            .any(|v| v.name == "XDG_SESSION_TYPE" && v.value == Some("wayland".to_string()));
+        let has_editor = config
+            .environment
+            .0
+            .iter()
+            .any(|v| v.name == "EDITOR" && v.value == Some("nvim".to_string()));
+
         assert!(has_display, "DISPLAY variable not found");
         assert!(has_wayland, "WAYLAND_DISPLAY variable not found");
         assert!(has_session, "XDG_SESSION_TYPE variable not found");
@@ -3487,7 +3796,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_debug_config() {
+    fn apply_debug_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3512,19 +3821,31 @@ mod tests {
 
         // Verify debug settings
         use niri_config::debug::PreviewRender;
-        assert!(matches!(config.debug.preview_render, Some(PreviewRender::Screencast)));
+        assert!(matches!(
+            config.debug.preview_render,
+            Some(PreviewRender::Screencast)
+        ));
         assert_eq!(config.debug.enable_overlay_planes, true);
         assert_eq!(config.debug.disable_cursor_plane, false);
         assert_eq!(config.debug.disable_direct_scanout, true);
         assert_eq!(config.debug.emulate_zero_presentation_time, true);
-        assert_eq!(config.debug.render_drm_device, Some(std::path::PathBuf::from("/dev/dri/renderD128")));
+        assert_eq!(
+            config.debug.render_drm_device,
+            Some(std::path::PathBuf::from("/dev/dri/renderD128"))
+        );
         assert_eq!(config.debug.ignored_drm_devices.len(), 2);
-        assert!(config.debug.ignored_drm_devices.contains(&std::path::PathBuf::from("/dev/dri/card0")));
-        assert!(config.debug.ignored_drm_devices.contains(&std::path::PathBuf::from("/dev/dri/card1")));
+        assert!(config
+            .debug
+            .ignored_drm_devices
+            .contains(&std::path::PathBuf::from("/dev/dri/card0")));
+        assert!(config
+            .debug
+            .ignored_drm_devices
+            .contains(&std::path::PathBuf::from("/dev/dri/card1")));
     }
 
     #[test]
-    fn test_apply_workspaces_config() {
+    fn apply_workspaces_config() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3547,27 +3868,34 @@ mod tests {
 
         // Verify workspaces
         assert_eq!(config.workspaces.len(), 5);
-        
+
         assert_eq!(config.workspaces[0].name.0, "1");
         assert_eq!(config.workspaces[0].open_on_output, None);
-        
+
         assert_eq!(config.workspaces[1].name.0, "2");
         assert_eq!(config.workspaces[1].open_on_output, None);
-        
+
         assert_eq!(config.workspaces[2].name.0, "3");
-        assert_eq!(config.workspaces[2].open_on_output, Some("DP-1".to_string()));
-        
+        assert_eq!(
+            config.workspaces[2].open_on_output,
+            Some("DP-1".to_string())
+        );
+
         assert_eq!(config.workspaces[3].name.0, "browser");
-        assert_eq!(config.workspaces[3].open_on_output, Some("HDMI-A-1".to_string()));
-        
+        assert_eq!(
+            config.workspaces[3].open_on_output,
+            Some("HDMI-A-1".to_string())
+        );
+
         assert_eq!(config.workspaces[4].name.0, "code");
         assert_eq!(config.workspaces[4].open_on_output, None);
     }
 
     #[test]
-    fn test_apply_animations_spring_config() {
-        use crate::LuaConfig;
+    fn apply_animations_spring_config() {
         use niri_config::animations::Kind;
+
+        use crate::LuaConfig;
 
         let code = r#"
         local animations = {
@@ -3602,9 +3930,10 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_animations_easing_config() {
-        use crate::LuaConfig;
+    fn apply_animations_easing_config() {
         use niri_config::animations::{Curve, Kind};
+
+        use crate::LuaConfig;
 
         let code = r#"
         local animations = {
@@ -3630,14 +3959,18 @@ mod tests {
             assert_eq!(easing.duration_ms, 150);
             assert_eq!(easing.curve, Curve::EaseOutCubic);
         } else {
-            panic!("Expected window_open to have Easing animation, got {:?}", anim.kind);
+            panic!(
+                "Expected window_open to have Easing animation, got {:?}",
+                anim.kind
+            );
         }
     }
 
     #[test]
-    fn test_apply_animations_all_curves() {
-        use crate::LuaConfig;
+    fn apply_animations_all_curves() {
         use niri_config::animations::{Curve, Kind};
+
+        use crate::LuaConfig;
 
         let code = r#"
         local animations = {
@@ -3690,7 +4023,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_animations_with_custom_shader() {
+    fn apply_animations_with_custom_shader() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3726,19 +4059,28 @@ mod tests {
 
         // Verify window_open with custom shader
         assert_eq!(config.animations.window_open.anim.off, false);
-        assert_eq!(config.animations.window_open.custom_shader, Some("path/to/shader.frag".to_string()));
+        assert_eq!(
+            config.animations.window_open.custom_shader,
+            Some("path/to/shader.frag".to_string())
+        );
 
         // Verify window_close with custom shader
         assert_eq!(config.animations.window_close.anim.off, false);
-        assert_eq!(config.animations.window_close.custom_shader, Some("another/shader.frag".to_string()));
+        assert_eq!(
+            config.animations.window_close.custom_shader,
+            Some("another/shader.frag".to_string())
+        );
 
         // Verify window_resize with custom shader
         assert_eq!(config.animations.window_resize.anim.off, false);
-        assert_eq!(config.animations.window_resize.custom_shader, Some("resize/shader.frag".to_string()));
+        assert_eq!(
+            config.animations.window_resize.custom_shader,
+            Some("resize/shader.frag".to_string())
+        );
     }
 
     #[test]
-    fn test_apply_animations_global_settings() {
+    fn apply_animations_global_settings() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3760,7 +4102,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_animations_all_types() {
+    fn apply_animations_all_types() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3845,7 +4187,10 @@ mod tests {
         assert_eq!(config.animations.window_open.anim.off, false);
         assert_eq!(config.animations.window_close.anim.off, false);
         assert_eq!(config.animations.window_resize.anim.off, false);
-        assert_eq!(config.animations.config_notification_open_close.0.off, false);
+        assert_eq!(
+            config.animations.config_notification_open_close.0.off,
+            false
+        );
         assert_eq!(config.animations.exit_confirmation_open_close.0.off, false);
         assert_eq!(config.animations.screenshot_ui_open.0.off, false);
         assert_eq!(config.animations.overview_open_close.0.off, false);
@@ -3853,7 +4198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_animations_off_flag() {
+    fn apply_animations_off_flag() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3877,7 +4222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_gestures_dnd_edge_view_scroll() {
+    fn apply_gestures_dnd_edge_view_scroll() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3905,7 +4250,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_gestures_dnd_edge_workspace_switch() {
+    fn apply_gestures_dnd_edge_workspace_switch() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3927,13 +4272,16 @@ mod tests {
         apply_lua_config(runtime, &mut config).expect("Failed to apply config");
 
         // Verify dnd_edge_workspace_switch settings
-        assert_eq!(config.gestures.dnd_edge_workspace_switch.trigger_height, 75.0);
+        assert_eq!(
+            config.gestures.dnd_edge_workspace_switch.trigger_height,
+            75.0
+        );
         assert_eq!(config.gestures.dnd_edge_workspace_switch.delay_ms, 150);
         assert_eq!(config.gestures.dnd_edge_workspace_switch.max_speed, 1500.0);
     }
 
     #[test]
-    fn test_apply_gestures_hot_corners() {
+    fn apply_gestures_hot_corners() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -3965,7 +4313,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_gestures_all_settings() {
+    fn apply_gestures_all_settings() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4002,11 +4350,14 @@ mod tests {
         assert_eq!(config.gestures.dnd_edge_view_scroll.trigger_width, 100.0);
         assert_eq!(config.gestures.dnd_edge_view_scroll.delay_ms, 300);
         assert_eq!(config.gestures.dnd_edge_view_scroll.max_speed, 3000.0);
-        
-        assert_eq!(config.gestures.dnd_edge_workspace_switch.trigger_height, 80.0);
+
+        assert_eq!(
+            config.gestures.dnd_edge_workspace_switch.trigger_height,
+            80.0
+        );
         assert_eq!(config.gestures.dnd_edge_workspace_switch.delay_ms, 250);
         assert_eq!(config.gestures.dnd_edge_workspace_switch.max_speed, 2500.0);
-        
+
         assert_eq!(config.gestures.hot_corners.off, true);
         assert_eq!(config.gestures.hot_corners.top_left, false);
         assert_eq!(config.gestures.hot_corners.top_right, true);
@@ -4015,7 +4366,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_clipboard_disable_primary() {
+    fn apply_clipboard_disable_primary() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4029,7 +4380,7 @@ mod tests {
         let runtime = lua_config.runtime();
 
         let mut config = Config::default();
-        
+
         // Store original value
         let original_disable_primary = config.clipboard.disable_primary;
 
@@ -4041,7 +4392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_clipboard_enable_primary() {
+    fn apply_clipboard_enable_primary() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4063,7 +4414,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_hotkey_overlay_skip_at_startup() {
+    fn apply_hotkey_overlay_skip_at_startup() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4077,7 +4428,7 @@ mod tests {
         let runtime = lua_config.runtime();
 
         let mut config = Config::default();
-        
+
         // Store original value
         let original_skip = config.hotkey_overlay.skip_at_startup;
 
@@ -4089,7 +4440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_hotkey_overlay_hide_not_bound() {
+    fn apply_hotkey_overlay_hide_not_bound() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4103,7 +4454,7 @@ mod tests {
         let runtime = lua_config.runtime();
 
         let mut config = Config::default();
-        
+
         // Store original value
         let original_hide = config.hotkey_overlay.hide_not_bound;
 
@@ -4115,7 +4466,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_hotkey_overlay_all_settings() {
+    fn apply_hotkey_overlay_all_settings() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4139,7 +4490,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_config_notification_disable_failed() {
+    fn apply_config_notification_disable_failed() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4153,7 +4504,7 @@ mod tests {
         let runtime = lua_config.runtime();
 
         let mut config = Config::default();
-        
+
         // Store original value
         let original_disable = config.config_notification.disable_failed;
 
@@ -4165,7 +4516,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_config_notification_enable_failed() {
+    fn apply_config_notification_enable_failed() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4187,7 +4538,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_all_misc_configs_together() {
+    fn apply_all_misc_configs_together() {
         use crate::LuaConfig;
 
         let code = r#"
@@ -4202,20 +4553,20 @@ mod tests {
                 top_right = true,
             }
         }
-        
+
         local clipboard = {
             disable_primary = true
         }
-        
+
         local hotkey_overlay = {
             skip_at_startup = false,
             hide_not_bound = true
         }
-        
+
         local config_notification = {
             disable_failed = true
         }
-        
+
         return {
             gestures = gestures,
             clipboard = clipboard,
@@ -4237,14 +4588,12 @@ mod tests {
         assert_eq!(config.gestures.dnd_edge_view_scroll.max_speed, 1800.0);
         assert_eq!(config.gestures.hot_corners.off, false);
         assert_eq!(config.gestures.hot_corners.top_right, true);
-        
+
         assert_eq!(config.clipboard.disable_primary, true);
-        
+
         assert_eq!(config.hotkey_overlay.skip_at_startup, false);
         assert_eq!(config.hotkey_overlay.hide_not_bound, true);
-        
+
         assert_eq!(config.config_notification.disable_failed, true);
     }
 }
-
-
