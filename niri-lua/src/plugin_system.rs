@@ -362,6 +362,12 @@ mod tests {
     }
 
     #[test]
+    fn test_plugin_manager_default() {
+        let manager = PluginManager::default();
+        assert!(!manager.search_paths.is_empty());
+    }
+
+    #[test]
     fn test_plugin_metadata_from_lua() {
         let lua = Lua::new();
         let table = lua.create_table().unwrap();
@@ -373,6 +379,45 @@ mod tests {
         assert_eq!(metadata.name, "test-plugin");
         assert_eq!(metadata.version, "1.0.0");
         assert_eq!(metadata.author, Some("Test Author".to_string()));
+    }
+
+    #[test]
+    fn test_plugin_metadata_minimal() {
+        let lua = Lua::new();
+        let table = lua.create_table().unwrap();
+        table.set("name", "minimal").unwrap();
+        table.set("version", "0.1.0").unwrap();
+
+        let metadata = PluginMetadata::from_lua(&LuaValue::Table(table)).unwrap();
+        assert_eq!(metadata.name, "minimal");
+        assert_eq!(metadata.version, "0.1.0");
+        assert_eq!(metadata.author, None);
+    }
+
+    #[test]
+    fn test_plugin_metadata_from_non_table() {
+        let invalid_value = LuaValue::Integer(42);
+        let result = PluginMetadata::from_lua(&invalid_value);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_plugin_info_creation() {
+        let metadata = PluginMetadata {
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            author: None,
+            description: None,
+            license: None,
+            dependencies: Vec::new(),
+        };
+        let path = std::path::PathBuf::from("/tmp/test.lua");
+        let info = PluginInfo::new(metadata.clone(), path.clone());
+        
+        assert_eq!(info.metadata.name, "test");
+        assert_eq!(info.path, path);
+        assert!(info.enabled);
+        assert!(!info.loaded);
     }
 
     #[test]
@@ -391,6 +436,64 @@ mod tests {
         manager.discover(&lua).unwrap();
 
         assert!(manager.get_plugin("test_plugin").is_some());
+    }
+
+    #[test]
+    fn test_discover_multiple_plugins() {
+        let lua = Lua::new();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        // Create multiple test plugins
+        for i in 1..=3 {
+            let plugin_file = temp_path.join(format!("plugin{}.lua", i));
+            let mut file = File::create(&plugin_file).unwrap();
+            file.write_all(format!("return {{ name = 'plugin{}', version = '1.0' }}", i).as_bytes()).unwrap();
+        }
+
+        let mut manager = PluginManager::new();
+        manager.add_search_path(temp_path);
+        manager.discover(&lua).unwrap();
+
+        assert!(manager.get_plugin("plugin1").is_some());
+        assert!(manager.get_plugin("plugin2").is_some());
+        assert!(manager.get_plugin("plugin3").is_some());
+    }
+
+    #[test]
+    fn test_add_search_path() {
+        let mut manager = PluginManager::new();
+        let initial_count = manager.search_paths.len();
+        
+        let temp_dir = TempDir::new().unwrap();
+        manager.add_search_path(temp_dir.path().to_path_buf());
+        
+        assert_eq!(manager.search_paths.len(), initial_count + 1);
+    }
+
+    #[test]
+    fn test_get_plugin_exists() {
+        let lua = Lua::new();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        let plugin_file = temp_path.join("myapp.lua");
+        let mut file = File::create(&plugin_file).unwrap();
+        file.write_all(b"return { name = 'myapp', version = '2.0' }").unwrap();
+
+        let mut manager = PluginManager::new();
+        manager.add_search_path(temp_path);
+        manager.discover(&lua).unwrap();
+
+        let plugin = manager.get_plugin("myapp");
+        assert!(plugin.is_some());
+        assert_eq!(plugin.unwrap().metadata.name, "myapp");
+    }
+
+    #[test]
+    fn test_get_plugin_not_found() {
+        let manager = PluginManager::new();
+        assert!(manager.get_plugin("nonexistent").is_none());
     }
 
     #[test]
@@ -418,6 +521,45 @@ mod tests {
     }
 
     #[test]
+    fn test_enable_nonexistent_plugin() {
+        let mut manager = PluginManager::new();
+        assert!(!manager.enable_plugin("nonexistent"));
+    }
+
+    #[test]
+    fn test_disable_nonexistent_plugin() {
+        let mut manager = PluginManager::new();
+        assert!(!manager.disable_plugin("nonexistent"));
+    }
+
+    #[test]
+    fn test_unload_plugin() {
+        let lua = Lua::new();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        let plugin_file = temp_path.join("temp_plugin.lua");
+        let mut file = File::create(&plugin_file).unwrap();
+        file.write_all(b"return { name = 'temp', version = '1.0' }").unwrap();
+
+        let mut manager = PluginManager::new();
+        manager.add_search_path(temp_path);
+        manager.discover(&lua).unwrap();
+
+        assert!(manager.get_plugin("temp_plugin").is_some());
+        
+        // Unload the plugin
+        assert!(manager.unload_plugin("temp_plugin"));
+        assert!(manager.get_plugin("temp_plugin").is_none());
+    }
+
+    #[test]
+    fn test_unload_nonexistent_plugin() {
+        let mut manager = PluginManager::new();
+        assert!(!manager.unload_plugin("nonexistent"));
+    }
+
+    #[test]
     fn test_list_plugins() {
         let lua = Lua::new();
         let temp_dir = TempDir::new().unwrap();
@@ -436,5 +578,68 @@ mod tests {
 
         let plugins = manager.list_plugins();
         assert_eq!(plugins.len(), 3);
+    }
+
+    #[test]
+    fn test_list_plugins_empty() {
+        let manager = PluginManager::new();
+        let plugins = manager.list_plugins();
+        assert_eq!(plugins.len(), 0);
+    }
+
+    #[test]
+    fn test_register_to_lua() {
+        let lua = Lua::new();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        let plugin_file = temp_path.join("test_plugin.lua");
+        let mut file = File::create(&plugin_file).unwrap();
+        file.write_all(b"return { name = 'test', version = '1.0' }").unwrap();
+
+        let mut manager = PluginManager::new();
+        manager.add_search_path(temp_path);
+        manager.discover(&lua).unwrap();
+
+        // Create niri table first
+        let niri_table = lua.create_table().unwrap();
+        lua.globals().set("niri", niri_table).unwrap();
+
+        // Register to Lua
+        assert!(manager.register_to_lua(&lua).is_ok());
+    }
+
+    #[test]
+    fn test_multiple_plugin_operations() {
+        let lua = Lua::new();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+
+        // Create test plugins
+        for i in 1..=2 {
+            let plugin_file = temp_path.join(format!("plugin{}.lua", i));
+            let mut file = File::create(&plugin_file).unwrap();
+            file.write_all(b"return { name = 'test', version = '1.0' }").unwrap();
+        }
+
+        let mut manager = PluginManager::new();
+        manager.add_search_path(temp_path);
+        manager.discover(&lua).unwrap();
+
+        // Verify both plugins are discovered
+        assert_eq!(manager.list_plugins().len(), 2);
+
+        // Disable first plugin
+        assert!(manager.disable_plugin("plugin1"));
+        assert!(!manager.get_plugin("plugin1").unwrap().enabled);
+        assert!(manager.get_plugin("plugin2").unwrap().enabled);
+
+        // Re-enable first plugin
+        assert!(manager.enable_plugin("plugin1"));
+        assert!(manager.get_plugin("plugin1").unwrap().enabled);
+
+        // Unload second plugin
+        assert!(manager.unload_plugin("plugin2"));
+        assert_eq!(manager.list_plugins().len(), 1);
     }
 }

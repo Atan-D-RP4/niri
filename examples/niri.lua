@@ -19,7 +19,7 @@ local input = {
 		-- Uncomment and modify to set custom keyboard layout:
 		xkb = {
 			layout = "us",
-			variant = "intl,phonetic"
+			variant = "intl,phonetic",
 			-- options = "grp:win_space_toggle,compose:ralt,ctrl:nocaps",
 		},
 		-- Enable numlock on startup (omit to disable)
@@ -376,6 +376,21 @@ local window_rules = {
         clip_to_geometry = true,
     },
     --]]
+}
+
+local layer_rules = {
+	match = { namespace = "swaync", at_startup = true },
+	block_out_from = "screencast",
+	block_out_from = "screencapture",
+}
+
+local recent_windows = {
+	highlight = {
+		active_color = "#00000000",
+		urgent_color = "#ff9999ff",
+		padding = 30,
+		corner_radius = 2,
+	},
 }
 
 -- ============================================================================
@@ -758,5 +773,7 @@ return {
 	screenshot = screenshot,
 	startup_commands = startup_commands,
 	window_rules = window_rules,
+	layer_rules = layer_rules,
+	recent_windows = recent_windows,
 	binds = binds,
 }
