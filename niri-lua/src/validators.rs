@@ -416,4 +416,394 @@ mod tests {
         let value = LuaValue::Number(150.0);
         assert!(ConfigValidator::validate_percentage(&value).is_err());
     }
+
+    // ========================================================================
+    // Entry point tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_config_table() {
+        let lua = mlua::Lua::new();
+        let table = lua.create_table().unwrap();
+        let value = LuaValue::Table(table);
+        assert!(ConfigValidator::validate_config(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_non_table() {
+        let value = LuaValue::Integer(42);
+        assert!(ConfigValidator::validate_config(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_setting_gaps() {
+        let value = LuaValue::Integer(10);
+        assert!(ConfigValidator::validate_setting("gaps", &value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_setting_unknown_key() {
+        let value = LuaValue::Integer(10);
+        assert!(ConfigValidator::validate_setting("unknown_setting", &value).is_err());
+    }
+
+    // ========================================================================
+    // Color validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_color_valid_hex() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("#FF0000").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_color(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_color_invalid_type() {
+        let value = LuaValue::Integer(42);
+        assert!(ConfigValidator::validate_color(&value).is_err());
+    }
+
+    // ========================================================================
+    // Bool validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_bool_true() {
+        let value = LuaValue::Boolean(true);
+        assert!(ConfigValidator::validate_bool(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_bool_false() {
+        let value = LuaValue::Boolean(false);
+        assert!(ConfigValidator::validate_bool(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_bool_invalid_type() {
+        let value = LuaValue::Integer(1);
+        assert!(ConfigValidator::validate_bool(&value).is_err());
+    }
+
+    // ========================================================================
+    // Curve validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_curve_linear() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("linear").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_curve(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_curve_ease_in_out_cubic() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("ease_in_out_cubic").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_curve(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_curve_ease_out_cubic() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("ease_out_cubic").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_curve(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_curve_invalid() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("invalid_curve").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_curve(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_curve_wrong_type() {
+        let value = LuaValue::Integer(42);
+        assert!(ConfigValidator::validate_curve(&value).is_err());
+    }
+
+    // ========================================================================
+    // Repeat rate validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_repeat_rate_valid() {
+        let value = LuaValue::Integer(50);
+        assert!(ConfigValidator::validate_repeat_rate(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_repeat_rate_zero() {
+        let value = LuaValue::Integer(0);
+        assert!(ConfigValidator::validate_repeat_rate(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_repeat_rate_too_high() {
+        let value = LuaValue::Integer(2000);
+        assert!(ConfigValidator::validate_repeat_rate(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_repeat_rate_wrong_type() {
+        let value = LuaValue::Number(50.5);
+        assert!(ConfigValidator::validate_repeat_rate(&value).is_err());
+    }
+
+    // ========================================================================
+    // Acceleration speed validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_accel_speed_valid_number() {
+        let value = LuaValue::Number(2.5);
+        assert!(ConfigValidator::validate_accel_speed(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accel_speed_valid_integer() {
+        let value = LuaValue::Integer(2);
+        assert!(ConfigValidator::validate_accel_speed(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accel_speed_zero() {
+        let value = LuaValue::Number(0.0);
+        assert!(ConfigValidator::validate_accel_speed(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accel_speed_too_high() {
+        let value = LuaValue::Number(15.0);
+        assert!(ConfigValidator::validate_accel_speed(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_accel_speed_negative() {
+        let value = LuaValue::Number(-1.0);
+        assert!(ConfigValidator::validate_accel_speed(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_accel_speed_wrong_type() {
+        let value = LuaValue::Boolean(true);
+        assert!(ConfigValidator::validate_accel_speed(&value).is_err());
+    }
+
+    // ========================================================================
+    // Acceleration profile validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_accel_profile_flat() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("flat").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_accel_profile(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accel_profile_adaptive() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("adaptive").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_accel_profile(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accel_profile_invalid() {
+        let lua = mlua::Lua::new();
+        let s = lua.create_string("invalid").unwrap();
+        let value = LuaValue::String(s);
+        assert!(ConfigValidator::validate_accel_profile(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_accel_profile_wrong_type() {
+        let value = LuaValue::Integer(42);
+        assert!(ConfigValidator::validate_accel_profile(&value).is_err());
+    }
+
+    // ========================================================================
+    // Refresh rate validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_refresh_rate_valid_number() {
+        let value = LuaValue::Number(60.0);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_refresh_rate_valid_integer() {
+        let value = LuaValue::Integer(144);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_refresh_rate_low_boundary() {
+        let value = LuaValue::Integer(30);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_refresh_rate_high_boundary() {
+        let value = LuaValue::Integer(240);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_refresh_rate_too_low() {
+        let value = LuaValue::Integer(20);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_refresh_rate_too_high() {
+        let value = LuaValue::Integer(300);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_refresh_rate_wrong_type() {
+        let value = LuaValue::Boolean(true);
+        assert!(ConfigValidator::validate_refresh_rate(&value).is_err());
+    }
+
+    // ========================================================================
+    // Scale validator tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_scale_boundary_low() {
+        let value = LuaValue::Number(0.5);
+        assert!(ConfigValidator::validate_scale(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_scale_boundary_high() {
+        let value = LuaValue::Number(4.0);
+        assert!(ConfigValidator::validate_scale(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_scale_too_low() {
+        let value = LuaValue::Number(0.25);
+        assert!(ConfigValidator::validate_scale(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_scale_too_high() {
+        let value = LuaValue::Number(5.0);
+        assert!(ConfigValidator::validate_scale(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_scale_with_integer() {
+        let value = LuaValue::Integer(2);
+        assert!(ConfigValidator::validate_scale(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_scale_wrong_type() {
+        let value = LuaValue::Boolean(true);
+        assert!(ConfigValidator::validate_scale(&value).is_err());
+    }
+
+    // ========================================================================
+    // Gaps validator edge cases
+    // ========================================================================
+
+    #[test]
+    fn test_validate_gaps_boundary_zero() {
+        let value = LuaValue::Integer(0);
+        assert!(ConfigValidator::validate_gaps(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_gaps_boundary_max() {
+        let value = LuaValue::Integer(100);
+        assert!(ConfigValidator::validate_gaps(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_gaps_negative() {
+        let value = LuaValue::Integer(-1);
+        assert!(ConfigValidator::validate_gaps(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_gaps_wrong_type() {
+        let value = LuaValue::Number(8.5);
+        assert!(ConfigValidator::validate_gaps(&value).is_err());
+    }
+
+    // ========================================================================
+    // Border width validator edge cases
+    // ========================================================================
+
+    #[test]
+    fn test_validate_border_width_boundary_zero() {
+        let value = LuaValue::Integer(0);
+        assert!(ConfigValidator::validate_border_width(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_border_width_boundary_max() {
+        let value = LuaValue::Integer(20);
+        assert!(ConfigValidator::validate_border_width(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_border_width_negative() {
+        let value = LuaValue::Integer(-1);
+        assert!(ConfigValidator::validate_border_width(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_border_width_wrong_type() {
+        let value = LuaValue::Number(2.5);
+        assert!(ConfigValidator::validate_border_width(&value).is_err());
+    }
+
+    // ========================================================================
+    // Percentage validator edge cases
+    // ========================================================================
+
+    #[test]
+    fn test_validate_percentage_boundary_zero() {
+        let value = LuaValue::Number(0.0);
+        assert!(ConfigValidator::validate_percentage(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_percentage_boundary_max() {
+        let value = LuaValue::Number(100.0);
+        assert!(ConfigValidator::validate_percentage(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_percentage_negative() {
+        let value = LuaValue::Number(-0.1);
+        assert!(ConfigValidator::validate_percentage(&value).is_err());
+    }
+
+    #[test]
+    fn test_validate_percentage_with_integer() {
+        let value = LuaValue::Integer(75);
+        assert!(ConfigValidator::validate_percentage(&value).is_ok());
+    }
+
+    #[test]
+    fn test_validate_percentage_wrong_type() {
+        let value = LuaValue::Boolean(true);
+        assert!(ConfigValidator::validate_percentage(&value).is_err());
+    }
 }

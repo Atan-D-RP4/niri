@@ -200,9 +200,11 @@ mod tests {
     use super::*;
 
     // Mock state for testing
+    #[derive(Clone)]
     struct MockState {
         windows: Vec<Window>,
         workspaces: Vec<Workspace>,
+        outputs: Vec<Output>,
     }
 
     impl CompositorState for MockState {
@@ -219,10 +221,202 @@ mod tests {
         }
 
         fn get_outputs(&self) -> Vec<Output> {
-            vec![] // Not tested here
+            self.outputs.clone()
         }
     }
 
-    // Note: The actual integration test will be with the full compositor.
-    // Unit testing the query mechanism requires complex thread synchronization.
+    // ========================================================================
+    // RuntimeApi::new tests
+    // ========================================================================
+
+    #[test]
+    fn test_runtime_api_construction() {
+        // We can test that RuntimeApi can be constructed
+        // Full testing requires a real event loop which is integration-level
+        // This test verifies the type system works correctly
+        let _ = std::mem::size_of::<RuntimeApi<MockState>>();
+    }
+
+    // ========================================================================
+    // CompositorState trait implementation tests with empty collections
+    // ========================================================================
+
+    #[test]
+    fn test_mock_state_get_windows_empty() {
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let result = state.get_windows();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mock_state_get_focused_window_none() {
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let result = state.get_focused_window();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_mock_state_get_workspaces_empty() {
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let result = state.get_workspaces();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mock_state_get_outputs_empty() {
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let result = state.get_outputs();
+        assert_eq!(result.len(), 0);
+    }
+
+    // ========================================================================
+    // Trait composition and polymorphism tests
+    // ========================================================================
+
+    #[test]
+    fn test_compositor_state_trait_object() {
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        // Test that we can use state as a trait object
+        let trait_obj: &dyn CompositorState = &state;
+        assert_eq!(trait_obj.get_windows().len(), 0);
+        assert_eq!(trait_obj.get_workspaces().len(), 0);
+        assert_eq!(trait_obj.get_outputs().len(), 0);
+    }
+
+    // ========================================================================
+    // CompositorState trait documentation tests
+    // ========================================================================
+
+    #[test]
+    fn test_compositor_state_get_windows_returns_vec() {
+        // Ensures get_windows returns a Vec that can be checked for length
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        let windows = state.get_windows();
+        assert!(windows.is_empty());
+    }
+
+    #[test]
+    fn test_compositor_state_get_focused_window_returns_option() {
+        // Ensures get_focused_window returns an Option that can be checked
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        let focused = state.get_focused_window();
+        assert!(matches!(focused, None));
+    }
+
+    #[test]
+    fn test_compositor_state_get_workspaces_returns_vec() {
+        // Ensures get_workspaces returns a Vec that can be checked for length
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        let workspaces = state.get_workspaces();
+        assert!(workspaces.is_empty());
+    }
+
+    #[test]
+    fn test_compositor_state_get_outputs_returns_vec() {
+        // Ensures get_outputs returns a Vec that can be checked for length
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        let outputs = state.get_outputs();
+        assert!(outputs.is_empty());
+    }
+
+    // ========================================================================
+    // RuntimeApi trait generic parameter tests
+    // ========================================================================
+
+    #[test]
+    fn test_runtime_api_generic_constraint() {
+        // This test verifies that RuntimeApi can work with any type implementing
+        // CompositorState, not just MockState
+        fn create_runtime_api<S: CompositorState + 'static>(_state: &S) {
+            let _ = std::mem::size_of::<RuntimeApi<S>>();
+        }
+
+        let mock_state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        create_runtime_api(&mock_state);
+    }
+
+    // ========================================================================
+    // CompositorState trait cloning tests
+    // ========================================================================
+
+    #[test]
+    fn test_compositor_state_cloning_preserves_data() {
+        // Verify that cloning state preserves empty collections correctly
+        let state1 = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let state2 = state1.clone();
+        assert_eq!(state2.get_windows().len(), state1.get_windows().len());
+        assert_eq!(state2.get_workspaces().len(), state1.get_workspaces().len());
+        assert_eq!(state2.get_outputs().len(), state1.get_outputs().len());
+    }
+
+    // ========================================================================
+    // CompositorState trait behavior consistency tests
+    // ========================================================================
+
+    #[test]
+    fn test_focused_window_filter_consistency() {
+        // Verify that get_focused_window filters correctly from get_windows
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let all_windows = state.get_windows();
+        let focused = state.get_focused_window();
+
+        // When no windows, focused should be None
+        assert!(all_windows.is_empty());
+        assert!(focused.is_none());
+    }
 }

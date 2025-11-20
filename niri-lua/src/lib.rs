@@ -24,6 +24,7 @@ pub mod hot_reload;
 // Tier 2: Configuration API
 pub mod lua_types;
 pub mod validators;
+pub mod extractors;
 pub mod config_api;
 
 // Tier 3: Runtime State Access
