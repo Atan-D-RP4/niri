@@ -61,6 +61,62 @@ mod tests {
 }
 ```
 
+### Testing Infrastructure from Codebase
+
+niri-lua tests leverage simplified patterns from the rest of the codebase:
+
+#### 1. Helper Functions with #[track_caller]
+
+Following the pattern from niri-config, use `#[track_caller]` helper functions to reduce boilerplate and provide better error messages:
+
+```rust
+#[track_caller]
+pub fn load_lua_code(code: &str) -> LuaResult<Lua> {
+    let lua = create_test_runtime()?;
+    lua.load(code).exec()?;
+    Ok(lua)
+}
+
+#[track_caller]
+pub fn get_lua_global<T: mlua::FromLua>(lua: &Lua, name: &str) -> LuaResult<T> {
+    lua.globals().get(name)
+}
+```
+
+**Benefits**:
+- Error messages show the caller's location (better debugging)
+- Reduces repetitive test setup code
+- Consistent with niri-config testing patterns
+
+#### 2. Snapshot Testing with `insta`
+
+For complex validation results, use the `insta` crate for snapshot testing:
+
+```rust
+#[test]
+fn test_complex_validation() {
+    use insta::assert_snapshot;
+    
+    let lua = Lua::new();
+    let table = lua.create_table().unwrap();
+    let result = validate_config(&LuaValue::Table(table));
+    
+    // Snapshot captures the debug output
+    assert_snapshot!(format!("{:?}", result));
+}
+```
+
+**Benefits**:
+- Easier to verify complex output (tables, nested structures)
+- Snapshots are versioned and reviewed in git
+- Updates with `cargo test` when intentional changes occur
+- Better for comparing large validation results
+
+**Workflow**:
+1. Run test: `cargo test --package niri-lua`
+2. Review: Check the `.snap.new` file was created
+3. Accept: Move `.snap.new` to `.snap` or use `cargo insta review`
+
 ### Naming Conventions
 
 Tests follow a consistent naming pattern:
@@ -144,6 +200,12 @@ let bool_val = lua_bool(&lua, true);
 ```rust
 // Create a test Lua runtime with standard library
 let lua = create_test_runtime()?;
+
+// Load and run Lua code
+let lua = load_lua_code("x = 42")?;
+
+// Extract global variable
+let value: i32 = get_lua_global(&lua, "x")?;
 ```
 
 ## Common Test Patterns
@@ -254,6 +316,73 @@ fn test_extract_string_opt_wrong_type_number() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), None);  // Returns None for wrong type
 }
+```
+
+### Pattern 5: Simplified Testing with #[track_caller] Helpers
+
+Use the simplified helper functions to reduce boilerplate:
+
+```rust
+#[test]
+fn test_load_and_access_config() {
+    // Much simpler than manually creating Lua, loading code, and extracting values
+    let lua = load_lua_code("config = { value = 42 }").unwrap();
+    let config: mlua::Table = get_lua_global(&lua, "config").unwrap();
+    
+    let value: i32 = config.get("value").unwrap();
+    assert_eq!(value, 42);
+}
+```
+
+**Before** (without helpers):
+```rust
+let lua = Lua::new();
+lua.load_std_libs(mlua::prelude::LuaStdLib::ALL_SAFE).unwrap();
+lua.load("config = { value = 42 }").exec().unwrap();
+let config: mlua::Table = lua.globals().get("config").unwrap();
+let value: i32 = config.get("value").unwrap();
+```
+
+**Benefits of helpers**:
+- Reduced code repetition
+- Better error messages with #[track_caller]
+- Consistent with codebase patterns
+- Easier to maintain
+
+### Pattern 6: Snapshot Testing for Complex Validation
+
+Use `insta` snapshot testing for complex results:
+
+```rust
+#[test]
+fn test_complex_config_validation() {
+    use insta::assert_snapshot;
+    
+    let lua = Lua::new();
+    let table = lua.create_table().unwrap();
+    let result = ConfigValidator::validate_config(&LuaValue::Table(table));
+    
+    // Automatically creates snapshot of the result
+    assert_snapshot!(format!("{:?}", result));
+}
+```
+
+**Better than manual assertions for**:
+- Large nested structures
+- Complex validation output
+- Results that change infrequently
+- Test output that's hard to write assertions for
+
+**Update workflow**:
+```bash
+# Run tests and create snapshots
+cargo test --package niri-lua
+
+# Review snapshots created in niri-lua/src/snapshots/
+# Move .snap.new to .snap files to accept them
+
+# Or use cargo-insta if installed
+cargo insta review
 ```
 
 ## Test Categories

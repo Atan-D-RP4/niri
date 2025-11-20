@@ -806,4 +806,28 @@ mod tests {
         let value = LuaValue::Boolean(true);
         assert!(ConfigValidator::validate_percentage(&value).is_err());
     }
+
+    // ========================================================================
+    // Snapshot test examples (using insta crate)
+    // ========================================================================
+    // These examples demonstrate how to use snapshot testing for complex
+    // assertions. Snapshots are useful for testing output that's lengthy
+    // or complex to manually verify.
+    //
+    // To update snapshots: cargo insta review
+    // To regenerate: cargo test --package niri-lua -- --nocapture
+
+    #[test]
+    fn test_validate_config_snapshot() {
+        use insta::assert_snapshot;
+        
+        // Example: Verify validation result format matches expected output
+        let lua = mlua::Lua::new();
+        let table = lua.create_table().unwrap();
+        let value = LuaValue::Table(table);
+        let result = ConfigValidator::validate_config(&value);
+        
+        // Instead of manual assertions, use snapshot
+        assert_snapshot!(format!("{:?}", result));
+    }
 }

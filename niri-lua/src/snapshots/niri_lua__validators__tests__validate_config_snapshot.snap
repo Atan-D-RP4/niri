@@ -1,0 +1,6 @@
+---
+source: niri-lua/src/validators.rs
+assertion_line: 831
+expression: "format!(\"{:?}\", result)"
+---
+Ok(())

@@ -140,6 +140,26 @@ pub fn create_test_runtime() -> LuaResult<Lua> {
     Ok(lua)
 }
 
+/// Helper to load and run Lua code in a test environment
+/// 
+/// This function with #[track_caller] provides better error messages
+/// when assertions fail by showing the caller's location.
+#[track_caller]
+pub fn load_lua_code(code: &str) -> LuaResult<Lua> {
+    let lua = create_test_runtime()?;
+    lua.load(code).exec()?;
+    Ok(lua)
+}
+
+/// Helper to extract a value from Lua environment
+/// 
+/// Simplifies test code by providing a consistent pattern for accessing
+/// global variables with automatic type conversion.
+#[track_caller]
+pub fn get_lua_global<T: mlua::FromLua>(lua: &Lua, name: &str) -> LuaResult<T> {
+    lua.globals().get(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +234,19 @@ mod tests {
         let lua = create_test_runtime().unwrap();
         // Verify that standard library is loaded
         assert!(lua.globals().get::<mlua::Table>("math").is_ok());
+    }
+
+    #[test]
+    fn test_load_lua_code() {
+        let lua = load_lua_code("x = 42").unwrap();
+        let x: i32 = lua.globals().get("x").unwrap();
+        assert_eq!(x, 42);
+    }
+
+    #[test]
+    fn test_get_lua_global() {
+        let lua = load_lua_code("y = 'hello'").unwrap();
+        let y: String = get_lua_global(&lua, "y").unwrap();
+        assert_eq!(y, "hello");
     }
 }
