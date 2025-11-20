@@ -891,6 +891,9 @@ impl XdgShellHandler for State {
         self.niri.layout.remove_window(&window, transaction.clone());
         self.add_default_dmabuf_pre_commit_hook(surface.wl_surface());
 
+        // Emit layout:window_removed event for Lua handlers
+        lua_event_hooks::emit_layout_window_removed(self, id.get() as u32);
+
         // Emit window:close event for Lua handlers
         lua_event_hooks::emit_window_close(self, id.get() as u32, "window");
 

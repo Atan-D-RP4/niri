@@ -75,6 +75,7 @@ use smithay::{
 pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
 use crate::layout::workspace::WorkspaceId;
 use crate::layout::ActivateWindow;
+use crate::lua_event_hooks;
 use crate::niri::{DndIcon, NewClient, State};
 use crate::protocols::ext_workspace::{self, ExtWorkspaceHandler, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{
@@ -586,6 +587,14 @@ impl ExtWorkspaceHandler for State {
             }
             self.niri.layout.switch_workspace(index);
             // No mouse warp: assuming the layer-shell bar workspaces use-case.
+
+            // Emit workspace:activate event for Lua handlers
+            if let Some(workspace) = self.niri.layout.active_workspace() {
+                let ws_name = workspace.name().map(|s| s.as_str());
+                let ws_name_default = format!("Workspace {}", id.get());
+                let ws_name = ws_name.unwrap_or(&ws_name_default);
+                lua_event_hooks::emit_workspace_activate(self, ws_name, id.get() as u32);
+            }
 
             // FIXME: granular
             self.niri.queue_redraw_all();

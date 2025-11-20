@@ -44,6 +44,7 @@ use self::resize_grab::ResizeGrab;
 use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
+use crate::lua_event_hooks;
 use crate::niri::{CastTarget, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
@@ -2030,6 +2031,9 @@ impl State {
             }
             Action::ToggleWindowFloating => {
                 self.niri.layout.toggle_window_floating(None);
+                if let Some(ws) = self.niri.layout.active_workspace() {
+                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                }
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
@@ -2038,12 +2042,18 @@ impl State {
                 let window = window.map(|(_, m)| m.window.clone());
                 if let Some(window) = window {
                     self.niri.layout.toggle_window_floating(Some(&window));
+                    if let Some(ws) = self.niri.layout.active_workspace() {
+                        lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                    }
                     // FIXME: granular
                     self.niri.queue_redraw_all();
                 }
             }
             Action::MoveWindowToFloating => {
                 self.niri.layout.set_window_floating(None, true);
+                if let Some(ws) = self.niri.layout.active_workspace() {
+                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                }
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
@@ -2052,12 +2062,18 @@ impl State {
                 let window = window.map(|(_, m)| m.window.clone());
                 if let Some(window) = window {
                     self.niri.layout.set_window_floating(Some(&window), true);
+                    if let Some(ws) = self.niri.layout.active_workspace() {
+                        lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                    }
                     // FIXME: granular
                     self.niri.queue_redraw_all();
                 }
             }
             Action::MoveWindowToTiling => {
                 self.niri.layout.set_window_floating(None, false);
+                if let Some(ws) = self.niri.layout.active_workspace() {
+                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                }
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
@@ -2066,6 +2082,9 @@ impl State {
                 let window = window.map(|(_, m)| m.window.clone());
                 if let Some(window) = window {
                     self.niri.layout.set_window_floating(Some(&window), false);
+                    if let Some(ws) = self.niri.layout.active_workspace() {
+                        lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                    }
                     // FIXME: granular
                     self.niri.queue_redraw_all();
                 }
@@ -2084,6 +2103,9 @@ impl State {
             }
             Action::SwitchFocusBetweenFloatingAndTiling => {
                 self.niri.layout.switch_focus_floating_tiling();
+                if let Some(ws) = self.niri.layout.active_workspace() {
+                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
+                }
                 self.maybe_warp_cursor_to_focus();
                 // FIXME: granular
                 self.niri.queue_redraw_all();

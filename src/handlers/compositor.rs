@@ -21,6 +21,7 @@ use smithay::{delegate_compositor, delegate_shm};
 use super::xdg_shell::add_mapped_toplevel_pre_commit_hook;
 use crate::handlers::XDG_ACTIVATION_TOKEN_TIMEOUT;
 use crate::layout::{ActivateWindow, AddWindowTarget, LayoutElement as _};
+use crate::lua_event_hooks;
 use crate::niri::{CastTarget, ClientState, LockState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{is_mapped, send_scale_transform};
@@ -224,6 +225,9 @@ impl CompositorHandler for State {
                     // maximized from the is_pending_maximized variable. Tell the layout about it
                     // here so that unfullscreening the window makes it maximized.
                     if let Some((mapped, _)) = self.niri.layout.find_window_and_output(surface) {
+                        // Emit layout:window_added event
+                        lua_event_hooks::emit_layout_window_added(self, mapped.id().get() as u32);
+
                         if mapped.pending_sizing_mode().is_fullscreen() && is_pending_maximized {
                             self.niri.layout.set_maximized(&window, true);
                         }

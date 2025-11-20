@@ -7,7 +7,7 @@
 use log::debug;
 use mlua::prelude::*;
 
-use crate::niri::State;
+use crate::niri::{Niri, State};
 
 /// Emit a window:open event
 ///
@@ -138,8 +138,8 @@ pub fn emit_workspace_deactivate(state: &State, workspace_name: &str, workspace_
 /// Emit a monitor:connect event
 ///
 /// Call this when a monitor is connected
-pub fn emit_monitor_connect(state: &State, monitor_name: &str, connector_name: &str) {
-    if let Some(lua_runtime) = &state.niri.lua_runtime {
+pub fn emit_monitor_connect(niri: &Niri, monitor_name: &str, connector_name: &str) {
+    if let Some(lua_runtime) = &niri.lua_runtime {
         if let Some(event_system) = &lua_runtime.event_system {
             let lua = lua_runtime.inner();
             match create_monitor_event_table(lua, monitor_name, connector_name, true) {
@@ -159,8 +159,8 @@ pub fn emit_monitor_connect(state: &State, monitor_name: &str, connector_name: &
 /// Emit a monitor:disconnect event
 ///
 /// Call this when a monitor is disconnected
-pub fn emit_monitor_disconnect(state: &State, monitor_name: &str, connector_name: &str) {
-    if let Some(lua_runtime) = &state.niri.lua_runtime {
+pub fn emit_monitor_disconnect(niri: &Niri, monitor_name: &str, connector_name: &str) {
+    if let Some(lua_runtime) = &niri.lua_runtime {
         if let Some(event_system) = &lua_runtime.event_system {
             let lua = lua_runtime.inner();
             match create_monitor_event_table(lua, monitor_name, connector_name, false) {
