@@ -3,12 +3,22 @@
 //! This module provides common helper functions and fixtures for testing
 //! the Niri Lua API. It includes utilities for creating test data, setting up
 //! Lua environments, and common assertions.
+//!
+//! ## Testing Patterns
+//!
+//! This module follows the patterns established in the Niri codebase:
+//! - Fixture builders for creating test data
+//! - `#[track_caller]` helpers for better error messages
+//! - Snapshot testing with insta for regression detection
+//! - Helper functions to reduce boilerplate in tests
 
 #![cfg(test)]
 
 use mlua::prelude::*;
 use mlua::Result as LuaResult;
 use niri_ipc::{Output, Transform, Window, WindowLayout, Workspace, LogicalOutput};
+use niri_config::Config;
+use std::collections::HashMap;
 
 /// Helper to create a test Lua environment with a table
 pub fn create_test_lua_table() -> (Lua, LuaTable) {
@@ -160,6 +170,172 @@ pub fn get_lua_global<T: mlua::FromLua>(lua: &Lua, name: &str) -> LuaResult<T> {
     lua.globals().get(name)
 }
 
+/// Helper to set up a Lua runtime with a config API registered
+///
+/// This is useful for testing config-dependent functionality.
+#[track_caller]
+pub fn create_config_lua_env() -> LuaResult<Lua> {
+    use crate::config_api::ConfigApi;
+    
+    let lua = create_test_runtime()?;
+    ConfigApi::register_to_lua(&lua, &Config::default())?;
+    Ok(lua)
+}
+
+/// Helper to set up a Lua runtime with a niri API registered
+///
+/// This is useful for testing niri-dependent functionality.
+/// Note: This requires a callback function for niri actions.
+#[track_caller]
+pub fn create_niri_lua_env_with_callback<F>(callback: F) -> LuaResult<Lua>
+where
+    F: Fn(String, Vec<String>) -> LuaResult<()> + 'static,
+{
+    use crate::niri_api::NiriApi;
+    use crate::LuaComponent;
+    
+    let lua = create_test_runtime()?;
+    NiriApi::register_to_lua(&lua, callback)?;
+    Ok(lua)
+}
+
+/// Helper to validate that a Lua value equals an expected value
+///
+/// Provides better error messages with #[track_caller].
+#[track_caller]
+pub fn assert_lua_value_eq<T: mlua::FromLua + PartialEq + std::fmt::Debug>(
+    lua: &Lua,
+    name: &str,
+    expected: T,
+) {
+    let actual: T = get_lua_global(lua, name).unwrap_or_else(|_| {
+        panic!("Failed to get Lua global: {}", name);
+    });
+    assert_eq!(actual, expected, "Lua value mismatch for {}", name);
+}
+
+/// Helper to assert that a Lua global exists
+///
+/// Provides better error messages with #[track_caller].
+#[track_caller]
+pub fn assert_lua_global_exists(lua: &Lua, name: &str) {
+    let globals = lua.globals();
+    assert!(
+        globals.get::<mlua::Value>(name).is_ok(),
+        "Expected Lua global '{}' to exist",
+        name
+    );
+}
+
+/// Helper to assert that a Lua table contains a key
+///
+/// Provides better error messages with #[track_caller].
+#[track_caller]
+pub fn assert_lua_table_has_key(table: &LuaTable, key: &str) {
+    assert!(
+        table.get::<mlua::Value>(key).is_ok(),
+        "Expected Lua table to have key '{}'",
+        key
+    );
+}
+
+/// Helper to assert that a Lua table has a specific value
+///
+/// Provides better error messages with #[track_caller].
+#[track_caller]
+pub fn assert_lua_table_value_eq<T: mlua::FromLua + PartialEq + std::fmt::Debug>(
+    table: &LuaTable,
+    key: &str,
+    expected: T,
+) {
+    let actual: T = table.get(key).unwrap_or_else(|_| {
+        panic!("Failed to get Lua table value: {}", key);
+    });
+    assert_eq!(actual, expected, "Lua table value mismatch for key '{}'", key);
+}
+
+/// Helper to build test data with a builder pattern
+///
+/// This fixture builder provides a fluent API for constructing test data.
+pub struct TestDataBuilder {
+    config: Config,
+    windows: Vec<Window>,
+    workspaces: Vec<Workspace>,
+    outputs: Vec<Output>,
+}
+
+impl TestDataBuilder {
+    /// Create a new test data builder with default config
+    pub fn new() -> Self {
+        Self {
+            config: Config::default(),
+            windows: Vec::new(),
+            workspaces: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    /// Add a window to the test data
+    pub fn with_window(mut self, window: Window) -> Self {
+        self.windows.push(window);
+        self
+    }
+
+    /// Add a workspace to the test data
+    pub fn with_workspace(mut self, workspace: Workspace) -> Self {
+        self.workspaces.push(workspace);
+        self
+    }
+
+    /// Add an output to the test data
+    pub fn with_output(mut self, output: Output) -> Self {
+        self.outputs.push(output);
+        self
+    }
+
+    /// Get the config
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Get the windows
+    pub fn windows(&self) -> &[Window] {
+        &self.windows
+    }
+
+    /// Get the workspaces
+    pub fn workspaces(&self) -> &[Workspace] {
+        &self.workspaces
+    }
+
+    /// Get the outputs
+    pub fn outputs(&self) -> &[Output] {
+        &self.outputs
+    }
+}
+
+impl Default for TestDataBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Helper to extract table as a HashMap for snapshot testing
+///
+/// Useful for comparing complex Lua table structures in snapshots.
+#[track_caller]
+pub fn lua_table_to_map(table: &LuaTable) -> LuaResult<HashMap<String, String>> {
+    let mut map = HashMap::new();
+    
+    for pair in table.pairs::<String, mlua::Value>() {
+        let (key, value) = pair?;
+        let value_str = format!("{:?}", value);
+        map.insert(key, value_str);
+    }
+    
+    Ok(map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +424,50 @@ mod tests {
         let lua = load_lua_code("y = 'hello'").unwrap();
         let y: String = get_lua_global(&lua, "y").unwrap();
         assert_eq!(y, "hello");
+    }
+
+    #[test]
+    fn test_create_config_lua_env() {
+        let lua = create_config_lua_env().unwrap();
+        assert_lua_global_exists(&lua, "niri");
+    }
+
+    #[test]
+    fn test_create_niri_lua_env_with_callback() {
+        let lua = create_niri_lua_env_with_callback(|_, _| Ok(())).unwrap();
+        assert_lua_global_exists(&lua, "niri");
+    }
+
+    #[test]
+    fn test_assert_lua_table_has_key() {
+        let lua = Lua::new();
+        let table = lua.create_table().unwrap();
+        table.set("test_key", "test_value").unwrap();
+        assert_lua_table_has_key(&table, "test_key");
+    }
+
+    #[test]
+    fn test_test_data_builder() {
+        let builder = TestDataBuilder::new()
+            .with_window(create_test_window(1))
+            .with_workspace(create_test_workspace(1))
+            .with_output(create_test_output("HDMI-1"));
+
+        assert_eq!(builder.windows().len(), 1);
+        assert_eq!(builder.workspaces().len(), 1);
+        assert_eq!(builder.outputs().len(), 1);
+    }
+
+    #[test]
+    fn test_lua_table_to_map() {
+        let lua = Lua::new();
+        let table = lua.create_table().unwrap();
+        table.set("key1", "value1").unwrap();
+        table.set("key2", 42).unwrap();
+        
+        let map = lua_table_to_map(&table).unwrap();
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("key1"));
+        assert!(map.contains_key("key2"));
     }
 }

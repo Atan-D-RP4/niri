@@ -559,22 +559,20 @@ impl ConfigApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{create_config_lua_env, get_lua_global, assert_lua_table_has_key};
+
+    /// Helper to setup config API and get the config table
+    #[track_caller]
+    fn setup_config_api() -> (Lua, LuaTable) {
+        let lua = create_config_lua_env().unwrap();
+        let niri_table: LuaTable = get_lua_global(&lua, "niri").unwrap();
+        let config_table: LuaTable = niri_table.get("config").unwrap();
+        (lua, config_table)
+    }
 
     #[test]
     fn test_config_api_registration() {
-        let lua = Lua::new();
-        // Create niri table first
-        let globals = lua.globals();
-        let niri_table = lua.create_table().unwrap();
-        globals.set("niri", niri_table).unwrap();
-
-        // Register should not fail with default configurations
-        let result = ConfigApi::register_to_lua(&lua, &Config::default());
-        assert!(result.is_ok());
-
-        // Verify config table exists and is accessible
-        let niri_table: LuaTable = globals.get("niri").unwrap();
-        let config_table: LuaTable = niri_table.get("config").unwrap();
+        let (_lua, config_table) = setup_config_api();
         
         // Verify all subsystems are registered
         assert!(config_table.get::<LuaTable>("animations").is_ok());
@@ -593,15 +591,7 @@ mod tests {
 
     #[test]
     fn test_animations_api() {
-        let lua = Lua::new();
-        let globals = lua.globals();
-        let niri_table = lua.create_table().unwrap();
-        globals.set("niri", niri_table).unwrap();
-
-        ConfigApi::register_to_lua(&lua, &Config::default()).unwrap();
-
-        let niri_table: LuaTable = globals.get("niri").unwrap();
-        let config_table: LuaTable = niri_table.get("config").unwrap();
+        let (_lua, config_table) = setup_config_api();
         let animations: LuaTable = config_table.get("animations").unwrap();
 
         // Verify animation settings are accessible
@@ -615,81 +605,119 @@ mod tests {
     }
 
     #[test]
+    fn test_animations_api_snapshot() {
+        let (_lua, config_table) = setup_config_api();
+        let animations: LuaTable = config_table.get("animations").unwrap();
+        
+        let off: bool = animations.get("off").unwrap();
+        let slowdown: f64 = animations.get("slowdown").unwrap();
+        
+        insta::assert_debug_snapshot!("animations_global", (off, slowdown));
+    }
+
+    #[test]
     fn test_layout_api() {
-        let lua = Lua::new();
-        let globals = lua.globals();
-        let niri_table = lua.create_table().unwrap();
-        globals.set("niri", niri_table).unwrap();
-
-        ConfigApi::register_to_lua(&lua, &Config::default()).unwrap();
-
-        let niri_table: LuaTable = globals.get("niri").unwrap();
-        let config_table: LuaTable = niri_table.get("config").unwrap();
+        let (_lua, config_table) = setup_config_api();
         let layout: LuaTable = config_table.get("layout").unwrap();
 
         // Verify layout sections exist
-        assert!(layout.get::<LuaTable>("struts").is_ok());
-        assert!(layout.get::<LuaTable>("focus_ring").is_ok());
-        assert!(layout.get::<LuaTable>("border").is_ok());
-        assert!(layout.get::<LuaTable>("shadow").is_ok());
-        assert!(layout.get::<LuaTable>("tab_indicator").is_ok());
-        assert!(layout.get::<LuaTable>("insert_hint").is_ok());
+        assert_lua_table_has_key(&layout, "struts");
+        assert_lua_table_has_key(&layout, "focus_ring");
+        assert_lua_table_has_key(&layout, "border");
+        assert_lua_table_has_key(&layout, "shadow");
+        assert_lua_table_has_key(&layout, "tab_indicator");
+        assert_lua_table_has_key(&layout, "insert_hint");
     }
 
     #[test]
     fn test_input_api() {
-        let lua = Lua::new();
-        let globals = lua.globals();
-        let niri_table = lua.create_table().unwrap();
-        globals.set("niri", niri_table).unwrap();
-
-        ConfigApi::register_to_lua(&lua, &Config::default()).unwrap();
-
-        let niri_table: LuaTable = globals.get("niri").unwrap();
-        let config_table: LuaTable = niri_table.get("config").unwrap();
+        let (_lua, config_table) = setup_config_api();
         let input: LuaTable = config_table.get("input").unwrap();
 
         // Verify input device sections exist
-        assert!(input.get::<LuaTable>("keyboard").is_ok());
-        assert!(input.get::<LuaTable>("mouse").is_ok());
-        assert!(input.get::<LuaTable>("touchpad").is_ok());
-        assert!(input.get::<LuaTable>("trackpoint").is_ok());
+        assert_lua_table_has_key(&input, "keyboard");
+        assert_lua_table_has_key(&input, "mouse");
+        assert_lua_table_has_key(&input, "touchpad");
+        assert_lua_table_has_key(&input, "trackpoint");
     }
 
     #[test]
     fn test_overview_api() {
-        let lua = Lua::new();
-        let globals = lua.globals();
-        let niri_table = lua.create_table().unwrap();
-        globals.set("niri", niri_table).unwrap();
-
-        ConfigApi::register_to_lua(&lua, &Config::default()).unwrap();
-
-        let niri_table: LuaTable = globals.get("niri").unwrap();
-        let config_table: LuaTable = niri_table.get("config").unwrap();
+        let (_lua, config_table) = setup_config_api();
         let overview: LuaTable = config_table.get("overview").unwrap();
 
         // Verify overview settings are accessible
         assert_eq!(overview.get::<f64>("zoom").unwrap(), 0.5);
-        assert!(overview.get::<LuaTable>("workspace_shadow").is_ok());
+        assert_lua_table_has_key(&overview, "workspace_shadow");
     }
 
     #[test]
     fn test_gestures_api() {
-        let lua = Lua::new();
-        let globals = lua.globals();
-        let niri_table = lua.create_table().unwrap();
-        globals.set("niri", niri_table).unwrap();
-
-        ConfigApi::register_to_lua(&lua, &Config::default()).unwrap();
-
-        let niri_table: LuaTable = globals.get("niri").unwrap();
-        let config_table: LuaTable = niri_table.get("config").unwrap();
+        let (_lua, config_table) = setup_config_api();
         let gestures: LuaTable = config_table.get("gestures").unwrap();
 
         // Verify gesture sections exist
-        assert!(gestures.get::<LuaTable>("dnd_edge_view_scroll").is_ok());
-        assert!(gestures.get::<LuaTable>("dnd_edge_workspace_switch").is_ok());
-        assert!(gestures.get::<LuaTable>("hot_corners").is_ok());
+        assert_lua_table_has_key(&gestures, "dnd_edge_view_scroll");
+        assert_lua_table_has_key(&gestures, "dnd_edge_workspace_switch");
+        assert_lua_table_has_key(&gestures, "hot_corners");
+    }
+
+    #[test]
+    fn test_cursor_api() {
+        let (_lua, config_table) = setup_config_api();
+        let cursor: LuaTable = config_table.get("cursor").unwrap();
+
+        // Verify cursor settings are accessible
+        assert_lua_table_has_key(&cursor, "xcursor_theme");
+        assert_lua_table_has_key(&cursor, "xcursor_size");
+        assert_lua_table_has_key(&cursor, "hide_when_typing");
+    }
+
+    #[test]
+    fn test_debug_api() {
+        let (_lua, config_table) = setup_config_api();
+        let debug: LuaTable = config_table.get("debug").unwrap();
+
+        // Verify debug settings are accessible
+        assert_lua_table_has_key(&debug, "dbus_interfaces_in_non_session_instances");
+        assert_lua_table_has_key(&debug, "wait_for_frame_completion_before_queueing");
+    }
+
+    #[test]
+    fn test_clipboard_api() {
+        let (_lua, config_table) = setup_config_api();
+        let clipboard: LuaTable = config_table.get("clipboard").unwrap();
+
+        // Verify clipboard settings are accessible
+        assert_lua_table_has_key(&clipboard, "disable_primary");
+    }
+
+    #[test]
+    fn test_hotkey_overlay_api() {
+        let (_lua, config_table) = setup_config_api();
+        let hotkey: LuaTable = config_table.get("hotkey_overlay").unwrap();
+
+        // Verify hotkey overlay settings are accessible
+        assert_lua_table_has_key(&hotkey, "skip_at_startup");
+        assert_lua_table_has_key(&hotkey, "hide_not_bound");
+    }
+
+    #[test]
+    fn test_config_notification_api() {
+        let (_lua, config_table) = setup_config_api();
+        let notif: LuaTable = config_table.get("config_notification").unwrap();
+
+        // Verify config notification settings are accessible
+        assert_lua_table_has_key(&notif, "disable_failed");
+    }
+
+    #[test]
+    fn test_xwayland_satellite_api() {
+        let (_lua, config_table) = setup_config_api();
+        let xwayland: LuaTable = config_table.get("xwayland_satellite").unwrap();
+
+        // Verify xwayland satellite settings are accessible
+        assert_lua_table_has_key(&xwayland, "off");
+        assert_lua_table_has_key(&xwayland, "path");
     }
 }

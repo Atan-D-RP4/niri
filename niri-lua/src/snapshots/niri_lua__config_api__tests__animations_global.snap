@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/config_api.rs
+assertion_line: 615
+expression: "(off, slowdown)"
+---
+(
+    false,
+    1.0,
+)
