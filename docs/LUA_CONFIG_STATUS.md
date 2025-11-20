@@ -712,17 +712,100 @@ return {
 
 ---
 
-## Next Steps: Tier 4 - Event System
+## Next Steps: Tier 4 - Event System - ⏳ IN PROGRESS
 
-The next tier will add:
-- System events (`window_opened`, `workspace_changed`, etc.)
-- Custom user events (Neovim-style)
-- Event handlers in Lua
-- Plugin-to-plugin communication
+**Current Status**: Foundation Phase Complete (Phase 1 ✅)  
+**Phase 1 Completion**: November 20, 2025  
+**Next Phase**: Phase 2 - Event Integration (Ready to implement)
 
-Estimated: ~350 lines of code, 2-3 weeks
+### Tier 4: Event System Architecture
 
-### Roadmap
+The event system is organized into 2 phases:
+
+#### Phase 1: Foundation ✅ COMPLETE (2,175 lines)
+
+**Core Components**:
+- **event_emitter.rs** (198 lines) - Event registration and emission
+- **event_handlers.rs** (328 lines) - Handler registry with lifecycle management
+- **event_system.rs** (243 lines) - Thread-safe wrapper and Lua API
+- **event_data.rs** (706 lines) - NEW Event type converters for Lua
+
+**Test Coverage**: 34 tests, all passing (21 event handler + system tests, 13 event_data tests)
+
+**What's Implemented**:
+1. ✅ Core event handler registry with HashMap storage
+2. ✅ Unique handler IDs (u64) for lifecycle management  
+3. ✅ Support for persistent and one-time handlers
+4. ✅ Error isolation (handler failures don't crash Niri)
+5. ✅ Automatic cleanup of one-time handlers
+6. ✅ Lua API registration (niri.on(), niri.once(), niri.off())
+7. ✅ Thread-safe Arc<parking_lot::Mutex> wrapper
+8. ✅ Event data conversion to Lua tables:
+   - Window events (open, close, focus, blur)
+   - Workspace events (activate, deactivate)
+   - Monitor events (connect, disconnect)
+   - Layout events (mode_changed, window_added, window_removed)
+9. ✅ Comprehensive documentation and integration guide
+
+**Example Usage**:
+```lua
+-- Listen for window events
+niri.on("window:open", function(event)
+    niri.log("Window opened: " .. event.window.title)
+end)
+
+-- One-time workspace activation
+niri.once("workspace:activate", function(event)
+    niri.log("First workspace activated: " .. event.workspace.name)
+end)
+
+-- Monitor connection
+niri.on("monitor:connect", function(event)
+    niri.log("Monitor connected: " .. event.output.name)
+end)
+
+-- Remove handler
+niri.off("window:open", handler_id)
+```
+
+#### Phase 2: Integration ⏳ READY TO IMPLEMENT
+
+**Files Created**:
+- `docs/TIER4_INTEGRATION_GUIDE.md` - Comprehensive 350+ line integration guide
+
+**What's Needed for Phase 2**:
+1. Create `src/lua_event_hooks.rs` - Emission functions
+2. Add `lua_event_handlers: Option<SharedEventHandlers>` to State
+3. Wire events in compositor handlers:
+   - Window events: `src/handlers/xdg_shell.rs`
+   - Workspace events: `src/layout/mod.rs`
+   - Monitor events: `src/backend/mod.rs`
+4. Add Phase 2 integration tests
+5. Test with real window open/close scenarios
+
+**Estimated Lines**: ~500-700 lines (mostly in emission points)
+
+**Event Emission Points**:
+
+| Event | Location | Trigger |
+|-------|----------|---------|
+| window:open | xdg_shell.rs:59-64 | new_toplevel() |
+| window:close | xdg_shell.rs:842-904 | toplevel_destroyed() |
+| window:focus | layout/mod.rs | focus change |
+| window:blur | layout/mod.rs | focus moves away |
+| workspace:activate | layout/mod.rs | workspace switch |
+| workspace:deactivate | layout/mod.rs | workspace loses focus |
+| monitor:connect | backend/mod.rs | output added |
+| monitor:disconnect | backend/mod.rs | output removed |
+| layout:mode_changed | workspace.rs | floating toggle |
+| layout:window_added | workspace.rs | add_tile() |
+| layout:window_removed | workspace.rs | remove_tile() |
+
+**Documentation Location**: `docs/TIER4_INTEGRATION_GUIDE.md` - Complete implementation guide with code examples
+
+---
+
+## Next Steps: Tier 4 - Event System (Roadmap)
 
 - ✅ Tier 1: Module System (Weeks 1-2) - **COMPLETE**
 - ✅ Tier 2: Configuration API (Weeks 3-4) - **COMPLETE**

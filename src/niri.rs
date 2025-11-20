@@ -405,6 +405,11 @@ pub struct Niri {
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,
 
+    /// Lua event handlers for reactive event system.
+    ///
+    /// This is shared with the Lua runtime to allow event emission from compositor core.
+    pub lua_event_handlers: Option<niri_lua::SharedEventHandlers>,
+
     /// Lua runtime for scripting support.
     ///
     /// This runtime is kept alive for the duration of the compositor session to enable
@@ -2828,6 +2833,8 @@ impl Niri {
 
             ipc_server,
             ipc_outputs_changed: false,
+
+            lua_event_handlers: None,
 
             lua_runtime: None,
 

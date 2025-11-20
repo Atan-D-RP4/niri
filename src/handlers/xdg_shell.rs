@@ -44,6 +44,7 @@ use crate::input::touch_move_grab::TouchMoveGrab;
 use crate::input::touch_resize_grab::TouchResizeGrab;
 use crate::input::{PointerOrTouchStartData, DOUBLE_CLICK_TIME};
 use crate::layout::ActivateWindow;
+use crate::lua_event_hooks;
 use crate::niri::{CastTarget, PopupGrabState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -61,6 +62,9 @@ impl XdgShellHandler for State {
         let unmapped = Unmapped::new(Window::new_wayland_window(surface));
         let existing = self.niri.unmapped_windows.insert(wl_surface, unmapped);
         assert!(existing.is_none());
+
+        // Emit window:open event for Lua handlers
+        lua_event_hooks::emit_window_open(self, 0, "window");
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -886,6 +890,9 @@ impl XdgShellHandler for State {
         self.niri.window_mru_ui.remove_window(id);
         self.niri.layout.remove_window(&window, transaction.clone());
         self.add_default_dmabuf_pre_commit_hook(surface.wl_surface());
+
+        // Emit window:close event for Lua handlers
+        lua_event_hooks::emit_window_close(self, id.get() as u32, "window");
 
         // If this is the only instance, then this transaction will complete immediately, so no
         // need to set the timer.

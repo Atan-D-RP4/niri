@@ -9,6 +9,7 @@ use mlua::prelude::*;
 use niri_config::Config;
 
 use crate::config_api::ConfigApi;
+use crate::event_system::EventSystem;
 use crate::{LuaComponent, NiriApi};
 
 /// Manages a Lua runtime for Niri.
@@ -17,6 +18,8 @@ use crate::{LuaComponent, NiriApi};
 /// executing scripts and registering components.
 pub struct LuaRuntime {
     lua: Lua,
+    /// Event system for emitting Lua events from the compositor
+    pub event_system: Option<EventSystem>,
 }
 
 impl LuaRuntime {
@@ -31,7 +34,10 @@ impl LuaRuntime {
         // Set up standard library with appropriate restrictions
         lua.load_std_libs(LuaStdLib::ALL_SAFE)?;
 
-        Ok(Self { lua })
+        Ok(Self {
+            lua,
+            event_system: None,
+        })
     }
 
     /// Register a Lua component, adding its functions to the runtime.
