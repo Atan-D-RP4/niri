@@ -3,11 +3,9 @@
 //! This module provides utilities for extracting complex configuration structures
 //! from Lua tables and converting them to Niri config types.
 
-use log::{debug, warn};
 use mlua::prelude::*;
 use niri_config::{
-    animations::*, appearance::*, binds::*, gestures::*, input::*, layout::*, misc::*, output::*,
-    window_rule::*,
+    animations::*, appearance::*, misc::*,
 };
 use std::str::FromStr;
 
@@ -232,12 +230,11 @@ pub fn extract_environment(table: &LuaTable) -> LuaResult<Option<Environment>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_lua_table;
 
-    /// Helper to create a test Lua environment with a table
+    // Re-export for backward compatibility with existing tests
     fn create_test_table() -> (mlua::Lua, mlua::Table) {
-        let lua = mlua::Lua::new();
-        let table = lua.create_table().unwrap();
-        (lua, table)
+        create_test_lua_table()
     }
 
     // ========================================================================

@@ -204,6 +204,7 @@ pub fn workspaces_to_lua(lua: &Lua, workspaces: &[Workspace]) -> Result<Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{create_test_window, create_test_workspace};
     use niri_ipc::WindowLayout;
 
     #[test]
@@ -246,6 +247,61 @@ mod tests {
     }
 
     #[test]
+    fn test_window_to_lua_minimal() {
+        let lua = Lua::new();
+        let window = Window {
+            id: 1,
+            title: None,
+            app_id: None,
+            pid: None,
+            workspace_id: None,
+            is_focused: false,
+            is_floating: false,
+            is_urgent: false,
+            focus_timestamp: None,
+            layout: WindowLayout {
+                pos_in_scrolling_layout: None,
+                tile_size: (0.0, 0.0),
+                window_size: (0, 0),
+                tile_pos_in_workspace_view: None,
+                window_offset_in_tile: (0.0, 0.0),
+            },
+        };
+
+        let table = window_to_lua(&lua, &window).unwrap();
+        assert_eq!(table.get::<u64>("id").unwrap(), 1);
+        assert_eq!(table.get::<bool>("is_focused").unwrap(), false);
+    }
+
+    #[test]
+    fn test_window_to_lua_floating() {
+        let lua = Lua::new();
+        let window = Window {
+            id: 456,
+            title: Some("Floating Window".to_string()),
+            app_id: Some("org.test.FloatApp".to_string()),
+            pid: Some(7890),
+            workspace_id: Some(2),
+            is_focused: false,
+            is_floating: true,
+            is_urgent: true,
+            focus_timestamp: None,
+            layout: WindowLayout {
+                pos_in_scrolling_layout: None,
+                tile_size: (800.0, 600.0),
+                window_size: (800, 600),
+                tile_pos_in_workspace_view: None,
+                window_offset_in_tile: (0.0, 0.0),
+            },
+        };
+
+        let table = window_to_lua(&lua, &window).unwrap();
+        assert_eq!(table.get::<u64>("id").unwrap(), 456);
+        assert_eq!(table.get::<bool>("is_floating").unwrap(), true);
+        assert_eq!(table.get::<bool>("is_urgent").unwrap(), true);
+    }
+
+    #[test]
     fn test_workspace_to_lua() {
         let lua = Lua::new();
         let workspace = Workspace {
@@ -266,4 +322,216 @@ mod tests {
         assert_eq!(table.get::<String>("name").unwrap(), "Main");
         assert_eq!(table.get::<bool>("is_focused").unwrap(), true);
     }
+
+    #[test]
+    fn test_workspace_to_lua_minimal() {
+        let lua = Lua::new();
+        let workspace = Workspace {
+            id: 1,
+            idx: 1,
+            name: None,
+            output: None,
+            is_urgent: false,
+            is_active: false,
+            is_focused: false,
+            active_window_id: None,
+        };
+
+        let table = workspace_to_lua(&lua, &workspace).unwrap();
+        assert_eq!(table.get::<u64>("id").unwrap(), 1);
+        assert_eq!(table.get::<bool>("is_active").unwrap(), false);
+    }
+
+    #[test]
+    fn test_workspace_to_lua_urgent() {
+        let lua = Lua::new();
+        let workspace = Workspace {
+            id: 2,
+            idx: 2,
+            name: Some("Work".to_string()),
+            output: Some("HDMI-1".to_string()),
+            is_urgent: true,
+            is_active: true,
+            is_focused: false,
+            active_window_id: Some(789),
+        };
+
+        let table = workspace_to_lua(&lua, &workspace).unwrap();
+        assert_eq!(table.get::<u64>("id").unwrap(), 2);
+        assert_eq!(table.get::<bool>("is_urgent").unwrap(), true);
+    }
+
+    // ========================================================================
+    // output_to_lua tests
+    // ========================================================================
+
+    #[test]
+    fn test_output_to_lua() {
+        use niri_ipc::{LogicalOutput, Transform};
+        
+        let lua = Lua::new();
+        let output = Output {
+            name: "HDMI-1".to_string(),
+            make: "Dell".to_string(),
+            model: "U2415".to_string(),
+            serial: Some("SN123456".to_string()),
+            physical_size: Some((530, 300)),
+            modes: vec![],
+            current_mode: Some(0),
+            is_custom_mode: false,
+            vrr_supported: true,
+            vrr_enabled: false,
+            logical: Some(LogicalOutput {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                scale: 1.0,
+                transform: Transform::Normal,
+            }),
+        };
+
+        let table = output_to_lua(&lua, &output).unwrap();
+        assert_eq!(table.get::<String>("name").unwrap(), "HDMI-1");
+        assert_eq!(table.get::<String>("make").unwrap(), "Dell");
+        assert_eq!(table.get::<String>("model").unwrap(), "U2415");
+    }
+
+    #[test]
+    fn test_output_to_lua_no_logical() {
+        use mlua::prelude::LuaValue;
+        
+        let lua = Lua::new();
+        let output = Output {
+            name: "DP-1".to_string(),
+            make: "LG".to_string(),
+            model: "27UP550".to_string(),
+            serial: None,
+            physical_size: None,
+            modes: vec![],
+            current_mode: None,
+            is_custom_mode: false,
+            vrr_supported: false,
+            vrr_enabled: false,
+            logical: None,
+        };
+
+        let table = output_to_lua(&lua, &output).unwrap();
+        assert_eq!(table.get::<String>("name").unwrap(), "DP-1");
+        let logical: LuaValue = table.get("logical").unwrap();
+        assert!(matches!(logical, LuaValue::Nil));
+    }
+
+    // ========================================================================
+    // windows_to_lua tests
+    // ========================================================================
+
+    #[test]
+    fn test_windows_to_lua_empty() {
+        let lua = Lua::new();
+        let windows: Vec<Window> = vec![];
+
+        let table = windows_to_lua(&lua, &windows).unwrap();
+        assert_eq!(table.len().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_windows_to_lua_single() {
+        let lua = Lua::new();
+        let window = Window {
+            id: 1,
+            title: Some("Window 1".to_string()),
+            app_id: None,
+            pid: None,
+            workspace_id: None,
+            is_focused: false,
+            is_floating: false,
+            is_urgent: false,
+            focus_timestamp: None,
+            layout: WindowLayout {
+                pos_in_scrolling_layout: None,
+                tile_size: (0.0, 0.0),
+                window_size: (0, 0),
+                tile_pos_in_workspace_view: None,
+                window_offset_in_tile: (0.0, 0.0),
+            },
+        };
+        let windows = vec![window];
+
+        let table = windows_to_lua(&lua, &windows).unwrap();
+        assert_eq!(table.len().unwrap(), 1);
+        
+        let first_window: Table = table.get(1).unwrap();
+        assert_eq!(first_window.get::<u64>("id").unwrap(), 1);
+    }
+
+    #[test]
+    fn test_windows_to_lua_multiple() {
+        let lua = Lua::new();
+        let windows = vec![
+            create_test_window(1),
+            create_test_window(2),
+            create_test_window(3),
+        ];
+
+        let table = windows_to_lua(&lua, &windows).unwrap();
+        assert_eq!(table.len().unwrap(), 3);
+        
+        let second_window: Table = table.get(2).unwrap();
+        assert_eq!(second_window.get::<u64>("id").unwrap(), 2);
+    }
+
+    // ========================================================================
+    // workspaces_to_lua tests
+    // ========================================================================
+
+    #[test]
+    fn test_workspaces_to_lua_empty() {
+        let lua = Lua::new();
+        let workspaces: Vec<Workspace> = vec![];
+
+        let table = workspaces_to_lua(&lua, &workspaces).unwrap();
+        assert_eq!(table.len().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_workspaces_to_lua_single() {
+        let lua = Lua::new();
+        let workspace = Workspace {
+            id: 1,
+            idx: 1,
+            name: Some("Main".to_string()),
+            output: Some("DP-1".to_string()),
+            is_urgent: false,
+            is_active: true,
+            is_focused: true,
+            active_window_id: None,
+        };
+        let workspaces = vec![workspace];
+
+        let table = workspaces_to_lua(&lua, &workspaces).unwrap();
+        assert_eq!(table.len().unwrap(), 1);
+        
+        let first_workspace: Table = table.get(1).unwrap();
+        assert_eq!(first_workspace.get::<u64>("id").unwrap(), 1);
+    }
+
+    #[test]
+    fn test_workspaces_to_lua_multiple() {
+        let lua = Lua::new();
+        let workspaces = vec![
+            create_test_workspace(1),
+            create_test_workspace(2),
+            create_test_workspace(3),
+            create_test_workspace(4),
+        ];
+
+        let table = workspaces_to_lua(&lua, &workspaces).unwrap();
+        assert_eq!(table.len().unwrap(), 4);
+        
+        let third_workspace: Table = table.get(3).unwrap();
+        assert_eq!(third_workspace.get::<u64>("id").unwrap(), 3);
+    }
+
+    // ========================================================================
 }

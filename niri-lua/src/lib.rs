@@ -31,6 +31,10 @@ pub mod config_api;
 pub mod ipc_bridge;
 pub mod runtime_api;
 
+// Testing utilities (only available in tests)
+#[cfg(test)]
+pub mod test_utils;
+
 use mlua::prelude::*;
 pub use config::LuaConfig;
 pub use config_converter::apply_lua_config;
