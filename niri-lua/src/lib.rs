@@ -17,6 +17,8 @@ pub mod runtime;
 
 // Tier 1: Foundation Layer - Core Lua scripting infrastructure
 pub mod event_emitter;
+pub mod event_handlers;
+pub mod event_system;
 pub mod hot_reload;
 pub mod module_loader;
 pub mod plugin_system;
@@ -39,6 +41,8 @@ pub use config::LuaConfig;
 pub use config_converter::apply_lua_config;
 // Tier 1 exports
 pub use event_emitter::EventEmitter;
+pub use event_handlers::EventHandlers;
+pub use event_system::{register_event_api_to_lua, EventSystem, SharedEventHandlers};
 pub use hot_reload::HotReloader;
 // Tier 2 exports
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};

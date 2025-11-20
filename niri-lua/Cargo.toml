@@ -16,6 +16,7 @@ log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_de
 mlua.workspace = true
 niri-config = { version = "25.8.0", path = "../niri-config" }
 niri-ipc = { version = "25.8.0", path = "../niri-ipc" }
+parking_lot = "0.12.3"
 regex.workspace = true
 serde.workspace = true
 

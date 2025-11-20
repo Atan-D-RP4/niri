@@ -2533,6 +2533,7 @@ dependencies = [
  "mlua",
  "niri-config",
  "niri-ipc",
+ "parking_lot",
  "regex",
  "serde",
  "tempfile",
