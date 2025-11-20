@@ -142,6 +142,7 @@ use crate::layer::MappedLayer;
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{HitType, Layout, LayoutElement as _, MonitorRenderElement};
+use crate::lua_event_hooks;
 use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
@@ -948,7 +949,18 @@ impl State {
     pub fn focus_window(&mut self, window: &Window) {
         let active_output = self.niri.layout.active_output().cloned();
 
+        // Get the previously focused window to emit blur event
+        let prev_focused = self.niri.layout.focus().map(|w| w.id().clone());
+
         self.niri.layout.activate_window(window);
+
+        // Emit blur event for previously focused window
+        if let Some(_prev_window) = prev_focused {
+            lua_event_hooks::emit_window_blur(self, 0, "window");
+        }
+
+        // Emit focus event for newly focused window
+        lua_event_hooks::emit_window_focus(self, 0, "window");
 
         let new_active = self.niri.layout.active_output().cloned();
         #[allow(clippy::collapsible_if)]
