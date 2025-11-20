@@ -99,11 +99,11 @@ The new Configuration API exposes all Niri settings through Lua tables. Access v
 
 #### 1. **Animations** (`niri.config.animations`)
 - Global flags: `off`, `slowdown`
-- 10 animation types with full properties:
+- 11 animation types with full properties:
   - `workspace_switch`, `window_open`, `window_close`
   - `horizontal_view_movement`, `window_movement`, `window_resize`
   - `config_notification_open_close`, `exit_confirmation_open_close`
-  - `screenshot_ui_open`, `overview_open_close`
+  - `screenshot_ui_open`, `overview_open_close`, `recent_windows_close`
 - Each animation has: `off`, `duration_ms` or spring params, `curve`, optional `custom_shader`
 
 #### 2. **Input Settings** (`niri.config.input`)
@@ -161,7 +161,19 @@ Per-output configuration:
 - **Hot Corners**:
   - `off`, `top_left`, `top_right`, `bottom_left`, `bottom_right`
 
-#### 7. **Overview** (`niri.config.overview`) NEW
+#### 7. **Recent Windows** (`niri.config.recent_windows`) NEW
+- `on`: Enable recent windows tracking (boolean)
+- `open_delay_ms`: Delay before showing recent windows (u16)
+- **highlight** subtable:
+  - `active_color`: Color of active workspace highlight
+  - `urgent_color`: Color of urgent workspace highlight
+  - `padding`: Padding around highlight
+  - `corner_radius`: Border radius of highlight
+- **previews** subtable:
+  - `max_height`: Maximum height of window previews
+  - `max_scale`: Maximum scale of window previews
+
+#### 8. **Overview** (`niri.config.overview`) NEW
 - `zoom`: Zoom level (0-0.75)
 - `backdrop_color`: Color behind workspaces
 - **Workspace Shadow**:
@@ -629,7 +641,7 @@ test result: ok. 127 passed; 0 failed; 0 ignored; 0 measured
 | Layout | 9 | ✅ 9/9 | Focus ring, border, gaps, struts, presets |
 | Window Rules | 31 | ✅ 31/31 | All rule types supported |
 | Bindings | 40+ | ✅ 40+/40+ | All actions supported |
-| Animations | 8 | ✅ 8/8 | All animation types |
+| Animations | 11 | ✅ 11/11 | All animation types including recent_windows_close |
 | Gestures | 3 | ✅ 3/3 | All gesture types |
 | Other | 6 | ✅ 6/6 | Screenshot, cursor, spawn, debug, environment |
 | **Total** | **24** | ✅ **24/24** | **100% parity** |

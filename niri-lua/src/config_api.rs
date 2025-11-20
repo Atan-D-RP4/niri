@@ -7,7 +7,7 @@ use mlua::prelude::*;
 use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
 use niri_config::{
     Animations, Clipboard, Config, ConfigNotification, Cursor, Debug, Gestures, HotkeyOverlay,
-    Input, Layout, Outputs, Overview, XwaylandSatellite,
+    Input, Layout, Outputs, Overview, RecentWindows, XwaylandSatellite,
 };
 
 /// Main configuration API handler
@@ -39,6 +39,7 @@ impl ConfigApi {
         Self::register_hotkey_overlay(lua, &config_table, &config.hotkey_overlay)?;
         Self::register_config_notification(lua, &config_table, &config.config_notification)?;
         Self::register_xwayland_satellite(lua, &config_table, &config.xwayland_satellite)?;
+        Self::register_recent_windows(lua, &config_table, &config.recent_windows)?;
         Self::register_miscellaneous(lua, &config_table, config)?;
 
         // Set niri.config
@@ -126,6 +127,11 @@ impl ConfigApi {
         let overview = lua.create_table()?;
         Self::set_animation_values(lua, &overview, &anim_config.overview_open_close.0)?;
         animations.set("overview_open_close", overview)?;
+
+        // Recent windows close animation
+        let recent_windows_close = lua.create_table()?;
+        Self::set_animation_values(lua, &recent_windows_close, &anim_config.recent_windows_close.0)?;
+        animations.set("recent_windows_close", recent_windows_close)?;
 
         config_table.set("animations", animations)?;
         Ok(())
@@ -641,9 +647,44 @@ impl ConfigApi {
         xwayland_config: &XwaylandSatellite,
     ) -> LuaResult<()> {
         let xwayland = lua.create_table()?;
-        xwayland.set("off", xwayland_config.off)?;
+         xwayland.set("off", xwayland_config.off)?;
         xwayland.set("path", xwayland_config.path.clone())?;
         config_table.set("xwayland_satellite", xwayland)?;
+        Ok(())
+    }
+
+    /// Register recent windows configuration
+    fn register_recent_windows(
+        lua: &Lua,
+        config_table: &LuaTable,
+        recent_windows: &RecentWindows,
+    ) -> LuaResult<()> {
+        let recent_windows_table = lua.create_table()?;
+
+        // on/off flag
+        recent_windows_table.set("on", recent_windows.on)?;
+
+        // Delay before the switcher appears
+        recent_windows_table.set("open_delay_ms", recent_windows.open_delay_ms)?;
+
+        // Highlight settings
+        let highlight = lua.create_table()?;
+        highlight.set("active_color", Self::color_to_hex(&recent_windows.highlight.active_color))?;
+        highlight.set("urgent_color", Self::color_to_hex(&recent_windows.highlight.urgent_color))?;
+        highlight.set("padding", recent_windows.highlight.padding)?;
+        highlight.set("corner_radius", recent_windows.highlight.corner_radius)?;
+        recent_windows_table.set("highlight", highlight)?;
+
+        // Preview settings
+        let previews = lua.create_table()?;
+        previews.set("max_height", recent_windows.previews.max_height)?;
+        previews.set("max_scale", recent_windows.previews.max_scale)?;
+        recent_windows_table.set("previews", previews)?;
+
+        // Binds are not exposed here since they're handled by the main binds converter
+        // Users should configure recent windows binds through the normal binds {} section
+
+        config_table.set("recent_windows", recent_windows_table)?;
         Ok(())
     }
 
