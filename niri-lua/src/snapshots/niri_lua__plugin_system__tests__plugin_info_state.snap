@@ -1,0 +1,11 @@
+---
+source: niri-lua/src/plugin_system.rs
+assertion_line: 694
+expression: "&snapshot_data"
+---
+(
+    "example",
+    "1.0.0",
+    true,
+    false,
+)

@@ -1,0 +1,12 @@
+---
+source: niri-lua/src/validators.rs
+assertion_line: 842
+expression: "&results"
+---
+[
+    true,
+    true,
+    true,
+    true,
+    true,
+]

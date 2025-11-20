@@ -642,4 +642,55 @@ mod tests {
         assert!(manager.unload_plugin("plugin2"));
         assert_eq!(manager.list_plugins().len(), 1);
     }
+
+    #[test]
+    fn test_plugin_metadata_snapshot() {
+        let metadata = PluginMetadata {
+            name: "example-plugin".to_string(),
+            version: "1.2.3".to_string(),
+            author: Some("Test Author".to_string()),
+            description: Some("A test plugin".to_string()),
+            license: Some("MIT".to_string()),
+            dependencies: vec!["dep1".to_string(), "dep2".to_string()],
+        };
+
+        insta::assert_debug_snapshot!("plugin_metadata_full", &metadata);
+    }
+
+    #[test]
+    fn test_plugin_metadata_minimal_snapshot() {
+        let metadata = PluginMetadata {
+            name: "minimal".to_string(),
+            version: "0.1.0".to_string(),
+            author: None,
+            description: None,
+            license: None,
+            dependencies: Vec::new(),
+        };
+
+        insta::assert_debug_snapshot!("plugin_metadata_minimal", &metadata);
+    }
+
+    #[test]
+    fn test_plugin_info_snapshot() {
+        let metadata = PluginMetadata {
+            name: "example".to_string(),
+            version: "1.0.0".to_string(),
+            author: Some("Author".to_string()),
+            description: None,
+            license: None,
+            dependencies: Vec::new(),
+        };
+        let info = PluginInfo::new(metadata, std::path::PathBuf::from("/tmp/example.lua"));
+
+        // Snapshot only the essential fields to avoid path differences
+        let snapshot_data = (
+            &info.metadata.name,
+            &info.metadata.version,
+            info.enabled,
+            info.loaded,
+        );
+
+        insta::assert_debug_snapshot!("plugin_info_state", &snapshot_data);
+    }
 }

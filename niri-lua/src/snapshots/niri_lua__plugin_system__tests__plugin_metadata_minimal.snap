@@ -1,0 +1,13 @@
+---
+source: niri-lua/src/plugin_system.rs
+assertion_line: 671
+expression: "&metadata"
+---
+PluginMetadata {
+    name: "minimal",
+    version: "0.1.0",
+    author: None,
+    description: None,
+    license: None,
+    dependencies: [],
+}

@@ -830,4 +830,37 @@ mod tests {
         // Instead of manual assertions, use snapshot
         assert_snapshot!(format!("{:?}", result));
     }
+
+    #[test]
+    fn test_validate_scale_range_snapshot() {
+        // Snapshot common scale values to ensure consistent behavior
+        let scales = vec![0.5, 1.0, 1.5, 2.0, 4.0];
+        let results: Vec<bool> = scales.iter()
+            .map(|&s| ConfigValidator::validate_scale(&LuaValue::Number(s)).is_ok())
+            .collect();
+        
+        insta::assert_debug_snapshot!("scale_validation_results", &results);
+    }
+
+    #[test]
+    fn test_validate_percentage_range_snapshot() {
+        // Snapshot common percentage values
+        let percentages = vec![0.0, 25.0, 50.0, 75.0, 100.0];
+        let results: Vec<bool> = percentages.iter()
+            .map(|&p| ConfigValidator::validate_percentage(&LuaValue::Number(p)).is_ok())
+            .collect();
+        
+        insta::assert_debug_snapshot!("percentage_validation_results", &results);
+    }
+
+    #[test]
+    fn test_validate_gaps_range_snapshot() {
+        // Snapshot common gap values
+        let gaps = vec![0, 5, 10, 20, 50];
+        let results: Vec<bool> = gaps.iter()
+            .map(|&g| ConfigValidator::validate_gaps(&LuaValue::Integer(g as i64)).is_ok())
+            .collect();
+        
+        insta::assert_debug_snapshot!("gaps_validation_results", &results);
+    }
 }
