@@ -111,6 +111,99 @@ impl LuaRuntime {
         self.lua.load(code).eval()
     }
 
+    /// Execute Lua code and capture output (for REPL/CLI usage).
+    ///
+    /// Captures print() output and returns the result.
+    /// Returns a tuple of (output, success).
+    pub fn execute_string(&self, code: &str) -> (String, bool) {
+        // Capture print output
+        let original_print = self.lua.globals().get::<LuaFunction>("print");
+        let mut output = Vec::new();
+        let output_ptr = &mut output as *mut Vec<String>;
+
+        let print_fn = self.lua.create_function(move |_, args: mlua::MultiValue| -> LuaResult<()> {
+            let output_vec = unsafe { &mut *output_ptr };
+            for v in args.iter() {
+                let s = match v {
+                    LuaValue::String(s) => s.to_string_lossy().to_string(),
+                    LuaValue::Integer(i) => i.to_string(),
+                    LuaValue::Number(n) => {
+                        // Format numbers cleanly without debug info
+                        if n.is_finite() {
+                            if n.fract() == 0.0 && n.abs() < 1e15 {
+                                format!("{:.0}", n)
+                            } else {
+                                n.to_string()
+                            }
+                        } else if n.is_nan() {
+                            "nan".to_string()
+                        } else if n.is_infinite() {
+                            if n.is_sign_positive() { "inf".to_string() } else { "-inf".to_string() }
+                        } else {
+                            n.to_string()
+                        }
+                    }
+                    LuaValue::Boolean(b) => b.to_string(),
+                    LuaValue::Nil => "nil".to_string(),
+                    _ => format!("{:?}", v),
+                };
+                output_vec.push(s);
+            }
+            Ok(())
+        });
+
+        if let Ok(pf) = print_fn {
+            let _ = self.lua.globals().set("print", pf);
+        }
+
+        let result = self.lua.load(code).eval::<LuaValue>();
+
+        // Restore original print
+        if let Ok(orig) = original_print {
+            let _ = self.lua.globals().set("print", orig);
+        }
+
+        let (success, message) = match result {
+            Ok(val) => {
+                // Format simple return values; tables and complex types are nil
+                let val_str = match val {
+                    LuaValue::Nil => String::new(),
+                    LuaValue::String(s) => s.to_string_lossy().to_string(),
+                    LuaValue::Integer(i) => i.to_string(),
+                    LuaValue::Number(n) => {
+                        if n.is_finite() {
+                            if n.fract() == 0.0 && n.abs() < 1e15 {
+                                format!("{:.0}", n)
+                            } else {
+                                n.to_string()
+                            }
+                        } else if n.is_nan() {
+                            "nan".to_string()
+                        } else if n.is_infinite() {
+                            if n.is_sign_positive() { "inf".to_string() } else { "-inf".to_string() }
+                        } else {
+                            n.to_string()
+                        }
+                    }
+                    LuaValue::Boolean(b) => b.to_string(),
+                    _ => String::new(),
+                };
+                (true, val_str)
+            }
+            Err(e) => (false, format!("Error: {}", e)),
+        };
+
+        let full_output = if output.is_empty() {
+            message
+        } else if message.is_empty() {
+            output.join("\n")
+        } else {
+            format!("{}\n{}", output.join("\n"), message)
+        };
+
+        (full_output, success)
+    }
+
     /// Execute a Lua function that takes no arguments and returns no value.
     ///
     /// # Errors

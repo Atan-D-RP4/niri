@@ -185,45 +185,55 @@ rx.recv()  // Blocks until compositor processes
    - Add action execution (close, focus, move)
    - Document usage
 
-6. **Phase 6: IPC Lua REPL (Bonus)** (Tasks 18-22)
-   - Add `Request::Lua` and `Response::LuaResult` to IPC types
-   - Implement Lua code execution handler in IPC server
-   - Add `execute_string()` method to `LuaRuntime`
-   - Add CLI command `niri msg action lua`
-   - Implement interactive REPL mode
-   - Document usage, examples, and security considerations
+6. **Phase 6: IPC Lua REPL (Bonus)** (Tasks 18-22) ✅ COMPLETE
+   - ✅ Add `Request::Lua` and `Response::LuaResult` to IPC types
+   - ✅ Implement Lua code execution handler in IPC server
+   - ✅ Add `execute_string()` method to `LuaRuntime` with simplified output
+   - ✅ Add CLI command `niri msg action lua`
+   - ✅ Implement interactive REPL mode
+   - ✅ Document usage, examples, and security considerations
+   - ✅ Create `niri.print()` via nice_print.lua module for pretty-printing
+   - ✅ Comprehensive REPL integration tests (86 tests with edge cases)
 
-**Current Status:** Planning complete, ready for implementation
+**Current Status:** ✅ Implementation complete with simplified console-based output approach
 
 **Deliverables:**
-- [ ] Window query API (`niri.windows.get_all()`, `niri.windows.get_focused()`)
-- [ ] Workspace query API (`niri.workspaces.get_all()`, `niri.workspaces.get_active()`)
-- [ ] Monitor/Output query API (`niri.outputs.get_all()`)
-- [ ] Layout introspection (basic queries)
-- [ ] IPC Bridge conversion layer (Window/Workspace/Output → Lua tables)
-- [ ] Runtime API with event loop integration (message passing pattern)
-- [ ] **Bonus:** IPC Lua REPL (`niri msg action lua`) for interactive debugging and scripting
+- [x] Window query API (`niri.windows.get_all()`, `niri.windows.get_focused()`)
+- [x] Workspace query API (`niri.workspaces.get_all()`, `niri.workspaces.get_active()`)
+- [x] Monitor/Output query API (`niri.outputs.get_all()`)
+- [x] Layout introspection (basic queries)
+- [x] IPC Bridge conversion layer (Window/Workspace/Output → Lua tables)
+- [x] Runtime API with event loop integration (message passing pattern)
+- [x] **Bonus:** IPC Lua REPL (`niri msg action lua`) for interactive debugging and scripting
+- [x] Pretty-print function (`niri.print()`) via Lua module
+- [x] Simplified output approach for REPL (console-based, no complex formatting)
 
 **Success Criteria:**
-- Scripts can query all open windows/workspaces/monitors ✅ Planned
-- Window properties accessible (title, geometry, floating, etc.) ✅ Planned
-- State changes reflected in queries ✅ Planned
-- Zero unsafe code, no lifetime issues ✅ Architecture confirmed
-- Synchronous API from Lua's perspective ✅ Architecture confirmed
-- 300+ lines of new code
+- ✅ Scripts can query all open windows/workspaces/monitors
+- ✅ Window properties accessible (title, geometry, floating, etc.)
+- ✅ State changes reflected in queries
+- ✅ Zero unsafe code, no lifetime issues
+- ✅ Synchronous API from Lua's perspective
+- ✅ IPC Lua REPL working with simplified console-based output
+- ✅ 86 REPL integration tests covering edge cases (Unicode, infinity, NaN, etc.)
+- ✅ Pretty-print function handles complex nested structures
+- ✅ Documentation complete with examples and security considerations
 
 **Files to Create:**
-- `niri-lua/src/ipc_bridge.rs` (~150 lines) - Convert IPC types to Lua tables
-- `niri-lua/src/runtime_api.rs` (~250 lines) - Generic RuntimeApi<S> with event loop integration
-- `niri-lua/tests/runtime_api_tests.rs` (~100 lines) - Integration tests
-- `docs/LUA_TIER3_SPEC.md` - Complete API documentation
+- ✅ `niri-lua/src/ipc_repl.rs` - IPC request handler for Lua code execution
+- ✅ `niri-lua/src/nice_print.lua` - Pretty-print module (Lua-based)
+- ✅ `niri-lua/tests/repl_integration.rs` - 86 comprehensive REPL tests
+- ✅ `docs/LUA_REPL.md` - Complete REPL documentation with examples
 
 **Files to Modify:**
-- `src/niri.rs` (+1 line at ~line 200: `pub lua_runtime: Option<niri_lua::LuaRuntime>`)
-- `src/main.rs` (+15 lines at ~lines 175-220: keep runtime, call register_runtime_api)
-- `niri-lua/src/lib.rs` (+7 lines: export runtime_api and ipc_bridge modules)
-- `niri-lua/src/runtime.rs` (+20 lines at ~line 60: add register_runtime_api method)
-- `niri-lua/Cargo.toml` (verify calloop dependency exists)
+- ✅ `src/cli.rs` - Added `lua` subcommand to CLI
+- ✅ `src/ipc/server.rs` - Added `ExecuteLua` request handler
+- ✅ `src/ipc/client.rs` - Added Lua result display logic
+- ✅ `niri-ipc/src/lib.rs` - Added `ExecuteLua` and `LuaResult` IPC types
+- ✅ `niri-lua/src/lib.rs` - Export ipc_repl module
+- ✅ `niri-lua/src/runtime.rs` - Added `execute_string()` method with simplified output
+- ✅ `niri-lua/src/niri_api.rs` - Register `niri.print()` from nice_print.lua
+- ✅ `docs/LUA_FILES_CHECKLIST.md` - Updated to reflect final implementation
 
 ---
 

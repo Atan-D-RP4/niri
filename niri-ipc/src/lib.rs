@@ -117,6 +117,22 @@ pub enum Request {
     ReturnError,
     /// Request information about the overview.
     OverviewState,
+    /// Execute Lua code and get the result.
+    ///
+    /// This executes arbitrary Lua code within the Niri Lua runtime context,
+    /// allowing access to all configured APIs like `niri.state`, `niri.config`, etc.
+    ///
+    /// The response will be a `Response::LuaResult` containing either the output
+    /// or an error message.
+    ///
+    /// # Security Note
+    ///
+    /// Only execute Lua code from trusted sources. There is no sandboxing, and
+    /// Lua code has full access to the Niri runtime and system (via os.execute, etc.).
+    ExecuteLua {
+        /// The Lua code to execute.
+        code: String,
+    },
 }
 
 /// Reply from niri to client.
@@ -161,6 +177,20 @@ pub enum Response {
     OutputConfigChanged(OutputConfigChanged),
     /// Information about the overview.
     OverviewState(Overview),
+    /// Result of executing Lua code.
+    LuaResult(LuaResult),
+}
+
+/// Result of executing Lua code.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct LuaResult {
+    /// The output from the Lua code execution.
+    ///
+    /// This will contain the `print()` output and any returned values from the Lua code.
+    pub output: String,
+    /// Whether the execution succeeded or had an error.
+    pub success: bool,
 }
 
 /// Overview information.

@@ -48,6 +48,9 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::EventStream => Request::EventStream,
         Msg::RequestError => Request::ReturnError,
         Msg::OverviewState => Request::OverviewState,
+        Msg::Lua { code } => Request::ExecuteLua {
+            code: code.join(" "),
+        },
     };
 
     let mut socket = Socket::connect().context("error connecting to the niri socket")?;
@@ -516,6 +519,26 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
                 println!("Overview is open.");
             } else {
                 println!("Overview is closed.");
+            }
+        }
+        Msg::Lua { .. } => {
+            let Response::LuaResult(result) = response else {
+                bail!("unexpected response: expected LuaResult, got {response:?}");
+            };
+
+            if json {
+                let output =
+                    serde_json::to_string(&result).context("error formatting response")?;
+                println!("{output}");
+                return Ok(());
+            }
+
+            if !result.output.is_empty() {
+                println!("{}", result.output);
+            }
+
+            if !result.success {
+                bail!("Lua execution failed");
             }
         }
     }

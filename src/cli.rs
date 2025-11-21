@@ -96,7 +96,7 @@ pub enum Msg {
         #[arg()]
         output: String,
         /// Configuration to apply.
-        #[command(subcommand)]
+         #[command(subcommand)]
         action: OutputAction,
     },
     /// Start continuously receiving events from the compositor.
@@ -107,6 +107,22 @@ pub enum Msg {
     RequestError,
     /// Print the overview state.
     OverviewState,
+    /// Execute Lua code within the Niri runtime.
+    ///
+    /// This allows you to test Lua scripts and query compositor state.
+    ///
+    /// Examples:
+    ///   niri msg lua "print(niri.version_string())"
+    ///   niri msg lua "return niri.state.windows()"
+    ///   niri msg lua "niri.config.set_keybind('Super+X', 'spawn xterm')"
+    Lua {
+        /// The Lua code to execute.
+        ///
+        /// The code will be evaluated in the Niri Lua runtime context with access to all
+        /// configured Lua APIs. Output from print() and return values will be displayed.
+        #[arg(last = true, required = true)]
+        code: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]

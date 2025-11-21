@@ -32,6 +32,7 @@ pub mod validators;
 // Tier 3: Runtime State Access
 pub mod event_data;
 pub mod ipc_bridge;
+pub mod ipc_repl;
 pub mod runtime_api;
 
 // Testing utilities (only available in tests)
@@ -54,6 +55,7 @@ pub use plugin_system::PluginManager;
 pub use runtime::LuaRuntime;
 // Tier 3 exports
 pub use event_data::{EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData};
+pub use ipc_repl::IpcLuaExecutor;
 pub use runtime_api::{register_runtime_api, CompositorState, RuntimeApi};
 
 /// Trait for registering Lua components to the global context.

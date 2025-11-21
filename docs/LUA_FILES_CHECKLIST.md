@@ -22,7 +22,7 @@
 - NiriApi component
 - Logging functions (log, debug, warn, error)
 - Config helpers
-- Utility functions (pprint)
+- Pretty-print function (niri.print via nice_print.lua)
 - UserData examples for complex types
 - Tests for registration and functionality
 
@@ -128,7 +128,7 @@
 - [x] Logging system (info, debug, warn, error)
 - [x] Version information
 - [x] Config helpers
-- [x] Pretty print utility
+- [x] Pretty print utility (niri.print())
 - [x] Module registration
 
 ### Documentation ✓

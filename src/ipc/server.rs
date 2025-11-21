@@ -453,6 +453,24 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             let is_open = state.overview.is_open;
             Response::OverviewState(Overview { is_open })
         }
+        Request::ExecuteLua { code } => {
+            let (tx, rx) = async_channel::bounded(1);
+            let code_clone = code.clone();
+            ctx.event_loop.insert_idle(move |state| {
+                let (output, success) = if let Some(runtime) = &state.niri.lua_runtime {
+                    runtime.execute_string(&code_clone)
+                } else {
+                    (
+                        "Lua runtime not initialized".to_string(),
+                        false,
+                    )
+                };
+                let _ = tx.send_blocking(niri_ipc::LuaResult { output, success });
+            });
+            let result = rx.recv().await;
+            let lua_result = result.map_err(|_| String::from("error executing Lua code"))?;
+            Response::LuaResult(lua_result)
+        }
     };
 
     Ok(response)

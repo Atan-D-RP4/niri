@@ -139,23 +139,13 @@ impl LuaComponent for NiriApi {
         })?;
         niri.set("spawn", spawn_fn)?;
 
+        // Register nice_print function as niri.print
+        let nice_print_code = include_str!("nice_print.lua");
+        let nice_print_fn: LuaFunction = lua.load(nice_print_code).eval()?;
+        niri.set("print", nice_print_fn)?;
+
         // Register the niri table globally
         globals.set("niri", niri)?;
-
-        // Also register common utility functions at global level
-        let pprint_fn = lua.create_function(|_, value: LuaValue| {
-            let json_str = match &value {
-                LuaValue::Nil => "nil".to_string(),
-                LuaValue::Boolean(b) => b.to_string(),
-                LuaValue::Integer(i) => i.to_string(),
-                LuaValue::Number(n) => n.to_string(),
-                LuaValue::String(s) => format!("\"{}\"", s.to_string_lossy()),
-                _ => format!("{:?}", value),
-            };
-            println!("{}", json_str);
-            Ok(())
-        })?;
-        globals.set("pprint", pprint_fn)?;
 
         info!("Registered Niri API component to Lua");
 
