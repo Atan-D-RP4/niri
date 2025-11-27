@@ -45,7 +45,10 @@ impl WindowEventData {
 #[derive(Debug, Clone)]
 pub enum WorkspaceEventData {
     /// Workspace is now active on its output.
-    Activate { workspace: Workspace, output: Output },
+    Activate {
+        workspace: Workspace,
+        output: Output,
+    },
     /// Workspace is no longer active.
     Deactivate { workspace: Workspace },
 }
@@ -56,10 +59,7 @@ impl WorkspaceEventData {
         let table = lua.create_table()?;
 
         match self {
-            WorkspaceEventData::Activate {
-                workspace,
-                output,
-            } => {
+            WorkspaceEventData::Activate { workspace, output } => {
                 table.set("type", "activate")?;
                 let workspace_table = workspace_to_lua(lua, workspace)?;
                 table.set("workspace", workspace_table)?;
@@ -181,8 +181,9 @@ impl EventData {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use niri_ipc::WindowLayout;
+
+    use super::*;
 
     fn create_test_window() -> Window {
         Window {
@@ -284,10 +285,7 @@ mod tests {
         let lua = Lua::new();
         let workspace = create_test_workspace();
         let output = create_test_output();
-        let event = WorkspaceEventData::Activate {
-            workspace,
-            output,
-        };
+        let event = WorkspaceEventData::Activate { workspace, output };
 
         let table = event.to_lua(&lua).unwrap();
         assert_eq!(table.get::<String>("type").unwrap(), "activate");
@@ -337,9 +335,7 @@ mod tests {
     #[test]
     fn test_layout_mode_changed_event_to_lua() {
         let lua = Lua::new();
-        let event = LayoutEventData::ModeChanged {
-            is_floating: true,
-        };
+        let event = LayoutEventData::ModeChanged { is_floating: true };
 
         let table = event.to_lua(&lua).unwrap();
         assert_eq!(table.get::<String>("type").unwrap(), "mode_changed");
@@ -363,10 +359,7 @@ mod tests {
         let lua = Lua::new();
         let workspace = create_test_workspace();
         let output = create_test_output();
-        let event = EventData::Workspace(WorkspaceEventData::Activate {
-            workspace,
-            output,
-        });
+        let event = EventData::Workspace(WorkspaceEventData::Activate { workspace, output });
 
         assert_eq!(event.category(), "workspace");
 
@@ -389,9 +382,7 @@ mod tests {
     #[test]
     fn test_generic_event_data_layout() {
         let lua = Lua::new();
-        let event = EventData::Layout(LayoutEventData::ModeChanged {
-            is_floating: false,
-        });
+        let event = EventData::Layout(LayoutEventData::ModeChanged { is_floating: false });
 
         assert_eq!(event.category(), "layout");
 

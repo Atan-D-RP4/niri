@@ -1396,38 +1396,38 @@ impl Tty {
         let presentation_misprediction_plot_name = tracy_client::PlotName::new_leak(format!(
             "{connector_name} presentation misprediction, ms"
         ));
-         let sequence_delta_plot_name =
-             tracy_client::PlotName::new_leak(format!("{connector_name} sequence delta"));
+        let sequence_delta_plot_name =
+            tracy_client::PlotName::new_leak(format!("{connector_name} sequence delta"));
 
-         // Emit monitor:connect event for Lua handlers
-         let monitor_name = output_name.format_description();
-         lua_event_hooks::emit_monitor_connect(niri, &monitor_name, &connector_name);
+        // Emit monitor:connect event for Lua handlers
+        let monitor_name = output_name.format_description();
+        lua_event_hooks::emit_monitor_connect(niri, &monitor_name, &connector_name);
 
-         let surface = Surface {
-             name: output_name,
-             connector: connector.handle(),
-             compositor,
-             dmabuf_feedback,
-             gamma_props,
-             pending_gamma_change: None,
-             vblank_frame: None,
-             vblank_frame_name,
-             time_since_presentation_plot_name,
-             presentation_misprediction_plot_name,
-             sequence_delta_plot_name,
-         };
+        let surface = Surface {
+            name: output_name,
+            connector: connector.handle(),
+            compositor,
+            dmabuf_feedback,
+            gamma_props,
+            pending_gamma_change: None,
+            vblank_frame: None,
+            vblank_frame_name,
+            time_since_presentation_plot_name,
+            presentation_misprediction_plot_name,
+            sequence_delta_plot_name,
+        };
 
-         let res = device.surfaces.insert(crtc, surface);
-         assert!(res.is_none(), "crtc must not have already existed");
+        let res = device.surfaces.insert(crtc, surface);
+        assert!(res.is_none(), "crtc must not have already existed");
 
-         niri.add_output(output.clone(), Some(refresh_interval(mode)), vrr_enabled);
+        niri.add_output(output.clone(), Some(refresh_interval(mode)), vrr_enabled);
 
-         if niri.monitors_active {
-             // Redraw the new monitor.
-             niri.event_loop.insert_idle(move |state| {
-                 // Guard against output disconnecting before the idle has a chance to run.
-                 if state.niri.output_state.contains_key(&output) {
-                     state.niri.queue_redraw(&output);
+        if niri.monitors_active {
+            // Redraw the new monitor.
+            niri.event_loop.insert_idle(move |state| {
+                // Guard against output disconnecting before the idle has a chance to run.
+                if state.niri.output_state.contains_key(&output) {
+                    state.niri.queue_redraw(&output);
                 }
             });
         }
@@ -1467,10 +1467,10 @@ impl Tty {
 
         debug!("disconnecting connector: {:?}", surface.name.connector);
 
-         // Emit monitor:disconnect event for Lua handlers
-         let connector_name = format!("{:?}", surface.name.connector);
-         let monitor_name = surface.name.format_description();
-         lua_event_hooks::emit_monitor_disconnect(niri, &monitor_name, &connector_name);
+        // Emit monitor:disconnect event for Lua handlers
+        let connector_name = format!("{:?}", surface.name.connector);
+        let monitor_name = surface.name.format_description();
+        lua_event_hooks::emit_monitor_disconnect(niri, &monitor_name, &connector_name);
 
         let output = niri
             .global_space

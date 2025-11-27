@@ -460,10 +460,7 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                 let (output, success) = if let Some(runtime) = &state.niri.lua_runtime {
                     runtime.execute_string(&code_clone)
                 } else {
-                    (
-                        "Lua runtime not initialized".to_string(),
-                        false,
-                    )
+                    ("Lua runtime not initialized".to_string(), false)
                 };
                 let _ = tx.send_blocking(niri_ipc::LuaResult { output, success });
             });

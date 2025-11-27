@@ -142,8 +142,6 @@ use crate::layer::MappedLayer;
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{HitType, Layout, LayoutElement as _, MonitorRenderElement};
-use crate::lua_event_hooks;
-use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
 use crate::protocols::gamma_control::GammaControlManagerState;
@@ -180,6 +178,7 @@ use crate::utils::{
 };
 use crate::window::mapped::MappedId;
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
+use crate::{lua_event_hooks, niri_render_elements};
 
 const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 
@@ -950,7 +949,7 @@ impl State {
         let active_output = self.niri.layout.active_output().cloned();
 
         // Get the previously focused window to emit blur event
-        let prev_focused = self.niri.layout.focus().map(|w| w.id().clone());
+        let prev_focused = self.niri.layout.focus().map(|w| w.id());
 
         self.niri.layout.activate_window(window);
 

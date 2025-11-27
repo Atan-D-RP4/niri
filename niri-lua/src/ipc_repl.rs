@@ -15,8 +15,7 @@
 //! {"LuaResult": {"output": "Niri 0.1.0 (abc1234)", "success": true}}
 //! ```
 
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Handler for executing Lua code from IPC requests.
 ///
@@ -49,19 +48,11 @@ impl IpcLuaExecutor {
     /// - success_bool indicates whether the code executed without errors
     pub fn execute(&self, code: &str) -> (String, bool) {
         match self.runtime.lock() {
-            Ok(guard) => {
-                match guard.as_ref() {
-                    Some(runtime) => runtime.execute_string(code),
-                    None => (
-                        "Lua runtime not initialized".to_string(),
-                        false,
-                    ),
-                }
-            }
-            Err(e) => (
-                format!("Failed to acquire Lua runtime lock: {}", e),
-                false,
-            ),
+            Ok(guard) => match guard.as_ref() {
+                Some(runtime) => runtime.execute_string(code),
+                None => ("Lua runtime not initialized".to_string(), false),
+            },
+            Err(e) => (format!("Failed to acquire Lua runtime lock: {}", e), false),
         }
     }
 }
@@ -87,8 +78,14 @@ mod tests {
 
         let (output, success) = executor.execute("print('Hello'); print('World')");
         assert!(success, "Execution should succeed");
-        assert!(output.contains("Hello"), "Output should contain first print");
-        assert!(output.contains("World"), "Output should contain second print");
+        assert!(
+            output.contains("Hello"),
+            "Output should contain first print"
+        );
+        assert!(
+            output.contains("World"),
+            "Output should contain second print"
+        );
     }
 
     #[test]
@@ -98,7 +95,10 @@ mod tests {
 
         let (output, success) = executor.execute("error('test error')");
         assert!(!success, "Execution should fail");
-        assert!(output.contains("Error"), "Output should contain error message");
+        assert!(
+            output.contains("Error"),
+            "Output should contain error message"
+        );
     }
 
     #[test]
@@ -106,6 +106,9 @@ mod tests {
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(None)));
         let (output, success) = executor.execute("print('test')");
         assert!(!success, "Execution should fail without runtime");
-        assert!(output.contains("not initialized"), "Output should indicate runtime not initialized");
+        assert!(
+            output.contains("not initialized"),
+            "Output should indicate runtime not initialized"
+        );
     }
 }

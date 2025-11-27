@@ -130,7 +130,11 @@ impl ConfigApi {
 
         // Recent windows close animation
         let recent_windows_close = lua.create_table()?;
-        Self::set_animation_values(lua, &recent_windows_close, &anim_config.recent_windows_close.0)?;
+        Self::set_animation_values(
+            lua,
+            &recent_windows_close,
+            &anim_config.recent_windows_close.0,
+        )?;
         animations.set("recent_windows_close", recent_windows_close)?;
 
         config_table.set("animations", animations)?;
@@ -647,7 +651,7 @@ impl ConfigApi {
         xwayland_config: &XwaylandSatellite,
     ) -> LuaResult<()> {
         let xwayland = lua.create_table()?;
-         xwayland.set("off", xwayland_config.off)?;
+        xwayland.set("off", xwayland_config.off)?;
         xwayland.set("path", xwayland_config.path.clone())?;
         config_table.set("xwayland_satellite", xwayland)?;
         Ok(())
@@ -669,8 +673,14 @@ impl ConfigApi {
 
         // Highlight settings
         let highlight = lua.create_table()?;
-        highlight.set("active_color", Self::color_to_hex(&recent_windows.highlight.active_color))?;
-        highlight.set("urgent_color", Self::color_to_hex(&recent_windows.highlight.urgent_color))?;
+        highlight.set(
+            "active_color",
+            Self::color_to_hex(&recent_windows.highlight.active_color),
+        )?;
+        highlight.set(
+            "urgent_color",
+            Self::color_to_hex(&recent_windows.highlight.urgent_color),
+        )?;
         highlight.set("padding", recent_windows.highlight.padding)?;
         highlight.set("corner_radius", recent_windows.highlight.corner_radius)?;
         recent_windows_table.set("highlight", highlight)?;

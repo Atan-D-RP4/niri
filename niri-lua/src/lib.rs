@@ -41,11 +41,16 @@ pub mod test_utils;
 
 pub use config::LuaConfig;
 pub use config_converter::apply_lua_config;
+// Tier 3 exports
+pub use event_data::{
+    EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData,
+};
 // Tier 1 exports
 pub use event_emitter::EventEmitter;
 pub use event_handlers::EventHandlers;
 pub use event_system::{register_event_api_to_lua, EventSystem, SharedEventHandlers};
 pub use hot_reload::HotReloader;
+pub use ipc_repl::IpcLuaExecutor;
 // Tier 2 exports
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
 use mlua::prelude::*;
@@ -53,9 +58,6 @@ pub use module_loader::ModuleLoader;
 pub use niri_api::NiriApi;
 pub use plugin_system::PluginManager;
 pub use runtime::LuaRuntime;
-// Tier 3 exports
-pub use event_data::{EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData};
-pub use ipc_repl::IpcLuaExecutor;
 pub use runtime_api::{register_runtime_api, CompositorState, RuntimeApi};
 
 /// Trait for registering Lua components to the global context.

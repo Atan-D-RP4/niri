@@ -4,14 +4,15 @@
 
 #[cfg(test)]
 mod tests {
-    use niri_lua::LuaRuntime;
     use std::sync::{Arc, Mutex};
+
+    use niri_lua::LuaRuntime;
 
     #[test]
     fn test_execute_simple_arithmetic() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 2 + 2");
-        
+
         assert!(success, "Arithmetic should execute successfully");
         assert!(output.contains("4"), "Output should contain the result 4");
     }
@@ -20,7 +21,7 @@ mod tests {
     fn test_execute_with_print() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("print('Hello'); print('World')");
-        
+
         assert!(success, "Code with print should execute successfully");
         assert!(output.contains("Hello"), "Output should contain 'Hello'");
         assert!(output.contains("World"), "Output should contain 'World'");
@@ -30,7 +31,7 @@ mod tests {
     fn test_execute_with_error() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("error('test error')");
-        
+
         assert!(!success, "Code with error should fail");
         assert!(output.contains("Error"), "Output should contain 'Error'");
     }
@@ -39,18 +40,19 @@ mod tests {
     fn test_execute_syntax_error() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("print(1 +");
-        
+
         assert!(!success, "Syntax error should fail");
-        assert!(output.contains("Error"), "Output should contain error message");
+        assert!(
+            output.contains("Error"),
+            "Output should contain error message"
+        );
     }
 
     #[test]
     fn test_execute_with_variables() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        let (output, success) = runtime.execute_string(
-            "local x = 10; local y = 20; return x + y"
-        );
-        
+        let (output, success) = runtime.execute_string("local x = 10; local y = 20; return x + y");
+
         assert!(success, "Code with variables should execute successfully");
         assert!(output.contains("30"), "Output should contain 30");
     }
@@ -58,10 +60,9 @@ mod tests {
     #[test]
     fn test_execute_with_table() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        let (output, success) = runtime.execute_string(
-            "local t = {a = 1, b = 2}; return t.a + t.b"
-        );
-        
+        let (output, success) =
+            runtime.execute_string("local t = {a = 1, b = 2}; return t.a + t.b");
+
         assert!(success, "Code with tables should execute successfully");
         assert!(output.contains("3"), "Output should contain 3");
     }
@@ -76,7 +77,7 @@ end
 return add(5, 7)
         "#;
         let (output, success) = runtime.execute_string(code);
-        
+
         assert!(success, "Code with function should execute successfully");
         assert!(output.contains("12"), "Output should contain 12");
     }
@@ -92,9 +93,12 @@ end
 return sum
         "#;
         let (output, success) = runtime.execute_string(code);
-        
+
         assert!(success, "Code with loop should execute successfully");
-        assert!(output.contains("15"), "Output should contain 15 (sum of 1..5)");
+        assert!(
+            output.contains("15"),
+            "Output should contain 15 (sum of 1..5)"
+        );
     }
 
     #[test]
@@ -106,8 +110,11 @@ print("Line 2")
 print("Line 3")
         "#;
         let (output, success) = runtime.execute_string(code);
-        
-        assert!(success, "Code with multiple prints should execute successfully");
+
+        assert!(
+            success,
+            "Code with multiple prints should execute successfully"
+        );
         assert!(output.contains("Line 1"), "Output should contain 'Line 1'");
         assert!(output.contains("Line 2"), "Output should contain 'Line 2'");
         assert!(output.contains("Line 3"), "Output should contain 'Line 3'");
@@ -117,7 +124,7 @@ print("Line 3")
     fn test_execute_empty_code() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("");
-        
+
         assert!(success, "Empty code should succeed");
         assert!(output.is_empty(), "Empty code should produce no output");
     }
@@ -126,17 +133,20 @@ print("Line 3")
     fn test_execute_nil_return() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return nil");
-        
+
         assert!(success, "Returning nil should succeed");
         // Nil return should have no output since we skip nil strings
-        assert!(output.is_empty() || output.contains("nil"), "Output should be empty or contain nil");
+        assert!(
+            output.is_empty() || output.contains("nil"),
+            "Output should be empty or contain nil"
+        );
     }
 
     #[test]
     fn test_execute_string_with_special_chars() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("print('Hello\\nWorld')");
-        
+
         assert!(success, "Code with escaped characters should execute");
         assert!(output.contains("Hello"), "Output should contain 'Hello'");
     }
@@ -144,10 +154,10 @@ print("Line 3")
     #[test]
     fn test_ipc_executor_integration() {
         use niri_lua::IpcLuaExecutor;
-        
+
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
-        
+
         let (output, success) = executor.execute("return 1 + 1");
         assert!(success, "Executor should succeed");
         assert!(output.contains("2"), "Output should contain 2");
@@ -156,10 +166,10 @@ print("Line 3")
     #[test]
     fn test_ipc_executor_with_error() {
         use niri_lua::IpcLuaExecutor;
-        
+
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
-        
+
         let (output, success) = executor.execute("error('test')");
         assert!(!success, "Executor should fail on error");
         assert!(output.contains("Error"), "Output should contain error");
@@ -168,28 +178,31 @@ print("Line 3")
     #[test]
     fn test_ipc_executor_no_runtime() {
         use niri_lua::IpcLuaExecutor;
-        
+
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(None)));
         let (output, success) = executor.execute("print('test')");
-        
+
         assert!(!success, "Executor should fail without runtime");
-        assert!(output.contains("not initialized"), "Output should indicate runtime not initialized");
+        assert!(
+            output.contains("not initialized"),
+            "Output should indicate runtime not initialized"
+        );
     }
 
     #[test]
     fn test_consecutive_executions() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        
+
         // First execution
         let (output1, success1) = runtime.execute_string("return 1");
         assert!(success1);
         assert!(output1.contains("1"));
-        
+
         // Second execution - should work fine
         let (output2, success2) = runtime.execute_string("return 2");
         assert!(success2);
         assert!(output2.contains("2"));
-        
+
         // Third execution - should work fine
         let (output3, success3) = runtime.execute_string("return 3");
         assert!(success3);
@@ -201,7 +214,7 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let code = "local x = 10\nlocal y = 20\nprint(x + y)";
         let (output, success) = runtime.execute_string(code);
-        
+
         assert!(success, "Multiline code should execute");
         assert!(output.contains("30"), "Output should contain 30");
     }
@@ -211,7 +224,7 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let code = "-- This is a comment\nprint('Hello') -- inline comment";
         let (output, success) = runtime.execute_string(code);
-        
+
         assert!(success, "Code with comments should execute");
         assert!(output.contains("Hello"), "Output should contain 'Hello'");
     }
@@ -221,7 +234,7 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let code = "print(42); print(3.14); print(true); print(false)";
         let (output, success) = runtime.execute_string(code);
-        
+
         assert!(success, "Code with various types should execute");
         assert!(output.contains("42"), "Output should contain 42");
         assert!(output.contains("3.14"), "Output should contain 3.14");
@@ -268,7 +281,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return false");
         assert!(success, "Should execute successfully");
-        assert_eq!(output, "false", "Boolean false should be converted to 'false'");
+        assert_eq!(
+            output, "false",
+            "Boolean false should be converted to 'false'"
+        );
     }
 
     #[test]
@@ -276,7 +292,11 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return nil");
         assert!(success, "Should execute successfully");
-        assert!(output.is_empty(), "nil should produce empty output, got: '{}'", output);
+        assert!(
+            output.is_empty(),
+            "nil should produce empty output, got: '{}'",
+            output
+        );
     }
 
     #[test]
@@ -286,7 +306,10 @@ print("Line 3")
         assert!(success, "Should execute successfully");
         println!("Simple array table output: '{}'", output);
         // Tables don't produce output - users should use niri.print() instead
-        assert!(output.is_empty(), "Array table should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Array table should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
@@ -296,17 +319,24 @@ print("Line 3")
         assert!(success, "Should execute successfully");
         println!("Table with string keys output: '{}'", output);
         // Tables don't produce output - users should use niri.print() instead
-        assert!(output.is_empty(), "Table should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Table should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
     fn test_return_nested_table() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        let (output, success) = runtime.execute_string("return {{id = 1, name = 'a'}, {id = 2, name = 'b'}}");
+        let (output, success) =
+            runtime.execute_string("return {{id = 1, name = 'a'}, {id = 2, name = 'b'}}");
         assert!(success, "Should execute successfully");
         println!("Nested table output: '{}'", output);
         // Tables don't produce output - users should use niri.print() instead
-        assert!(output.is_empty(), "Nested table should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Nested table should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
@@ -316,7 +346,10 @@ print("Line 3")
         assert!(success, "Should execute successfully");
         println!("Empty table output: '{}'", output);
         // Tables don't produce output - users should use niri.print() instead
-        assert!(output.is_empty(), "Empty table should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Empty table should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
@@ -327,18 +360,25 @@ print("Line 3")
         assert!(success, "Should execute successfully");
         println!("Large array output length: {}", output.len());
         // Tables don't produce output - users should use niri.print() instead
-        assert!(output.is_empty(), "Large array should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Large array should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
     fn test_return_large_complex_table() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        let code = "local t = {} for i=1,50 do t[i] = {id=i, value='item'..i, active=i%2==0} end return t";
+        let code =
+            "local t = {} for i=1,50 do t[i] = {id=i, value='item'..i, active=i%2==0} end return t";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
         println!("Large complex table output length: {}", output.len());
         // Tables don't produce output - users should use niri.print() instead
-        assert!(output.is_empty(), "Large complex table should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Large complex table should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
@@ -348,7 +388,10 @@ print("Line 3")
         assert!(success, "Should execute successfully");
         println!("No explicit return output: '{}'", output);
         // No explicit return should produce empty output
-        assert!(output.is_empty(), "No explicit return should produce empty output");
+        assert!(
+            output.is_empty(),
+            "No explicit return should produce empty output"
+        );
     }
 
     #[test]
@@ -401,7 +444,10 @@ print("Line 3")
         assert!(!success, "Should fail on error");
         println!("Error output: '{}'", output);
         assert!(output.contains("Error"), "Should contain 'Error'");
-        assert!(output.contains("custom"), "Should contain custom error message");
+        assert!(
+            output.contains("custom"),
+            "Should contain custom error message"
+        );
     }
 
     #[test]
@@ -430,7 +476,10 @@ print("Line 3")
         assert!(success, "Should execute successfully");
         println!("Table structure output: '{}'", output);
         // Tables return empty output since users should use niri.print() for pretty-printing
-        assert!(output.is_empty(), "Table should not produce output (use niri.print instead)");
+        assert!(
+            output.is_empty(),
+            "Table should not produce output (use niri.print instead)"
+        );
     }
 
     #[test]
@@ -470,7 +519,10 @@ print("Line 3")
         let code = "return 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
-        assert!(output.contains("Lorem"), "Should contain part of long string");
+        assert!(
+            output.contains("Lorem"),
+            "Should contain part of long string"
+        );
     }
 
     #[test]
@@ -508,7 +560,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 1000000000000");
         assert!(success, "Should execute successfully");
-        assert_eq!(output, "1000000000000", "Large integer should format correctly");
+        assert_eq!(
+            output, "1000000000000",
+            "Large integer should format correctly"
+        );
     }
 
     #[test]
@@ -524,7 +579,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 0.000001");
         assert!(success, "Should execute successfully");
-        assert_eq!(output, "0.000001", "Very small float should format correctly");
+        assert_eq!(
+            output, "0.000001",
+            "Very small float should format correctly"
+        );
     }
 
     #[test]
@@ -532,7 +590,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return -3.14159");
         assert!(success, "Should execute successfully");
-        assert!(output.contains("-3.14"), "Negative float should format correctly");
+        assert!(
+            output.contains("-3.14"),
+            "Negative float should format correctly"
+        );
     }
 
     #[test]
@@ -584,7 +645,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string(r#"return "It's a \"quoted\" string""#);
         assert!(success, "Should execute successfully");
-        assert!(output.contains("quoted"), "String with quotes should be returned");
+        assert!(
+            output.contains("quoted"),
+            "String with quotes should be returned"
+        );
     }
 
     #[test]
@@ -592,7 +656,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 'Hello 世界 🌍'");
         assert!(success, "Should execute successfully");
-        assert_eq!(output, "Hello 世界 🌍", "Unicode string should be preserved");
+        assert_eq!(
+            output, "Hello 世界 🌍",
+            "Unicode string should be preserved"
+        );
     }
 
     #[test]
@@ -600,7 +667,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("print('emoji: 🚀 ✨ 🔥')");
         assert!(success, "Should execute successfully");
-        assert_eq!(output, "emoji: 🚀 ✨ 🔥", "Unicode in print should be preserved");
+        assert_eq!(
+            output, "emoji: 🚀 ✨ 🔥",
+            "Unicode in print should be preserved"
+        );
     }
 
     #[test]
@@ -608,7 +678,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 'Hello\\tWorld'");
         assert!(success, "Should execute successfully");
-        assert!(output.contains("Hello"), "String with tab should be preserved");
+        assert!(
+            output.contains("Hello"),
+            "String with tab should be preserved"
+        );
     }
 
     #[test]
@@ -616,7 +689,10 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 'Line1\\nLine2'");
         assert!(success, "Should execute successfully");
-        assert!(output.contains("Line1"), "String with newlines should preserve content");
+        assert!(
+            output.contains("Line1"),
+            "String with newlines should preserve content"
+        );
     }
 
     #[test]
@@ -815,7 +891,10 @@ print("Line 3")
     fn test_division_by_zero() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 1 / 0");
-        assert!(success, "Should execute successfully (Lua allows division by zero)");
+        assert!(
+            success,
+            "Should execute successfully (Lua allows division by zero)"
+        );
         assert_eq!(output, "inf", "Division by zero should produce infinity");
     }
 
@@ -825,7 +904,10 @@ print("Line 3")
         let (output, success) = runtime.execute_string("return undefined_var");
         // In Lua, accessing undefined variables returns nil, not an error
         assert!(success, "Should execute successfully");
-        assert_eq!(output, "", "Undefined variable should return nil (empty output)");
+        assert_eq!(
+            output, "",
+            "Undefined variable should return nil (empty output)"
+        );
     }
 
     #[test]
@@ -882,14 +964,19 @@ print("Line 3")
     fn test_separate_runtimes_isolated() {
         let runtime1 = LuaRuntime::new().expect("Failed to create Lua runtime");
         let runtime2 = LuaRuntime::new().expect("Failed to create Lua runtime");
-        
+
         // Set a variable in runtime1
         runtime1.load_string("test_var = 42").unwrap();
-        
+
         // Try to access it in runtime2 - should return nil, not error
         let (output, success) = runtime2.execute_string("return test_var");
-        assert!(success, "Accessing undefined variable returns nil, not error");
-        assert_eq!(output, "", "Variable from runtime1 should not be accessible in runtime2 (returns nil)");
+        assert!(
+            success,
+            "Accessing undefined variable returns nil, not error"
+        );
+        assert_eq!(
+            output, "",
+            "Variable from runtime1 should not be accessible in runtime2 (returns nil)"
+        );
     }
-
 }

@@ -4,12 +4,14 @@
 //! It provides utilities for loading scripts and managing the Lua environment.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use mlua::prelude::*;
 use niri_config::Config;
 
 use crate::config_api::ConfigApi;
-use crate::event_system::EventSystem;
+use crate::event_handlers::EventHandlers;
+use crate::event_system::{register_event_api_to_lua, EventSystem};
 use crate::{LuaComponent, NiriApi};
 
 /// Manages a Lua runtime for Niri.
@@ -90,6 +92,22 @@ impl LuaRuntime {
         crate::register_runtime_api(&self.lua, api)
     }
 
+    /// Initialize the event system for this runtime.
+    ///
+    /// This must be called once during runtime initialization to enable event handling.
+    /// It registers the Lua event API (`niri.on()`, `niri.once()`, `niri.off()`)
+    /// and creates the internal event system for emitting events from the compositor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if event system initialization fails.
+    pub fn init_event_system(&mut self) -> LuaResult<()> {
+        let handlers = Arc::new(parking_lot::Mutex::new(EventHandlers::new()));
+        register_event_api_to_lua(&self.lua, handlers.clone())?;
+        self.event_system = Some(EventSystem::new(handlers));
+        Ok(())
+    }
+
     /// Load and execute a Lua script from a file.
     ///
     /// # Errors
@@ -121,36 +139,42 @@ impl LuaRuntime {
         let mut output = Vec::new();
         let output_ptr = &mut output as *mut Vec<String>;
 
-        let print_fn = self.lua.create_function(move |_, args: mlua::MultiValue| -> LuaResult<()> {
-            let output_vec = unsafe { &mut *output_ptr };
-            for v in args.iter() {
-                let s = match v {
-                    LuaValue::String(s) => s.to_string_lossy().to_string(),
-                    LuaValue::Integer(i) => i.to_string(),
-                    LuaValue::Number(n) => {
-                        // Format numbers cleanly without debug info
-                        if n.is_finite() {
-                            if n.fract() == 0.0 && n.abs() < 1e15 {
-                                format!("{:.0}", n)
-                            } else {
-                                n.to_string()
+        let print_fn =
+            self.lua
+                .create_function(move |_, args: mlua::MultiValue| -> LuaResult<()> {
+                    let output_vec = unsafe { &mut *output_ptr };
+                    for v in args.iter() {
+                        let s = match v {
+                            LuaValue::String(s) => s.to_string_lossy().to_string(),
+                            LuaValue::Integer(i) => i.to_string(),
+                            LuaValue::Number(n) => {
+                                // Format numbers cleanly without debug info
+                                if n.is_finite() {
+                                    if n.fract() == 0.0 && n.abs() < 1e15 {
+                                        format!("{:.0}", n)
+                                    } else {
+                                        n.to_string()
+                                    }
+                                } else if n.is_nan() {
+                                    "nan".to_string()
+                                } else if n.is_infinite() {
+                                    if n.is_sign_positive() {
+                                        "inf".to_string()
+                                    } else {
+                                        "-inf".to_string()
+                                    }
+                                } else {
+                                    n.to_string()
+                                }
                             }
-                        } else if n.is_nan() {
-                            "nan".to_string()
-                        } else if n.is_infinite() {
-                            if n.is_sign_positive() { "inf".to_string() } else { "-inf".to_string() }
-                        } else {
-                            n.to_string()
-                        }
+                            LuaValue::Boolean(b) => b.to_string(),
+                            LuaValue::Nil => "nil".to_string(),
+                            _ => format!("{:?}", v),
+                        };
+                        output_vec.push(s);
                     }
-                    LuaValue::Boolean(b) => b.to_string(),
-                    LuaValue::Nil => "nil".to_string(),
-                    _ => format!("{:?}", v),
-                };
-                output_vec.push(s);
-            }
-            Ok(())
-        });
+                    Ok(())
+                });
 
         if let Ok(pf) = print_fn {
             let _ = self.lua.globals().set("print", pf);
@@ -180,7 +204,11 @@ impl LuaRuntime {
                         } else if n.is_nan() {
                             "nan".to_string()
                         } else if n.is_infinite() {
-                            if n.is_sign_positive() { "inf".to_string() } else { "-inf".to_string() }
+                            if n.is_sign_positive() {
+                                "inf".to_string()
+                            } else {
+                                "-inf".to_string()
+                            }
                         } else {
                             n.to_string()
                         }
@@ -371,13 +399,13 @@ impl LuaRuntime {
         // Try multiple locations for binds table for compatibility with different configs
         let binds_table_opt: Option<LuaTable> =
             if let Ok(Some(t)) = self.get_global_table_opt("binds") {
-                debug!("[get_keybindings] Found binds in global scope");
+                // debug!("[get_keybindings] Found binds in global scope");
                 Some(t)
             } else if let Ok(Some(niri_table)) = self.get_global_table_opt("niri") {
                 // Try niri.binds
                 match niri_table.get::<LuaValue>("binds") {
                     Ok(LuaValue::Table(t)) => {
-                        debug!("[get_keybindings] Found binds in niri table");
+                        // debug!("[get_keybindings] Found binds in niri table");
                         Some(t)
                     }
                     _ => {
@@ -386,7 +414,7 @@ impl LuaRuntime {
                             Ok(LuaValue::Table(config_table)) => {
                                 match config_table.get::<LuaValue>("binds") {
                                     Ok(LuaValue::Table(t2)) => {
-                                        debug!("[get_keybindings] Found binds in niri.config");
+                                        // debug!("[get_keybindings] Found binds in niri.config");
                                         Some(t2)
                                     }
                                     _ => None,
@@ -401,12 +429,12 @@ impl LuaRuntime {
             };
 
         if let Some(binds_table) = binds_table_opt {
-            debug!("[get_keybindings] Iterating bindings");
+            // debug!("[get_keybindings] Iterating bindings");
             let mut index = 1i64;
             loop {
                 let binding: LuaValue = binds_table.get(index)?;
                 if binding == LuaValue::Nil {
-                    debug!("[get_keybindings] End of binds table at index {}", index);
+                    // debug!("[get_keybindings] End of binds table at index {}", index);
                     break;
                 }
 
@@ -417,10 +445,10 @@ impl LuaRuntime {
                         .get("action")
                         .unwrap_or_else(|_| "".to_string());
 
-                    debug!(
-                        "[get_keybindings] Binding {}: key='{}', action='{}'",
-                        index, key, action
-                    );
+                    // debug!(
+                    //     "[get_keybindings] Binding {}: key='{}', action='{}'",
+                    //     index, key, action
+                    // );
 
                     let args: Vec<String> =
                         if let Ok(args_table) = binding_table.get::<LuaTable>("args") {
@@ -481,7 +509,10 @@ impl LuaRuntime {
 
         // Try multiple locations for startup table
         let startup_table_opt: Option<LuaTable> =
-            if let Ok(Some(t)) = self.get_global_table_opt("startup") {
+            if let Ok(Some(t)) = self.get_global_table_opt("spawn_at_startup") {
+                debug!("[get_startup_commands] Found spawn_at_startup in global scope");
+                Some(t)
+            } else if let Ok(Some(t)) = self.get_global_table_opt("startup") {
                 debug!("[get_startup_commands] Found startup in global scope");
                 Some(t)
             } else if let Ok(Some(niri_table)) = self.get_global_table_opt("niri") {

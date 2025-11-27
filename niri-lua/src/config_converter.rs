@@ -230,6 +230,13 @@ fn lua_keybinding_to_bind(lua_binding: LuaKeybinding) -> Option<Bind> {
         "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
         "screenshot-window" => Action::ScreenshotWindow(true, None),
 
+        // Window sizing
+        "reset-window-height" => Action::ResetWindowHeight,
+        "expand-column-to-available-width" => Action::ExpandColumnToAvailableWidth,
+
+        // Keyboard shortcuts inhibit
+        "toggle-keyboard-shortcuts-inhibit" => Action::ToggleKeyboardShortcutsInhibit,
+
         // Unsupported actions requiring arguments
         "move-column-to-monitor" | "move-window-to-monitor" | "focus-monitor" => {
             warn!(
@@ -542,10 +549,10 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 let mut converted_binds = Vec::new();
 
                 for (key, action, args) in raw_keybindings {
-                    debug!(
-                        "[apply_lua_config] Processing binding: key='{}', action='{}'",
-                        key, action
-                    );
+                    // debug!(
+                    //     "[apply_lua_config] Processing binding: key='{}', action='{}'",
+                    //     key, action
+                    // );
                     let lua_binding = LuaKeybinding {
                         key,
                         action,
@@ -1380,10 +1387,10 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 );
             }
             Ok(_) => {
-                warn!("✗ outputs is not a table");
+                debug!("ℹ outputs global exists but is not a table, skipping");
             }
             Err(e) => {
-                warn!("✗ Error extracting outputs configuration from Lua: {}", e);
+                debug!("ℹ Error extracting outputs: {}", e);
             }
         }
     } else {
@@ -1744,7 +1751,22 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 info!("✓ Applied screenshot_path configuration from Lua");
             }
             Err(e) => {
-                warn!("✗ Error extracting screenshot_path from Lua: {}", e);
+                debug!("ℹ screenshot_path exists but is not a string: {}", e);
+            }
+        }
+    } else if runtime.has_global("screenshot") {
+        // Also check for screenshot table with a path field
+        debug!("Found screenshot configuration in Lua globals");
+        match runtime.inner().globals().get::<mlua::Table>("screenshot") {
+            Ok(screenshot_table) => {
+                if let Ok(path) = screenshot_table.get::<String>("path") {
+                    debug!("  screenshot.path: {}", path);
+                    config.screenshot_path = niri_config::ScreenshotPath(Some(path));
+                    info!("✓ Applied screenshot.path configuration from Lua");
+                }
+            }
+            Err(e) => {
+                debug!("ℹ screenshot exists but is not a table: {}", e);
             }
         }
     } else {
@@ -1988,8 +2010,8 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
                 );
             }
             Err(e) => {
-                warn!(
-                    "✗ Error extracting workspaces configuration from Lua: {}",
+                debug!(
+                    "ℹ workspaces configuration exists but is not a table: {}",
                     e
                 );
             }
@@ -2300,6 +2322,139 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
         }
     } else {
         debug!("ℹ config_notification configuration not found in Lua globals");
+    }
+
+    // Extract recent_windows configuration
+    if runtime.has_global("recent_windows") {
+        debug!("Found recent_windows configuration in Lua globals");
+        match runtime
+            .inner()
+            .globals()
+            .get::<mlua::Table>("recent_windows")
+        {
+            Ok(recent_windows_table) => {
+                debug!("Processing recent_windows configuration");
+
+                if let Ok(on) = recent_windows_table.get::<bool>("on") {
+                    debug!("  recent_windows.on: {}", on);
+                    config.recent_windows.on = on;
+                }
+
+                if let Ok(open_delay_ms) = recent_windows_table.get::<u16>("open_delay_ms") {
+                    debug!("  recent_windows.open_delay_ms: {}", open_delay_ms);
+                    config.recent_windows.open_delay_ms = open_delay_ms;
+                }
+
+                // Process highlight subtable
+                if let Ok(highlight_table) = recent_windows_table.get::<mlua::Table>("highlight") {
+                    debug!("  Processing recent_windows.highlight");
+
+                    if let Ok(active_color) = highlight_table.get::<String>("active_color") {
+                        if let Some(color) = parse_hex_color(&active_color) {
+                            config.recent_windows.highlight.active_color = color;
+                        }
+                    }
+
+                    if let Ok(urgent_color) = highlight_table.get::<String>("urgent_color") {
+                        if let Some(color) = parse_hex_color(&urgent_color) {
+                            config.recent_windows.highlight.urgent_color = color;
+                        }
+                    }
+
+                    if let Ok(padding) = highlight_table.get::<f64>("padding") {
+                        config.recent_windows.highlight.padding = padding;
+                    }
+
+                    if let Ok(corner_radius) = highlight_table.get::<f64>("corner_radius") {
+                        config.recent_windows.highlight.corner_radius = corner_radius;
+                    }
+                }
+
+                // Process previews subtable
+                if let Ok(previews_table) = recent_windows_table.get::<mlua::Table>("previews") {
+                    debug!("  Processing recent_windows.previews");
+
+                    if let Ok(max_height) = previews_table.get::<f64>("max_height") {
+                        config.recent_windows.previews.max_height = max_height;
+                    }
+
+                    if let Ok(max_scale) = previews_table.get::<f64>("max_scale") {
+                        config.recent_windows.previews.max_scale = max_scale;
+                    }
+                }
+
+                info!("✓ Applied recent_windows configuration from Lua");
+            }
+            Err(e) => {
+                warn!(
+                    "✗ Error extracting recent_windows configuration from Lua: {}",
+                    e
+                );
+            }
+        }
+    } else {
+        debug!("ℹ recent_windows configuration not found in Lua globals");
+    }
+
+    // Extract overview configuration
+    if runtime.has_global("overview") {
+        debug!("Found overview configuration in Lua globals");
+        match runtime.inner().globals().get::<mlua::Table>("overview") {
+            Ok(overview_table) => {
+                debug!("Processing overview configuration");
+
+                if let Ok(zoom) = overview_table.get::<f64>("zoom") {
+                    debug!("  overview.zoom: {}", zoom);
+                    config.overview.zoom = zoom;
+                }
+
+                if let Ok(backdrop_color) = overview_table.get::<String>("backdrop_color") {
+                    if let Some(color) = parse_hex_color(&backdrop_color) {
+                        config.overview.backdrop_color = color;
+                    }
+                }
+
+                // Process workspace_shadow subtable
+                if let Ok(shadow_table) = overview_table.get::<mlua::Table>("workspace_shadow") {
+                    debug!("  Processing overview.workspace_shadow");
+
+                    if let Ok(off) = shadow_table.get::<bool>("off") {
+                        config.overview.workspace_shadow.off = off;
+                    }
+
+                    if let Ok(softness) = shadow_table.get::<f64>("softness") {
+                        config.overview.workspace_shadow.softness = softness;
+                    }
+
+                    if let Ok(spread) = shadow_table.get::<f64>("spread") {
+                        config.overview.workspace_shadow.spread = spread;
+                    }
+
+                    if let Ok(color) = shadow_table.get::<String>("color") {
+                        if let Some(parsed_color) = parse_hex_color(&color) {
+                            config.overview.workspace_shadow.color = parsed_color;
+                        }
+                    }
+
+                    // Process offset
+                    if let Ok(offset_table) = shadow_table.get::<mlua::Table>("offset") {
+                        if let Ok(x) = offset_table.get::<f64>("x") {
+                            config.overview.workspace_shadow.offset.x = niri_config::FloatOrInt(x);
+                        }
+                        if let Ok(y) = offset_table.get::<f64>("y") {
+                            config.overview.workspace_shadow.offset.y = niri_config::FloatOrInt(y);
+                        }
+                    }
+                }
+
+                info!("✓ Applied overview configuration from Lua");
+            }
+            Err(e) => {
+                warn!("✗ Error extracting overview configuration from Lua: {}", e);
+            }
+        }
+    } else {
+        debug!("ℹ overview configuration not found in Lua globals");
     }
 
     // Register the config API so Lua scripts can read the current configuration

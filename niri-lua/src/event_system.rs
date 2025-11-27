@@ -8,7 +8,7 @@ use std::sync::Arc;
 use log::debug;
 use mlua::prelude::*;
 
-use crate::event_handlers::{EventHandlers, EventHandlerId};
+use crate::event_handlers::{EventHandlerId, EventHandlers};
 
 /// Thread-safe wrapper around EventHandlers for Lua integration
 pub type SharedEventHandlers = Arc<parking_lot::Mutex<EventHandlers>>;
@@ -53,11 +53,13 @@ pub fn register_event_api_to_lua(lua: &Lua, handlers: SharedEventHandlers) -> Lu
     let handlers_off = handlers.clone();
     niri_table.set(
         "off",
-        lua.create_function(move |_, (event_type, handler_id): (String, EventHandlerId)| {
-            let mut h = handlers_off.lock();
-            h.unregister_handler(&event_type, handler_id);
-            Ok(())
-        })?,
+        lua.create_function(
+            move |_, (event_type, handler_id): (String, EventHandlerId)| {
+                let mut h = handlers_off.lock();
+                h.unregister_handler(&event_type, handler_id);
+                Ok(())
+            },
+        )?,
     )?;
 
     debug!("Registered event API to Lua");
@@ -182,7 +184,9 @@ mod tests {
 
         // Emit twice
         let data = lua.create_table().unwrap();
-        event_system.emit("once_event", LuaValue::Table(data.clone())).ok();
+        event_system
+            .emit("once_event", LuaValue::Table(data.clone()))
+            .ok();
         event_system.emit("once_event", LuaValue::Table(data)).ok();
 
         // Should only be called once

@@ -251,7 +251,12 @@ fn create_window_event_table(lua: &Lua, id: u32, title: &str) -> LuaResult<LuaVa
     Ok(LuaValue::Table(table))
 }
 
-fn create_workspace_event_table(lua: &Lua, name: &str, index: u32, active: bool) -> LuaResult<LuaValue> {
+fn create_workspace_event_table(
+    lua: &Lua,
+    name: &str,
+    index: u32,
+    active: bool,
+) -> LuaResult<LuaValue> {
     let table = lua.create_table()?;
     table.set("name", name)?;
     table.set("index", index)?;
@@ -259,7 +264,12 @@ fn create_workspace_event_table(lua: &Lua, name: &str, index: u32, active: bool)
     Ok(LuaValue::Table(table))
 }
 
-fn create_monitor_event_table(lua: &Lua, name: &str, connector: &str, connected: bool) -> LuaResult<LuaValue> {
+fn create_monitor_event_table(
+    lua: &Lua,
+    name: &str,
+    connector: &str,
+    connected: bool,
+) -> LuaResult<LuaValue> {
     let table = lua.create_table()?;
     table.set("name", name)?;
     table.set("connector", connector)?;
@@ -272,4 +282,3 @@ fn create_layout_event_table(lua: &Lua, mode: &str) -> LuaResult<LuaValue> {
     table.set("mode", mode)?;
     Ok(LuaValue::Table(table))
 }
-

@@ -89,7 +89,10 @@ impl EventHandlers {
         if let Some(handlers) = self.handlers.get_mut(event_type) {
             if let Some(pos) = handlers.iter().position(|h| h.id == handler_id) {
                 handlers.remove(pos);
-                debug!("Unregistered event handler '{}' with ID {}", event_type, handler_id);
+                debug!(
+                    "Unregistered event handler '{}' with ID {}",
+                    event_type, handler_id
+                );
                 return true;
             }
         }
@@ -153,10 +156,7 @@ impl EventHandlers {
 
     /// Get the number of handlers for a specific event
     pub fn handler_count(&self, event_type: &str) -> usize {
-        self.handlers
-            .get(event_type)
-            .map(|h| h.len())
-            .unwrap_or(0)
+        self.handlers.get(event_type).map(|h| h.len()).unwrap_or(0)
     }
 
     /// Get the total number of registered handlers
@@ -271,7 +271,9 @@ mod tests {
         assert_eq!(handlers.handler_count("once_event"), 1);
 
         let data = lua.create_table().unwrap();
-        handlers.emit_event("once_event", LuaValue::Table(data)).ok();
+        handlers
+            .emit_event("once_event", LuaValue::Table(data))
+            .ok();
 
         // Handler should be removed after execution
         assert_eq!(handlers.handler_count("once_event"), 0);

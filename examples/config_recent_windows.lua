@@ -33,7 +33,7 @@ local recent_windows = {
 		padding = 8,
 
 		-- Corner radius of the highlight box
-		corner_radius = 4,
+		corner_radius = 10,
 	},
 
 	-- Preview configuration for window thumbnails

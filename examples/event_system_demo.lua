@@ -1,137 +1,73 @@
---[[
-    Example Niri Lua Event System Plugin
-    
-    This plugin demonstrates how to use the Niri event system
-    for reactive, event-driven Lua programming.
-    
-    Demonstrates:
-    - Window lifecycle tracking
-    - Event handler registration and cleanup
-    - One-time handlers with `niri.once()`
-    - Persistent handlers with `niri.on()`
-    - Multiple event types
+#!/usr/bin/env niri
+--! This example demonstrates the Lua event system in Niri.
+--! 
+--! The Niri Lua runtime provides an event system that allows scripts to listen
+--! to various compositor events like window opening/closing, workspace switching,
+--! monitor connection, and layout changes.
+--!
+--! Supported events:
+--! - window:open      - Window created
+--! - window:close     - Window destroyed
+--! - window:focus     - Window received focus
+--! - window:blur      - Window lost focus
+--! - workspace:activate   - Workspace became active
+--! - workspace:deactivate - Workspace became inactive
+--! - monitor:connect      - Monitor connected
+--! - monitor:disconnect   - Monitor disconnected
+--! - layout:mode_changed  - Tiling/floating mode changed
+--! - layout:window_added  - Window added to layout
+--! - layout:window_removed - Window removed from layout
+
+niri.apply_config({
+    -- Configuration goes here
+})
+
+-- Track event counts for demonstration
+local event_counts = {}
+
+-- Helper function to register event listener
+function register_event(event_type)
+    niri.on(event_type, function(data)
+        event_counts[event_type] = (event_counts[event_type] or 0) + 1
+        niri.log(string.format("Event: %s (count: %d)", event_type, event_counts[event_type]))
+        if data then
+            for key, value in pairs(data) do
+                niri.log(string.format("  %s: %s", key, tostring(value)))
+            end
+        end
+    end)
+end
+
+-- Register all event types
+niri.log("=== Niri Event System Demo ===")
+niri.log("Setting up event listeners...")
+
+register_event("window:open")
+register_event("window:close")
+register_event("window:focus")
+register_event("window:blur")
+register_event("workspace:activate")
+register_event("workspace:deactivate")
+register_event("monitor:connect")
+register_event("monitor:disconnect")
+register_event("layout:mode_changed")
+register_event("layout:window_added")
+register_event("layout:window_removed")
+
+niri.log("Event listeners registered. You should see events as they occur.")
+niri.log("Try opening/closing windows, switching workspaces, toggling floating mode, etc.")
+
+-- Optional: Register a one-time event listener to demonstrate niri.once()
+niri.once("window:open", function(data)
+    niri.log(">>> First window opened (this event fired once only)")
+end)
+
+-- Print event summary every 60 seconds
+--[[ Uncomment to enable periodic summary
+local function print_summary()
+    niri.log("=== Event Summary ===")
+    for event_type, count in pairs(event_counts) do
+        niri.log(string.format("%s: %d events", event_type, count))
+    end
+end
 ]]
-
-local M = {}
-
--- Track open windows for demonstration
-local window_tracker = {
-    windows = {},
-    total_opened = 0,
-    total_closed = 0,
-}
-
--- Example 1: Basic window open handler
-function M.track_window_opens()
-    niri.on("window:open", function(event)
-        window_tracker.total_opened = window_tracker.total_opened + 1
-        local window = event.window
-        niri.log(string.format(
-            "[Window Tracker] Window opened: %s (%s) - Total: %d",
-            window.title or "(untitled)",
-            window.app_id or "(unknown)",
-            window_tracker.total_opened
-        ))
-    end)
-end
-
--- Example 2: One-time handler (fires only on first event)
-function M.first_window_notification()
-    niri.once("window:open", function(event)
-        niri.log("[Event System] First window opened! This message appears only once.")
-    end)
-end
-
--- Example 3: Window closing tracker
-function M.track_window_closes()
-    niri.on("window:close", function(event)
-        window_tracker.total_closed = window_tracker.total_closed + 1
-        local window = event.window
-        niri.log(string.format(
-            "[Window Tracker] Window closed: %s - Total closed: %d",
-            window.title or "(untitled)",
-            window_tracker.total_closed
-        ))
-    end)
-end
-
--- Example 4: Multiple event tracking
-function M.track_focus_changes()
-    niri.on("window:focus", function(event)
-        local window = event.window
-        local prev = event.previous_window
-        
-        niri.log(string.format(
-            "[Focus] Focus changed to: %s (was: %s)",
-            window.title or "(untitled)",
-            (prev and prev.title) or "(none)"
-        ))
-    end)
-end
-
--- Example 5: Workspace-aware automation
-function M.workspace_automation()
-    niri.on("workspace:activate", function(event)
-        local ws = event.workspace
-        local prev_ws = event.previous_workspace
-        
-        niri.log(string.format(
-            "[Workspace] Switched to workspace: %s (from %s)",
-            ws.name or string.format("Workspace %d", ws.idx),
-            (prev_ws and prev_ws.name) or "(none)"
-        ))
-    end)
-end
-
--- Example 6: Monitor connection handling
-function M.monitor_tracking()
-    niri.on("monitor:connect", function(event)
-        local monitor = event.monitor
-        niri.log(string.format(
-            "[Monitor] Connected: %s (%s) at scale %.1fx",
-            monitor.name,
-            monitor.model or "(unknown model)",
-            monitor.scale or 1.0
-        ))
-    end)
-    
-    niri.on("monitor:disconnect", function(event)
-        local monitor = event.monitor
-        niri.log(string.format(
-            "[Monitor] Disconnected: %s",
-            monitor.name
-        ))
-    end)
-end
-
--- Example 7: Logging tracker state
-function M.get_statistics()
-    return {
-        total_opened = window_tracker.total_opened,
-        total_closed = window_tracker.total_closed,
-        active_windows = window_tracker.total_opened - window_tracker.total_closed,
-    }
-end
-
--- Plugin initialization
-function M.init()
-    niri.log("[Event System Plugin] Initializing...")
-    
-    -- Register all event handlers
-    M.track_window_opens()
-    M.first_window_notification()
-    M.track_window_closes()
-    M.track_focus_changes()
-    M.workspace_automation()
-    M.monitor_tracking()
-    
-    niri.log("[Event System Plugin] Initialization complete!")
-    niri.log("Event handlers installed:")
-    niri.log("  - Window lifecycle tracking")
-    niri.log("  - Focus change monitoring")
-    niri.log("  - Workspace activation tracking")
-    niri.log("  - Monitor connection/disconnection handling")
-end
-
--- Return public API
-return M

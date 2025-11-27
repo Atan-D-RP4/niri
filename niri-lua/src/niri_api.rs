@@ -139,6 +139,63 @@ impl LuaComponent for NiriApi {
         })?;
         niri.set("spawn", spawn_fn)?;
 
+        // Register apply_config function
+        // This function takes a config table and applies it to globals
+        // allowing scripts to do: niri.apply_config({ binds = {...}, input = {...} })
+        let apply_config_fn = lua.create_function(|lua, config_table: LuaTable| {
+            info!("Applying configuration from Lua table");
+            let globals = lua.globals();
+
+            // List of config fields to extract and set as globals
+            let field_names = [
+                "binds",
+                "startup",
+                "spawn_at_startup",
+                "spawn_sh_at_startup",
+                "input",
+                "outputs",
+                "layout",
+                "animations",
+                "gestures",
+                "clipboard",
+                "hotkey_overlay",
+                "config_notification",
+                "screenshot",
+                "window_rules",
+                "layer_rules",
+                "prefer_no_csd",
+                "cursor",
+                "screenshot_path",
+                "environment",
+                "debug",
+                "workspaces",
+                "xwayland_satellite",
+                "recent_windows",
+                "overview",
+            ];
+
+            for field_name in &field_names {
+                if let Ok(value) = config_table.get::<LuaValue>(*field_name) {
+                    if value != LuaValue::Nil {
+                        debug!("Applying config field: {}", field_name);
+                        globals.set(*field_name, value)?;
+                    }
+                }
+            }
+
+            // Also check for startup_commands and map it to startup
+            if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
+                if value != LuaValue::Nil {
+                    debug!("Applying startup_commands (mapping to startup)");
+                    globals.set("startup", value)?;
+                }
+            }
+
+            info!("✓ Configuration applied successfully");
+            Ok(())
+        })?;
+        niri.set("apply_config", apply_config_fn)?;
+
         // Register nice_print function as niri.print
         let nice_print_code = include_str!("nice_print.lua");
         let nice_print_fn: LuaFunction = lua.load(nice_print_code).eval()?;

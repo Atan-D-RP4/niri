@@ -527,8 +527,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
             };
 
             if json {
-                let output =
-                    serde_json::to_string(&result).context("error formatting response")?;
+                let output = serde_json::to_string(&result).context("error formatting response")?;
                 println!("{output}");
                 return Ok(());
             }

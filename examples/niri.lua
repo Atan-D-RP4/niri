@@ -1,592 +1,750 @@
+-- ============================================================================
 -- Niri Lua Configuration Example
--- Place this file at ~/.config/niri/config.lua
--- See the wiki for detailed documentation: https://yalter.github.io/niri/Configuration:-Introduction
+-- ============================================================================
+-- This is the comprehensive example Lua configuration for Niri.
 
--- Log only if running within Niri (niri global is available)
-if niri then
-	niri.log("Loading Niri Lua configuration example...")
-end
+-- To use this configuration:
+-- 1. Copy this file to: ~/.config/niri/niri.lua (or init.lua)
+-- 2. Uncomment and modify the settings you want to change
+-- 3. Restart niri to apply changes
+
+-- This configuration demonstrates ALL implemented Lua API features:
+-- - Tier 1: Module System (100% complete)
+-- - Tier 2: Configuration API (100% complete)
+-- - Tier 3: Runtime State Access (100% complete)
+-- - Full keybinding converter support
+-- - Event system integration (in progress)
+
+-- Key Feature: niri.apply_config()
+-- This example uses niri.apply_config() which allows you to:
+-- 1. Build your config using local variables and functions
+-- 2. Apply it to niri with niri.apply_config({ ... })
+-- 3. Continue with additional Lua scripting after config is applied
+-- 4. No need for async callbacks - everything runs sequentially!
+
+-- Documentation: https://yalter.github.io/niri/
+-- ============================================================================
 
 -- ============================================================================
 -- INPUT CONFIGURATION
 -- ============================================================================
--- Input device configuration
--- Full documentation: https://yalter.github.io/niri/Configuration:-Input
+-- Configure keyboard, mouse, touchpad, and other input devices.
+-- All settings here match the KDL config format.
 
 local input = {
+	-- Keyboard configuration
 	keyboard = {
-		-- XKB configuration for keyboard layout
-		-- Uncomment and modify to set custom keyboard layout:
+		-- XKB keyboard layout settings
 		xkb = {
+			-- Keyboard layout (e.g., "us", "us,ru", "de")
 			layout = "us",
-			variant = "intl,phonetic",
-			-- options = "grp:win_space_toggle,compose:ralt,ctrl:nocaps",
+
+			-- Layout variant (e.g., "dvorak", "colemak")
+			-- variant = "intl",
+
+			-- XKB rules file
+			-- rules = "evdev",
+
+			-- Keyboard model
+			-- model = "pc105",
+
+			-- XKB options (comma-separated)
+			-- Common options:
+			-- - "grp:win_space_toggle" - Switch layouts with Win+Space
+			-- - "ctrl:nocaps" - Make Caps Lock act as Ctrl
+			-- - "compose:ralt" - Right Alt as Compose key
+			options = "ctrl:nocaps",
 		},
-		-- Enable numlock on startup (omit to disable)
+
+		-- Key repeat delay in milliseconds (default: 600)
+		-- repeat_delay = 600,
+
+		-- Key repeat rate in characters per second (default: 25)
+		-- repeat_rate = 25,
+
+		-- Enable numlock on startup
 		numlock = false,
 	},
 
-	-- Next sections include libinput settings.
-	-- Omitting settings disables them, or leaves them at their default values.
-	touchpad = {
-		-- off = true,
-		tap = true,
-		-- dwt = true,
-		-- dwtp = true,
-		-- drag = false,
-		-- drag_lock = true,
-		natural_scroll = true,
-		-- accel_speed = 0.2,
-		-- accel_profile = "flat",
-		-- scroll_method = "two-finger",
-		-- disabled_on_external_mouse = true,
-	},
-
+	-- Mouse configuration
 	mouse = {
-		-- off = true,
+		-- Acceleration speed from -1.0 to 1.0 (default: 0.0)
+		-- accel_speed = 0.0,
+
+		-- Acceleration profile: "adaptive" or "flat"
+		-- accel_profile = "adaptive",
+
+		-- Natural scrolling (reverse scroll direction)
 		-- natural_scroll = false,
-		-- accel_speed = 0.2,
-		-- accel_profile = "flat",
+
+		-- Scroll method: "no-scroll", "two-finger", "edge", "on-button-down"
 		-- scroll_method = "no-scroll",
 	},
 
-	trackpoint = {
-		-- off = true,
-		-- natural_scroll = false,
-		-- accel_speed = 0.2,
-		-- accel_profile = "flat",
-		-- scroll_method = "on-button-down",
-		-- scroll_button = 273,
-		-- scroll_button_lock = true,
-		-- middle_emulation = true,
+	-- Touchpad configuration
+	touchpad = {
+		-- Acceleration speed from -1.0 to 1.0
+		-- accel_speed = 0.0,
+
+		-- Acceleration profile: "adaptive" or "flat"
+		-- accel_profile = "adaptive",
+
+		-- Tap to click
+		tap = true,
+
+		-- Tap button mapping: "left-right-middle" or "left-middle-right"
+		-- tap_button_map = "left-right-middle",
+
+		-- Natural scrolling (reverse scroll direction)
+		natural_scroll = true,
+
+		-- Scroll method: "no-scroll", "two-finger", "edge", "on-button-down"
+		-- scroll_method = "two-finger",
+
+		-- Disable while typing
+		-- dwt = true,
+
+		-- Disable while trackpoint is in use
+		-- dwtp = true,
+
+		-- Drag and drop
+		-- drag = true,
+
+		-- Drag lock
+		-- drag_lock = false,
+
+		-- Disable touchpad when external mouse is connected
+		-- disabled_on_external_mouse = false,
 	},
 
-	-- Uncomment to make the mouse warp to the center of newly focused windows.
-	-- warp_mouse_to_focus = true,
+	-- Trackpoint configuration
+	trackpoint = {
+		-- accel_speed = 0.0,
+		-- accel_profile = "adaptive",
+		-- natural_scroll = false,
+		-- scroll_method = "on-button-down",
+		-- scroll_button = 273,  -- BTN_MIDDLE
+		-- scroll_button_lock = false,
+		-- middle_emulation = false,
+	},
 
-	-- Focus windows and outputs automatically when moving the mouse into them.
-	-- Setting max_scroll_amount="0%" makes it work only on windows already fully on screen.
-	-- focus_follows_mouse = { max_scroll_amount = "0%" },
+	-- Warp mouse cursor to center of newly focused windows
+	-- warp_mouse_to_focus = false,
+
+	-- Focus windows when moving mouse into them
+	-- focus_follows_mouse = {
+	--     -- Maximum scroll amount (as percentage) to focus window
+	--     -- Set to "0%" to only focus windows fully on screen
+	--     max_scroll_amount = "0%",
+	-- },
+}
+
+-- ============================================================================
+-- LAYOUT CONFIGURATION
+-- ============================================================================
+-- Control window positioning, sizing, borders, shadows, and gaps.
+
+local layout = {
+	-- Gaps around windows in logical pixels
+	gaps = 16,
+
+	-- Background color for empty workspace areas
+	-- Supports: CSS colors ("red"), hex ("#rrggbb"), rgb(), rgba(), hsl()
+	-- background_color = "transparent",
+
+	-- When to center focused column: "never", "always", "on-overflow"
+	-- - "never": Default behavior, keeps column at edge when off-screen
+	-- - "always": Always centers the focused column
+	-- - "on-overflow": Center if it doesn't fit with previous column
+	center_focused_column = "never",
+
+	-- Always center a single column on the screen
+	-- always_center_single_column = false,
+
+	-- Keep an empty workspace above the first real workspace
+	-- empty_workspace_above_first = false,
+
+	-- Default column display mode: "normal" or "tabbed"
+	-- default_column_display = "normal",
+
+	-- Preset column widths cycled with Mod+R (switch-preset-column-width)
+	-- Can use "proportion" (fraction of output width) or "fixed" (pixels)
+	preset_column_widths = {
+		{ proportion = 1.0 / 3.0 }, -- 33.33%
+		{ proportion = 1.0 / 2.0 }, -- 50%
+		{ proportion = 2.0 / 3.0 }, -- 66.67%
+		-- { fixed = 1920 },       -- Fixed pixel width
+	},
+
+	-- Default width for new windows
+	-- Empty {} lets windows decide their own initial width
+	default_column_width = { proportion = 0.5 },
+	-- default_column_width = {},
+
+	-- Preset window heights cycled with Mod+Shift+R (switch-preset-window-height)
+	preset_window_heights = {
+		{ proportion = 1.0 / 3.0 },
+		{ proportion = 1.0 / 2.0 },
+		{ proportion = 2.0 / 3.0 },
+	},
+
+	-- Focus ring - highlights the active window
+	focus_ring = {
+		-- Disable focus ring
+		-- off = false,
+
+		-- Width in logical pixels
+		width = 4,
+
+		-- Colors for different states
+		-- Active monitor's focused window
+		active_color = "#7fc8ff",
+
+		-- Inactive monitor's focused window
+		inactive_color = "#505050",
+
+		-- Window requesting attention
+		-- urgent_color = "#ff0000",
+
+		-- Gradients (take precedence over solid colors)
+		-- active_gradient = {
+		--     from = "#80c8ff",
+		--     to = "#c7ff7f",
+		--     angle = 45,  -- Optional, defaults to 180 (top-to-bottom)
+		--     relative_to = "window",  -- "window" or "workspace-view"
+		--     in_color_space = "srgb",  -- "srgb", "oklch", "oklch longer hue", etc.
+		-- },
+	},
+
+	-- Border - always visible outline around windows
+	border = {
+		-- Disable border (if using focus ring, usually disable one or the other)
+		off = true,
+
+		-- Width in logical pixels
+		width = 4,
+
+		-- Colors
+		active_color = "#ffc87f",
+		inactive_color = "#505050",
+		urgent_color = "#9b0000",
+
+		-- Gradients work the same as focus_ring
+		-- active_gradient = { from = "#ffc87f", to = "#ff7f7f", angle = 90 },
+	},
+
+	-- Drop shadow for windows
+	shadow = {
+		-- Enable shadows (disabled by default)
+		-- on = false,
+
+		-- Draw shadow behind window (fixes CSD rounded corners artifacts)
+		-- draw_behind_window = false,
+
+		-- Shadow blur radius in logical pixels
+		softness = 30,
+
+		-- Shadow expansion
+		spread = 5,
+
+		-- Shadow offset
+		offset = {
+			x = 0,
+			y = 5,
+		},
+
+		-- Shadow color (supports alpha channel)
+		color = "#0007", -- Black with ~27% opacity
+	},
+
+	-- Tab indicator - shows active tab in tabbed column display
+	tab_indicator = {
+		-- off = false,
+		-- width = 4,
+		-- active_color = "#7fc8ff",
+		-- inactive_color = "#505050",
+		-- urgent_color = "#ff0000",
+	},
+
+	-- Insert hint - shows where window will be inserted when dragging
+	insert_hint = {
+		-- off = false,
+		-- color = "#7fc8ff80",  -- Semi-transparent blue
+	},
+
+	-- Struts - reserved space at screen edges (like outer gaps)
+	-- Measured in logical pixels
+	struts = {
+		-- left = 0,
+		-- right = 0,
+		-- top = 0,
+		-- bottom = 0,
+	},
 }
 
 -- ============================================================================
 -- OUTPUT CONFIGURATION
 -- ============================================================================
--- You can configure outputs by their name, which you can find
--- by running `niri msg outputs` while inside a niri instance.
--- Full documentation: https://yalter.github.io/niri/Configuration:-Outputs
+-- Configure monitor settings (resolution, scale, position).
+-- Get output names with: niri msg outputs
 
--- Uncomment and modify to configure displays:
---[[
 local outputs = {
-    {
-        name = "eDP-1",  -- laptop internal display
-        -- Uncomment to disable this output.
-        -- off = true,
+	-- Example: built-in laptop display
+	-- ["eDP-1"] = {
+	--     -- Disable this output
+	--     -- off = false,
 
-        -- Resolution and, optionally, refresh rate of the output.
-        -- The format is "<width>x<height>" or "<width>x<height>@<refresh rate>".
-        -- If the refresh rate is omitted, niri will pick the highest refresh rate
-        -- for the resolution. If invalid, niri will pick one automatically.
-        mode = "1920x1080@120.030",
+	--     -- Mode: "WIDTHxHEIGHT" or "WIDTHxHEIGHT@REFRESH"
+	--     -- If omitted, niri picks the best mode automatically
+	--     -- mode = "1920x1080@120.030",
 
-        -- You can use integer or fractional scale, for example use 1.5 for 150% scale.
-        scale = 2.0,
+	--     -- Scale factor (1.0 = 100%, 1.5 = 150%, 2.0 = 200%)
+	--     -- scale = 2.0,
 
-        -- Transform allows to rotate the output counter-clockwise
-        -- Valid values: normal, 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
-        transform = "normal",
+	--     -- Transform: "normal", "90", "180", "270",
+	--     --           "flipped", "flipped-90", "flipped-180", "flipped-270"
+	--     -- transform = "normal",
 
-        -- Position of the output in the global coordinate space.
-        -- This affects directional monitor actions like "focus-monitor-left", and cursor movement.
-        -- Output scale and rotation has to be taken into account for positioning:
-        -- outputs are sized in logical, or scaled, pixels.
-        position = { x = 1280, y = 0 },
-    },
+	--     -- Position in global coordinate space (in logical pixels)
+	--     -- position = { x = 0, y = 0 },
+
+	--     -- Variable refresh rate (VRR/FreeSync/G-Sync)
+	--     -- vrr = false,
+	-- },
+
+	-- Example: external monitor
+	-- ["HDMI-A-1"] = {
+	--     mode = "3840x2160@60",
+	--     scale = 1.5,
+	--     position = { x = 1920, y = 0 },
+	-- },
 }
---]]
 
 -- ============================================================================
--- LAYOUT CONFIGURATION
+-- CURSOR CONFIGURATION
 -- ============================================================================
--- Settings that influence how windows are positioned and sized.
--- Full documentation: https://yalter.github.io/niri/Configuration:-Layout
+-- Configure cursor theme, size, and hiding behavior.
 
-local layout = {
-	-- Set gaps around windows in logical pixels.
-	gaps = 16,
+local cursor = {
+	-- Xcursor theme name
+	-- xcursor_theme = "Adwaita",
 
-	backgroud_color = "transparent",
+	-- Cursor size in pixels
+	xcursor_size = 24,
 
-	-- When to center a column when changing focus
-	-- Options: "never" (default), "always", "on-overflow"
-	center_focused_column = "never",
+	-- Hide cursor while typing
+	hide_when_typing = false,
 
-	-- Customize the widths that "switch-preset-column-width" (Mod+R) toggles between.
-	-- Proportion sets the width as a fraction of the output width, taking gaps into account.
-	-- For example, you can perfectly fit four windows sized "proportion 0.25" on an output.
-	-- The default preset widths are 1/3, 1/2 and 2/3 of the output.
-	preset_column_widths = {
-		{ proportion = 0.33333 }, -- 1/3
-		{ proportion = 0.5 }, -- 1/2
-		{ proportion = 0.66667 }, -- 2/3
-		-- You can also use fixed widths:
-		-- { fixed = 1920 },
+	-- Hide cursor after N milliseconds of inactivity
+	-- hide_after_inactive_ms = 5000,
+}
+
+-- ============================================================================
+-- GESTURES CONFIGURATION
+-- ============================================================================
+-- Configure touchpad gestures and hot corners.
+
+local gestures = {
+	-- Drag-drop edge view scrolling (scroll view when dragging near edge)
+	-- drag_drop_edge_view_scroll = {
+	--     trigger_width = 32,  -- Pixels from edge to trigger
+	--     delay_ms = 500,      -- Delay before scrolling starts
+	--     max_speed = 1000,    -- Maximum scroll speed
+	-- },
+
+	-- Drag-drop edge workspace switching (switch workspace when dragging near edge)
+	-- drag_drop_edge_workspace_switch = {
+	--     trigger_height = 32,
+	--     delay_ms = 500,
+	--     max_speed = 1000,
+	-- },
+
+	-- Hot corners - perform actions when cursor touches screen corners
+	-- hot_corners = {
+	--     off = false,
+	--     top_left = "toggle-overview",
+	--     top_right = nil,
+	--     bottom_left = nil,
+	--     bottom_right = nil,
+	-- },
+}
+
+-- ============================================================================
+-- RECENT WINDOWS (MRU) CONFIGURATION
+-- ============================================================================
+-- Configure the recent windows overlay (Alt+Tab style switcher).
+
+local recent_windows = {
+	-- Enable recent windows feature
+	on = true,
+
+	-- Delay before showing overlay in milliseconds (default: 150)
+	open_delay_ms = 150,
+
+	-- Highlight configuration
+	highlight = {
+		-- Default colors (gray for active, reddish for urgent)
+		active_color = "#999999", -- Default: Color::new_unpremul(0.6, 0.6, 0.6, 1.)
+		urgent_color = "#ff9999", -- Default: Color::new_unpremul(1., 0.6, 0.6, 1.)
+		padding = 30, -- Default padding
+		corner_radius = 0, -- Default: no rounding
 	},
 
-	-- You can also customize the heights that "switch-preset-window-height" (Mod+Shift+R) toggles between.
-	-- preset_window_heights = { ... },
-
-	-- Change the default width of new windows.
-	default_column_width = { proportion = 0.5 },
-	-- If you leave it empty, the windows themselves will decide their initial width.
-	-- default_column_width = {},
-
-	-- By default focus ring and border are rendered as a solid background rectangle
-	-- behind windows. That is, they will show up through semitransparent windows.
-	-- This is because windows using client-side decorations can have an arbitrary shape.
-
-	-- If you don't like that, uncomment `prefer_no_csd` below.
-	-- Niri will draw focus ring and border *around* windows that agree to omit their
-	-- client-side decorations.
-
-	-- Alternatively, you can override it with a window rule called
-	-- `draw_border_with_background`.
-	-- prefer_no_csd = true,
-
-	-- You can change how the focus ring looks.
-	focus_ring = {
-		-- Uncomment this line to disable the focus ring.
-		-- off = true,
-
-		-- How many logical pixels the ring extends out from the windows.
-		width = 4,
-
-		-- Colors can be set in a variety of ways:
-		-- - CSS named colors: "red"
-		-- - RGB hex: "#rgb", "#rgba", "#rrggbb", "#rrggbbaa"
-		-- - CSS-like notation: "rgb(255, 127, 0)", rgba(), hsl() and a few others.
-
-		-- Color of the ring on the active monitor.
-		active_color = "#7fc8ff",
-
-		-- Color of the ring on inactive monitors.
-		-- The focus ring only draws around the active window, so the only place
-		-- where you can see its inactive_color is on other monitors.
-		inactive_color = "#505050",
-
-		-- You can also use gradients. They take precedence over solid colors.
-		-- Gradients are rendered the same as CSS linear-gradient(angle, from, to).
-		-- The angle is the same as in linear-gradient, and is optional,
-		-- defaulting to 180 (top-to-bottom gradient).
-		-- You can use any CSS linear-gradient tool on the web to set these up.
-		-- Changing the color space is also supported, check the wiki for more info.
-
-		-- active_gradient = { from = "#80c8ff", to = "#c7ff7f", angle = 45 },
-
-		-- You can also color the gradient relative to the entire view
-		-- of the workspace, rather than relative to just the window itself.
-		-- To do that, set relative_to="workspace-view".
-
-		-- inactive_gradient = { from = "#505050", to = "#808080", angle = 45, relative_to = "workspace-view" },
+	-- Window preview configuration
+	previews = {
+		max_height = 480, -- Default maximum height
+		max_scale = 0.5, -- Default maximum scale
 	},
+}
 
-	-- You can also add a border. It's similar to the focus ring, but always visible.
-	border = {
-		-- The settings are the same as for the focus ring.
-		-- If you enable the border, you probably want to disable the focus ring.
-		off = true,
+-- ============================================================================
+-- OVERVIEW CONFIGURATION
+-- ============================================================================
+-- Configure the workspace overview mode.
 
-		width = 4,
-		active_color = "#ffc87f",
-		inactive_color = "#505050",
+local overview = {
+	-- Zoom level (1.0 = no zoom, < 1.0 = zoom out)
+	zoom = 0.5,
 
-		-- Color of the border around windows that request your attention.
-		urgent_color = "#9b0000",
+	-- Backdrop color
+	backdrop_color = "#00000080", -- Semi-transparent black
 
-		-- Gradients can use a few different interpolation color spaces.
-		-- For example, this is a pastel rainbow gradient via in="oklch longer hue".
-
-		-- active_gradient = { from = "#e5989b", to = "#ffb4a2", angle = 45, relative_to = "workspace-view", in_ = "oklch longer hue" },
-
-		-- inactive_gradient = { from = "#505050", to = "#808080", angle = 45, relative_to = "workspace-view" },
-	},
-
-	-- You can enable drop shadows for windows.
-	shadow = {
-		-- Uncomment the next line to enable shadows.
-		-- on = true,
-
-		-- By default, the shadow draws only around its window, and not behind it.
-		-- Uncomment this setting to make the shadow draw behind its window.
-
-		-- Note that niri has no way of knowing about the CSD window corner
-		-- radius. It has to assume that windows have square corners, leading to
-		-- shadow artifacts inside the CSD rounded corners. This setting fixes
-		-- those artifacts.
-
-		-- However, instead you may want to set prefer_no_csd and/or
-		-- geometry_corner_radius. Then, niri will know the corner radius and
-		-- draw the shadow correctly, without having to draw it behind the
-		-- window. These will also remove client-side shadows if the window
-		-- draws any.
-
-		-- draw_behind_window = true,
-
-		-- You can change how shadows look. The values below are in logical
-		-- pixels and match the CSS box-shadow properties.
-
-		-- Softness controls the shadow blur radius.
+	-- Shadow around workspace thumbnails
+	workspace_shadow = {
+		-- off = false,
 		softness = 30,
-
-		-- Spread expands the shadow.
 		spread = 5,
-
-		-- Offset moves the shadow relative to the window.
 		offset = { x = 0, y = 5 },
-
-		-- You can also change the shadow color and opacity.
 		color = "#0007",
 	},
-
-	-- Struts shrink the area occupied by windows, similarly to layer-shell panels.
-	-- You can think of them as a kind of outer gaps. They are set in logical pixels.
-	-- Left and right struts will cause the next window to the side to always be visible.
-	-- Top and bottom struts will simply add outer gaps in addition to the area occupied by
-	-- layer-shell panels and regular gaps.
-	struts = {
-		-- left = 64,
-		-- right = 64,
-		-- top = 64,
-		-- bottom = 64,
-	},
 }
 
 -- ============================================================================
--- STARTUP COMMANDS
+-- ANIMATIONS CONFIGURATION
 -- ============================================================================
--- Add lines like this to spawn processes at startup.
--- Note that running niri as a session supports xdg-desktop-autostart,
--- which may be more convenient to use.
+-- Configure animation speeds and curves.
 
-local startup_commands = {
-	-- This line starts waybar, a commonly used bar for Wayland compositors.
-	"waybar",
-	"swaync",
-	"kitty",
+local animations = {
+	-- Disable all animations
+	-- off = false,
 
-	-- To run a shell command (with variables, pipes, etc.), use spawn-sh:
-	-- "sh -c 'qs -c ~/source/qs/MyAwesomeShell'",
+	-- Global slowdown multiplier (>1.0 = slower, <1.0 = faster)
+	-- slowdown = 1.0,
+
+	-- Individual animation settings
+	-- Each can have: off, duration_ms, curve (spring or easing)
+
+	-- workspace_switch = {
+	--     off = false,
+	--     -- duration_ms = 250,
+	--     -- Spring curve (natural physics-based)
+	--     -- curve = {
+	--     --     spring = {
+	--     --         damping_ratio = 1.0,
+	--     --         stiffness = 1000,
+	--     --         epsilon = 0.0001,
+	--     --     }
+	--     -- },
+	--     -- Easing curve
+	--     -- curve = { easing = "ease-out-cubic" },
+	-- },
+
+	-- window_open = { off = false },
+	-- window_close = { off = false },
+	-- horizontal_view_movement = { off = false },
+	-- window_movement = { off = false },
+	-- window_resize = { off = false },
+	-- config_notification_open_close = { off = false },
+	-- exit_confirmation_open_close = { off = false },
+	-- screenshot_ui_open = { off = false },
+	-- overview_open_close = { off = false },
+	-- recent_windows_close = { off = false },
 }
 
 -- ============================================================================
--- HOTKEY OVERLAY
+-- CLIPBOARD CONFIGURATION
 -- ============================================================================
+-- Configure clipboard behavior.
+
+local clipboard = {
+	-- Disable primary selection (middle-click paste)
+	disable_primary = false,
+}
+
+-- ============================================================================
+-- HOTKEY OVERLAY CONFIGURATION
+-- ============================================================================
+-- Configure the hotkey help overlay (shown with Mod+Shift+/).
 
 local hotkey_overlay = {
-	-- Uncomment this line to disable the "Important Hotkeys" pop-up at startup.
-	-- skip_at_startup = true,
+	-- Skip showing overlay at startup
+	skip_at_startup = false,
+
+	-- Hide keybindings without hotkey-overlay-title
+	-- hide_not_bound = false,
 }
 
 -- ============================================================================
--- CLIENT-SIDE DECORATION PREFERENCES
+-- CONFIG NOTIFICATION CONFIGURATION
 -- ============================================================================
--- Uncomment this line to ask the clients to omit their client-side decorations if possible.
--- If the client will specifically ask for CSD, the request will be honored.
--- Additionally, clients will be informed that they are tiled, removing some client-side rounded corners.
--- This option will also fix border/focus ring drawing behind some semitransparent windows.
--- After enabling or disabling this, you need to restart the apps for this to take effect.
+-- Configure error notifications when config reload fails.
 
--- prefer_no_csd = true,
+local config_notification = {
+	-- Disable failed config notifications
+	disable_failed = false,
+}
+
+-- ============================================================================
+-- DEBUG CONFIGURATION
+-- ============================================================================
+-- Advanced debugging and performance options.
+
+local debug = {
+	-- disable_direct_scanout = false,
+	-- enable_overlay_planes = false,
+	-- render_drm_device = "/dev/dri/renderD128",
+	-- disable_cursor_plane = false,
+	-- wait_for_frame_completion_before_queueing = false,
+	-- emulate_zero_presentation_time = false,
+	-- disable_drm_compositing = false,
+	-- more_pixel_shader_invocations = false,
+	-- disable_pipewire_server = false,
+	-- disable_pipewire_capture_cursor = false,
+	-- dbus_interfaces_in_non_session_instances = false,
+	-- block_out_from = nil,
+	-- damage_tracking = "auto",
+}
+
+-- ============================================================================
+-- XWAYLAND SATELLITE CONFIGURATION
+-- ============================================================================
+-- Configure Xwayland support via xwayland-satellite.
+
+local xwayland_satellite = {
+	-- Disable Xwayland
+	-- off = false,
+
+	-- Path to xwayland-satellite binary
+	-- path = "xwayland-satellite",
+}
 
 -- ============================================================================
 -- SCREENSHOT CONFIGURATION
 -- ============================================================================
--- You can change the path where screenshots are saved.
--- A ~ at the front will be expanded to the home directory.
--- The path is formatted with strftime(3) to give you the screenshot date and time.
+-- Configure screenshot save path.
 
 local screenshot = {
-	path = "~/Media/images/Screenshots/Screenshot_from_%Y-%m-%d %H-%M-%S.png",
-	-- You can also set this to null to disable saving screenshots to disk.
-	-- path = nil,
-}
-
--- ============================================================================
--- ANIMATION CONFIGURATION
--- ============================================================================
--- Animation settings and documentation:
--- https://yalter.github.io/niri/Configuration:-Animations
-
-local animations = {
-	-- Uncomment to turn off all animations.
-	-- off = true,
-
-	-- Slow down all animations by this factor. Values below 1 speed them up instead.
-	-- slowdown = 3.0,
-}
-
--- ============================================================================
--- WINDOW RULES
--- ============================================================================
--- Window rules let you adjust behavior for individual windows.
--- Full documentation: https://yalter.github.io/niri/Configuration:-Window-Rules
-
-local window_rules = {
-	-- Work around WezTerm's initial configure bug
-	-- by setting an empty default_column_width.
-	{
-		-- This regular expression is intentionally made as specific as possible,
-		-- since this is the default config, and we want no false positives.
-		-- You can get away with just app_id="wezterm" if you want.
-		match = { app_id = "^org%.wezfurlong%.wezterm$" },
-		default_column_width = {},
-	},
-
-	-- Open the Firefox picture-in-picture player as floating by default.
-	{
-		-- This app_id regular expression will work for both:
-		-- - host Firefox (app_id is "firefox")
-		-- - Flatpak Firefox (app_id is "org.mozilla.firefox")
-		match = { app_id = "firefox$", title = "^Picture%-in%-Picture$" },
-		open_floating = true,
-	},
-
-	-- Example: block out two password managers from screen capture.
-	-- (This example rule is commented out by default.)
-	--[[
-    {
-        match = { app_id = "^org%.keepassxc%.KeePassXC$" },
-        block_out_from = "screen-capture",
-        -- Use this instead if you want them visible on third-party screenshot tools.
-        -- block_out_from = "screencast",
-    },
-    {
-        match = { app_id = "^org%.gnome%.World%.Secrets$" },
-        block_out_from = "screen-capture",
-    },
-    --]]
-
-	-- Example: enable rounded corners for all windows.
-	-- (This example rule is commented out by default.)
-	--[[
-    {
-        match = { app_id = ".*" },
-        geometry_corner_radius = 12,
-        clip_to_geometry = true,
-    },
-    --]]
-}
-
-local layer_rules = {
-	match = { namespace = "swaync", at_startup = true },
-	block_out_from = "screencast",
-	block_out_from = "screencapture",
-}
-
-local recent_windows = {
-	highlight = {
-		active_color = "#00000000",
-		urgent_color = "#ff9999ff",
-		padding = 30,
-		corner_radius = 2,
-	},
+	-- Path with strftime formatting
+	-- Set to nil/null to disable saving to disk
+	path = "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png",
 }
 
 -- ============================================================================
 -- KEYBINDINGS
 -- ============================================================================
--- Keys consist of modifiers separated by + signs, followed by an XKB key name
--- in the end. To find an XKB name for a particular key, you may use a program
--- like wev.
-
--- "Mod" is a special modifier equal to Super when running on a TTY, and to Alt
--- when running as a winit window.
-
--- Most actions that you can bind here can also be invoked programmatically with
--- `niri msg action do-something`.
+-- Define keyboard and mouse bindings.
+-- Find XKB key names with: wev or xev
+-- "Mod" = Super (TTY) or Alt (winit window)
 
 local binds = {
-	-- Show hotkey overlay
-	-- Mod-Shift-/, which is usually the same as Mod-?,
-	-- shows a list of important hotkeys.
-	{ key = "Mod+Slash", action = "show-hotkey-overlay" },
+	-- ====================
+	-- SYSTEM & COMPOSITOR
+	-- ====================
 
-	-- Suggested binds for running programs: terminal, app launcher, screen locker.
+	-- Show hotkey overlay
+	{ key = "Mod+Shift+Slash", action = "show-hotkey-overlay" },
+
+	-- Quit with confirmation
+	{ key = "Mod+Shift+E", action = "quit" },
+	{ key = "Ctrl+Alt+Delete", action = "quit" },
+
+	-- Power off monitors (wake with any input)
+	{ key = "Mod+Shift+P", action = "power-off-monitors" },
+
+	-- Toggle keyboard shortcuts inhibit (for VNC/remote desktop apps)
+	{ key = "Mod+Escape", action = "toggle-keyboard-shortcuts-inhibit" },
+
+	-- ====================
+	-- APPLICATION LAUNCHING
+	-- ====================
+
+	-- Terminal
 	{
 		key = "Mod+T",
 		action = "spawn",
 		args = { "kitty" },
-		title = "Open a Terminal: kitty",
-	},
-	{
-		key = "Mod+D",
-		action = "spawn-sh",
-		args = { "hyde-shell rofilaunch.sh" },
-		title = "Run an Application: HyDE Rofi",
-	},
-	{
-		key = "Super+Alt+L",
-		action = "spawn-sh",
-		args = { "hyde-shell hyprlock.sh" },
-		title = "Lock the Screen: HyDE Hyprlock",
+		-- Optional: title shown in hotkey overlay
+		-- hotkey_overlay_title = "Open a Terminal: alacritty",
 	},
 
-	-- Use spawn-sh to run a shell command. Do this if you need pipes, multiple commands, etc.
-	-- Note: the entire command goes as a single argument. It's passed verbatim to `sh -c`.
-	-- For example, this is a standard bind to toggle the screen reader (orca).
-	{
-		key = "Super+Alt+S",
-		action = "spawn-sh",
-		args = { "pkill orca || exec orca" },
-		allow_when_locked = true,
-		title = nil, -- Set title to nil to disable in hotkey overlay
-	},
+	-- Application launcher
+	{ key = "Mod+D", action = "spawn-sh", args = { "hyde-shell rofilaunch.sh" } },
 
-	-- Example volume keys mappings for PipeWire & WirePlumber.
-	-- The allow_when_locked=true property makes them work even when the session is locked.
-	-- Using spawn-sh allows to pass multiple arguments together with the command.
-	{
-		key = "XF86AudioRaiseVolume",
-		action = "spawn-sh",
-		args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86AudioLowerVolume",
-		action = "spawn-sh",
-		args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86AudioMute",
-		action = "spawn-sh",
-		args = { "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86AudioMicMute",
-		action = "spawn-sh",
-		args = { "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle" },
-		allow_when_locked = true,
-	},
+	-- Screen locker
+	{ key = "Super+Alt+L", action = "spawn", args = { "hyde-shell hyprlock.sh" } },
 
-	-- Example media keys mapping using playerctl.
-	-- This will work with any MPRIS-enabled media player.
-	{
-		key = "XF86AudioPlay",
-		action = "spawn-sh",
-		args = { "playerctl play-pause" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86AudioStop",
-		action = "spawn-sh",
-		args = { "playerctl stop" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86AudioPrev",
-		action = "spawn-sh",
-		args = { "playerctl previous" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86AudioNext",
-		action = "spawn-sh",
-		args = { "playerctl next" },
-		allow_when_locked = true,
-	},
+	-- Shell command example (with pipes, variables, etc.)
+	-- {
+	--     key = "Super+Alt+S",
+	--     action = "spawn-sh",
+	--     args = { "pkill orca || exec orca" },
+	--     -- allow_when_locked = true,
+	-- },
 
-	-- Example brightness key mappings for brightnessctl.
-	-- You can use regular spawn with multiple arguments too (to avoid going through "sh"),
-	-- but you need to manually put each argument in separate "" quotes.
-	{
-		key = "XF86MonBrightnessUp",
-		action = "spawn",
-		args = { "brightnessctl", "--class=backlight", "set", "+10%" },
-		allow_when_locked = true,
-	},
-	{
-		key = "XF86MonBrightnessDown",
-		action = "spawn",
-		args = { "brightnessctl", "--class=backlight", "set", "10%-" },
-		allow_when_locked = true,
-	},
+	-- ====================
+	-- MEDIA KEYS (example with wpctl for PipeWire)
+	-- ====================
 
-	-- Open/close the Overview: a zoomed-out view of workspaces and windows.
-	-- You can also move the mouse into the top-left hot corner,
-	-- or do a four-finger swipe up on a touchpad.
-	{ key = "Mod+O", action = "toggle-overview", repeat_key = false },
+	-- Volume
+	-- { key = "XF86AudioRaiseVolume", action = "spawn-sh", args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+" } },
+	-- { key = "XF86AudioLowerVolume", action = "spawn-sh", args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-" } },
+	-- { key = "XF86AudioMute", action = "spawn-sh", args = { "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" } },
+	-- { key = "XF86AudioMicMute", action = "spawn-sh", args = { "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle" } },
 
-	{ key = "Mod+Q", action = "close-window", repeat_key = false },
+	-- Media playback (with playerctl)
+	-- { key = "XF86AudioPlay", action = "spawn-sh", args = { "playerctl play-pause" } },
+	-- { key = "XF86AudioStop", action = "spawn-sh", args = { "playerctl stop" } },
+	-- { key = "XF86AudioPrev", action = "spawn-sh", args = { "playerctl previous" } },
+	-- { key = "XF86AudioNext", action = "spawn-sh", args = { "playerctl next" } },
 
-	-- Focus navigation
+	-- Brightness (with brightnessctl)
+	-- { key = "XF86MonBrightnessUp", action = "spawn", args = { "brightnessctl", "--class=backlight", "set", "+10%" } },
+	-- { key = "XF86MonBrightnessDown", action = "spawn", args = { "brightnessctl", "--class=backlight", "set", "10%-" } },
+
+	-- ====================
+	-- WINDOW MANAGEMENT
+	-- ====================
+
+	-- Close window
+	{ key = "Mod+Q", action = "close-window" },
+
+	-- Fullscreen
+	{ key = "Mod+Shift+F", action = "fullscreen-window" },
+
+	-- Maximize column
+	{ key = "Mod+F", action = "maximize-column" },
+
+	-- Expand column to fill available width
+	{ key = "Mod+Ctrl+F", action = "expand-column-to-available-width" },
+
+	-- Center column
+	{ key = "Mod+C", action = "center-column" },
+
+	-- Center all visible columns
+	{ key = "Mod+Ctrl+C", action = "center-visible-columns" },
+
+	-- Toggle floating/tiling
+	{ key = "Mod+V", action = "toggle-window-floating" },
+
+	-- Switch focus between floating and tiling
+	{ key = "Mod+Shift+V", action = "switch-focus-between-floating-and-tiling" },
+
+	-- Toggle tabbed column display
+	{ key = "Mod+W", action = "toggle-column-tabbed-display" },
+
+	-- ====================
+	-- WINDOW FOCUS
+	-- ====================
+
+	-- Focus column left/right
 	{ key = "Mod+Left", action = "focus-column-left" },
-	{ key = "Mod+Down", action = "focus-window-down" },
-	{ key = "Mod+Up", action = "focus-window-up" },
 	{ key = "Mod+Right", action = "focus-column-right" },
 	{ key = "Mod+H", action = "focus-column-left" },
-	{ key = "Mod+J", action = "focus-window-down" },
-	{ key = "Mod+K", action = "focus-window-up" },
 	{ key = "Mod+L", action = "focus-column-right" },
 
-	-- Window movement
-	{ key = "Mod+Ctrl+Left", action = "move-column-left" },
-	{ key = "Mod+Ctrl+Down", action = "move-window-down" },
-	{ key = "Mod+Ctrl+Up", action = "move-window-up" },
-	{ key = "Mod+Ctrl+Right", action = "move-column-right" },
-	{ key = "Mod+Ctrl+H", action = "move-column-left" },
-	{ key = "Mod+Ctrl+J", action = "move-window-down" },
-	{ key = "Mod+Ctrl+K", action = "move-window-up" },
-	{ key = "Mod+Ctrl+L", action = "move-column-right" },
+	-- Focus window up/down
+	{ key = "Mod+Down", action = "focus-window-down" },
+	{ key = "Mod+Up", action = "focus-window-up" },
+	{ key = "Mod+J", action = "focus-window-down" },
+	{ key = "Mod+K", action = "focus-window-up" },
 
-	-- Alternative commands that move across workspaces when reaching
-	-- the first or last window in a column.
-	-- { key = "Mod+J", action = "focus-window-or-workspace-down" },
-	-- { key = "Mod+K", action = "focus-window-or-workspace-up" },
-	-- { key = "Mod+Ctrl+J", action = "move-window-down-or-to-workspace-down" },
-	-- { key = "Mod+Ctrl+K", action = "move-window-up-or-to-workspace-up" },
-
-	-- Column first/last
+	-- Focus first/last column
 	{ key = "Mod+Home", action = "focus-column-first" },
 	{ key = "Mod+End", action = "focus-column-last" },
+
+	-- Focus across workspaces
+	-- { key = "Mod+J", action = "focus-window-or-workspace-down" },
+	-- { key = "Mod+K", action = "focus-window-or-workspace-up" },
+
+	-- ====================
+	-- WINDOW MOVEMENT
+	-- ====================
+
+	-- Move column left/right
+	{ key = "Mod+Ctrl+Left", action = "move-column-left" },
+	{ key = "Mod+Ctrl+Right", action = "move-column-right" },
+	{ key = "Mod+Ctrl+H", action = "move-column-left" },
+	{ key = "Mod+Ctrl+L", action = "move-column-right" },
+
+	-- Move window up/down
+	{ key = "Mod+Ctrl+Down", action = "move-window-down" },
+	{ key = "Mod+Ctrl+Up", action = "move-window-up" },
+	{ key = "Mod+Ctrl+J", action = "move-window-down" },
+	{ key = "Mod+Ctrl+K", action = "move-window-up" },
+
+	-- Move to first/last
 	{ key = "Mod+Ctrl+Home", action = "move-column-to-first" },
 	{ key = "Mod+Ctrl+End", action = "move-column-to-last" },
 
-	-- Monitor focus
+	-- Consume/expel windows
+	{ key = "Mod+BracketLeft", action = "consume-or-expel-window-left" },
+	{ key = "Mod+BracketRight", action = "consume-or-expel-window-right" },
+	{ key = "Mod+Comma", action = "consume-window-into-column" },
+	{ key = "Mod+Period", action = "expel-window-from-column" },
+
+	-- ====================
+	-- MONITOR FOCUS
+	-- ====================
+
 	{ key = "Mod+Shift+Left", action = "focus-monitor-left" },
+	{ key = "Mod+Shift+Right", action = "focus-monitor-right" },
 	{ key = "Mod+Shift+Down", action = "focus-monitor-down" },
 	{ key = "Mod+Shift+Up", action = "focus-monitor-up" },
-	{ key = "Mod+Shift+Right", action = "focus-monitor-right" },
 	{ key = "Mod+Shift+H", action = "focus-monitor-left" },
+	{ key = "Mod+Shift+L", action = "focus-monitor-right" },
 	{ key = "Mod+Shift+J", action = "focus-monitor-down" },
 	{ key = "Mod+Shift+K", action = "focus-monitor-up" },
-	{ key = "Mod+Shift+L", action = "focus-monitor-right" },
 
-	-- Move column to monitor
+	-- ====================
+	-- MONITOR MOVEMENT
+	-- ====================
+
 	{ key = "Mod+Shift+Ctrl+Left", action = "move-column-to-monitor-left" },
+	{ key = "Mod+Shift+Ctrl+Right", action = "move-column-to-monitor-right" },
 	{ key = "Mod+Shift+Ctrl+Down", action = "move-column-to-monitor-down" },
 	{ key = "Mod+Shift+Ctrl+Up", action = "move-column-to-monitor-up" },
-	{ key = "Mod+Shift+Ctrl+Right", action = "move-column-to-monitor-right" },
 	{ key = "Mod+Shift+Ctrl+H", action = "move-column-to-monitor-left" },
+	{ key = "Mod+Shift+Ctrl+L", action = "move-column-to-monitor-right" },
 	{ key = "Mod+Shift+Ctrl+J", action = "move-column-to-monitor-down" },
 	{ key = "Mod+Shift+Ctrl+K", action = "move-column-to-monitor-up" },
-	{ key = "Mod+Shift+Ctrl+L", action = "move-column-to-monitor-right" },
 
-	-- Alternatively, there are commands to move just a single window:
-	-- { key = "Mod+Shift+Ctrl+Left", action = "move-window-to-monitor-left" },
-	-- ...
+	-- ====================
+	-- WORKSPACE NAVIGATION
+	-- ====================
 
-	-- And you can also move a whole workspace to another monitor:
-	-- { key = "Mod+Shift+Ctrl+Left", action = "move-workspace-to-monitor-left" },
-	-- ...
-
-	-- Workspace focus
+	-- Cycle workspaces
 	{ key = "Mod+Page_Down", action = "focus-workspace-down" },
 	{ key = "Mod+Page_Up", action = "focus-workspace-up" },
 	{ key = "Mod+U", action = "focus-workspace-down" },
 	{ key = "Mod+I", action = "focus-workspace-up" },
+
+	-- Focus specific workspace by index
+	{ key = "Mod+1", action = "focus-workspace", args = { "1" } },
+	{ key = "Mod+2", action = "focus-workspace", args = { "2" } },
+	{ key = "Mod+3", action = "focus-workspace", args = { "3" } },
+	{ key = "Mod+4", action = "focus-workspace", args = { "4" } },
+	{ key = "Mod+5", action = "focus-workspace", args = { "5" } },
+	{ key = "Mod+6", action = "focus-workspace", args = { "6" } },
+	{ key = "Mod+7", action = "focus-workspace", args = { "7" } },
+	{ key = "Mod+8", action = "focus-workspace", args = { "8" } },
+	{ key = "Mod+9", action = "focus-workspace", args = { "9" } },
+
+	-- Previous workspace
+	-- { key = "Mod+Tab", action = "focus-workspace-previous" },
+
+	-- ====================
+	-- WORKSPACE MOVEMENT
+	-- ====================
 
 	-- Move column to workspace
 	{ key = "Mod+Ctrl+Page_Down", action = "move-column-to-workspace-down" },
@@ -594,186 +752,293 @@ local binds = {
 	{ key = "Mod+Ctrl+U", action = "move-column-to-workspace-down" },
 	{ key = "Mod+Ctrl+I", action = "move-column-to-workspace-up" },
 
-	-- Alternatively, there are commands to move just a single window:
-	-- { key = "Mod+Ctrl+Page_Down", action = "move-window-to-workspace-down" },
-	-- ...
+	-- Move column to specific workspace
+	{ key = "Mod+Ctrl+1", action = "move-column-to-workspace", args = { "1" } },
+	{ key = "Mod+Ctrl+2", action = "move-column-to-workspace", args = { "2" } },
+	{ key = "Mod+Ctrl+3", action = "move-column-to-workspace", args = { "3" } },
+	{ key = "Mod+Ctrl+4", action = "move-column-to-workspace", args = { "4" } },
+	{ key = "Mod+Ctrl+5", action = "move-column-to-workspace", args = { "5" } },
+	{ key = "Mod+Ctrl+6", action = "move-column-to-workspace", args = { "6" } },
+	{ key = "Mod+Ctrl+7", action = "move-column-to-workspace", args = { "7" } },
+	{ key = "Mod+Ctrl+8", action = "move-column-to-workspace", args = { "8" } },
+	{ key = "Mod+Ctrl+9", action = "move-column-to-workspace", args = { "9" } },
 
-	-- Move workspace
+	-- Move workspace itself
 	{ key = "Mod+Shift+Page_Down", action = "move-workspace-down" },
 	{ key = "Mod+Shift+Page_Up", action = "move-workspace-up" },
 	{ key = "Mod+Shift+U", action = "move-workspace-down" },
 	{ key = "Mod+Shift+I", action = "move-workspace-up" },
 
-	-- You can bind mouse wheel scroll ticks using the following syntax.
-	-- These binds will change direction based on the natural-scroll setting.
+	-- ====================
+	-- WINDOW SIZING
+	-- ====================
 
-	-- To avoid scrolling through workspaces really fast, you can use
-	-- the cooldown_ms property. The bind will be rate-limited to this value.
-	-- You can set a cooldown on any bind, but it's most useful for the wheel.
-	{ key = "Mod+WheelScrollDown", action = "focus-workspace-down", cooldown = 150 },
-	{ key = "Mod+WheelScrollUp", action = "focus-workspace-up", cooldown = 150 },
-	{ key = "Mod+Ctrl+WheelScrollDown", action = "move-column-to-workspace-down", cooldown = 150 },
-	{ key = "Mod+Ctrl+WheelScrollUp", action = "move-column-to-workspace-up", cooldown = 150 },
+	-- Cycle preset column widths
+	{ key = "Mod+R", action = "switch-preset-column-width" },
+	-- { key = "Mod+R", action = "switch-preset-column-width-back" },  -- Reverse
 
+	-- Cycle preset window heights
+	{ key = "Mod+Shift+R", action = "switch-preset-window-height" },
+
+	-- Reset window height to automatic
+	{ key = "Mod+Ctrl+R", action = "reset-window-height" },
+
+	-- Fine column width adjustments
+	-- Supports: pixels ("1000", "+5", "-10"), percentages ("25%", "+10%", "-10%")
+	{ key = "Mod+Minus", action = "set-column-width", args = { "-10%" } },
+	{ key = "Mod+Equal", action = "set-column-width", args = { "+10%" } },
+
+	-- Fine window height adjustments (in columns with multiple windows)
+	{ key = "Mod+Shift+Minus", action = "set-window-height", args = { "-10%" } },
+	{ key = "Mod+Shift+Equal", action = "set-window-height", args = { "+10%" } },
+
+	-- ====================
+	-- MOUSE WHEEL BINDINGS
+	-- ====================
+
+	-- Workspace switching
+	{ key = "Mod+WheelScrollDown", action = "focus-workspace-down", cooldown_ms = 150 },
+	{ key = "Mod+WheelScrollUp", action = "focus-workspace-up", cooldown_ms = 150 },
+	{ key = "Mod+Ctrl+WheelScrollDown", action = "move-column-to-workspace-down", cooldown_ms = 150 },
+	{ key = "Mod+Ctrl+WheelScrollUp", action = "move-column-to-workspace-up", cooldown_ms = 150 },
+
+	-- Column navigation
 	{ key = "Mod+WheelScrollRight", action = "focus-column-right" },
 	{ key = "Mod+WheelScrollLeft", action = "focus-column-left" },
 	{ key = "Mod+Ctrl+WheelScrollRight", action = "move-column-right" },
 	{ key = "Mod+Ctrl+WheelScrollLeft", action = "move-column-left" },
 
-	-- Usually scrolling up and down with Shift in applications results in
-	-- horizontal scrolling; these binds replicate that.
+	-- Shift + wheel for horizontal scrolling
 	{ key = "Mod+Shift+WheelScrollDown", action = "focus-column-right" },
 	{ key = "Mod+Shift+WheelScrollUp", action = "focus-column-left" },
 	{ key = "Mod+Ctrl+Shift+WheelScrollDown", action = "move-column-right" },
 	{ key = "Mod+Ctrl+Shift+WheelScrollUp", action = "move-column-left" },
 
-	-- Similarly, you can bind touchpad scroll "ticks".
-	-- Touchpad scrolling is continuous, so for these binds it is split into
-	-- discrete intervals.
-	-- These binds are also affected by touchpad's natural-scroll, so these
-	-- example binds are "inverted", since we have natural-scroll enabled for
-	-- touchpads by default.
-	-- { key = "Mod+TouchpadScrollDown", action = "spawn-sh", args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.02+" } },
-	-- { key = "Mod+TouchpadScrollUp", action = "spawn-sh", args = { "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.02-" } },
+	-- ====================
+	-- OVERVIEW & SCREENSHOTS
+	-- ====================
 
-	-- You can refer to workspaces by index. However, keep in mind that
-	-- niri is a dynamic workspace system, so these commands are kind of
-	-- "best effort". Trying to refer to a workspace index bigger than
-	-- the current workspace count will instead refer to the bottommost
-	-- (empty) workspace.
-
-	-- For example, with 2 workspaces + 1 empty, indices 3, 4, 5 and so on
-	-- will all refer to the 3rd workspace.
-	{ key = "Mod+1", action = "focus-workspace", args = { 1 } },
-	{ key = "Mod+2", action = "focus-workspace", args = { 2 } },
-	{ key = "Mod+3", action = "focus-workspace", args = { 3 } },
-	{ key = "Mod+4", action = "focus-workspace", args = { 4 } },
-	{ key = "Mod+5", action = "focus-workspace", args = { 5 } },
-	{ key = "Mod+6", action = "focus-workspace", args = { 6 } },
-	{ key = "Mod+7", action = "focus-workspace", args = { 7 } },
-	{ key = "Mod+8", action = "focus-workspace", args = { 8 } },
-	{ key = "Mod+9", action = "focus-workspace", args = { 9 } },
-	{ key = "Mod+Ctrl+1", action = "move-column-to-workspace", args = { 1 } },
-	{ key = "Mod+Ctrl+2", action = "move-column-to-workspace", args = { 2 } },
-	{ key = "Mod+Ctrl+3", action = "move-column-to-workspace", args = { 3 } },
-	{ key = "Mod+Ctrl+4", action = "move-column-to-workspace", args = { 4 } },
-	{ key = "Mod+Ctrl+5", action = "move-column-to-workspace", args = { 5 } },
-	{ key = "Mod+Ctrl+6", action = "move-column-to-workspace", args = { 6 } },
-	{ key = "Mod+Ctrl+7", action = "move-column-to-workspace", args = { 7 } },
-	{ key = "Mod+Ctrl+8", action = "move-column-to-workspace", args = { 8 } },
-	{ key = "Mod+Ctrl+9", action = "move-column-to-workspace", args = { 9 } },
-
-	-- Alternatively, there are commands to move just a single window:
-	-- { key = "Mod+Ctrl+1", action = "move-window-to-workspace", args = { 1 } },
-
-	-- Switches focus between the current and the previous workspace.
-	-- { key = "Mod+Tab", action = "focus-workspace-previous" },
-
-	-- The following binds move the focused window in and out of a column.
-	-- If the window is alone, they will consume it into the nearby column to the side.
-	-- If the window is already in a column, they will expel it out.
-	{ key = "Mod+BracketLeft", action = "consume-or-expel-window-left" },
-	{ key = "Mod+BracketRight", action = "consume-or-expel-window-right" },
-
-	-- Consume one window from the right to the bottom of the focused column.
-	{ key = "Mod+Comma", action = "consume-window-into-column" },
-	-- Expel the bottom window from the focused column to the right.
-	{ key = "Mod+Period", action = "expel-window-from-column" },
-
-	-- Column width management
-	{ key = "Mod+R", action = "switch-preset-column-width" },
-	-- Cycling through the presets in reverse order is also possible.
-	-- { key = "Mod+R", action = "switch-preset-column-width-back" },
-	{ key = "Mod+Shift+R", action = "switch-preset-window-height" },
-	{ key = "Mod+Ctrl+R", action = "reset-window-height" },
-
-	-- Column and window sizing
-	{ key = "Mod+F", action = "maximize-column" },
-	{ key = "Mod+Shift+F", action = "fullscreen-window", repeat_key = false },
-
-	-- Expand the focused column to space not taken up by other fully visible columns.
-	-- Makes the column "fill the rest of the space".
-	{ key = "Mod+Ctrl+F", action = "expand-column-to-available-width" },
-
-	-- Column centering
-	{ key = "Mod+C", action = "center-column" },
-
-	-- Center all fully visible columns on screen.
-	{ key = "Mod+Ctrl+C", action = "center-visible-columns" },
-
-	-- Finer width adjustments.
-	-- This command can also:
-	-- * set width in pixels: "1000"
-	-- * adjust width in pixels: "-5" or "+5"
-	-- * set width as a percentage of screen width: "25%"
-	-- * adjust width as a percentage of screen width: "-10%" or "+10%"
-	-- Pixel sizes use logical, or scaled, pixels. I.e. on an output with scale 2.0,
-	-- set-column-width "100" will make the column occupy 200 physical screen pixels.
-	{ key = "Mod+Minus", action = "set-column-width", args = { "-10%" } },
-	{ key = "Mod+Equal", action = "set-column-width", args = { "+10%" } },
-
-	-- Finer height adjustments when in column with other windows.
-	{ key = "Mod+Shift+Minus", action = "set-window-height", args = { "-10%" } },
-	{ key = "Mod+Shift+Equal", action = "set-window-height", args = { "+10%" } },
-
-	-- Move the focused window between the floating and the tiling layout.
-	{ key = "Mod+V", action = "toggle-window-floating" },
-	{ key = "Mod+Shift+V", action = "switch-focus-between-floating-and-tiling" },
-
-	-- Toggle tabbed column display mode.
-	-- Windows in this column will appear as vertical tabs,
-	-- rather than stacked on top of each other.
-	{ key = "Mod+W", action = "toggle-column-tabbed-display" },
-
-	-- Actions to switch layouts.
-	-- Note: if you uncomment these, make sure you do NOT have
-	-- a matching layout switch hotkey configured in xkb options above.
-	-- Having both at once on the same hotkey will break the switching,
-	-- since it will switch twice upon pressing the hotkey (once by xkb, once by niri).
-	-- { key = "Mod+Space", action = "switch-layout", args = { "next" } },
-	-- { key = "Mod+Shift+Space", action = "switch-layout", args = { "prev" } },
+	-- Toggle overview
+	{ key = "Mod+O", action = "toggle-overview" },
+	-- { key = "Mod+O", action = "open-overview" },
+	-- { key = "Mod+O", action = "close-overview" },
 
 	-- Screenshots
 	{ key = "Print", action = "screenshot" },
 	{ key = "Ctrl+Print", action = "screenshot-screen" },
 	{ key = "Alt+Print", action = "screenshot-window" },
-
-	-- Applications such as remote-desktop clients and software KVM switches may
-	-- request that niri stops processing the keyboard shortcuts defined here
-	-- so they may, for example, forward the key presses as-is to a remote machine.
-	-- It's a good idea to bind an escape hatch to toggle the inhibitor,
-	-- so a buggy application can't hold your session hostage.
-
-	-- The allow_inhibiting=false property can be applied to other binds as well,
-	-- which ensures niri always processes them, even when an inhibitor is active.
-	{ key = "Mod+Escape", action = "toggle-keyboard-shortcuts-inhibit", allow_inhibiting = false },
-
-	-- The quit action will show a confirmation dialog to avoid accidental exits.
-	{ key = "Mod+Shift+E", action = "quit" },
-	{ key = "Ctrl+Alt+Delete", action = "quit" },
-
-	-- Powers off the monitors. To turn them back on, do any input like
-	-- moving the mouse or pressing any other key.
-	{ key = "Mod+Shift+P", action = "power-off-monitors" },
 }
 
 -- ============================================================================
--- CONFIGURATION APPLICATION
+-- WINDOW RULES
 -- ============================================================================
+-- Apply special behavior to specific windows based on app-id or title.
 
--- Log only if running within Niri (niri global is available)
-if niri then
-	niri.log("Niri Lua configuration loaded successfully!")
-end
-return {
+local window_rules = {
+	-- Fix WezTerm's initial configure bug
+	{
+		match = { app_id = "^org%.wezfurlong%.wezterm$" },
+		default_column_width = {},
+	},
+
+	-- Firefox picture-in-picture as floating
+	{
+		match = {
+			app_id = "firefox$",
+			title = "^Picture-in-Picture$",
+		},
+		open_floating = true,
+	},
+
+	-- Example: Set window opacity
+	-- {
+	--     match = { app_id = "Alacritty" },
+	--     opacity = 0.9,
+	-- },
+
+	-- Example: Block from screen capture
+	-- {
+	--     match = { app_id = "^org%.keepassxc%.KeePassXC$" },
+	--     block_out_from = "screen-capture",  -- or "screencast"
+	-- },
+
+	-- Example: Rounded corners (requires prefer-no-csd)
+	-- {
+	--     match = {},  -- All windows
+	--     geometry_corner_radius = 12,
+	--     clip_to_geometry = true,
+	-- },
+
+	-- Other available properties:
+	-- - min_width, max_width, min_height, max_height
+	-- - draw_border_with_background
+	-- - open_on_output = "HDMI-A-1"
+	-- - open_on_workspace = 2
+	-- - open_maximized = true
+	-- - open_fullscreen = true
+}
+
+-- ============================================================================
+-- LAYER RULES
+-- ============================================================================
+-- Rules for layer-shell surfaces (panels, notifications, etc.)
+
+local layer_rules = {
+	-- Example: Block notification daemon from screencasts
+	-- {
+	--     match = {
+	--         namespace = "swaync",
+	--         at_startup = true,
+	--     },
+	--     block_out_from = "screencast",
+	-- },
+}
+
+-- ============================================================================
+-- STARTUP COMMANDS
+-- ============================================================================
+-- Programs to launch when niri starts.
+-- Note: When running as a session, xdg-desktop-autostart also works.
+
+local spawn_at_startup = {
+	"waybar",
+	-- "swaync",
+	-- "kitty",
+}
+
+-- Shell commands with pipes, variables, etc.
+local spawn_sh_at_startup = {
+	-- "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP",
+}
+
+-- ============================================================================
+-- ENVIRONMENT VARIABLES
+-- ============================================================================
+-- Set environment variables for child processes.
+
+local environment = {
+	-- Example: Set default apps
+	-- BROWSER = "firefox",
+	-- TERMINAL = "alacritty",
+
+	-- Example: Enable Wayland for Qt apps
+	-- QT_QPA_PLATFORM = "wayland",
+
+	-- Example: GBM backend for SDL
+	-- SDL_VIDEODRIVER = "wayland",
+}
+
+-- ============================================================================
+-- PREFER NO CSD
+-- ============================================================================
+-- Ask clients to omit client-side decorations.
+-- After changing this, restart apps for it to take effect.
+
+local prefer_no_csd = false
+
+-- ============================================================================
+-- WORKSPACES
+-- ============================================================================
+-- Pre-configure workspaces with names.
+
+local workspaces = {
+	-- { name = "1" },
+	-- { name = "2" },
+	-- { name = "browser" },
+	-- { name = "code" },
+}
+
+-- ============================================================================
+-- APPLY CONFIGURATION
+-- ============================================================================
+-- Apply the configuration using niri.apply_config()
+
+-- Why use niri.apply_config() instead of return?
+-- 1. Allows you to do additional scripting AFTER config is applied
+-- 2. More explicit and clear about what's happening
+-- 3. Enables sequential execution - no need for async callbacks
+-- 4. You can still use local variables and helper functions
+
+-- The old pattern (return { ... }) still works for backward compatibility,
+-- but niri.apply_config() is the recommended approach.
+
+niri.apply_config({
+	-- Core configuration
 	input = input,
 	layout = layout,
-	animations = animations,
-	hotkey_overlay = hotkey_overlay,
-	screenshot = screenshot,
-	startup_commands = startup_commands,
-	window_rules = window_rules,
-	layer_rules = layer_rules,
+	cursor = cursor,
+
+	-- Output configuration (monitor-specific)
+	-- outputs = outputs,
+
+	-- Features
+	gestures = gestures,
 	recent_windows = recent_windows,
+	overview = overview,
+	animations = animations,
+
+	-- UI configuration
+	clipboard = clipboard,
+	hotkey_overlay = hotkey_overlay,
+	config_notification = config_notification,
+
+	-- Advanced
+	debug = debug,
+	xwayland_satellite = xwayland_satellite,
+
+	-- Miscellaneous
+	screenshot = screenshot,
+	environment = environment,
+	prefer_no_csd = prefer_no_csd,
+
+	-- Bindings and rules
 	binds = binds,
-}
+	window_rules = window_rules,
+	-- layer_rules = layer_rules,
+
+	-- Startup
+	spawn_at_startup = spawn_at_startup,
+	-- spawn_sh_at_startup = spawn_sh_at_startup,
+
+	-- Workspaces
+	-- workspaces = workspaces,
+})
+
+-- ============================================================================
+-- POST-CONFIG SCRIPTING
+-- ============================================================================
+-- Everything below this line runs AFTER the configuration has been applied.
+-- This is the perfect place to add:
+
+-- 1. Event listeners (when event system is implemented)
+--    Example:
+-- niri.on("window_opened", function(window)
+-- 	niri.log("New window: " .. window.title)
+-- end)
+
+-- 2. Runtime state queries
+--    Example:
+--    local windows = niri.runtime.windows()
+--    niri.log("Current window count: " .. #windows)
+
+-- 3. Dynamic configuration based on runtime state
+--    Example:
+--    local outputs = niri.runtime.outputs()
+--    if #outputs > 1 then
+--        niri.log("Multiple monitors detected!")
+--    end
+
+-- 4. Custom initialization logic
+--    Example:
+--    local hostname = os.getenv("HOSTNAME")
+--    if hostname == "work-laptop" then
+--        -- Spawn work-specific apps
+--    end
+
+-- 5. Debugging and diagnostics
+--    Example:
+--    niri.log("Config loaded with " .. #binds .. " keybindings")
+
+-- Simple example: Log that configuration was loaded successfully
+niri.log("Niri configuration loaded successfully!")
+niri.log("Loaded " .. #binds .. " keybindings and " .. #spawn_at_startup .. " startup command(s)")

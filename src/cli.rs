@@ -96,7 +96,7 @@ pub enum Msg {
         #[arg()]
         output: String,
         /// Configuration to apply.
-         #[command(subcommand)]
+        #[command(subcommand)]
         action: OutputAction,
     },
     /// Start continuously receiving events from the compositor.
