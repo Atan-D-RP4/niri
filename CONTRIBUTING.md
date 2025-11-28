@@ -5,6 +5,18 @@ The project has grown quite a bit, and we could use all help that we can.
 
 Make sure to join our Matrix chat if you have any questions or want to discuss anything: https://matrix.to/#/#niri:matrix.org
 
+## Architecture Documentation
+
+Before diving into the code, it's helpful to understand the architecture:
+
+- **[AGENTS.md](AGENTS.md)** - Main compositor architecture overview
+- **[niri-ipc/AGENTS.md](niri-ipc/AGENTS.md)** - IPC communication system
+- **[niri-config/AGENTS.md](niri-config/AGENTS.md)** - Configuration parsing and keybinding system
+- **[niri-visual-tests/AGENTS.md](niri-visual-tests/AGENTS.md)** - Visual testing framework
+- **[niri-lua/AGENTS.md](niri-lua/AGENTS.md)** - Lua scripting system
+
+These documents provide detailed walkthroughs of how each subsystem works, which is essential for contributing to specific areas.
+
 ## Issues and discussions
 
 This is a good way to help many new and existing users without programming knowledge.

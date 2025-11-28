@@ -580,10 +580,13 @@ impl ExtWorkspaceHandler for State {
                 if output.as_ref() == Some(active) {
                     // Same output, get the old workspace
                     self.niri.layout.active_workspace().map(|ws| {
-                        (ws.name().map(|s| s.to_string()).unwrap_or_else(|| {
-                            // Get the workspace ID from the old workspace
-                            format!("Workspace {}", ws.id().get())
-                        }), ws.id().get())
+                        (
+                            ws.name().map(|s| s.to_string()).unwrap_or_else(|| {
+                                // Get the workspace ID from the old workspace
+                                format!("Workspace {}", ws.id().get())
+                            }),
+                            ws.id().get(),
+                        )
                     })
                 } else {
                     None

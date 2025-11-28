@@ -432,4 +432,144 @@ mod tests {
         assert!(all_windows.is_empty());
         assert!(focused.is_none());
     }
+
+    // ========================================================================
+    // NEW: Runtime API documentation and usage tests
+    // ========================================================================
+
+    #[test]
+    fn runtime_api_example_get_windows() {
+        // Example usage: Getting all windows
+        // In a real scenario, this would be called from Lua:
+        // local windows = niri.runtime.get_windows()
+
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let windows = state.get_windows();
+        assert_eq!(windows.len(), 0);
+    }
+
+    #[test]
+    fn runtime_api_example_get_focused_window() {
+        // Example usage: Getting the focused window
+        // In a real scenario, this would be called from Lua:
+        // local focused = niri.runtime.get_focused_window()
+        // if focused then
+        //     print("Focused window:", focused.title)
+        // end
+
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let focused = state.get_focused_window();
+        assert!(focused.is_none());
+    }
+
+    #[test]
+    fn runtime_api_example_get_workspaces() {
+        // Example usage: Getting all workspaces
+        // In a real scenario, this would be called from Lua:
+        // local workspaces = niri.runtime.get_workspaces()
+        // for i, ws in ipairs(workspaces) do
+        //     print("Workspace:", ws.name or ws.idx, "active:", ws.is_active)
+        // end
+
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let workspaces = state.get_workspaces();
+        assert_eq!(workspaces.len(), 0);
+    }
+
+    #[test]
+    fn runtime_api_example_get_outputs() {
+        // Example usage: Getting all outputs (monitors)
+        // In a real scenario, this would be called from Lua:
+        // local outputs = niri.runtime.get_outputs()
+        // for i, output in ipairs(outputs) do
+        //     print("Output:", output.name, "enabled:", output.is_enabled)
+        // end
+
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let outputs = state.get_outputs();
+        assert_eq!(outputs.len(), 0);
+    }
+
+    #[test]
+    fn runtime_api_compositor_state_contract() {
+        // Test that CompositorState trait contract is upheld
+        // All methods should be callable without panicking
+
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        // All of these should be callable
+        let _ = state.get_windows();
+        let _ = state.get_focused_window();
+        let _ = state.get_workspaces();
+        let _ = state.get_outputs();
+    }
+
+    #[test]
+    fn runtime_api_trait_object_polymorphism() {
+        // Test that CompositorState works correctly as a trait object
+
+        let state = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let trait_obj: &dyn CompositorState = &state;
+
+        // Should be able to call all methods via trait object
+        let windows = trait_obj.get_windows();
+        let workspaces = trait_obj.get_workspaces();
+        let outputs = trait_obj.get_outputs();
+        let focused = trait_obj.get_focused_window();
+
+        assert_eq!(windows.len(), 0);
+        assert_eq!(workspaces.len(), 0);
+        assert_eq!(outputs.len(), 0);
+        assert!(focused.is_none());
+    }
+
+    #[test]
+    fn runtime_api_multiple_state_instances() {
+        // Test that multiple state instances work independently
+
+        let state1 = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let state2 = MockState {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        // Both should work independently
+        assert_eq!(state1.get_windows().len(), 0);
+        assert_eq!(state2.get_windows().len(), 0);
+    }
 }
