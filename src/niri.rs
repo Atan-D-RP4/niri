@@ -16,7 +16,7 @@ use calloop::futures::Scheduler;
 use niri_config::debug::PreviewRender;
 use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
-    WorkspaceReference, Xkb, DEFAULT_MRU_COMMIT_MS,
+    WorkspaceReference, Xkb,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::Keycode;
@@ -169,6 +169,7 @@ use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::{CHILD_DISPLAY, CHILD_ENV};
+use crate::utils::vblank_throttle::VBlankThrottle;
 use crate::utils::watcher::Watcher;
 use crate::utils::xwayland::satellite::Satellite;
 use crate::utils::{
@@ -470,6 +471,7 @@ pub struct OutputState {
     pub unfinished_animations_remain: bool,
     /// Last sequence received in a vblank event.
     pub last_drm_sequence: Option<u32>,
+    pub vblank_throttle: VBlankThrottle,
     /// Sequence for frame callback throttling.
     ///
     /// We want to send frame callbacks for each surface at most once per monitor refresh cycle.
@@ -1275,11 +1277,13 @@ impl State {
                     // period has gone by without the focus having elsewhere.
                     let stamp = get_monotonic_time();
 
-                    if mapped.get_focus_timestamp().is_none() {
+                    let debounce = self.niri.config.borrow().recent_windows.debounce_ms;
+                    let debounce = Duration::from_millis(u64::from(debounce));
+
+                    if mapped.get_focus_timestamp().is_none() || debounce.is_zero() {
                         mapped.set_focus_timestamp(stamp);
                     } else {
-                        let timer =
-                            Timer::from_duration(Duration::from_millis(DEFAULT_MRU_COMMIT_MS));
+                        let timer = Timer::from_duration(debounce);
 
                         let focus_token = self
                             .niri
@@ -3102,6 +3106,7 @@ impl Niri {
             unfinished_animations_remain: false,
             frame_clock: FrameClock::new(refresh_interval, vrr),
             last_drm_sequence: None,
+            vblank_throttle: VBlankThrottle::new(self.event_loop.clone(), name.connector.clone()),
             frame_callback_sequence: 0,
             backdrop_buffer: SolidColorBuffer::new(size, backdrop_color),
             lock_render_state,
