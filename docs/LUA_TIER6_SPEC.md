@@ -1,8 +1,55 @@
 # Tier 6 Specification: Developer Experience
 
-**Status:** Specification | **Duration:** Weeks 11-12 | **Estimated LOC:** 1300 (code + docs + examples)
+**Status:** ⚙️ **PARTIAL IMPLEMENTATION**
+
+**Duration:** Weeks 11-12 | **Estimated LOC:** 1300 (code + docs + examples)
 
 This tier focuses on making Niri's Lua API developer-friendly through type definitions, LSP support, comprehensive documentation, and tooling.
+
+## Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Interactive REPL | ✅ Complete | `niri-lua/src/ipc_repl.rs`, 86 integration tests |
+| Documentation | ✅ Complete | LUA_GUIDE.md, LUA_QUICKSTART.md, LUA_EMBEDDING.md, etc. |
+| Example Scripts | ✅ Complete | 10 examples in `examples/` directory |
+| Type Definitions | ⏳ Pending | Should use EmmyLua annotations (see note below) |
+| LSP Support | ⏳ Pending | lua_ls configuration not yet provided |
+| Testing Framework | ⏳ Pending | Plugin testing infrastructure not implemented |
+
+### Code References (Implemented Components)
+
+**IPC REPL** (`niri-lua/src/ipc_repl.rs`, ~120 lines):
+- `IpcLuaExecutor` struct: `:24` - Handler for executing Lua code from IPC requests
+- `IpcLuaExecutor::new()`: `:34` - Creates executor with `Arc<Mutex<Option<LuaRuntime>>>`
+- `IpcLuaExecutor::execute()`: `:49` - Executes Lua code string, returns `(output, success)`
+- Unit tests: `:60+` - `test_lua_executor_basic`, `test_lua_executor_print`, `test_lua_executor_error`
+
+**Integration Tests** (`niri-lua/tests/repl_integration.rs`):
+- 86 REPL integration tests covering runtime API, config API, and error handling
+
+**Documentation** (`docs/`):
+- `LUA_GUIDE.md` - Comprehensive user guide
+- `LUA_QUICKSTART.md` - Quick start tutorial
+- `LUA_EMBEDDING.md` - Embedding Lua in niri
+- `LUA_REPL.md` - REPL usage documentation
+- `LUA_EVENT_HOOKS.md` - Event system documentation
+- `LUA_RUNTIME_STATE_API.md` - Runtime state API reference
+- `LUA_CONFIG_STATUS.md` - Configuration status tracking
+- `LUA_FILES_CHECKLIST.md` - Implementation file checklist
+
+**Example Scripts** (`examples/`):
+- `niri.lua` - Main example configuration
+- `config_api_demo.lua`, `config_api_dump.lua`, `config_api_usage.lua` - Config API examples
+- `runtime_state_api_demo.lua`, `runtime_state_query.lua` - Runtime API examples
+- `query_windows.lua`, `query_workspaces.lua` - Query examples
+- `event_system_demo.lua` - Event system example
+- `config_recent_windows.lua` - Recent windows tracking example
+
+> **Important Correction:** This spec originally proposed "Luau type definitions" with Luau's `declare module` syntax. Since niri uses **Lua 5.2 with LuaJIT** (not Luau), type definitions should use **EmmyLua annotations** instead - the same format used by Neovim and supported by lua_ls (lua-language-server).
+>
+> - **Luau syntax (incorrect for niri):** `declare module "niri" do function log(msg: string): nil end`
+> - **EmmyLua syntax (correct):** `---@param msg string` / `---@return nil` / `---@class NiriConfig`
 
 ---
 
@@ -10,8 +57,8 @@ This tier focuses on making Niri's Lua API developer-friendly through type defin
 
 Tier 6 bridges the gap between implementation and usability by providing:
 
-1. **Type Definitions** - Luau type stubs for IDE autocomplete and type checking
-2. **LSP Support** - Language Server Protocol integration for Neovim/VS Code
+1. **Type Definitions** - EmmyLua annotation stubs for IDE autocomplete and type checking (Lua 5.2/LuaJIT)
+2. **LSP Support** - Language Server Protocol integration for Neovim/VS Code via lua_ls
 3. **Documentation** - User guides, quick start, architecture docs
 4. **Example Plugins** - 5+ real-world plugins with full source code
 5. **Testing Framework** - Plugin testing infrastructure

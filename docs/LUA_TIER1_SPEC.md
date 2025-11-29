@@ -1,8 +1,56 @@
 # Tier 1 Specification: Module System & Plugin Foundation
 
+**Status:** ✅ **IMPLEMENTED**
+
 **Duration:** Weeks 1-2  
 **Estimated LOC:** 470 Rust + 100 documentation  
 **Complexity:** Medium-High
+
+## Implementation Status
+
+| Component | File | Status |
+|-----------|------|--------|
+| Module Loader | `niri-lua/src/module_loader.rs` | ✅ Complete |
+| Plugin System | `niri-lua/src/plugin_system.rs` | ✅ Complete |
+| Event Emitter | `niri-lua/src/event_emitter.rs` | ✅ Complete |
+| Hot Reload | `niri-lua/src/hot_reload.rs` | ✅ Complete |
+
+### Code References
+
+**Module Loader** (`niri-lua/src/module_loader.rs`, 277 lines):
+- `ModuleLoader` struct: `:35` - Core struct with `search_paths: Vec<PathBuf>`
+- `ModuleLoader::new()`: `:41` - Creates loader with default search paths
+- `find_module()`: `:77` - Resolves `foo.bar` → `foo/bar.lua` or `foo/bar/init.lua`
+- `load_module()`: `:102` - Loads and executes module code via `lua.load(&source).eval()`
+- `register_to_lua()`: `:131` - Overrides global `require` function
+
+**Plugin System** (`niri-lua/src/plugin_system.rs`, 717 lines):
+- `PluginMetadata` struct: `:44` - name, version, author, description, license, dependencies
+- `PluginInfo` struct: `:72` - metadata + path + enabled/loaded state
+- `PluginManager` struct: `:91` - HashMap of plugins + search paths
+- `PluginManager::discover()`: `:123` - Scans for `.lua` files and `init.lua` packages
+- `PluginManager::load_plugin()`: `:185` - Loads plugin, extracts metadata
+- `create_plugin_env()`: `:263` - Creates isolated Lua environment for plugin
+- `register_to_lua()`: `:322` - Exposes `niri.plugins.list()` API
+
+**Event Emitter** (`niri-lua/src/event_emitter.rs`, 413 lines):
+- `EventEmitter` struct: `:48` - handlers HashMap + next_handler_id counter
+- `on()`: `:63` - Register persistent event handler
+- `once()`: `:86` - Register one-time handler (auto-removes after firing)
+- `off()`: `:109` - Unregister handler by ID
+- `emit()`: `:129` - Dispatch event to all registered handlers
+- `register_to_lua()`: `:180` - Exposes `niri.events.on/once/off/emit` API
+
+**Hot Reload** (`niri-lua/src/hot_reload.rs`, 348 lines):
+- `FileMetadata` struct: `:37` - modified timestamp + size for change detection
+- `HotReloader` struct: `:62` - watched_files HashMap + changed_files Vec
+- `watch()`: `:77` - Add file to watch list (handles `~` expansion)
+- `check_changes()`: `:120` - Poll for file changes, returns bool
+- `get_changed_files()`: `:146` - Returns list of recently changed files
+
+> **Note:** All file paths in this spec originally referenced `src/lua_extensions/`. The actual implementation is in `niri-lua/src/`.
+
+---
 
 ## Overview
 
@@ -50,7 +98,7 @@ Hot Reload:
 
 ## Detailed Specifications
 
-### 1. Module Loader (`src/lua_extensions/module_loader.rs`)
+### 1. Module Loader (`niri-lua/src/module_loader.rs`)
 
 #### Purpose
 Implement Lua's `require()` function with Niri-specific search paths.
@@ -150,7 +198,7 @@ return utils
 
 ---
 
-### 2. Plugin System (`src/lua_extensions/plugin_system.rs`)
+### 2. Plugin System (`niri-lua/src/plugin_system.rs`)
 
 #### Purpose
 Discover, load, and manage Niri plugins from `~/.config/niri/plugins/` directory.
@@ -327,7 +375,7 @@ Tests to implement:
 
 ---
 
-### 3. Event Emitter Foundation (`src/lua_extensions/event_emitter.rs`)
+### 3. Event Emitter Foundation (`niri-lua/src/event_emitter.rs`)
 
 #### Purpose
 Provide infrastructure for Tier 4's full event system. In Tier 1, this is a placeholder that allows basic event registration but doesn't actually fire events yet. Tier 4 will integrate this with Niri core.
@@ -415,7 +463,7 @@ Tests to implement (mostly placeholders):
 
 ---
 
-### 4. Hot Reload (`src/lua_extensions/hot_reload.rs`)
+### 4. Hot Reload (`niri-lua/src/hot_reload.rs`)
 
 #### Purpose
 Watch Lua configuration files for changes and reload them without restarting Niri.
@@ -518,7 +566,7 @@ Tests to implement:
 
 ## Integration with Existing Code
 
-### Changes to `src/lua_extensions/mod.rs`
+### Changes to `niri-lua/src/mod.rs`
 
 ```rust
 pub mod module_loader;
@@ -532,7 +580,7 @@ pub use event_emitter::EventEmitter;
 pub use hot_reload::HotReloader;
 ```
 
-### Changes to `src/lua_extensions/runtime.rs`
+### Changes to `niri-lua/src/runtime.rs`
 
 ```rust
 pub struct LuaRuntime {
@@ -574,7 +622,7 @@ impl LuaRuntime {
 }
 ```
 
-### Changes to `src/lua_extensions/config.rs`
+### Changes to `niri-lua/src/config.rs`
 
 ```rust
 impl LuaConfig {
@@ -593,15 +641,15 @@ impl LuaConfig {
 ## File Structure Summary
 
 **New Files:**
-- `src/lua_extensions/module_loader.rs` (150 lines)
-- `src/lua_extensions/plugin_system.rs` (200 lines)
-- `src/lua_extensions/event_emitter.rs` (120 lines)
-- `src/lua_extensions/hot_reload.rs` (100 lines)
+- `niri-lua/src/module_loader.rs` (150 lines)
+- `niri-lua/src/plugin_system.rs` (200 lines)
+- `niri-lua/src/event_emitter.rs` (120 lines)
+- `niri-lua/src/hot_reload.rs` (100 lines)
 
 **Modified Files:**
-- `src/lua_extensions/mod.rs` (+20 lines)
-- `src/lua_extensions/runtime.rs` (+40 lines)
-- `src/lua_extensions/config.rs` (+20 lines)
+- `niri-lua/src/mod.rs` (+20 lines)
+- `niri-lua/src/runtime.rs` (+40 lines)
+- `niri-lua/src/config.rs` (+20 lines)
 - `Cargo.toml` (+1 line: notify dependency)
 
 **Documentation:**

@@ -1,8 +1,48 @@
 # Tier 3 Specification: Runtime State Access & Introspection
 
+**Status:** ✅ **IMPLEMENTED**
+
 **Duration:** Weeks 5-6  
 **Estimated LOC:** 350-400 Rust + 150 documentation  
 **Complexity:** High (State synchronization required)
+
+## Implementation Status
+
+| Component | File | Status |
+|-----------|------|--------|
+| Runtime State API | `niri-lua/src/runtime_api.rs` | ✅ Complete |
+
+### Code References
+
+**Runtime API** (`niri-lua/src/runtime_api.rs`, 576 lines):
+- `RuntimeApi<S>` struct: `:32` - Generic runtime API with event loop handle
+- `RuntimeApi::new()`: `:38` - Create RuntimeApi with event loop
+- `RuntimeApi::query()`: `:46` - Helper to query event loop and wait for response
+- `CompositorState` trait: `:68` - Trait defining state access interface
+- `CompositorState::get_windows()`: `:70` - Trait method for window list
+- `CompositorState::get_focused_window()`: `:73` - Trait method for focused window
+- `CompositorState::get_workspaces()`: `:76` - Trait method for workspace list
+- `CompositorState::get_outputs()`: `:79` - Trait method for output list
+- `register_runtime_api()`: `:103` - **Entry point** - registers `niri.runtime` table
+
+**Lua API Functions** (registered at `:118+`):
+- `niri.runtime.get_windows()`: `:121` - Returns table of all windows
+- `niri.runtime.get_focused_window()`: `:139` - Returns focused window or nil
+- `niri.runtime.get_workspaces()`: `:161` - Returns table of all workspaces
+- `niri.runtime.get_outputs()`: `:180` - Returns table of all outputs
+
+**Integration Tests** (`niri-lua/tests/repl_integration.rs`):
+- 86 REPL integration tests covering all runtime API functions
+
+> **Note:** The implementation differs from this spec:
+> - **Spec proposed:** 4 separate files (`window_api.rs`, `workspace_api.rs`, `monitor_api.rs`, `layout_query_api.rs`)
+> - **Actual implementation:** Single `runtime_api.rs` with unified `niri.runtime.*` namespace
+> - **Spec API:** `niri.windows.get_all()`, `niri.workspaces.get_active()`, etc.
+> - **Actual API:** `niri.runtime.get_windows()`, `niri.runtime.get_workspaces()`, etc.
+>
+> All file paths in this spec originally referenced `src/lua_extensions/`. The actual implementation is in `niri-lua/src/`.
+
+---
 
 ## Overview
 
@@ -55,7 +95,7 @@ UserData Types (with methods):
 
 ## Detailed Specifications
 
-### 1. Window Query API (`src/lua_extensions/window_api.rs`)
+### 1. Window Query API (`niri-lua/src/window_api.rs`)
 
 #### Purpose
 Query information about open windows.
@@ -216,7 +256,7 @@ end
 
 ---
 
-### 2. Workspace Query API (`src/lua_extensions/workspace_api.rs`)
+### 2. Workspace Query API (`niri-lua/src/workspace_api.rs`)
 
 #### Purpose
 Query information about workspaces.
@@ -325,7 +365,7 @@ impl WorkspaceApi {
 
 ---
 
-### 3. Monitor Query API (`src/lua_extensions/monitor_api.rs`)
+### 3. Monitor Query API (`niri-lua/src/monitor_api.rs`)
 
 #### Purpose
 Query information about connected monitors.
@@ -420,7 +460,7 @@ impl MonitorApi {
 
 ---
 
-### 4. Layout Query API (`src/lua_extensions/layout_query_api.rs`)
+### 4. Layout Query API (`niri-lua/src/layout_query_api.rs`)
 
 #### Purpose
 Query layout state and column information.
@@ -535,7 +575,7 @@ impl State {
 }
 ```
 
-### Changes to `src/lua_extensions/runtime.rs`
+### Changes to `niri-lua/src/runtime.rs`
 
 ```rust
 impl LuaRuntime {
@@ -605,14 +645,14 @@ end
 ## File Structure Summary
 
 **New Files:**
-- `src/lua_extensions/window_api.rs` (100 lines)
-- `src/lua_extensions/workspace_api.rs` (100 lines)
-- `src/lua_extensions/monitor_api.rs` (100 lines)
-- `src/lua_extensions/layout_query_api.rs` (50 lines)
+- `niri-lua/src/window_api.rs` (100 lines)
+- `niri-lua/src/workspace_api.rs` (100 lines)
+- `niri-lua/src/monitor_api.rs` (100 lines)
+- `niri-lua/src/layout_query_api.rs` (50 lines)
 
 **Modified Files:**
-- `src/lua_extensions/mod.rs` (+15 lines)
-- `src/lua_extensions/runtime.rs` (+30 lines)
+- `niri-lua/src/mod.rs` (+15 lines)
+- `niri-lua/src/runtime.rs` (+30 lines)
 - `src/niri.rs` (+80 lines of query methods)
 
 ---

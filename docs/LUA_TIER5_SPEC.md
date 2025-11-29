@@ -1,8 +1,54 @@
 # Tier 5 Specification: Plugin Ecosystem & Lifecycle
 
+**Status:** ⚙️ **PARTIAL IMPLEMENTATION**
+
 **Duration:** Weeks 9-10  
 **Estimated LOC:** 250-300 Rust + 200 documentation  
 **Complexity:** Very High (Complete plugin manager required)
+
+## Implementation Status
+
+| Component | File | Status |
+|-----------|------|--------|
+| Plugin System (basic) | `niri-lua/src/plugin_system.rs` | ✅ Complete |
+| Module Loader | `niri-lua/src/module_loader.rs` | ✅ Complete |
+| Hot Reload | `niri-lua/src/hot_reload.rs` | ✅ Complete |
+| Plugin Manager (full lifecycle) | Not implemented | ⏳ Pending |
+| Plugin Sandbox | Not implemented | ⏳ Pending |
+| Plugin Registry | Not implemented | ⏳ Pending |
+| Dependency Resolution | Not implemented | ⏳ Pending |
+| IPC Plugin Commands | Not implemented | ⏳ Pending |
+
+### Code References (Implemented Components)
+
+**Plugin System** (`niri-lua/src/plugin_system.rs`, 717 lines):
+- `PluginMetadata` struct: `:44` - name, version, author, description, license, dependencies
+- `PluginInfo` struct: `:72` - metadata + path + enabled/loaded state
+- `PluginManager` struct: `:91` - HashMap of plugins + search paths
+- `PluginManager::discover()`: `:123` - Scans for `.lua` files and `init.lua` packages
+- `PluginManager::load_plugin()`: `:185` - Loads plugin, extracts metadata
+- `create_plugin_env()`: `:263` - Creates isolated Lua environment for plugin
+- `register_to_lua()`: `:322` - Exposes `niri.plugins.list()` API
+
+**Module Loader** (`niri-lua/src/module_loader.rs`, 277 lines):
+- `ModuleLoader` struct: `:35` - Core struct with `search_paths: Vec<PathBuf>`
+- `ModuleLoader::new()`: `:41` - Creates loader with default search paths
+- `find_module()`: `:77` - Resolves `foo.bar` → `foo/bar.lua` or `foo/bar/init.lua`
+- `load_module()`: `:102` - Loads and executes module code
+- `register_to_lua()`: `:131` - Overrides global `require` function
+
+**Hot Reload** (`niri-lua/src/hot_reload.rs`, 348 lines):
+- `FileMetadata` struct: `:37` - modified timestamp + size for change detection
+- `HotReloader` struct: `:62` - watched_files HashMap + changed_files Vec
+- `watch()`: `:77` - Add file to watch list (handles `~` expansion)
+- `check_changes()`: `:120` - Poll for file changes, returns bool
+- `get_changed_files()`: `:146` - Returns list of recently changed files
+
+> **Note:** Basic plugin infrastructure exists (discovery, loading, events, hot reload). Full lifecycle management (install/uninstall, enable/disable, dependency resolution, sandboxing) is not yet implemented.
+>
+> All file paths in this spec originally referenced `src/lua_extensions/`. The actual implementation is in `niri-lua/src/`.
+
+---
 
 ## Overview
 
@@ -43,7 +89,7 @@ Plugin Metadata (expanded):
 
 ## Detailed Specifications
 
-### 1. Plugin Manager (`src/lua_extensions/plugin_manager.rs`)
+### 1. Plugin Manager (`niri-lua/src/plugin_manager.rs`)
 
 #### Purpose
 Orchestrate plugin lifecycle and state management.
@@ -362,7 +408,7 @@ impl PluginRegistry {
 
 ---
 
-### 2. Plugin Sandbox (`src/lua_extensions/plugin_sandbox.rs`)
+### 2. Plugin Sandbox (`niri-lua/src/plugin_sandbox.rs`)
 
 #### Purpose
 Isolate plugin code and manage permissions.
@@ -430,7 +476,7 @@ impl PluginSandbox {
 
 ---
 
-### 3. Plugin API (`src/lua_extensions/plugin_api.rs`)
+### 3. Plugin API (`niri-lua/src/plugin_api.rs`)
 
 #### Purpose
 Provide plugin-specific APIs for lifecycle and state management.
@@ -598,7 +644,7 @@ fn json_to_lua(lua: &Lua, value: &serde_json::Value) -> LuaResult<LuaValue> {
 
 ---
 
-### 4. Plugin Registry (`src/lua_extensions/plugin_registry.rs`)
+### 4. Plugin Registry (`niri-lua/src/plugin_registry.rs`)
 
 #### Purpose
 Central registry of available plugins for discovery and distribution.
@@ -770,14 +816,14 @@ $ niri msg plugin info awesome-status-bar
 ## File Structure Summary
 
 **New Files:**
-- `src/lua_extensions/plugin_manager.rs` (250 lines)
-- `src/lua_extensions/plugin_sandbox.rs` (100 lines)
-- `src/lua_extensions/plugin_api.rs` (150 lines)
-- `src/lua_extensions/plugin_registry.rs` (150 lines)
+- `niri-lua/src/plugin_manager.rs` (250 lines)
+- `niri-lua/src/plugin_sandbox.rs` (100 lines)
+- `niri-lua/src/plugin_api.rs` (150 lines)
+- `niri-lua/src/plugin_registry.rs` (150 lines)
 
 **Modified Files:**
-- `src/lua_extensions/mod.rs` (+20 lines)
-- `src/lua_extensions/runtime.rs` (+40 lines)
+- `niri-lua/src/mod.rs` (+20 lines)
+- `niri-lua/src/runtime.rs` (+40 lines)
 - `src/ipc/server.rs` (+50 lines - plugin IPC commands)
 
 **Documentation:**

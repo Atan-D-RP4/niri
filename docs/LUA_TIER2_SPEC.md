@@ -1,8 +1,70 @@
 # Tier 2 Specification: Full Configuration API
 
+**Status:** ✅ **IMPLEMENTED**
+
 **Duration:** Weeks 3-4  
 **Estimated LOC:** 400-500 Rust + 150 documentation  
 **Complexity:** High (complex type mappings)
+
+## Implementation Status
+
+| Component | File | Status |
+|-----------|------|--------|
+| Configuration API | `niri-lua/src/config_api.rs` | ✅ Complete |
+| Lua Types | `niri-lua/src/lua_types.rs` | ✅ Complete |
+| Validators | `niri-lua/src/validators.rs` | ✅ Complete |
+| Config Converter | `niri-lua/src/config_converter.rs` | ✅ Complete |
+| Extractors | `niri-lua/src/extractors.rs` | ✅ Complete |
+
+### Code References
+
+**Configuration API** (`niri-lua/src/config_api.rs`, 942 lines):
+- `ConfigApi` struct: `:14` - Main configuration API handler
+- `register_to_lua()`: `:18` - Entry point - registers all config subsystems to `niri.config`
+- `register_animations()`: `:53` - Animations config (workspace_switch, window_open/close)
+- `register_input()`: `:188` - Input config (keyboard, mouse, touchpad, trackpoint)
+- `register_layout()`: `:261` - Layout config (gaps, struts, focus_ring, border, shadow, tab_indicator)
+- `register_cursor()`: `:404` - Cursor config (xcursor_theme, xcursor_size, hide_when_typing)
+- `register_output()`: `:423` - Output/monitor config (scale, position, mode)
+- `register_overview()`: `:500` - Overview config (zoom, backdrop_color, workspace_shadow)
+- `register_debug()`: `:533` - Debug config (preview_render, dbus_interfaces)
+- `register_miscellaneous()`: `:702` - Misc (spawn_at_startup, prefer_no_csd, environment)
+
+**Lua Types** (`niri-lua/src/lua_types.rs`, 396 lines):
+- `LuaAnimation` struct: `:12` - Animation with name, duration_ms, curve
+- `LuaAnimation::new()`: `:19` - Constructor with validation (1-5000ms, valid curves)
+- `LuaFilter` struct: `:77` - Window filter with match_app_id, match_title, regex support
+- `LuaFilter::matches()`: `:119` - Check if app_id/title match filter
+- `LuaWindowRule` struct: `:157` - Window rule with filter + floating/fullscreen/tile actions
+- `LuaGesture` struct: `:211` - Gesture type (swipe/pinch/hold), fingers, direction, action
+
+**Validators** (`niri-lua/src/validators.rs`, 869 lines):
+- `ConfigValidator` struct: `:10` - Main validator for config settings
+- `validate_gaps()`: `:65` - Validates gaps (0-100)
+- `validate_color()`: `:100` - Validates hex color format (#RRGGBB or #RRGGBBAA)
+- `validate_duration()`: `:142` - Validates animation duration (1-5000ms)
+- `validate_scale()`: `:259` - Validates monitor scale (0.5-4.0)
+- `validate_percentage()`: `:312` - Validates percentage (0-100)
+- Unit tests: `:337-868`
+
+**Config Converter** (`niri-lua/src/config_converter.rs`, 2000+ lines):
+- `LuaKeybinding` struct: `:22` - Keybinding representation: key, action, args, repeat
+- `lua_keybinding_to_bind()`: `:37` - Convert LuaKeybinding to Niri Bind struct
+- `parse_hex_color()`: `:287` - Parse hex color strings (#RRGGBB, #RRGGBBAA)
+- `parse_animation()`: `:479` - Parse full Animation struct
+- `apply_lua_config()`: `:509` - **Main entry point** - applies Lua config to niri Config
+
+**Extractors** (`niri-lua/src/extractors.rs`, 873 lines):
+- `extract_string_opt()`: `:14` - Extract optional string from Lua table
+- `extract_color()`: `:66` - Parse color from hex string (#RGB, #RGBA, #RRGGBB, #RRGGBBAA)
+- `extract_cursor()`: `:107` - Extract Cursor config (theme, size, hide settings)
+- `extract_animations()`: `:137` - Extract Animations config (off, on, slowdown)
+- `extract_overview()`: `:170` - Extract Overview config (zoom, backdrop_color)
+- `extract_environment()`: `:189` - Extract environment variables from Lua table
+
+> **Note:** All file paths in this spec originally referenced `src/lua_extensions/`. The actual implementation is in `niri-lua/src/`.
+
+---
 
 ## Overview
 
@@ -52,7 +114,7 @@ Type Validation:
 
 ## Detailed Specifications
 
-### 1. Configuration API Module (`src/lua_extensions/config_api.rs`)
+### 1. Configuration API Module (`niri-lua/src/config_api.rs`)
 
 #### Purpose
 Provide `niri.config.*` modules for all Niri settings.
@@ -301,7 +363,7 @@ fn register_functions(lua: &Lua, config_table: &LuaTable) -> LuaResult<()> {
 
 ---
 
-### 2. Lua Types Module (`src/lua_extensions/lua_types.rs`)
+### 2. Lua Types Module (`niri-lua/src/lua_types.rs`)
 
 #### Purpose
 Define complex types as Lua UserData with getter/setter methods.
@@ -468,7 +530,7 @@ table.insert(niri.config.gestures.shortcuts, gesture)
 
 ---
 
-### 3. Validators Module (`src/lua_extensions/validators.rs`)
+### 3. Validators Module (`niri-lua/src/validators.rs`)
 
 #### Purpose
 Validate configuration values before applying them.
@@ -567,7 +629,7 @@ Examples of clear error messages:
 
 ## Integration with Existing Code
 
-### Changes to `src/lua_extensions/config_converter.rs`
+### Changes to `niri-lua/src/config_converter.rs`
 
 ```rust
 // Enhance apply_lua_config to use new config API
@@ -639,13 +701,13 @@ load_lua_config(&mut config, &config_path)?;
 ## File Structure Summary
 
 **New Files:**
-- `src/lua_extensions/config_api.rs` (300 lines)
-- `src/lua_extensions/lua_types.rs` (150 lines)
-- `src/lua_extensions/validators.rs` (100 lines)
+- `niri-lua/src/config_api.rs` (300 lines)
+- `niri-lua/src/lua_types.rs` (150 lines)
+- `niri-lua/src/validators.rs` (100 lines)
 
 **Modified Files:**
-- `src/lua_extensions/mod.rs` (+10 lines)
-- `src/lua_extensions/config_converter.rs` (+30 lines)
+- `niri-lua/src/mod.rs` (+10 lines)
+- `niri-lua/src/config_converter.rs` (+30 lines)
 - `src/main.rs` (+10 lines)
 
 **Documentation:**
