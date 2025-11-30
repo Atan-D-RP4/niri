@@ -4300,12 +4300,20 @@ impl State {
                     }
                 }
 
-                // Continue ongoing gesture animations (natural scroll - negated deltas).
+                // Apply natural scroll if configured (invert deltas for natural feel).
+                let natural_scroll = self.niri.config.borrow().input.touch.natural_scroll;
+                let (gesture_delta_x, gesture_delta_y) = if natural_scroll {
+                    (-delta_x, -delta_y)
+                } else {
+                    (delta_x, delta_y)
+                };
+
+                // Continue ongoing gesture animations.
                 // Swipe down → previous workspace, swipe up → next workspace.
                 if self
                     .niri
                     .layout
-                    .workspace_switch_gesture_update(-delta_y, timestamp, true)
+                    .workspace_switch_gesture_update(gesture_delta_y, timestamp, true)
                     .is_some()
                 {
                     self.niri.queue_redraw_all();
@@ -4315,13 +4323,14 @@ impl State {
                 if self
                     .niri
                     .layout
-                    .view_offset_gesture_update(-delta_x, timestamp, true)
+                    .view_offset_gesture_update(gesture_delta_x, timestamp, true)
                     .is_some()
                 {
                     self.niri.queue_redraw_all();
                 }
 
                 // Update overview gesture (uses vertical delta like touchpad).
+                // Overview always uses uninverted delta, matching touchpad behavior.
                 if let Some(redraw) =
                     self.niri
                         .layout
