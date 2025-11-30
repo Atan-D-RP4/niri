@@ -2457,6 +2457,45 @@ pub fn apply_lua_config(runtime: &LuaRuntime, config: &mut Config) -> Result<()>
         debug!("ℹ overview configuration not found in Lua globals");
     }
 
+    // Extract and apply xwayland_satellite configuration
+    debug!("Checking for xwayland_satellite configuration in Lua globals");
+    if runtime.has_global("xwayland_satellite") {
+        info!("✓ Found xwayland_satellite configuration in Lua globals");
+        match runtime.inner().globals().get::<mlua::Table>("xwayland_satellite") {
+            Ok(xwayland_table) => {
+                // Extract off setting
+                if let Ok(off) = xwayland_table.get::<bool>("off") {
+                    debug!(
+                        "Applying xwayland_satellite.off: {} → {}",
+                        config.xwayland_satellite.off, off
+                    );
+                    config.xwayland_satellite.off = off;
+                }
+
+                // Extract path setting
+                if let Ok(path) = xwayland_table.get::<String>("path") {
+                    if !path.is_empty() {
+                        debug!(
+                            "Applying xwayland_satellite.path: {} → {}",
+                            config.xwayland_satellite.path, path
+                        );
+                        config.xwayland_satellite.path = path;
+                    }
+                }
+
+                info!("✓ Applied xwayland_satellite configuration from Lua");
+            }
+            Err(e) => {
+                warn!(
+                    "✗ Error extracting xwayland_satellite configuration from Lua: {}",
+                    e
+                );
+            }
+        }
+    } else {
+        debug!("ℹ xwayland_satellite configuration not found in Lua globals");
+    }
+
     // Register the config API so Lua scripts can read the current configuration
     debug!("Registering configuration API to Lua");
     runtime

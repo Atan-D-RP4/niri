@@ -290,27 +290,27 @@ local layout = {
 
 local outputs = {
 	-- Example: built-in laptop display
-	-- ["eDP-1"] = {
-	--     -- Disable this output
-	--     -- off = false,
+	["eDP-1"] = {
+	    -- Disable this output
+	    -- off = false,
 
-	--     -- Mode: "WIDTHxHEIGHT" or "WIDTHxHEIGHT@REFRESH"
-	--     -- If omitted, niri picks the best mode automatically
-	--     -- mode = "1920x1080@120.030",
+	    -- Mode: "WIDTHxHEIGHT" or "WIDTHxHEIGHT@REFRESH"
+	    -- If omitted, niri picks the best mode automatically
+	    mode = "1920x1080@60",
 
-	--     -- Scale factor (1.0 = 100%, 1.5 = 150%, 2.0 = 200%)
-	--     -- scale = 2.0,
+	    -- Scale factor (1.0 = 100%, 1.5 = 150%, 2.0 = 200%)
+	    scale = 1.5,
 
-	--     -- Transform: "normal", "90", "180", "270",
-	--     --           "flipped", "flipped-90", "flipped-180", "flipped-270"
-	--     -- transform = "normal",
+	    -- Transform: "normal", "90", "180", "270",
+	    --           "flipped", "flipped-90", "flipped-180", "flipped-270"
+	    -- transform = "normal",
 
-	--     -- Position in global coordinate space (in logical pixels)
-	--     -- position = { x = 0, y = 0 },
+	    -- Position in global coordinate space (in logical pixels)
+	    -- position = { x = 0, y = 0 },
 
-	--     -- Variable refresh rate (VRR/FreeSync/G-Sync)
-	--     -- vrr = false,
-	-- },
+	    -- Variable refresh rate (VRR/FreeSync/G-Sync)
+	    -- vrr = false,
+	},
 
 	-- Example: external monitor
 	-- ["HDMI-A-1"] = {
@@ -522,7 +522,7 @@ local debug = {
 
 local xwayland_satellite = {
 	-- Disable Xwayland
-	-- off = false,
+	off = true,
 
 	-- Path to xwayland-satellite binary
 	-- path = "xwayland-satellite",
@@ -902,8 +902,8 @@ local layer_rules = {
 
 local spawn_at_startup = {
 	"waybar",
-	-- "swaync",
-	-- "kitty",
+	"swaync",
+	"kitty",
 }
 
 -- Shell commands with pipes, variables, etc.
@@ -1012,7 +1012,7 @@ niri.apply_config({
 
 -- 1. Event listeners (when event system is implemented)
 --    Example:
--- niri.on("window_opened", function(window)
+-- niri.on("window_opened", function(window)
 -- 	niri.log("New window: " .. window.title)
 -- end)
 
