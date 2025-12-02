@@ -194,11 +194,17 @@
 
 ### Logging
 ```lua
-niri.log("message")      -- Info level
-niri.debug("message")    -- Debug level
-niri.warn("message")     -- Warning level
-niri.error("message")    -- Error level
-niri.print(value)        -- Pretty-print any value
+niri.utils.log("message")      -- Info level
+niri.utils.debug("message")    -- Debug level
+niri.utils.warn("message")     -- Warning level
+niri.utils.error("message")    -- Error level
+niri.print(value)              -- Pretty-print any value
+
+-- Legacy aliases (still work for backward compatibility)
+niri.log("message")
+niri.debug("message")
+niri.warn("message")
+niri.error("message")
 ```
 
 ### Configuration
@@ -210,20 +216,20 @@ niri.apply_config({
 
 ### Runtime State
 ```lua
-niri.runtime.get_windows()        -- All windows
-niri.runtime.get_focused_window() -- Focused window or nil
-niri.runtime.get_workspaces()     -- All workspaces
-niri.runtime.get_outputs()        -- All outputs/monitors
+niri.state.windows()        -- All windows
+niri.state.focused_window() -- Focused window or nil
+niri.state.workspaces()     -- All workspaces
+niri.state.outputs()        -- All outputs/monitors
 ```
 
 ### Events
 ```lua
 local id = niri.on("window:focus", function(data)
-    niri.log("Focused: " .. data.title)
+    niri.utils.log("Focused: " .. data.title)
 end)
 
 niri.once("window:open", function(data)
-    niri.log("First window!")
+    niri.utils.log("First window!")
 end)
 
 niri.off("window:focus", id)

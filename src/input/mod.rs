@@ -2260,17 +2260,26 @@ impl State {
                 self.set_dynamic_cast_target(CastTarget::Nothing);
             }
             Action::ToggleOverview => {
+                let was_open = self.niri.layout.is_overview_open();
                 self.niri.layout.toggle_overview();
                 self.niri.queue_redraw_all();
+                // Emit overview event based on new state
+                if was_open {
+                    lua_event_hooks::emit_overview_close(self);
+                } else {
+                    lua_event_hooks::emit_overview_open(self);
+                }
             }
             Action::OpenOverview => {
                 if self.niri.layout.open_overview() {
                     self.niri.queue_redraw_all();
+                    lua_event_hooks::emit_overview_open(self);
                 }
             }
             Action::CloseOverview => {
                 if self.niri.layout.close_overview() {
                     self.niri.queue_redraw_all();
+                    lua_event_hooks::emit_overview_close(self);
                 }
             }
             Action::ToggleWindowUrgent(id) => {

@@ -10,8 +10,11 @@ use mlua::prelude::*;
 use niri_config::Config;
 
 use crate::config_api::ConfigApi;
+use crate::config_proxy::{create_shared_pending_changes, register_config_proxy_to_lua, SharedPendingChanges};
 use crate::event_handlers::EventHandlers;
-use crate::event_system::{register_event_api_to_lua, EventSystem};
+use crate::event_system::EventSystem;
+use crate::events_proxy::register_events_proxy;
+use crate::action_proxy::{register_action_proxy, ActionCallback};
 use crate::{LuaComponent, NiriApi};
 
 /// Manages a Lua runtime for Niri.
@@ -22,6 +25,8 @@ pub struct LuaRuntime {
     lua: Lua,
     /// Event system for emitting Lua events from the compositor
     pub event_system: Option<EventSystem>,
+    /// Pending configuration changes (for the new v2 API)
+    pub pending_config: Option<SharedPendingChanges>,
 }
 
 impl LuaRuntime {
@@ -39,6 +44,7 @@ impl LuaRuntime {
         Ok(Self {
             lua,
             event_system: None,
+            pending_config: None,
         })
     }
 
@@ -69,6 +75,77 @@ impl LuaRuntime {
         ConfigApi::register_to_lua(&self.lua, config)
     }
 
+    /// Register the reactive configuration proxy API to the runtime.
+    ///
+    /// This provides a reactive configuration system through `niri.config` that allows
+    /// reading current values and staging changes via proxy tables. Changes are accumulated
+    /// until `niri.config:apply()` is called, or applied automatically if auto-apply mode
+    /// is enabled via `niri.config:auto_apply(true)`.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The current Niri configuration to initialize proxy values from
+    ///
+    /// # Returns
+    ///
+    /// Returns a shared handle to the pending changes that can be used by the compositor
+    /// to apply configuration updates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration proxy API registration fails.
+    pub fn register_config_proxy_api(&mut self, config: &Config) -> LuaResult<SharedPendingChanges> {
+        let pending = create_shared_pending_changes();
+        register_config_proxy_to_lua(&self.lua, pending.clone(), config)?;
+        self.pending_config = Some(pending.clone());
+        Ok(pending)
+    }
+
+    /// Initialize an empty config proxy for initial script loading.
+    ///
+    /// This creates a config proxy with empty collections that can be populated
+    /// by the Lua script during initial loading. The proxy will be updated with
+    /// real config values later when `register_config_proxy_api` is called.
+    ///
+    /// Spawn commands issued via `niri.action:spawn()` during config loading
+    /// are captured and added to `spawn_at_startup` in the pending config changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration proxy initialization fails.
+    pub fn init_empty_config_proxy(&mut self) -> LuaResult<SharedPendingChanges> {
+        let pending = create_shared_pending_changes();
+        // Use a default config to initialize empty collections
+        let default_config = Config::default();
+        register_config_proxy_to_lua(&self.lua, pending.clone(), &default_config)?;
+        self.pending_config = Some(pending.clone());
+
+        // Also register the action proxy with a callback that captures spawn commands
+        // Spawn actions called during config loading are converted to spawn_at_startup
+        let pending_clone = pending.clone();
+        let capture_callback: ActionCallback = std::sync::Arc::new(move |action| {
+            match &action {
+                niri_ipc::Action::Spawn { command } => {
+                    log::debug!("Config load: capturing spawn {:?} as spawn_at_startup", command);
+                    // Add to pending config changes as spawn_at_startup
+                    let spawn_json = serde_json::json!(command);
+                    let mut pending = pending_clone.lock();
+                    pending.collection_additions
+                        .entry("spawn_at_startup".to_string())
+                        .or_default()
+                        .push(spawn_json);
+                }
+                _ => {
+                    log::debug!("Config load: action {:?} (deferred/ignored)", action);
+                }
+            }
+            Ok(())
+        });
+        register_action_proxy(&self.lua, capture_callback)?;
+
+        Ok(pending)
+    }
+
     /// Register the runtime API to the runtime.
     ///
     /// This provides access to live compositor state through the niri.runtime table.
@@ -95,7 +172,7 @@ impl LuaRuntime {
     /// Initialize the event system for this runtime.
     ///
     /// This must be called once during runtime initialization to enable event handling.
-    /// It registers the Lua event API (`niri.on()`, `niri.once()`, `niri.off()`)
+    /// It registers the events proxy API (`niri.events:on()`, `niri.events:once()`, etc.)
     /// and creates the internal event system for emitting events from the compositor.
     ///
     /// # Errors
@@ -103,9 +180,39 @@ impl LuaRuntime {
     /// Returns an error if event system initialization fails.
     pub fn init_event_system(&mut self) -> LuaResult<()> {
         let handlers = Arc::new(parking_lot::Mutex::new(EventHandlers::new()));
-        register_event_api_to_lua(&self.lua, handlers.clone())?;
+        
+        // Register events proxy API (niri.events:on, niri.events:once, etc.)
+        register_events_proxy(&self.lua, handlers.clone())?;
+        
         self.event_system = Some(EventSystem::new(handlers));
         Ok(())
+    }
+
+    /// Register the action proxy API to the runtime.
+    ///
+    /// This provides access to compositor actions through the `niri.action` namespace.
+    /// Actions are executed via the provided callback, which typically sends them
+    /// to the compositor for processing.
+    ///
+    /// # Arguments
+    ///
+    /// * `callback` - Callback function that executes actions in the compositor
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // In the compositor, provide a callback that handles actions
+    /// runtime.register_action_proxy(Arc::new(|action| {
+    ///     // Handle the action (e.g., send via IPC or execute directly)
+    ///     Ok(())
+    /// }))?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if action proxy registration fails.
+    pub fn register_action_proxy(&self, callback: ActionCallback) -> LuaResult<()> {
+        register_action_proxy(&self.lua, callback)
     }
 
     /// Load and execute a Lua script from a file.
@@ -242,373 +349,11 @@ impl LuaRuntime {
         func.call::<()>(())?;
         Ok(())
     }
-
-    /// Check if a global variable exists in the Lua runtime.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the global variable to check
-    pub fn has_global(&self, name: &str) -> bool {
-        self.lua.globals().get::<LuaValue>(name).is_ok()
-    }
-
-    /// Get a string value from the Lua runtime globals.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the global variable
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(Some(value)) if the variable exists and is a string,
-    /// Ok(None) if the variable doesn't exist, or an error if it exists but isn't a string.
-    pub fn get_global_string_opt(&self, name: &str) -> LuaResult<Option<String>> {
-        match self.lua.globals().get::<LuaValue>(name) {
-            Ok(LuaValue::Nil) => Ok(None),
-            Ok(LuaValue::String(s)) => Ok(Some(s.to_string_lossy().to_string())),
-            Ok(_) => Err(LuaError::external(format!(
-                "Global '{}' is not a string",
-                name
-            ))),
-            Err(_) => Ok(None),
-        }
-    }
-
-    /// Get a boolean value from the Lua runtime globals.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the global variable
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(Some(value)) if the variable exists and is a boolean,
-    /// Ok(None) if the variable doesn't exist, or an error if it exists but isn't a boolean.
-    pub fn get_global_bool_opt(&self, name: &str) -> LuaResult<Option<bool>> {
-        match self.lua.globals().get::<LuaValue>(name) {
-            Ok(LuaValue::Nil) => Ok(None),
-            Ok(LuaValue::Boolean(b)) => Ok(Some(b)),
-            Ok(_) => Err(LuaError::external(format!(
-                "Global '{}' is not a boolean",
-                name
-            ))),
-            Err(_) => Ok(None),
-        }
-    }
-
-    /// Get an integer value from the Lua runtime globals.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the global variable
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(Some(value)) if the variable exists and is convertible to an integer,
-    /// Ok(None) if the variable doesn't exist.
-    pub fn get_global_int_opt(&self, name: &str) -> LuaResult<Option<i64>> {
-        match self.lua.globals().get::<LuaValue>(name) {
-            Ok(LuaValue::Nil) => Ok(None),
-            Ok(LuaValue::Integer(i)) => Ok(Some(i)),
-            Ok(LuaValue::Number(n)) => Ok(Some(n as i64)),
-            Ok(_) => Err(LuaError::external(format!(
-                "Global '{}' cannot be converted to integer",
-                name
-            ))),
-            Err(_) => Ok(None),
-        }
-    }
-
-    /// Get a table value from the Lua runtime globals.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the global variable
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(Some(table)) if the variable exists and is a table,
-    /// Ok(None) if the variable doesn't exist, or an error if it exists but isn't a table.
-    pub fn get_global_table_opt(&self, name: &str) -> LuaResult<Option<LuaTable>> {
-        match self.lua.globals().get::<LuaValue>(name) {
-            Ok(LuaValue::Nil) => Ok(None),
-            Ok(LuaValue::Table(t)) => Ok(Some(t)),
-            Ok(_) => Err(LuaError::external(format!(
-                "Global '{}' is not a table",
-                name
-            ))),
-            Err(_) => Ok(None),
-        }
-    }
-
-    /// Iterate over all entries in a Lua table and call a closure for each entry.
-    ///
-    /// # Arguments
-    ///
-    /// * `table` - The Lua table to iterate
-    /// * `f` - Closure that receives (key, value) for each entry
-    ///
-    /// # Returns
-    ///
-    /// Returns an error if iteration fails.
-    pub fn iterate_table<F>(&self, table: &LuaTable, mut f: F) -> LuaResult<()>
-    where
-        F: FnMut(LuaValue, LuaValue) -> LuaResult<()>,
-    {
-        let pairs_fn = self.lua.globals().get::<LuaFunction>("pairs")?;
-        let mut iter = pairs_fn.call::<LuaMultiValue>(table.clone())?;
-
-        loop {
-            let key_opt = iter.pop_front();
-            let val_opt = iter.pop_front();
-
-            match (key_opt, val_opt) {
-                (Some(key), Some(value)) => f(key, value)?,
-                (None, None) => break,
-                _ => break,
-            }
-        }
-
-        Ok(())
-    }
-
     /// Get a reference to the underlying Lua runtime for advanced use cases.
     ///
     /// This allows direct access to the mlua::Lua instance.
     pub fn inner(&self) -> &Lua {
         &self.lua
-    }
-
-    /// Extract all keybindings from the Lua globals.binds table (with compatibility).
-    ///
-    /// This method looks for a `binds` table in several locations and extracts
-    /// all keybinding entries. It checks, in order:
-    ///  - global `binds`
-    ///  - `niri.binds`
-    ///  - `niri.config.binds`
-    ///
-    /// Each entry should have a key, action, and optional args field.
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(Vec of keybindings) or an error if extraction fails.
-    pub fn get_keybindings(&self) -> LuaResult<Vec<(String, String, Vec<String>)>> {
-        use log::debug;
-        let mut keybindings = Vec::new();
-
-        // Try multiple locations for binds table for compatibility with different configs
-        let binds_table_opt: Option<LuaTable> =
-            if let Ok(Some(t)) = self.get_global_table_opt("binds") {
-                // debug!("[get_keybindings] Found binds in global scope");
-                Some(t)
-            } else if let Ok(Some(niri_table)) = self.get_global_table_opt("niri") {
-                // Try niri.binds
-                match niri_table.get::<LuaValue>("binds") {
-                    Ok(LuaValue::Table(t)) => {
-                        // debug!("[get_keybindings] Found binds in niri table");
-                        Some(t)
-                    }
-                    _ => {
-                        // Try niri.config.binds
-                        match niri_table.get::<LuaValue>("config") {
-                            Ok(LuaValue::Table(config_table)) => {
-                                match config_table.get::<LuaValue>("binds") {
-                                    Ok(LuaValue::Table(t2)) => {
-                                        // debug!("[get_keybindings] Found binds in niri.config");
-                                        Some(t2)
-                                    }
-                                    _ => None,
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
-                }
-            } else {
-                None
-            };
-
-        if let Some(binds_table) = binds_table_opt {
-            // debug!("[get_keybindings] Iterating bindings");
-            let mut index = 1i64;
-            loop {
-                let binding: LuaValue = binds_table.get(index)?;
-                if binding == LuaValue::Nil {
-                    // debug!("[get_keybindings] End of binds table at index {}", index);
-                    break;
-                }
-
-                if let Some(binding_table) = binding.as_table() {
-                    // Extract key, action, and optional args
-                    let key: String = binding_table.get("key").unwrap_or_else(|_| "".to_string());
-                    let action: String = binding_table
-                        .get("action")
-                        .unwrap_or_else(|_| "".to_string());
-
-                    // debug!(
-                    //     "[get_keybindings] Binding {}: key='{}', action='{}'",
-                    //     index, key, action
-                    // );
-
-                    let args: Vec<String> =
-                        if let Ok(args_table) = binding_table.get::<LuaTable>("args") {
-                            let mut args_vec = Vec::new();
-                            let mut arg_index = 1i64;
-                            loop {
-                                let arg: LuaValue = args_table.get(arg_index)?;
-                                if arg == LuaValue::Nil {
-                                    break;
-                                }
-                                // Handle both string and numeric arguments
-                                if let Some(arg_str) = arg.as_string() {
-                                    args_vec.push(arg_str.to_string_lossy().to_string());
-                                } else if let Some(num) = arg.as_integer() {
-                                    args_vec.push(num.to_string());
-                                } else if let Some(num) = arg.as_number() {
-                                    args_vec.push(num.to_string());
-                                }
-                                arg_index += 1;
-                            }
-                            args_vec
-                        } else {
-                            Vec::new()
-                        };
-
-                    if !key.is_empty() && !action.is_empty() {
-                        keybindings.push((key, action, args));
-                    }
-                } else {
-                    debug!("[get_keybindings] Binding {} is not a table", index);
-                }
-
-                index += 1;
-            }
-        } else {
-            debug!("[get_keybindings] No binds table found in Lua globals or niri namespace");
-        }
-
-        Ok(keybindings)
-    }
-
-    /// Extract all startup commands from the Lua globals.startup table (with compatibility).
-    ///
-    /// This method looks for a `startup` table in several locations and extracts
-    /// all startup command entries. It checks, in order:
-    ///  - global `startup`
-    ///  - `niri.startup`
-    ///  - `niri.config.startup`
-    ///
-    /// Supports both simple string commands and structured command arrays.
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(Vec of commands) or an error if extraction fails.
-    pub fn get_startup_commands(&self) -> LuaResult<Vec<Vec<String>>> {
-        use log::debug;
-        let mut commands = Vec::new();
-
-        // Try multiple locations for startup table
-        let startup_table_opt: Option<LuaTable> =
-            if let Ok(Some(t)) = self.get_global_table_opt("spawn_at_startup") {
-                debug!("[get_startup_commands] Found spawn_at_startup in global scope");
-                Some(t)
-            } else if let Ok(Some(t)) = self.get_global_table_opt("startup") {
-                debug!("[get_startup_commands] Found startup in global scope");
-                Some(t)
-            } else if let Ok(Some(niri_table)) = self.get_global_table_opt("niri") {
-                // Try niri.startup
-                match niri_table.get::<LuaValue>("startup") {
-                    Ok(LuaValue::Table(t)) => {
-                        debug!("[get_startup_commands] Found startup in niri table");
-                        Some(t)
-                    }
-                    _ => {
-                        // Try niri.config.startup
-                        match niri_table.get::<LuaValue>("config") {
-                            Ok(LuaValue::Table(config_table)) => match config_table
-                                .get::<LuaValue>("startup")
-                            {
-                                Ok(LuaValue::Table(t2)) => {
-                                    debug!("[get_startup_commands] Found startup in niri.config");
-                                    Some(t2)
-                                }
-                                _ => None,
-                            },
-                            _ => None,
-                        }
-                    }
-                }
-            } else {
-                None
-            };
-
-        if let Some(startup_table) = startup_table_opt {
-            debug!("[get_startup_commands] Iterating startup entries");
-            // Iterate through each startup command entry in the table
-            let mut index = 1i64;
-            loop {
-                let entry: LuaValue = startup_table.get(index)?;
-                if entry == LuaValue::Nil {
-                    debug!(
-                        "[get_startup_commands] End of startup table at index {}",
-                        index
-                    );
-                    break;
-                }
-
-                // Handle both simple strings and structured tables
-                if let Some(cmd_str) = entry.as_string() {
-                    // Simple string command: just wrap it as a single command
-                    debug!(
-                        "[get_startup_commands] Entry {}: simple string command: '{}'",
-                        index,
-                        cmd_str.to_string_lossy()
-                    );
-                    commands.push(vec![cmd_str.to_string_lossy().to_string()]);
-                } else if let Some(entry_table) = entry.as_table() {
-                    // Structured command table with "command" field
-                    if let Ok(cmd_table) = entry_table.get::<LuaTable>("command") {
-                        let mut cmd_vec = Vec::new();
-                        let mut cmd_index = 1i64;
-                        loop {
-                            let arg: LuaValue = cmd_table.get(cmd_index)?;
-                            if arg == LuaValue::Nil {
-                                break;
-                            }
-                            // Handle both string and numeric arguments
-                            if let Some(arg_str) = arg.as_string() {
-                                cmd_vec.push(arg_str.to_string_lossy().to_string());
-                            } else if let Some(num) = arg.as_integer() {
-                                cmd_vec.push(num.to_string());
-                            } else if let Some(num) = arg.as_number() {
-                                cmd_vec.push(num.to_string());
-                            }
-                            cmd_index += 1;
-                        }
-                        if !cmd_vec.is_empty() {
-                            debug!(
-                                "[get_startup_commands] Entry {}: structured command: {:?}",
-                                index, cmd_vec
-                            );
-                            commands.push(cmd_vec);
-                        }
-                    }
-                } else {
-                    debug!(
-                        "[get_startup_commands] Entry {} is not a string or table",
-                        index
-                    );
-                }
-
-                index += 1;
-            }
-        } else {
-            debug!(
-                "[get_startup_commands] No startup table found in Lua globals or niri namespace"
-            );
-        }
-
-        Ok(commands)
     }
 }
 
@@ -632,11 +377,15 @@ mod tests {
         assert!(rt.is_ok());
     }
 
+    // ========================================================================
+    // LuaRuntime::load_file tests
+    // ========================================================================
+
     #[test]
-    fn default_runtime() {
-        let rt = LuaRuntime::default();
-        // Should not panic
-        let _ = rt;
+    fn load_file_not_found() {
+        let rt = LuaRuntime::new().unwrap();
+        let result = rt.load_file("/nonexistent/path.lua");
+        assert!(result.is_err());
     }
 
     // ========================================================================
@@ -644,249 +393,37 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn load_string() {
+    fn load_string_valid_code() {
         let rt = LuaRuntime::new().unwrap();
-        let result = rt.load_string("return 42");
+        let result = rt.load_string("local x = 1 + 1");
         assert!(result.is_ok());
     }
 
     #[test]
-    fn load_string_with_variables() {
+    fn load_string_syntax_error() {
         let rt = LuaRuntime::new().unwrap();
-        let result = rt.load_string("local x = 10; return x + 5");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn load_string_with_table() {
-        let rt = LuaRuntime::new().unwrap();
-        let result = rt.load_string("return {a = 1, b = 2}");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn load_string_invalid_syntax() {
-        let rt = LuaRuntime::new().unwrap();
-        let result = rt.load_string("return 42 garbage");
+        let result = rt.load_string("local x = ");
         assert!(result.is_err());
     }
 
     // ========================================================================
-    // LuaRuntime::has_global tests
+    // LuaRuntime::execute_string tests
     // ========================================================================
 
     #[test]
-    fn has_global_exists() {
+    fn execute_string_valid_code() {
         let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_var = 42").unwrap();
-        assert!(rt.has_global("test_var"));
+        let (output, success) = rt.execute_string("return 1 + 1");
+        assert!(success);
+        assert!(output.contains("2"));
     }
 
     #[test]
-    fn has_global_builtin() {
+    fn execute_string_syntax_error() {
         let rt = LuaRuntime::new().unwrap();
-        // Lua's standard library should include math
-        assert!(rt.has_global("math"));
-    }
-
-    #[test]
-    fn has_global_explicit_nil() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_var = nil").unwrap();
-        // Explicitly set to nil still returns true because the key exists
-        assert!(rt.has_global("test_var"));
-    }
-
-    // ========================================================================
-    // LuaRuntime::get_global_string_opt tests
-    // ========================================================================
-
-    #[test]
-    fn get_global_string_opt_exists() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_string = 'hello'").unwrap();
-        let result = rt.get_global_string_opt("test_string").unwrap();
-        assert_eq!(result, Some("hello".to_string()));
-    }
-
-    #[test]
-    fn get_global_string_opt_nil() {
-        let rt = LuaRuntime::new().unwrap();
-        let result = rt.get_global_string_opt("nonexistent").unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn get_global_string_opt_wrong_type() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_number = 42").unwrap();
-        let result = rt.get_global_string_opt("test_number");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_global_string_opt_empty_string() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_empty = ''").unwrap();
-        let result = rt.get_global_string_opt("test_empty").unwrap();
-        assert_eq!(result, Some("".to_string()));
-    }
-
-    // ========================================================================
-    // LuaRuntime::get_global_bool_opt tests
-    // ========================================================================
-
-    #[test]
-    fn get_global_bool_opt_true() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_bool = true").unwrap();
-        let result = rt.get_global_bool_opt("test_bool").unwrap();
-        assert_eq!(result, Some(true));
-    }
-
-    #[test]
-    fn get_global_bool_opt_false() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_bool = false").unwrap();
-        let result = rt.get_global_bool_opt("test_bool").unwrap();
-        assert_eq!(result, Some(false));
-    }
-
-    #[test]
-    fn get_global_bool_opt_nil() {
-        let rt = LuaRuntime::new().unwrap();
-        let result = rt.get_global_bool_opt("nonexistent").unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn get_global_bool_opt_wrong_type() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_string = 'true'").unwrap();
-        let result = rt.get_global_bool_opt("test_string");
-        assert!(result.is_err());
-    }
-
-    // ========================================================================
-    // LuaRuntime::get_global_int_opt tests
-    // ========================================================================
-
-    #[test]
-    fn get_global_int_opt_integer() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_int = 42").unwrap();
-        let result = rt.get_global_int_opt("test_int").unwrap();
-        assert_eq!(result, Some(42));
-    }
-
-    #[test]
-    fn get_global_int_opt_number() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_number = 42.5").unwrap();
-        let result = rt.get_global_int_opt("test_number").unwrap();
-        assert_eq!(result, Some(42));
-    }
-
-    #[test]
-    fn get_global_int_opt_nil() {
-        let rt = LuaRuntime::new().unwrap();
-        let result = rt.get_global_int_opt("nonexistent").unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn get_global_int_opt_negative() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_neg = -100").unwrap();
-        let result = rt.get_global_int_opt("test_neg").unwrap();
-        assert_eq!(result, Some(-100));
-    }
-
-    #[test]
-    fn get_global_int_opt_wrong_type() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_string = 'not_a_number'").unwrap();
-        let result = rt.get_global_int_opt("test_string");
-        assert!(result.is_err());
-    }
-
-    // ========================================================================
-    // LuaRuntime::get_global_table_opt tests
-    // ========================================================================
-
-    #[test]
-    fn get_global_table_opt_exists() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_table = {a = 1, b = 2}").unwrap();
-        let result = rt.get_global_table_opt("test_table").unwrap();
-        assert!(result.is_some());
-        let table = result.unwrap();
-        let a: i64 = table.get("a").unwrap();
-        assert_eq!(a, 1);
-    }
-
-    #[test]
-    fn get_global_table_opt_nil() {
-        let rt = LuaRuntime::new().unwrap();
-        let result = rt.get_global_table_opt("nonexistent").unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn get_global_table_opt_wrong_type() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_number = 42").unwrap();
-        let result = rt.get_global_table_opt("test_number");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_global_table_opt_empty_table() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_empty = {}").unwrap();
-        let result = rt.get_global_table_opt("test_empty").unwrap();
-        assert!(result.is_some());
-        let table = result.unwrap();
-        let len = table.len().unwrap();
-        assert_eq!(len, 0);
-    }
-
-    // ========================================================================
-    // LuaRuntime::iterate_table tests
-    // ========================================================================
-
-    #[test]
-    fn iterate_table_single_entry() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_table = {a = 1}").unwrap();
-        let table = rt.get_global_table_opt("test_table").unwrap().unwrap();
-
-        let mut count = 0;
-        rt.iterate_table(&table, |_k, _v| {
-            count += 1;
-            Ok(())
-        })
-        .unwrap();
-
-        // The current implementation gets only the first pair
-        assert!(count >= 1);
-    }
-
-    #[test]
-    fn iterate_table_with_values() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("test_table = {x = 10, y = 20}").unwrap();
-        let table = rt.get_global_table_opt("test_table").unwrap().unwrap();
-
-        let mut count = 0;
-        rt.iterate_table(&table, |_k, _v| {
-            count += 1;
-            Ok(())
-        })
-        .unwrap();
-
-        // The current implementation gets only the first pair
-        assert!(count >= 1);
+        let (output, success) = rt.execute_string("local x = ");
+        assert!(!success);
+        assert!(!output.is_empty());
     }
 
     // ========================================================================
@@ -908,66 +445,81 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn call_function_void_with_side_effects() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("global_state = 0; test_func = function() global_state = 42 end")
-            .unwrap();
-        rt.call_function_void("test_func").unwrap();
-
-        let value = rt.get_global_int_opt("global_state").unwrap();
-        assert_eq!(value, Some(42));
-    }
-
     // ========================================================================
-    // Integration tests
+    // Config Proxy API tests
     // ========================================================================
 
     #[test]
-    fn runtime_state_persistence() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string("x = 10").unwrap();
-        rt.load_string("x = x + 5").unwrap();
-
-        let result = rt.get_global_int_opt("x").unwrap();
-        assert_eq!(result, Some(15));
+    fn init_empty_config_proxy_creates_shared_changes() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let shared = rt.init_empty_config_proxy();
+        assert!(shared.is_ok());
     }
 
     #[test]
-    fn runtime_complex_operations() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string(
-            "
-            function add(a, b)
-                return a + b
-            end
-
-            result = add(10, 20)
-            ",
-        )
-        .unwrap();
-
-        let result = rt.get_global_int_opt("result").unwrap();
-        assert_eq!(result, Some(30));
+    fn config_proxy_captures_layout_changes() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let shared = rt.init_empty_config_proxy().unwrap();
+        
+        // Set a layout value through the proxy
+        rt.load_string("niri.config.layout.gaps = 20").unwrap();
+        
+        // Check that the change was captured in scalar_changes
+        let changes = shared.lock();
+        let layout_gaps = changes.scalar_changes.get("layout.gaps");
+        assert!(layout_gaps.is_some());
     }
 
     #[test]
-    fn runtime_table_manipulation() {
-        let rt = LuaRuntime::new().unwrap();
-        rt.load_string(
-            "
-            config = {
-                setting1 = 'value1',
-                setting2 = 42
-            }
-            ",
-        )
-        .unwrap();
+    fn config_proxy_captures_nested_values() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let shared = rt.init_empty_config_proxy().unwrap();
+        
+        // Set a deeply nested value
+        rt.load_string("niri.config.layout.border.active.color = '#ff0000'").unwrap();
+        
+        let changes = shared.lock();
+        let border_color = changes.scalar_changes.get("layout.border.active.color");
+        assert!(border_color.is_some());
+    }
 
-        let config = rt.get_global_table_opt("config").unwrap().unwrap();
-        let s: String = config.get("setting1").unwrap();
-        assert_eq!(s, "value1");
-        let n: i64 = config.get("setting2").unwrap();
-        assert_eq!(n, 42);
+    #[test]
+    fn config_proxy_captures_bind_additions() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let shared = rt.init_empty_config_proxy().unwrap();
+        
+        // Add a keybind through the collection API
+        rt.load_string(r#"
+            niri.config.binds:add({
+                key = 'Mod+Return',
+                action = 'spawn',
+                args = { 'alacritty' }
+            })
+        "#).unwrap();
+        
+        let changes = shared.lock();
+        // Collection additions are keyed by collection name
+        let binds = changes.collection_additions.get("binds");
+        assert!(binds.is_some());
+        assert!(!binds.unwrap().is_empty());
+    }
+
+    #[test]
+    fn config_proxy_captures_spawn_at_startup() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let shared = rt.init_empty_config_proxy().unwrap();
+        
+        // Add a spawn-at-startup command
+        rt.load_string(r#"
+            niri.config.spawn_at_startup:add({
+                command = { 'waybar' }
+            })
+        "#).unwrap();
+        
+        let changes = shared.lock();
+        // Collection additions are keyed by collection name
+        let spawns = changes.collection_additions.get("spawn_at_startup");
+        assert!(spawns.is_some());
+        assert!(!spawns.unwrap().is_empty());
     }
 }

@@ -1427,6 +1427,9 @@ impl State {
                 #[cfg(feature = "dbus")]
                 self.niri.a11y_announce_config_error();
 
+                // Emit config:reload event with failure
+                lua_event_hooks::emit_config_reload(self, false);
+
                 return;
             }
         };
@@ -1709,7 +1712,801 @@ impl State {
         // global suddenly appearing? Either way, right now it's live-reloaded in a sense that new
         // clients will use the new xdg-decoration setting.
 
+        // Emit config:reload event with success
+        lua_event_hooks::emit_config_reload(self, true);
+
         self.niri.queue_redraw_all();
+    }
+
+    /// Apply pending configuration changes from Lua.
+    ///
+    /// This method is called after Lua code execution (via IPC) to apply any
+    /// configuration changes that were staged via `niri.config.*` assignments
+    /// or collection operations.
+    ///
+    /// Returns true if any changes were applied, false otherwise.
+    pub fn apply_pending_lua_config(&mut self) -> bool {
+        let pending = {
+            let runtime = match &self.niri.lua_runtime {
+                Some(rt) => rt,
+                None => return false,
+            };
+
+            let pending_ref = match &runtime.pending_config {
+                Some(p) => p,
+                None => return false,
+            };
+
+            let mut pending = pending_ref.lock();
+            if !pending.has_changes() {
+                return false;
+            }
+
+            // Take the changes and clear the pending state
+            let changes = std::mem::take(&mut *pending);
+            changes
+        };
+
+        log::debug!(
+            "Applying {} scalar changes from Lua config",
+            pending.scalar_changes.len()
+        );
+
+        let mut layout_changed = false;
+        let mut animation_changed = false;
+
+        // Apply scalar changes
+        let mut config = self.niri.config.borrow_mut();
+
+        for (path, value) in &pending.scalar_changes {
+            log::debug!("Applying config change: {} = {:?}", path, value);
+
+            // Parse the path and apply the change
+            let parts: Vec<&str> = path.split('.').collect();
+            if parts.is_empty() {
+                continue;
+            }
+
+            match parts[0] {
+                "layout" => {
+                    if self.apply_layout_change(&mut config.layout, &parts[1..], value) {
+                        layout_changed = true;
+                    }
+                }
+                "animations" => {
+                    if self.apply_animation_change(&mut config.animations, &parts[1..], value) {
+                        animation_changed = true;
+                    }
+                }
+                "input" => {
+                    self.apply_input_change(&mut config.input, &parts[1..], value);
+                }
+                "cursor" => {
+                    self.apply_cursor_change(&mut config.cursor, &parts[1..], value);
+                }
+                "prefer_no_csd" => {
+                    if let Some(b) = value.as_bool() {
+                        config.prefer_no_csd = b;
+                    }
+                }
+                "hotkey_overlay" => {
+                    if parts.len() > 1 && parts[1] == "skip_at_startup" {
+                        if let Some(b) = value.as_bool() {
+                            config.hotkey_overlay.skip_at_startup = b;
+                        }
+                    }
+                }
+                "screenshot_path" => {
+                    if let Some(s) = value.as_str() {
+                        config.screenshot_path = niri_config::ScreenshotPath(Some(s.to_string()));
+                    }
+                }
+                _ => {
+                    log::debug!("Unhandled config section: {}", parts[0]);
+                }
+            }
+        }
+
+        // Apply collection additions
+        let mut binds_changed = false;
+        for (collection_name, items) in &pending.collection_additions {
+            match collection_name.as_str() {
+                "binds" => {
+                    for item in items {
+                        if let Some(bind) = self.json_to_bind(item) {
+                            config.binds.0.push(bind);
+                            binds_changed = true;
+                            log::debug!("Added bind from Lua config");
+                        }
+                    }
+                }
+                "window_rules" => {
+                    for item in items {
+                        if let Some(rule) = self.json_to_window_rule(item) {
+                            config.window_rules.push(rule);
+                            log::debug!("Added window rule from Lua config");
+                        }
+                    }
+                }
+                _ => {
+                    log::debug!("Unhandled collection addition: {}", collection_name);
+                }
+            }
+        }
+
+        // Apply collection removals
+        for (collection_name, criteria_list) in &pending.collection_removals {
+            match collection_name.as_str() {
+                "binds" => {
+                    for criteria in criteria_list {
+                        let before_len = config.binds.0.len();
+                        config.binds.0.retain(|bind| !self.bind_matches_criteria(bind, criteria));
+                        if config.binds.0.len() < before_len {
+                            binds_changed = true;
+                            log::debug!("Removed bind(s) matching criteria from Lua config");
+                        }
+                    }
+                }
+                "window_rules" => {
+                    for criteria in criteria_list {
+                        let before_len = config.window_rules.len();
+                        config.window_rules.retain(|rule| !self.window_rule_matches_criteria(rule, criteria));
+                        if config.window_rules.len() < before_len {
+                            log::debug!("Removed window rule(s) matching criteria from Lua config");
+                        }
+                    }
+                }
+                _ => {
+                    log::debug!("Unhandled collection removal: {}", collection_name);
+                }
+            }
+        }
+
+        // Apply collection replacements
+        for (collection_name, items) in &pending.collection_replacements {
+            match collection_name.as_str() {
+                "binds" => {
+                    config.binds.0.clear();
+                    for item in items {
+                        if let Some(bind) = self.json_to_bind(item) {
+                            config.binds.0.push(bind);
+                        }
+                    }
+                    binds_changed = true;
+                    log::debug!("Replaced all binds from Lua config");
+                }
+                "window_rules" => {
+                    config.window_rules.clear();
+                    for item in items {
+                        if let Some(rule) = self.json_to_window_rule(item) {
+                            config.window_rules.push(rule);
+                        }
+                    }
+                    log::debug!("Replaced all window rules from Lua config");
+                }
+                _ => {
+                    log::debug!("Unhandled collection replacement: {}", collection_name);
+                }
+            }
+        }
+
+        drop(config);
+
+        // Re-resolve keybindings if binds changed
+        if binds_changed {
+            // Binds are resolved dynamically at key event time, no explicit re-resolve needed
+            log::debug!("Binds updated, changes will take effect on next key event");
+        }
+
+        // Trigger necessary refreshes based on what changed
+        if layout_changed {
+            let config = self.niri.config.borrow();
+            self.niri.layout.update_config(&config);
+        }
+
+        if animation_changed {
+            let config = self.niri.config.borrow();
+            let rate = 1.0 / config.animations.slowdown.max(0.001);
+            self.niri.clock.set_rate(rate);
+            self.niri.clock.set_complete_instantly(config.animations.off);
+        }
+
+        self.niri.queue_redraw_all();
+
+        true
+    }
+
+    /// Apply a layout configuration change from Lua.
+    fn apply_layout_change(
+        &self,
+        layout: &mut niri_config::Layout,
+        path: &[&str],
+        value: &serde_json::Value,
+    ) -> bool {
+        if path.is_empty() {
+            return false;
+        }
+
+        match path[0] {
+            "gaps" => {
+                if let Some(n) = value.as_f64() {
+                    layout.gaps = n;
+                    return true;
+                } else if let Some(n) = value.as_i64() {
+                    layout.gaps = n as f64;
+                    return true;
+                }
+            }
+            "struts" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "left" => {
+                            if let Some(n) = value.as_f64() {
+                                layout.struts.left = FloatOrInt(n);
+                                return true;
+                            } else if let Some(n) = value.as_i64() {
+                                layout.struts.left = FloatOrInt(n as f64);
+                                return true;
+                            }
+                        }
+                        "right" => {
+                            if let Some(n) = value.as_f64() {
+                                layout.struts.right = FloatOrInt(n);
+                                return true;
+                            } else if let Some(n) = value.as_i64() {
+                                layout.struts.right = FloatOrInt(n as f64);
+                                return true;
+                            }
+                        }
+                        "top" => {
+                            if let Some(n) = value.as_f64() {
+                                layout.struts.top = FloatOrInt(n);
+                                return true;
+                            } else if let Some(n) = value.as_i64() {
+                                layout.struts.top = FloatOrInt(n as f64);
+                                return true;
+                            }
+                        }
+                        "bottom" => {
+                            if let Some(n) = value.as_f64() {
+                                layout.struts.bottom = FloatOrInt(n);
+                                return true;
+                            } else if let Some(n) = value.as_i64() {
+                                layout.struts.bottom = FloatOrInt(n as f64);
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "focus_ring" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "off" => {
+                            if let Some(b) = value.as_bool() {
+                                layout.focus_ring.off = b;
+                                return true;
+                            }
+                        }
+                        "width" => {
+                            if let Some(n) = value.as_f64() {
+                                layout.focus_ring.width = n;
+                                return true;
+                            } else if let Some(n) = value.as_i64() {
+                                layout.focus_ring.width = n as f64;
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "border" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "off" => {
+                            if let Some(b) = value.as_bool() {
+                                layout.border.off = b;
+                                return true;
+                            }
+                        }
+                        "width" => {
+                            if let Some(n) = value.as_f64() {
+                                layout.border.width = n;
+                                return true;
+                            } else if let Some(n) = value.as_i64() {
+                                layout.border.width = n as f64;
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "center_focused_column" => {
+                if let Some(s) = value.as_str() {
+                    match s {
+                        "never" => {
+                            layout.center_focused_column =
+                                niri_config::CenterFocusedColumn::Never;
+                            return true;
+                        }
+                        "always" => {
+                            layout.center_focused_column =
+                                niri_config::CenterFocusedColumn::Always;
+                            return true;
+                        }
+                        "on-overflow" => {
+                            layout.center_focused_column =
+                                niri_config::CenterFocusedColumn::OnOverflow;
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
+    /// Apply an animation configuration change from Lua.
+    fn apply_animation_change(
+        &self,
+        animations: &mut niri_config::Animations,
+        path: &[&str],
+        value: &serde_json::Value,
+    ) -> bool {
+        if path.is_empty() {
+            return false;
+        }
+
+        match path[0] {
+            "off" => {
+                if let Some(b) = value.as_bool() {
+                    animations.off = b;
+                    return true;
+                }
+            }
+            "slowdown" => {
+                if let Some(n) = value.as_f64() {
+                    animations.slowdown = n;
+                    return true;
+                } else if let Some(n) = value.as_i64() {
+                    animations.slowdown = n as f64;
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
+    /// Apply an input configuration change from Lua.
+    fn apply_input_change(
+        &self,
+        input: &mut niri_config::Input,
+        path: &[&str],
+        value: &serde_json::Value,
+    ) {
+        if path.is_empty() {
+            return;
+        }
+
+        match path[0] {
+            "keyboard" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "repeat_delay" => {
+                            if let Some(n) = value.as_i64() {
+                                input.keyboard.repeat_delay = n as u16;
+                            }
+                        }
+                        "repeat_rate" => {
+                            if let Some(n) = value.as_i64() {
+                                input.keyboard.repeat_rate = n as u8;
+                            }
+                        }
+                        "track_layout" => {
+                            if let Some(s) = value.as_str() {
+                                input.keyboard.track_layout = match s {
+                                    "global" => niri_config::TrackLayout::Global,
+                                    "window" => niri_config::TrackLayout::Window,
+                                    _ => return,
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "touchpad" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "tap" => {
+                            if let Some(b) = value.as_bool() {
+                                input.touchpad.tap = b;
+                            }
+                        }
+                        "dwt" => {
+                            if let Some(b) = value.as_bool() {
+                                input.touchpad.dwt = b;
+                            }
+                        }
+                        "dwtp" => {
+                            if let Some(b) = value.as_bool() {
+                                input.touchpad.dwtp = b;
+                            }
+                        }
+                        "natural_scroll" => {
+                            if let Some(b) = value.as_bool() {
+                                input.touchpad.natural_scroll = b;
+                            }
+                        }
+                        "accel_speed" => {
+                            if let Some(n) = value.as_f64() {
+                                input.touchpad.accel_speed = FloatOrInt(n);
+                            }
+                        }
+                        "accel_profile" => {
+                            if let Some(s) = value.as_str() {
+                                input.touchpad.accel_profile = match s {
+                                    "adaptive" => Some(niri_config::input::AccelProfile::Adaptive),
+                                    "flat" => Some(niri_config::input::AccelProfile::Flat),
+                                    _ => None,
+                                };
+                            }
+                        }
+                        "scroll_factor" => {
+                            if let Some(n) = value.as_f64() {
+                                input.touchpad.scroll_factor = Some(niri_config::input::ScrollFactor {
+                                    base: Some(FloatOrInt(n)),
+                                    horizontal: None,
+                                    vertical: None,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "mouse" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "natural_scroll" => {
+                            if let Some(b) = value.as_bool() {
+                                input.mouse.natural_scroll = b;
+                            }
+                        }
+                        "accel_speed" => {
+                            if let Some(n) = value.as_f64() {
+                                input.mouse.accel_speed = FloatOrInt(n);
+                            }
+                        }
+                        "accel_profile" => {
+                            if let Some(s) = value.as_str() {
+                                input.mouse.accel_profile = match s {
+                                    "adaptive" => Some(niri_config::input::AccelProfile::Adaptive),
+                                    "flat" => Some(niri_config::input::AccelProfile::Flat),
+                                    _ => None,
+                                };
+                            }
+                        }
+                        "scroll_factor" => {
+                            if let Some(n) = value.as_f64() {
+                                input.mouse.scroll_factor = Some(niri_config::input::ScrollFactor {
+                                    base: Some(FloatOrInt(n)),
+                                    horizontal: None,
+                                    vertical: None,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "trackpoint" => {
+                if path.len() > 1 {
+                    match path[1] {
+                        "natural_scroll" => {
+                            if let Some(b) = value.as_bool() {
+                                input.trackpoint.natural_scroll = b;
+                            }
+                        }
+                        "accel_speed" => {
+                            if let Some(n) = value.as_f64() {
+                                input.trackpoint.accel_speed = FloatOrInt(n);
+                            }
+                        }
+                        "accel_profile" => {
+                            if let Some(s) = value.as_str() {
+                                input.trackpoint.accel_profile = match s {
+                                    "adaptive" => Some(niri_config::input::AccelProfile::Adaptive),
+                                    "flat" => Some(niri_config::input::AccelProfile::Flat),
+                                    _ => None,
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "focus_follows_mouse" => {
+                // focus_follows_mouse is Option<FocusFollowsMouse>
+                // Simply enable it if the value is true
+                if let Some(b) = value.as_bool() {
+                    if b {
+                        input.focus_follows_mouse = Some(niri_config::input::FocusFollowsMouse {
+                            max_scroll_amount: None,
+                        });
+                    } else {
+                        input.focus_follows_mouse = None;
+                    }
+                }
+            }
+            "warp_mouse_to_focus" => {
+                if path.len() > 1 && path[1] == "mode" {
+                    if let Some(s) = value.as_str() {
+                        let mode = match s {
+                            "center-xy" => Some(niri_config::input::WarpMouseToFocusMode::CenterXy),
+                            "center-xy-always" => Some(niri_config::input::WarpMouseToFocusMode::CenterXyAlways),
+                            _ => None,
+                        };
+                        if let Some(ref mut wmtf) = input.warp_mouse_to_focus {
+                            wmtf.mode = mode;
+                        } else {
+                            input.warp_mouse_to_focus = Some(niri_config::input::WarpMouseToFocus { mode });
+                        }
+                    }
+                }
+            }
+            "workspace_auto_back_and_forth" => {
+                if let Some(b) = value.as_bool() {
+                    input.workspace_auto_back_and_forth = b;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply a cursor configuration change from Lua.
+    fn apply_cursor_change(
+        &self,
+        cursor: &mut niri_config::Cursor,
+        path: &[&str],
+        value: &serde_json::Value,
+    ) {
+        if path.is_empty() {
+            return;
+        }
+
+        match path[0] {
+            "xcursor_theme" | "theme" => {
+                if let Some(s) = value.as_str() {
+                    cursor.xcursor_theme = s.to_string();
+                }
+            }
+            "xcursor_size" | "size" => {
+                if let Some(n) = value.as_i64() {
+                    cursor.xcursor_size = n as u8;
+                }
+            }
+            "hide_when_typing" => {
+                if let Some(b) = value.as_bool() {
+                    cursor.hide_when_typing = b;
+                }
+            }
+            "hide_after_inactive_ms" => {
+                if let Some(n) = value.as_i64() {
+                    cursor.hide_after_inactive_ms = Some(n as u32);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Convert a JSON value to a Bind struct.
+    fn json_to_bind(&self, json: &serde_json::Value) -> Option<niri_config::Bind> {
+        let obj = json.as_object()?;
+        
+        // Parse the key string (e.g., "Mod+T")
+        let key_str = obj.get("key")?.as_str()?;
+        let key: niri_config::Key = key_str.parse().ok()?;
+        
+        // Parse the action
+        let action_str = obj.get("action")?.as_str()?;
+        let args: Vec<String> = obj
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        
+        let action = self.parse_action(action_str, &args)?;
+        
+        // Parse optional fields
+        let repeat = obj.get("repeat").and_then(|v| v.as_bool()).unwrap_or(true);
+        let allow_when_locked = obj.get("allow_when_locked").and_then(|v| v.as_bool()).unwrap_or(false);
+        let allow_inhibiting = obj.get("allow_inhibiting").and_then(|v| v.as_bool()).unwrap_or(true);
+        
+        Some(niri_config::Bind {
+            key,
+            action,
+            repeat,
+            cooldown: None,
+            allow_when_locked,
+            allow_inhibiting,
+            hotkey_overlay_title: None,
+        })
+    }
+
+    /// Parse an action string and arguments into an Action enum.
+    fn parse_action(&self, action_str: &str, args: &[String]) -> Option<niri_config::Action> {
+        use niri_config::Action;
+        
+        Some(match action_str {
+            "spawn" => {
+                if args.is_empty() {
+                    return None;
+                }
+                Action::Spawn(args.to_vec())
+            }
+            "spawn-sh" => {
+                if args.is_empty() {
+                    return None;
+                }
+                Action::SpawnSh(args.join(" "))
+            }
+            "close-window" => Action::CloseWindow,
+            "fullscreen-window" => Action::FullscreenWindow,
+            "toggle-windowed-fullscreen" => Action::ToggleWindowedFullscreen,
+            "toggle-window-floating" => Action::ToggleWindowFloating,
+            "maximize-column" => Action::MaximizeColumn,
+            "center-column" => Action::CenterColumn,
+            "focus-window-down" => Action::FocusWindowDown,
+            "focus-window-up" => Action::FocusWindowUp,
+            "focus-column-left" => Action::FocusColumnLeft,
+            "focus-column-right" => Action::FocusColumnRight,
+            "move-column-left" => Action::MoveColumnLeft,
+            "move-column-right" => Action::MoveColumnRight,
+            "move-window-down" => Action::MoveWindowDown,
+            "move-window-up" => Action::MoveWindowUp,
+            "focus-workspace-down" => Action::FocusWorkspaceDown,
+            "focus-workspace-up" => Action::FocusWorkspaceUp,
+            "move-window-to-workspace-down" => Action::MoveWindowToWorkspaceDown(false),
+            "move-window-to-workspace-up" => Action::MoveWindowToWorkspaceUp(false),
+            "toggle-overview" => Action::ToggleOverview {},
+            "quit" => Action::Quit(false),
+            "power-off-monitors" => Action::PowerOffMonitors,
+            "power-on-monitors" => Action::PowerOnMonitors,
+            "screenshot" => Action::Screenshot(true, None),
+            "screenshot-screen" => Action::ScreenshotScreen(true, true, None),
+            "screenshot-window" => Action::ScreenshotWindow(true, None),
+            _ => {
+                log::debug!("Unknown action: {}", action_str);
+                return None;
+            }
+        })
+    }
+
+    /// Convert a JSON value to a WindowRule struct.
+    fn json_to_window_rule(&self, json: &serde_json::Value) -> Option<niri_config::WindowRule> {
+        let obj = json.as_object()?;
+        
+        let mut rule = niri_config::WindowRule::default();
+        
+        // Parse matches
+        if let Some(matches_arr) = obj.get("matches").and_then(|v| v.as_array()) {
+            for match_json in matches_arr {
+                if let Some(match_obj) = match_json.as_object() {
+                    let app_id = match_obj.get("app_id").and_then(|v| v.as_str()).and_then(|s| {
+                        regex::Regex::new(s).ok().map(niri_config::utils::RegexEq)
+                    });
+                    let title = match_obj.get("title").and_then(|v| v.as_str()).and_then(|s| {
+                        regex::Regex::new(s).ok().map(niri_config::utils::RegexEq)
+                    });
+                    
+                    let wm = niri_config::window_rule::Match {
+                        app_id,
+                        title,
+                        is_active: None,
+                        is_focused: None,
+                        is_active_in_column: None,
+                        is_floating: None,
+                        is_window_cast_target: None,
+                        is_urgent: None,
+                        at_startup: None,
+                    };
+                    
+                    rule.matches.push(wm);
+                }
+            }
+        }
+        
+        // Parse rule properties
+        if let Some(output) = obj.get("open_on_output").and_then(|v| v.as_str()) {
+            rule.open_on_output = Some(output.to_string());
+        }
+        if let Some(maximized) = obj.get("open_maximized").and_then(|v| v.as_bool()) {
+            rule.open_maximized = Some(maximized);
+        }
+        if let Some(fullscreen) = obj.get("open_fullscreen").and_then(|v| v.as_bool()) {
+            rule.open_fullscreen = Some(fullscreen);
+        }
+        if let Some(floating) = obj.get("open_floating").and_then(|v| v.as_bool()) {
+            rule.open_floating = Some(floating);
+        }
+        
+        Some(rule)
+    }
+
+    /// Check if a bind matches the given criteria.
+    fn bind_matches_criteria(&self, bind: &niri_config::Bind, criteria: &serde_json::Value) -> bool {
+        let obj = match criteria.as_object() {
+            Some(o) => o,
+            None => return false,
+        };
+        
+        // Match by key string
+        if let Some(key_str) = obj.get("key").and_then(|v| v.as_str()) {
+            let bind_key_str = format!("{:?}", bind.key);
+            if !bind_key_str.contains(key_str) && key_str != bind_key_str {
+                // Try parsing and comparing
+                if let Ok(criteria_key) = key_str.parse::<niri_config::Key>() {
+                    if bind.key != criteria_key {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+        }
+        
+        // Match by action name
+        if let Some(action_str) = obj.get("action").and_then(|v| v.as_str()) {
+            let bind_action_str = format!("{:?}", bind.action);
+            if !bind_action_str.to_lowercase().contains(&action_str.to_lowercase()) {
+                return false;
+            }
+        }
+        
+        true
+    }
+
+    /// Check if a window rule matches the given criteria.
+    fn window_rule_matches_criteria(&self, rule: &niri_config::WindowRule, criteria: &serde_json::Value) -> bool {
+        let obj = match criteria.as_object() {
+            Some(o) => o,
+            None => return false,
+        };
+        
+        // Match by app_id in any match
+        if let Some(app_id) = obj.get("app_id").and_then(|v| v.as_str()) {
+            let has_matching_app_id = rule.matches.iter().any(|m| {
+                m.app_id.as_ref().map(|r| r.0.as_str() == app_id).unwrap_or(false)
+            });
+            if !has_matching_app_id {
+                return false;
+            }
+        }
+        
+        // Match by title in any match
+        if let Some(title) = obj.get("title").and_then(|v| v.as_str()) {
+            let has_matching_title = rule.matches.iter().any(|m| {
+                m.title.as_ref().map(|r| r.0.as_str() == title).unwrap_or(false)
+            });
+            if !has_matching_title {
+                return false;
+            }
+        }
+        
+        true
     }
 
     pub fn reload_output_config(&mut self) {

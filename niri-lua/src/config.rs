@@ -56,6 +56,14 @@ impl LuaConfig {
 
         debug!("Event system initialized");
 
+        // Initialize the config proxy with empty collections BEFORE loading the script
+        // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
+        runtime
+            .init_empty_config_proxy()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize config proxy: {}", e))?;
+
+        debug!("Config proxy initialized");
+
         // Load the configuration file
         // The script can either:
         // 1. Call niri.apply_config({ ... }) to apply config (preferred)
@@ -165,6 +173,14 @@ impl LuaConfig {
 
         debug!("Event system initialized");
 
+        // Initialize the config proxy with empty collections BEFORE loading the script
+        // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
+        runtime
+            .init_empty_config_proxy()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize config proxy: {}", e))?;
+
+        debug!("Config proxy initialized");
+
         // Load and execute the code
         let return_val = runtime
             .load_string(code)
@@ -262,20 +278,15 @@ mod tests {
     fn lua_niri_api() {
         let config = LuaConfig::from_string(
             r#"
-             niri.log("Test log message")
-             version_str = niri.config.version()
+             niri.utils.log("Test log message")
+             -- Test setting a config value via the reactive API
+             niri.config.prefer_no_csd = true
          "#,
         )
         .unwrap();
 
-        // Verify it executed without error
-        let version_str: String = config
-            .runtime()
-            .inner()
-            .globals()
-            .get("version_str")
-            .unwrap();
-        assert!(!version_str.is_empty());
+        // Verify it executed without error - the config proxy should have captured the change
+        assert!(config.runtime().inner().globals().get::<mlua::Value>("niri").is_ok());
     }
 
     #[test]

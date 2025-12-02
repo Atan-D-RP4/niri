@@ -462,6 +462,15 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                 } else {
                     ("Lua runtime not initialized".to_string(), false)
                 };
+
+                // Apply any pending configuration changes from Lua
+                if success {
+                    let applied = state.apply_pending_lua_config();
+                    if applied {
+                        log::debug!("Applied pending Lua config changes");
+                    }
+                }
+
                 let _ = tx.send_blocking(niri_ipc::LuaResult { output, success });
             });
             let result = rx.recv().await;

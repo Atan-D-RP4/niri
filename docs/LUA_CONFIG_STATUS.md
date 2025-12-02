@@ -426,7 +426,7 @@ animations = {
 ```
 Lua Script
     ↓
-niri.runtime.get_windows()
+niri.state.windows()
     ↓
 RuntimeApi::query() - Creates channel
     ↓
@@ -447,7 +447,7 @@ Lua receives Vec<Window>
 
 ### Implemented Functions
 
-**1. `niri.runtime.get_windows()` → `Window[]`**
+**1. `niri.state.windows()` → `Window[]`**
 
 Returns array of all windows. Each window has:
 ```lua
@@ -474,11 +474,11 @@ Returns array of all windows. Each window has:
 }
 ```
 
-**2. `niri.runtime.get_focused_window()` → `Window` or `nil`**
+**2. `niri.state.focused_window()` → `Window` or `nil`**
 
 Returns the currently focused window (same structure as above) or nil if no window is focused.
 
-**3. `niri.runtime.get_workspaces()` → `Workspace[]`**
+**3. `niri.state.workspaces()` → `Workspace[]`**
 
 Returns array of all workspaces:
 ```lua
@@ -494,7 +494,7 @@ Returns array of all workspaces:
 }
 ```
 
-**4. `niri.runtime.get_outputs()` → `Output[]`**
+**4. `niri.state.outputs()` → `Output[]`**
 
 Returns array of all monitors/outputs:
 ```lua
@@ -557,32 +557,32 @@ if let Some(ref runtime) = state.niri.lua_runtime {
 
 **Basic Usage** (`examples/query_windows.lua`)
 ```lua
-local windows = niri.runtime.get_windows()
-niri.log(string.format("Total windows: %d", #windows))
+local windows = niri.state.windows()
+niri.utils.log(string.format("Total windows: %d", #windows))
 
 for _, win in ipairs(windows) do
-    niri.log(string.format("  %s: %s", win.id, win.title or "(no title)"))
+    niri.utils.log(string.format("  %s: %s", win.id, win.title or "(no title)"))
 end
 ```
 
 **Workspace Info** (`examples/query_workspaces.lua`)
 ```lua
-local workspaces = niri.runtime.get_workspaces()
+local workspaces = niri.state.workspaces()
 for _, ws in ipairs(workspaces) do
     if ws.is_focused then
-        niri.log(string.format("Focused workspace: %s", ws.name or "(unnamed)"))
+        niri.utils.log(string.format("Focused workspace: %s", ws.name or "(unnamed)"))
     end
 end
 ```
 
 **Comprehensive State** (`examples/runtime_state_query.lua`)
 ```lua
-local outputs = niri.runtime.get_outputs()
-local workspaces = niri.runtime.get_workspaces()
-local windows = niri.runtime.get_windows()
-local focused = niri.runtime.get_focused_window()
+local outputs = niri.state.outputs()
+local workspaces = niri.state.workspaces()
+local windows = niri.state.windows()
+local focused = niri.state.focused_window()
 
-niri.log(string.format("%d outputs, %d workspaces, %d windows",
+niri.utils.log(string.format("%d outputs, %d workspaces, %d windows",
     #outputs, #workspaces, #windows))
 ```
 

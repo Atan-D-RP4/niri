@@ -698,7 +698,7 @@ print("Line 3")
     #[test]
     fn test_string_with_null_bytes() {
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        let (output, success) = runtime.execute_string("return 'Hello\\0World'");
+        let (_output, success) = runtime.execute_string("return 'Hello\\0World'");
         assert!(success, "Should handle null bytes without crashing");
     }
 
@@ -978,5 +978,528 @@ print("Line 3")
             output, "",
             "Variable from runtime1 should not be accessible in runtime2 (returns nil)"
         );
+    }
+
+    // ========================================================================
+    // Phase R4: Events Proxy API Tests
+    // ========================================================================
+
+    #[test]
+    fn test_events_proxy_on_method() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            _test_called = false
+            local id = niri.events:on("test:event", function(data)
+                _test_called = true
+            end)
+            return id
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "events:on should execute successfully");
+        assert_eq!(output, "1", "First handler should have ID 1");
+    }
+
+    #[test]
+    fn test_events_proxy_once_method() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            _test_count = 0
+            niri.events:once("test:event", function(data)
+                _test_count = _test_count + 1
+            end)
+            niri.events:emit("test:event", {})
+            niri.events:emit("test:event", {})
+            niri.events:emit("test:event", {})
+            return _test_count
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "events:once should execute successfully");
+        assert_eq!(output, "1", "once handler should fire only once");
+    }
+
+    #[test]
+    fn test_events_proxy_off_method() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            _test_count = 0
+            local id = niri.events:on("test:event", function(data)
+                _test_count = _test_count + 1
+            end)
+            niri.events:emit("test:event", {})
+            niri.events:off("test:event", id)
+            niri.events:emit("test:event", {})
+            return _test_count
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "events:off should execute successfully");
+        assert_eq!(output, "1", "handler should not fire after being removed");
+    }
+
+    #[test]
+    fn test_events_proxy_emit_method() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            _test_value = nil
+            niri.events:on("custom:event", function(data)
+                _test_value = data.message
+            end)
+            niri.events:emit("custom:event", { message = "hello world" })
+            return _test_value
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "events:emit should execute successfully");
+        assert_eq!(output, "hello world", "emit should pass data to handlers");
+    }
+
+    #[test]
+    fn test_events_proxy_list_method() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            niri.events:on("event1", function() end)
+            niri.events:on("event1", function() end)
+            niri.events:on("event2", function() end)
+            local info = niri.events:list()
+            return info.total
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "events:list should execute successfully");
+        assert_eq!(output, "3", "list should return correct total count");
+    }
+
+    #[test]
+    fn test_events_proxy_clear_method() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            niri.events:on("event1", function() end)
+            niri.events:on("event1", function() end)
+            niri.events:on("event2", function() end)
+            niri.events:clear("event1")
+            local info = niri.events:list()
+            return info.total
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "events:clear should execute successfully");
+        assert_eq!(output, "1", "clear should remove handlers for specific event");
+    }
+
+    #[test]
+    fn test_events_proxy_multiple_handlers_same_event() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        let code = r#"
+            _test_sum = 0
+            niri.events:on("test:event", function() _test_sum = _test_sum + 1 end)
+            niri.events:on("test:event", function() _test_sum = _test_sum + 10 end)
+            niri.events:on("test:event", function() _test_sum = _test_sum + 100 end)
+            niri.events:emit("test:event", {})
+            return _test_sum
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "Multiple handlers should work");
+        assert_eq!(output, "111", "All handlers should fire");
+    }
+
+    #[test]
+    fn test_events_proxy_emit_primitive_value() {
+        let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        runtime.init_event_system().expect("Failed to init event system");
+
+        // When emitting a primitive, it should be wrapped in { value = ... }
+        let code = r#"
+            _test_value = nil
+            niri.events:on("test:event", function(data)
+                _test_value = data.value
+            end)
+            niri.events:emit("test:event", 42)
+            return _test_value
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "Emitting primitive should work");
+        assert_eq!(output, "42", "Primitive should be wrapped in table");
+    }
+
+    // ========================================================================
+    // Phase R5: Action Proxy API Tests
+    // ========================================================================
+
+    #[test]
+    fn test_action_proxy_exists() {
+        use std::sync::Arc;
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+
+        // Register action proxy with a no-op callback
+        let callback: niri_lua::ActionCallback = Arc::new(|_action| Ok(()));
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let (output, success) = runtime.execute_string("return type(niri.action)");
+        assert!(success, "Should execute successfully");
+        assert_eq!(output, "userdata", "niri.action should be a userdata");
+    }
+
+    #[test]
+    fn test_action_proxy_spawn_method() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let (_, success) = runtime.execute_string(r#"niri.action:spawn({"echo", "hello"})"#);
+        assert!(success, "spawn should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 1, "Should have captured one action");
+        if let Action::Spawn { command } = &actions[0] {
+            assert_eq!(command, &vec!["echo", "hello"]);
+        } else {
+            panic!("Expected Spawn action, got {:?}", actions[0]);
+        }
+    }
+
+    #[test]
+    fn test_action_proxy_focus_column_methods() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:focus_column_left()
+            niri.action:focus_column_right()
+            niri.action:focus_column_first()
+            niri.action:focus_column_last()
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Focus column methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 4, "Should have captured four actions");
+        assert!(matches!(actions[0], Action::FocusColumnLeft {}));
+        assert!(matches!(actions[1], Action::FocusColumnRight {}));
+        assert!(matches!(actions[2], Action::FocusColumnFirst {}));
+        assert!(matches!(actions[3], Action::FocusColumnLast {}));
+    }
+
+    #[test]
+    fn test_action_proxy_workspace_methods() {
+        use niri_ipc::{Action, WorkspaceReferenceArg};
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:focus_workspace(1)
+            niri.action:focus_workspace("dev")
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Workspace methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 2, "Should have captured two actions");
+
+        if let Action::FocusWorkspace { reference } = &actions[0] {
+            assert!(matches!(reference, WorkspaceReferenceArg::Index(1)));
+        } else {
+            panic!("Expected FocusWorkspace action");
+        }
+
+        if let Action::FocusWorkspace { reference } = &actions[1] {
+            if let WorkspaceReferenceArg::Name(name) = reference {
+                assert_eq!(name, "dev");
+            } else {
+                panic!("Expected workspace name reference");
+            }
+        } else {
+            panic!("Expected FocusWorkspace action");
+        }
+    }
+
+    #[test]
+    fn test_action_proxy_size_change_parsing() {
+        use niri_ipc::{Action, SizeChange};
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:set_window_width(500)
+            niri.action:set_window_width("50%")
+            niri.action:set_window_width("+10")
+            niri.action:set_window_width("-5%")
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Size change methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 4, "Should have captured four actions");
+
+        // Fixed value
+        if let Action::SetWindowWidth { change, .. } = &actions[0] {
+            assert!(matches!(change, SizeChange::SetFixed(500)));
+        } else {
+            panic!("Expected SetWindowWidth action");
+        }
+
+        // Proportion
+        if let Action::SetWindowWidth { change, .. } = &actions[1] {
+            if let SizeChange::SetProportion(p) = change {
+                assert!((p - 0.5).abs() < 0.001);
+            } else {
+                panic!("Expected SetProportion");
+            }
+        }
+
+        // Adjust fixed
+        if let Action::SetWindowWidth { change, .. } = &actions[2] {
+            assert!(matches!(change, SizeChange::AdjustFixed(10)));
+        }
+
+        // Adjust proportion negative
+        if let Action::SetWindowWidth { change, .. } = &actions[3] {
+            if let SizeChange::AdjustProportion(p) = change {
+                assert!((p + 0.05).abs() < 0.001);
+            } else {
+                panic!("Expected AdjustProportion");
+            }
+        }
+    }
+
+    #[test]
+    fn test_action_proxy_overview_methods() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:toggle_overview()
+            niri.action:open_overview()
+            niri.action:close_overview()
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Overview methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 3, "Should have captured three actions");
+        assert!(matches!(actions[0], Action::ToggleOverview {}));
+        assert!(matches!(actions[1], Action::OpenOverview {}));
+        assert!(matches!(actions[2], Action::CloseOverview {}));
+    }
+
+    #[test]
+    fn test_action_proxy_quit_with_confirmation() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:quit()
+            niri.action:quit(true)
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "quit methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 2, "Should have captured two actions");
+
+        assert!(matches!(
+            actions[0],
+            Action::Quit {
+                skip_confirmation: false
+            }
+        ));
+        assert!(matches!(
+            actions[1],
+            Action::Quit {
+                skip_confirmation: true
+            }
+        ));
+    }
+
+    #[test]
+    fn test_action_proxy_screenshot_methods() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:screenshot()
+            niri.action:screenshot_screen()
+            niri.action:screenshot_window()
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Screenshot methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 3, "Should have captured three actions");
+        assert!(matches!(actions[0], Action::Screenshot { .. }));
+        assert!(matches!(actions[1], Action::ScreenshotScreen { .. }));
+        assert!(matches!(actions[2], Action::ScreenshotWindow { .. }));
+    }
+
+    #[test]
+    fn test_action_proxy_move_column_methods() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:move_column_left()
+            niri.action:move_column_right()
+            niri.action:move_column_to_first()
+            niri.action:move_column_to_last()
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Move column methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 4, "Should have captured four actions");
+        assert!(matches!(actions[0], Action::MoveColumnLeft {}));
+        assert!(matches!(actions[1], Action::MoveColumnRight {}));
+        assert!(matches!(actions[2], Action::MoveColumnToFirst {}));
+        assert!(matches!(actions[3], Action::MoveColumnToLast {}));
+    }
+
+    #[test]
+    fn test_action_proxy_floating_methods() {
+        use niri_ipc::Action;
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
+
+        let actions_clone = captured_actions.clone();
+        let callback: niri_lua::ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
+
+        runtime
+            .register_action_proxy(callback)
+            .expect("Failed to register action proxy");
+
+        let code = r#"
+            niri.action:toggle_window_floating()
+            niri.action:move_window_to_floating()
+            niri.action:move_window_to_tiling()
+            niri.action:focus_floating()
+            niri.action:focus_tiling()
+        "#;
+        let (_, success) = runtime.execute_string(code);
+        assert!(success, "Floating methods should execute successfully");
+
+        let actions = captured_actions.lock().unwrap();
+        assert_eq!(actions.len(), 5, "Should have captured five actions");
+        assert!(matches!(actions[0], Action::ToggleWindowFloating { .. }));
+        assert!(matches!(actions[1], Action::MoveWindowToFloating { .. }));
+        assert!(matches!(actions[2], Action::MoveWindowToTiling { .. }));
+        assert!(matches!(actions[3], Action::FocusFloating {}));
+        assert!(matches!(actions[4], Action::FocusTiling {}));
     }
 }

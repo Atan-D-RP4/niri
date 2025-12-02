@@ -503,12 +503,31 @@ impl ConfigPath {
         (created_at, result)
     }
 
+    /// Check if a path is a Lua config file
+    pub fn is_lua_config(path: &Path) -> bool {
+        path.extension().map_or(false, |ext| ext == "lua")
+    }
+
     fn load_inner<'a>(
         &'a self,
         maybe_create: impl FnOnce(&'a Path, &'a Path) -> miette::Result<&'a Path>,
     ) -> ConfigParseResult<Config, miette::Report> {
         let path = match self {
-            ConfigPath::Explicit(path) => path.as_path(),
+            ConfigPath::Explicit(path) => {
+                // Check if this is a Lua config file
+                if Self::is_lua_config(path) {
+                    // Return default config - Lua loading will be handled by main.rs
+                    info!(
+                        "Lua config file specified: {:?}, using default config as base",
+                        path
+                    );
+                    return ConfigParseResult {
+                        config: Ok(Config::default()),
+                        includes: vec![],
+                    };
+                }
+                path.as_path()
+            }
             ConfigPath::Regular {
                 user_path,
                 system_path,

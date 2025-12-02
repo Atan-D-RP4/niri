@@ -1,8 +1,8 @@
-# Niri Lua Configuration & Plugin Guide
+# Niri Lua Configuration Guide
 
-**Complete Reference for Lua in Niri**
+**Complete Reference for Lua Configuration in Niri**
 
-This comprehensive guide covers everything you need to know about configuring and extending Niri with Lua scripts and plugins.
+This guide covers the Lua configuration API for Niri, including all available settings, keybindings, window rules, and the differences between KDL and Lua configuration formats.
 
 ---
 
@@ -10,877 +10,651 @@ This comprehensive guide covers everything you need to know about configuring an
 
 1. [Getting Started](#getting-started)
 2. [Configuration Basics](#configuration-basics)
-3. [Core Concepts](#core-concepts)
-4. [Configuration API](#configuration-api)
-5. [State Queries](#state-queries)
-6. [Event Handling](#event-handling)
-7. [Plugin Development](#plugin-development)
-8. [Advanced Topics](#advanced-topics)
-9. [Troubleshooting](#troubleshooting)
-10. [Examples](#examples)
+3. [The Reactive Config API](#the-reactive-config-api)
+4. [Keybindings](#keybindings)
+5. [Layout Configuration](#layout-configuration)
+6. [Input Configuration](#input-configuration)
+7. [Appearance](#appearance)
+8. [Window Rules](#window-rules)
+9. [Workspaces](#workspaces)
+10. [Startup Commands](#startup-commands)
+11. [Animations](#animations)
+12. [KDL vs Lua Differences](#kdl-vs-lua-differences)
+13. [Runtime APIs](#runtime-apis)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Getting Started
 
-### Installation
+### Configuration File Location
 
-Niri with Lua support is available through:
+Niri looks for Lua configuration in:
 
-```bash
-# From source with Lua enabled
-git clone https://github.com/sodiboo/niri.git
-cd niri
-cargo build --release --features lua
-sudo cargo install --path .
+1. `~/.config/niri/config.lua` (highest priority)
+2. Path specified with `-c` command line option
 
-# Or if using your distro's package
-# (requires niri-lua package)
-```
+If no Lua config is found, Niri falls back to KDL configuration.
 
-### Configuration Files
-
-Niri looks for Lua configuration in these locations (in order):
-
-1. **`~/.config/niri/config.lua`** - User configuration (highest priority)
-2. **`~/.config/niri/config.kdl`** - KDL configuration (fallback)
-3. **`/etc/niri/config.kdl`** - System default (lowest priority)
-
-### First Configuration
-
-Create `~/.config/niri/config.lua`:
+### Minimal Configuration
 
 ```lua
 -- ~/.config/niri/config.lua
--- Niri Lua Configuration Example
 
-local niri = require "niri"
+-- Log that we're loading
+niri.utils.log("Loading Niri Lua configuration...")
 
--- Log that config is loading
-niri.log("Loading Niri configuration...")
+-- Basic keybindings
+niri.config.binds:add({ key = "Mod+Return", action = "spawn", args = { "alacritty" } })
+niri.config.binds:add({ key = "Mod+Q", action = "close-window" })
+niri.config.binds:add({ key = "Mod+Shift+E", action = "quit" })
 
--- Basic keybinds
-niri.config.set_keybind("Super+Q", "quit")
-niri.config.set_keybind("Super+Return", "spawn term")
-
--- Log on ready
-niri.events.on("niri:ready", function()
-  niri.log("Niri is ready!")
-end)
-
-niri.log("Configuration loaded successfully")
+niri.utils.log("Configuration loaded!")
 ```
 
-Restart Niri to apply changes:
+### Testing Your Configuration
 
 ```bash
-# Reload configuration (if supported)
-niri --quit
-niri &
+# Run niri with a specific config file
+niri -c ~/.config/niri/config.lua
 
-# Or use systemctl if using niri.service
-systemctl --user restart niri
+# Check logs for errors
+journalctl -eu niri -n 50
 ```
 
 ---
 
 ## Configuration Basics
 
-### Lua Syntax Primer
+### The `niri` Global
 
-If you're new to Lua, here are the basics:
+The `niri` global table is automatically available in all Lua config files. It provides:
+
+- `niri.config` - Configuration proxy for setting values
+- `niri.utils` - Utility functions (logging, etc.)
+- `niri.action` - Action execution API
+- `niri.state` - Runtime state queries (windows, workspaces, etc.)
+- `niri.events` - Event handling system
+
+### Lua Syntax Quick Reference
 
 ```lua
--- Comments use --
+-- Comments
+-- This is a comment
 
 -- Variables
-local x = 10
-local name = "niri"
-local enabled = true
+local my_gap = 16
+local terminal = "alacritty"
 
--- Tables (like dictionaries or arrays)
-local config = {
-  width = 1920,
-  height = 1080,
-  theme = "dark",
+-- Tables (dictionaries)
+local bind = {
+    key = "Mod+Return",
+    action = "spawn",
+    args = { "alacritty" },
 }
 
--- Access table values
-print(config.width)        -- 1920
-print(config["width"])     -- 1920
+-- Arrays
+local commands = { "waybar", "dunst", "swaybg" }
 
--- Arrays/lists
-local items = { "one", "two", "three" }
-print(items[1])            -- "one"
-
--- Strings
-local msg = "Hello, " .. "Niri"  -- Concatenation
-local formatted = string.format("Size: %d x %d", 1920, 1080)
-
--- Functions
-local function add(a, b)
-  return a + b
-end
-print(add(5, 3))           -- 8
-
--- Loops
-for i = 1, 3 do
-  print(i)                 -- Prints 1, 2, 3
-end
+-- String concatenation
+local message = "Gap size: " .. tostring(my_gap)
 
 -- Conditionals
-if x > 5 then
-  print("x is large")
-elseif x > 0 then
-  print("x is positive")
-else
-  print("x is not positive")
+if my_gap > 10 then
+    niri.utils.log("Large gaps!")
 end
-```
 
-### Module System
-
-The `require` function loads Lua modules:
-
-```lua
--- Load niri module (always available)
-local niri = require "niri"
-
--- Load your own modules
-local helpers = require "helpers"  -- Loads ./helpers.lua
-
--- Module search paths
--- - ~/.config/niri/?.lua
--- - ~/.config/niri/?/init.lua
--- - ~/.local/share/niri/plugins/?.lua
+-- Loops
+for i = 1, 9 do
+    niri.config.binds:add({
+        key = "Mod+" .. i,
+        action = "focus-workspace",
+        args = { i }
+    })
+end
 ```
 
 ---
 
-## Core Concepts
+## The Reactive Config API
 
-### 1. Logging
+Niri uses a **reactive configuration proxy** that captures your settings and applies them when the config is loaded.
 
-Output messages to Niri's log (visible with `journalctl -eu niri`):
+### Setting Scalar Values
 
 ```lua
-niri.log("This is a message")           -- info level
-niri.debug("Debug information")         -- debug level
-niri.info("Informational message")      -- info level
-niri.warn("Warning message")            -- warning level
-niri.error("Error message")             -- error level
+-- Direct field assignment
+niri.config.layout.gaps = 16
+niri.config.prefer_no_csd = true
+niri.config.cursor.xcursor_size = 24
 
--- Formatted logging
-local version = niri.version_string()
-niri.log("Niri version: " .. version)
-
--- Complex objects (use string.format)
-local win = { id = 1, title = "Firefox" }
-niri.log(string.format("Window: %s (ID: %d)", win.title, win.id))
+-- Nested fields
+niri.config.input.keyboard.repeat_delay = 300
+niri.config.layout.border.active.color = "#ff8800"
 ```
 
-### 2. Version Information
-
-Check Niri version:
+### Bulk Assignment
 
 ```lua
-local version = niri.version()
--- { major = 0, minor = 1, patch = 0, is_debug = false }
+-- Set multiple values at once
+niri.config.layout = {
+    gaps = 16,
+    center_focused_column = "never",
+    default_column_width = { proportion = 0.5 },
+}
 
-local version_str = niri.version_string()
--- "Niri 0.1.0"
-
--- Conditional behavior based on version
-if version.major >= 1 then
-  niri.log("Running Niri 1.0+")
-else
-  niri.log("Running Niri 0.x")
-end
+-- Nested bulk assignment
+niri.config.input.keyboard = {
+    repeat_delay = 300,
+    repeat_rate = 50,
+}
 ```
 
-### 3. Process Spawning
+### Collection APIs
 
-Execute external commands:
+Collections (binds, window_rules, workspaces, spawn_at_startup) use the `:add()` method:
 
 ```lua
--- Non-blocking spawn
-niri.spawn("firefox")
-niri.spawn("alacritty", {
-  cwd = os.getenv("HOME"),
+-- Add a single item
+niri.config.binds:add({
+    key = "Mod+Return",
+    action = "spawn",
+    args = { "alacritty" }
 })
 
--- Blocking spawn (wait for exit)
-local exit_code = niri.spawn_blocking("echo 'done'")
-niri.log("Command exited with code: " .. exit_code)
-
--- With environment variables
-niri.spawn("myapp", {
-  env = {
-    MY_VAR = "value",
-    ANOTHER = "setting",
-  },
+-- Add multiple items at once
+niri.config.binds:add({
+    { key = "Mod+1", action = "focus-workspace", args = { 1 } },
+    { key = "Mod+2", action = "focus-workspace", args = { 2 } },
+    { key = "Mod+3", action = "focus-workspace", args = { 3 } },
 })
-
--- With custom working directory
-niri.spawn("command", {
-  cwd = "/tmp",
-})
-```
-
-### 4. Event System
-
-Respond to Niri events:
-
-```lua
--- Basic event listener
-niri.events.on("window:open", function(event)
-  niri.log("New window: " .. event.window.title)
-end)
-
--- One-time listener
-niri.events.once("workspace:enter", function(event)
-  niri.log("Entered workspace (will fire only once)")
-end)
-
--- Remove listener
-local handler_id = niri.events.on("action", function(event)
-  -- This will be called
-end)
-niri.events.off("action", handler_id)  -- Won't be called anymore
-```
-
-### 5. Plugin Lifecycle
-
-Understand how plugins load and run:
-
-```lua
--- 1. Configuration loaded (initialization)
-niri.log("Plugin is initializing...")
-
--- 2. Setup phase
-local function setup()
-  niri.log("Setting up plugin...")
-  -- Register keybinds, listeners, etc.
-end
-
--- 3. Ready event
-niri.events.on("niri:ready", function()
-  niri.log("Niri is ready, plugin is active")
-end)
-
--- 4. Cleanup before reload
-niri.events.on("plugin:unload", function()
-  niri.log("Plugin is being unloaded")
-  -- Clean up resources
-end)
 ```
 
 ---
 
-## Configuration API
+## Keybindings
 
-### Animations
-
-Control animation timings and curves:
+### Basic Syntax
 
 ```lua
--- Get current animation config
-local anim = niri.config.get_animations()
--- {
---   window_open = { curve = "ease_out_back", duration_ms = 200 },
---   window_close = { curve = "ease_out_back", duration_ms = 200 },
---   ...
--- }
-
--- Set animation config (partial update)
-niri.config.set_animations({
-  window_open = {
-    curve = "ease_out_cubic",
-    duration_ms = 300,
-  },
-  window_movement = {
-    curve = "linear",
-    duration_ms = 150,
-  },
-})
-
--- Available curves
--- - "linear" - No acceleration
--- - "ease_out_cubic" - Quick start, smooth end
--- - "ease_out_back" - Slightly bouncy
--- - "ease_out_sine" - Smooth deceleration
-```
-
-### Input Configuration
-
-Configure keyboard, mouse, and touchpad:
-
-```lua
--- Get input config
-local input = niri.config.get_input()
-
--- Set keyboard layout
-niri.config.set_input({
-  keyboard = {
-    xkb_layout = "us,de",      -- Multiple layouts
-    xkb_variant = "dvorak",    -- Or specific variant
-    xkb_options = "grp:alt_shift_toggle",
-    repeat_delay = 600,        -- ms before repeat
-    repeat_rate = 25,          -- repeats per second
-  },
-})
-
--- Configure mouse acceleration
-niri.config.set_input({
-  mouse = {
-    accel = { enabled = true, speed = 0.0 },
-    natural_scroll = false,
-  },
-})
-
--- Configure touchpad
-niri.config.set_input({
-  touchpad = {
-    accel = { enabled = true, speed = 1.0 },
-    natural_scroll = true,
-    tap_to_click = true,
-  },
+niri.config.binds:add({
+    key = "MODIFIERS+KEY",
+    action = "action-name",
+    args = { ... },  -- Optional, depends on action
 })
 ```
 
-### Layout Configuration
+### Modifiers
 
-Customize tiling layout:
+| Modifier | Description |
+|----------|-------------|
+| `Mod` | Super/Windows key |
+| `Ctrl` | Control key |
+| `Alt` | Alt key |
+| `Shift` | Shift key |
+| `Super` | Explicit Super key |
+
+### Common Actions
 
 ```lua
--- Get current layout
-local layout = niri.config.get_layout()
--- { preset = "vertical", gaps = 8, struts = {...} }
+-- Spawn applications
+niri.config.binds:add({ key = "Mod+Return", action = "spawn", args = { "alacritty" } })
+niri.config.binds:add({ key = "Mod+D", action = "spawn", args = { "rofi", "-show", "drun" } })
 
--- Change layout preset
-niri.config.set_layout({
-  preset = "vertical",  -- or "horizontal", "paper"
-  gaps = 12,           -- Space between windows
-})
+-- Window management
+niri.config.binds:add({ key = "Mod+Q", action = "close-window" })
+niri.config.binds:add({ key = "Mod+F", action = "maximize-column" })
+niri.config.binds:add({ key = "Mod+Shift+F", action = "fullscreen-window" })
+niri.config.binds:add({ key = "Mod+V", action = "toggle-window-floating" })
 
--- Configure struts (reserved screen space)
-niri.config.set_layout({
-  struts = {
-    top = 32,      -- Panel height at top
-    bottom = 0,
-    left = 0,
-    right = 0,
-  },
-})
+-- Focus movement
+niri.config.binds:add({ key = "Mod+Left", action = "focus-column-left" })
+niri.config.binds:add({ key = "Mod+Right", action = "focus-column-right" })
+niri.config.binds:add({ key = "Mod+Up", action = "focus-window-up" })
+niri.config.binds:add({ key = "Mod+Down", action = "focus-window-down" })
+
+-- Column/window movement
+niri.config.binds:add({ key = "Mod+Shift+Left", action = "move-column-left" })
+niri.config.binds:add({ key = "Mod+Shift+Right", action = "move-column-right" })
+
+-- Workspaces
+niri.config.binds:add({ key = "Mod+1", action = "focus-workspace", args = { 1 } })
+niri.config.binds:add({ key = "Mod+Shift+1", action = "move-window-to-workspace", args = { 1 } })
+
+-- Resize
+niri.config.binds:add({ key = "Mod+Minus", action = "set-column-width", args = { "-10%" } })
+niri.config.binds:add({ key = "Mod+Equal", action = "set-column-width", args = { "+10%" } })
+
+-- Session
+niri.config.binds:add({ key = "Mod+Shift+E", action = "quit" })
+niri.config.binds:add({ key = "Mod+Shift+P", action = "power-off-monitors" })
+
+-- Screenshots
+niri.config.binds:add({ key = "Print", action = "screenshot" })
+niri.config.binds:add({ key = "Mod+Print", action = "screenshot-window" })
 ```
 
-### Appearance Configuration
-
-Customize visuals:
+### Generating Keybinds with Loops
 
 ```lua
--- Set border style
-niri.config.set_appearance({
-  border = {
-    width = 4,
-    active_color = "#ffaa00",      -- Hex color
-    inactive_color = "#333333",
-    active_gradient_angle = 45,    -- Optional gradient
-  },
-})
-
--- Set background
-niri.config.set_appearance({
-  background_image = os.getenv("HOME") .. "/Pictures/wallpaper.png",
-  background_blur = 10,  -- Blur amount (0-100)
-})
-```
-
-### Keybindings
-
-Define and manage keyboard shortcuts:
-
-```lua
--- Set a keybind
-niri.config.set_keybind("Super+Q", "quit")
-niri.config.set_keybind("Super+Return", "spawn alacritty")
-niri.config.set_keybind("Super+M", "toggle-fullscreen")
-
--- Get all keybinds
-local binds = niri.config.get_keybinds()
-for key, action in pairs(binds) do
-  niri.log(string.format("%s => %s", key, action))
+-- Workspace switching (1-9)
+for i = 1, 9 do
+    niri.config.binds:add({
+        key = "Mod+" .. i,
+        action = "focus-workspace",
+        args = { i }
+    })
+    niri.config.binds:add({
+        key = "Mod+Shift+" .. i,
+        action = "move-window-to-workspace",
+        args = { i }
+    })
 end
-
--- Remove a keybind
-niri.config.remove_keybind("Super+Q")
-
--- Multi-key combos
-niri.config.set_keybind("Super+Ctrl+Alt+L", "lock-screen")
-
--- With modifiers
--- Super (Windows key), Ctrl, Alt, Shift
--- Example: "Super+Shift+N" or "Ctrl+Alt+T"
 ```
 
 ---
 
-## State Queries
-
-### Windows
-
-Query and filter windows:
+## Layout Configuration
 
 ```lua
--- Get all windows
+-- Gap between windows
+niri.config.layout.gaps = 16
+
+-- Center focused column behavior
+-- "never" | "always" | "on-overflow"
+niri.config.layout.center_focused_column = "never"
+
+-- Preset column widths (cycle with switch-preset-column-width)
+niri.config.layout.preset_column_widths = {
+    { proportion = 0.33 },
+    { proportion = 0.5 },
+    { proportion = 0.67 },
+}
+
+-- Default column width for new windows
+niri.config.layout.default_column_width = { proportion = 0.5 }
+-- Or fixed pixel width:
+-- niri.config.layout.default_column_width = { fixed = 800 }
+
+-- Struts (reserved screen edges)
+niri.config.layout.struts.left = 0
+niri.config.layout.struts.right = 0
+niri.config.layout.struts.top = 0
+niri.config.layout.struts.bottom = 0
+```
+
+### Border Configuration
+
+```lua
+-- Enable/disable border
+niri.config.layout.border.off = false
+
+-- Border width
+niri.config.layout.border.width = 2
+
+-- Active window border color
+niri.config.layout.border.active.color = "#ff8800"
+
+-- Inactive window border color  
+niri.config.layout.border.inactive.color = "#505050"
+
+-- Gradient borders (optional)
+niri.config.layout.border.active.gradient = {
+    from = "#ff0000",
+    to = "#0000ff",
+    angle = 45,
+}
+```
+
+### Focus Ring Configuration
+
+```lua
+-- Enable/disable focus ring (alternative to border)
+niri.config.layout.focus_ring.off = true
+
+-- Focus ring width
+niri.config.layout.focus_ring.width = 4
+
+-- Colors
+niri.config.layout.focus_ring.active.color = "#00ff00"
+niri.config.layout.focus_ring.inactive.color = "#333333"
+```
+
+---
+
+## Input Configuration
+
+### Keyboard
+
+```lua
+niri.config.input.keyboard.repeat_delay = 300  -- ms before repeat starts
+niri.config.input.keyboard.repeat_rate = 50    -- repeats per second
+
+-- XKB settings (set via environment or xkb options)
+-- niri.config.input.keyboard.xkb.layout = "us"
+-- niri.config.input.keyboard.xkb.options = "ctrl:nocaps"
+```
+
+### Mouse
+
+```lua
+niri.config.input.mouse.natural_scroll = false
+niri.config.input.mouse.accel_speed = 0.0  -- -1.0 to 1.0
+niri.config.input.mouse.accel_profile = "adaptive"  -- "adaptive" | "flat"
+```
+
+### Touchpad
+
+```lua
+niri.config.input.touchpad.tap = true
+niri.config.input.touchpad.natural_scroll = true
+niri.config.input.touchpad.dwt = true       -- Disable while typing
+niri.config.input.touchpad.dwtp = false     -- Disable while trackpointing
+niri.config.input.touchpad.accel_speed = 0.0
+niri.config.input.touchpad.accel_profile = "adaptive"
+```
+
+### Trackpoint
+
+```lua
+niri.config.input.trackpoint.natural_scroll = false
+niri.config.input.trackpoint.accel_speed = 0.0
+niri.config.input.trackpoint.accel_profile = "flat"
+```
+
+### Focus Behavior
+
+```lua
+-- Warp mouse to focused window
+niri.config.input.warp_mouse_to_focus.mode = "center-xy"  -- "center-xy" | "center-xy-always"
+
+-- Workspace auto back-and-forth
+niri.config.input.workspace_auto_back_and_forth = true
+```
+
+---
+
+## Appearance
+
+### Cursor
+
+```lua
+niri.config.cursor.xcursor_theme = "Adwaita"
+niri.config.cursor.xcursor_size = 24
+niri.config.cursor.hide_when_typing = true
+niri.config.cursor.hide_after_inactive_ms = 3000
+```
+
+### Miscellaneous
+
+```lua
+-- Prefer server-side decorations
+niri.config.prefer_no_csd = true
+
+-- Skip hotkey overlay at startup
+niri.config.hotkey_overlay.skip_at_startup = true
+
+-- Screenshot path
+niri.config.screenshot_path = "~/Pictures/Screenshots/screenshot-%Y-%m-%d-%H-%M-%S.png"
+```
+
+---
+
+## Window Rules
+
+Window rules let you customize behavior for specific applications.
+
+### Basic Syntax
+
+```lua
+niri.config.window_rules:add({
+    matches = { { app_id = "PATTERN" } },
+    -- ... rule properties
+})
+```
+
+### Match Criteria
+
+```lua
+-- Match by app_id
+matches = { { app_id = "firefox" } }
+
+-- Match by title
+matches = { { title = "Settings" } }
+
+-- Match by both (AND)
+matches = { { app_id = "firefox", title = "Picture-in-Picture" } }
+
+-- Match multiple patterns (OR)
+matches = {
+    { app_id = "firefox" },
+    { app_id = "chromium" },
+}
+
+-- Regex patterns
+matches = { { app_id = "^org\\.mozilla\\.firefox$" } }
+```
+
+### Rule Properties
+
+```lua
+-- Open as floating window
+niri.config.window_rules:add({
+    matches = { { app_id = "pavucontrol" } },
+    open_floating = true,
+})
+
+-- Set default column width
+niri.config.window_rules:add({
+    matches = { { app_id = "firefox" } },
+    default_column_width = { proportion = 0.6 },
+})
+
+-- Open on specific workspace
+niri.config.window_rules:add({
+    matches = { { app_id = "slack" } },
+    open_on_workspace = "chat",
+})
+
+-- Open fullscreen
+niri.config.window_rules:add({
+    matches = { { app_id = "mpv" } },
+    open_fullscreen = true,
+})
+
+-- Block out from screencasts
+niri.config.window_rules:add({
+    matches = { { app_id = "1password" } },
+    block_out_from = "screencast",
+})
+```
+
+---
+
+## Workspaces
+
+```lua
+-- Define named workspaces
+niri.config.workspaces:add({ name = "main" })
+niri.config.workspaces:add({ name = "web" })
+niri.config.workspaces:add({ name = "dev" })
+
+-- Workspace on specific output
+niri.config.workspaces:add({
+    name = "chat",
+    open_on_output = "DP-1",
+})
+```
+
+---
+
+## Startup Commands
+
+```lua
+-- Simple command
+niri.config.spawn_at_startup:add({ command = { "waybar" } })
+
+-- Command with arguments
+niri.config.spawn_at_startup:add({
+    command = { "swaybg", "-i", "/path/to/wallpaper.png", "-m", "fill" }
+})
+
+-- Multiple startup commands
+niri.config.spawn_at_startup:add({ command = { "dunst" } })
+niri.config.spawn_at_startup:add({ command = { "nm-applet" } })
+niri.config.spawn_at_startup:add({ command = { "blueman-applet" } })
+```
+
+---
+
+## Animations
+
+```lua
+-- Disable all animations
+niri.config.animations.off = true
+
+-- Or slow down animations (for debugging)
+niri.config.animations.slowdown = 2.0  -- 2x slower
+
+-- Enable with normal speed
+niri.config.animations.off = false
+niri.config.animations.slowdown = 1.0
+```
+
+---
+
+## KDL vs Lua Differences
+
+When migrating from KDL to Lua configuration, note these differences:
+
+### Syntax Mapping
+
+| KDL | Lua |
+|-----|-----|
+| `spawn "alacritty"` | `action = "spawn", args = { "alacritty" }` |
+| `focus-workspace 1` | `action = "focus-workspace", args = { 1 }` |
+| `set-column-width "+10%"` | `action = "set-column-width", args = { "+10%" }` |
+| `app-id="firefox"` | `app_id = "firefox"` |
+| `open-floating` | `open_floating = true` |
+
+### Key Differences
+
+1. **Hyphens vs Underscores**
+   - Action names use hyphens: `focus-column-left`, `close-window`
+   - Lua table keys use underscores: `app_id`, `open_floating`, `repeat_delay`
+
+2. **Window Rule Matches**
+   - KDL: `match { app-id="firefox" }`
+   - Lua: `matches = { { app_id = "firefox" } }` (array of match objects)
+
+3. **Arguments**
+   - KDL: `spawn "alacritty" "-e" "bash"`
+   - Lua: `args = { "alacritty", "-e", "bash" }`
+
+4. **Booleans**
+   - KDL: `tap` (presence = true)
+   - Lua: `tap = true` (explicit boolean)
+
+5. **Colors**
+   - Both: `"#rrggbb"` hex format
+   - Lua also supports: `{ r = 255, g = 128, b = 0, a = 255 }`
+
+### Equivalent Configurations
+
+**KDL:**
+```kdl
+input {
+    keyboard {
+        repeat-delay 300
+        repeat-rate 50
+    }
+    touchpad {
+        tap
+        natural-scroll
+    }
+}
+
+binds {
+    Mod+Return { spawn "alacritty"; }
+    Mod+Q { close-window; }
+    Mod+1 { focus-workspace 1; }
+}
+
+window-rule {
+    match app-id="firefox"
+    default-column-width { proportion 0.6; }
+}
+```
+
+**Lua:**
+```lua
+niri.config.input.keyboard.repeat_delay = 300
+niri.config.input.keyboard.repeat_rate = 50
+niri.config.input.touchpad.tap = true
+niri.config.input.touchpad.natural_scroll = true
+
+niri.config.binds:add({ key = "Mod+Return", action = "spawn", args = { "alacritty" } })
+niri.config.binds:add({ key = "Mod+Q", action = "close-window" })
+niri.config.binds:add({ key = "Mod+1", action = "focus-workspace", args = { 1 } })
+
+niri.config.window_rules:add({
+    matches = { { app_id = "firefox" } },
+    default_column_width = { proportion = 0.6 },
+})
+```
+
+---
+
+## Runtime APIs
+
+These APIs are available at runtime (after niri starts) for querying state and executing actions.
+
+### State Queries
+
+```lua
+-- Query windows (returns empty array during config load)
 local windows = niri.state.windows()
-
--- Iterate and print
-for i, win in ipairs(windows) do
-  niri.log(string.format(
-    "Window %d: %s (app: %s, floating: %s)",
-    i,
-    win.title,
-    win.app_id,
-    tostring(win.is_floating)
-  ))
+for _, win in ipairs(windows) do
+    niri.utils.log("Window: " .. win.title)
 end
 
--- Get specific window
-local active = niri.state.active_window()
-if active then
-  niri.log("Active: " .. active.title)
-end
-
--- Find window by ID
-local win = niri.state.window_by_id(42)
-
--- Find by app ID
-local firefox = niri.state.window_by_app_id("firefox")
-
--- Windows on workspace
-local ws_windows = niri.state.windows_on_workspace(1)
-niri.log("Workspace 1 has " .. #ws_windows .. " windows")
-
--- Window properties
-local win = niri.state.active_window()
-if win then
-  print(win.id)           -- Unique ID
-  print(win.title)        -- Window title
-  print(win.app_id)       -- Application ID
-  print(win.is_floating)  -- Floating or tiled
-  print(win.workspace_id) -- Workspace ID
-  print(win.bounds)       -- { x, y, width, height }
-end
-```
-
-### Workspaces
-
-Query workspaces:
-
-```lua
--- Get all workspaces
+-- Query workspaces
 local workspaces = niri.state.workspaces()
 
--- Iterate
-for i, ws in ipairs(workspaces) do
-  niri.log(string.format(
-    "Workspace: %s (index: %d, windows: %d)",
-    ws.name,
-    ws.index,
-    ws.window_count
-  ))
-end
-
--- Active workspace
-local active = niri.state.active_workspace()
-niri.log("Active: " .. active.name)
-
--- Get by name or ID
-local ws1 = niri.state.workspace_by_name("1")
-local ws_named = niri.state.workspace_by_id(42)
-
--- Workspace properties
-local ws = niri.state.active_workspace()
-print(ws.id)              -- Unique ID
-print(ws.name)            -- Workspace name
-print(ws.index)           -- Numeric index
-print(ws.monitor_index)   -- Which monitor
-print(ws.window_count)    -- Number of windows
-print(ws.layout_mode)     -- "tiling" or "floating"
+-- Query outputs
+local outputs = niri.state.outputs()
 ```
 
-### Monitors
-
-Query connected monitors:
+### Action Execution
 
 ```lua
--- Get all monitors
-local monitors = niri.state.monitors()
-
--- Iterate
-for i, mon in ipairs(monitors) do
-  niri.log(string.format(
-    "Monitor %d: %s (%s) @ %.1fx",
-    mon.index,
-    mon.model,
-    mon.make,
-    mon.current_scale
-  ))
-end
-
--- Active monitor
-local active = niri.state.active_monitor()
-
--- By index
-local mon0 = niri.state.monitor_at_index(0)
-
--- Monitor properties
-local mon = niri.state.active_monitor()
-print(mon.index)          -- 0, 1, 2...
-print(mon.name)           -- e.g., "HDMI-1"
-print(mon.make)           -- e.g., "Dell"
-print(mon.model)          -- e.g., "U2415"
-print(mon.refresh_rate)   -- e.g., 60
-print(mon.current_scale)  -- e.g., 1.0
-print(mon.layout)         -- Position: { x, y, width, height }
+-- Execute actions via IPC
+niri.action.spawn({ "alacritty" })
+niri.action.close_window()
+niri.action.focus_workspace(1)
 ```
 
-### Advanced Filtering
-
-Combine queries to find specific windows:
+### Event Handling
 
 ```lua
--- Find floating windows
-local function floating_windows()
-  local result = {}
-  for _, win in ipairs(niri.state.windows()) do
-    if win.is_floating then
-      table.insert(result, win)
-    end
-  end
-  return result
-end
-
--- Find windows on specific workspace
-local function windows_by_workspace(ws_name)
-  local ws = niri.state.workspace_by_name(ws_name)
-  if not ws then return {} end
-  return niri.state.windows_on_workspace(ws.id)
-end
-
--- Find window by title pattern
-local function find_window_by_title(pattern)
-  for _, win in ipairs(niri.state.windows()) do
-    if string.match(win.title, pattern) then
-      return win
-    end
-  end
-end
-
--- Find windows from specific application
-local function app_windows(app_id)
-  local result = {}
-  for _, win in ipairs(niri.state.windows()) do
-    if win.app_id == app_id then
-      table.insert(result, win)
-    end
-  end
-  return result
-end
-
--- Usage
-niri.log("Firefox windows: " .. #app_windows("firefox"))
-niri.log("Floating windows: " .. #floating_windows())
-```
-
----
-
-## Event Handling
-
-### Available Events
-
-```lua
--- Window events
-niri.events.on("window:open", function(ev)
-  niri.log("Opened: " .. ev.window.title)
+-- Listen for events
+niri.events:on("window-open", function(event)
+    niri.utils.log("Window opened: " .. event.window.title)
 end)
 
-niri.events.on("window:close", function(ev)
-  niri.log("Closed: " .. ev.window.title)
-end)
-
-niri.events.on("window:focus", function(ev)
-  if ev.old_focus then
-    niri.log("Focus: " .. ev.old_focus.title .. " → " .. ev.window.title)
-  end
-end)
-
-niri.events.on("window:title_changed", function(ev)
-  niri.log("Title changed: " .. ev.window.title)
-end)
-
--- Workspace events
-niri.events.on("workspace:enter", function(ev)
-  niri.log("Entered workspace: " .. ev.workspace.name)
-end)
-
-niri.events.on("workspace:leave", function(ev)
-  niri.log("Left workspace: " .. ev.workspace.name)
-end)
-
-niri.events.on("workspace:layout_changed", function(ev)
-  niri.log("Layout is now: " .. ev.workspace.layout_mode)
-end)
-
--- Monitor events
-niri.events.on("monitor:connect", function(ev)
-  niri.log("Monitor connected: " .. ev.monitor.model)
-end)
-
-niri.events.on("monitor:disconnect", function(ev)
-  niri.log("Monitor disconnected: " .. ev.monitor.model)
-end)
-
--- System events
-niri.events.on("niri:ready", function()
-  niri.log("Niri initialization complete")
+niri.events:on("workspace-active", function(event)
+    niri.utils.log("Workspace activated: " .. event.workspace.name)
 end)
 ```
 
-### Event Patterns
-
-Common patterns for event handling:
+### Utility Functions
 
 ```lua
--- Track active window
-local active_window = nil
-
-niri.events.on("window:focus", function(ev)
-  active_window = ev.window
-  niri.log("Active window: " .. active_window.title)
-end)
-
--- Accumulate state
-local window_count = 0
-
-niri.events.on("window:open", function(ev)
-  window_count = window_count + 1
-  niri.log("Window count: " .. window_count)
-end)
-
-niri.events.on("window:close", function(ev)
-  window_count = window_count - 1
-  niri.log("Window count: " .. window_count)
-end)
-
--- Conditional reactions
-niri.events.on("window:open", function(ev)
-  if string.match(ev.window.app_id, "chrome") then
-    niri.log("Browser opened!")
-  end
-end)
-
--- Debouncing (ignore rapid events)
-local last_focus_time = 0
-niri.events.on("window:focus", function(ev)
-  local now = os.time() * 1000
-  if now - last_focus_time > 100 then  -- 100ms minimum
-    niri.log("Focus: " .. ev.window.title)
-    last_focus_time = now
-  end
-end)
-```
-
----
-
-## Plugin Development
-
-### Plugin Structure
-
-A plugin is a Lua file with this structure:
-
-```lua
--- ~/.config/niri/plugins/my-plugin.lua
-
-local niri = require "niri"
-
--- Plugin metadata
-local metadata = {
-  name = "my-plugin",
-  version = "1.0.0",
-  author = "Your Name",
-  description = "What it does",
-  license = "MIT",
-  dependencies = {},  -- Other plugins required
-}
-
--- Initialization
-local function setup()
-  niri.log("Initializing my-plugin...")
-  
-  -- Register keybinds
-  niri.config.set_keybind("Super+P", "my-plugin.action")
-  
-  -- Register event listeners
-  niri.events.on("window:open", on_window_open)
-end
-
--- Main logic
-local function on_window_open(event)
-  niri.log("New window: " .. event.window.title)
-end
-
--- Initialization on load
-setup()
-
--- Return metadata (optional but recommended)
-return metadata
-```
-
-### Plugin Paths
-
-Niri looks for plugins in:
-
-1. **`~/.config/niri/plugins/`** - User plugins (highest priority)
-2. **`/usr/local/share/niri/plugins/`** - System plugins
-3. **`/usr/share/niri/plugins/`** - Vendor plugins
-
-### Plugin Persistence
-
-Save plugin state to survive restarts:
-
-```lua
-local niri = require "niri"
-
--- Save state
-local state = {
-  counter = 42,
-  theme = "dark",
-  last_window_id = nil,
-}
-
--- Serialize (JSON-like table)
-function save_state()
-  -- In real code, use JSON library or custom serialization
-  niri.log("State would be saved here")
-end
-
--- Restore on init
-function load_state()
-  -- In real code, load from storage
-  niri.log("State would be loaded here")
-end
-
--- Save on important events
-niri.events.on("niri:shutdown", save_state)
-niri.events.on("plugin:unload", save_state)
-```
-
-### Publishing Plugins
-
-To share your plugin:
-
-1. Create GitHub repository
-2. Name it `niri-<plugin-name>`
-3. Add `niri-plugin` topic
-4. Create README with:
-   - Description
-   - Installation instructions
-   - Usage examples
-   - Screenshots
-5. Submit to Niri plugin registry (when available)
-
----
-
-## Advanced Topics
-
-### Custom Modules
-
-Create reusable utilities:
-
-```lua
--- ~/.config/niri/lib/helpers.lua
-
-local helpers = {}
-
-function helpers.window_by_title(title)
-  for _, win in ipairs(niri.state.windows()) do
-    if win.title == title then
-      return win
-    end
-  end
-  return nil
-end
-
-function helpers.workspace_index(ws)
-  return ws.index or 0
-end
-
-return helpers
-
--- Usage in main config:
-local helpers = require "lib.helpers"
-local firefox = helpers.window_by_title("Mozilla Firefox")
-```
-
-### Performance Optimization
-
-Tips for efficient Lua code:
-
-```lua
--- Minimize table allocations in hot paths
-local windows_cache = {}
-
-niri.events.on("window:open", function(ev)
-  -- Bad: creates new table every time
-  local windows = niri.state.windows()
-  
-  -- Good: reuse cached table
-  windows_cache = niri.state.windows()
-  niri.log("Total windows: " .. #windows_cache)
-end)
-
--- Avoid expensive operations in event handlers
-niri.events.on("window:focus", function(ev)
-  -- OK for infrequent events, but not ideal for rapid events
-  local all_wins = niri.state.windows()  -- O(n) operation
-end)
-
--- Use early returns
-local function check_window(win)
-  if not win then return false end
-  if win.is_floating then return false end
-  if win.workspace_id ~= 1 then return false end
-  return true
-end
-```
-
-### Debugging
-
-Enable debug logging:
-
-```lua
--- Set environment variable
--- export NIRI_LUA_DEBUG=1
-
--- Or check in code
-if niri.version().is_debug then
-  niri.debug("Debug mode enabled")
-end
-
--- Print complex objects
-local function dump(obj, indent)
-  indent = indent or 0
-  for k, v in pairs(obj) do
-    print(string.rep(" ", indent) .. k .. ": " .. tostring(v))
-    if type(v) == "table" then
-      dump(v, indent + 2)
-    end
-  end
-end
-
-dump(niri.state.active_window())
+-- Logging
+niri.utils.log("Info message")
+niri.utils.debug("Debug message")
+niri.utils.warn("Warning message")
+niri.utils.error("Error message")
 ```
 
 ---
@@ -890,50 +664,32 @@ dump(niri.state.active_window())
 ### Configuration Won't Load
 
 ```bash
-# Check logs
+# Check niri logs
 journalctl -eu niri -n 50
 
-# Validate Lua syntax
-lua -c ~/.config/niri/config.lua
-
-# Test with simple config
-echo 'local niri = require "niri"; niri.log("OK")' > ~/.config/niri/config.lua
+# Look for Lua errors in the output
 ```
 
-### Performance Issues
+### Keybindings Not Working
 
-```bash
-# Profile event handlers
-# Use niri.log() strategically to measure timing
+1. Check that the key name is correct (e.g., `Return` not `Enter`)
+2. Check that modifiers are correct (`Mod` = Super key)
+3. Check logs for binding parse errors
 
-local start = os.time() * 1000
--- expensive operation
-local elapsed = os.time() * 1000 - start
-niri.log(string.format("Operation took %dms", elapsed))
-```
+### Window Rules Not Matching
 
-### Module Not Found
-
-```lua
--- Ensure full path is correct
--- ~/.config/niri/plugins/mylib.lua
-local mylib = require "plugins.mylib"  -- ✓ Correct
-local mylib = require "mylib"          -- ✗ Won't find it
-```
+1. Use `niri msg windows` to see actual `app_id` values
+2. Check regex patterns are properly escaped
+3. Remember: `matches` is an array of match objects
 
 ### State Queries Return Empty
 
-```lua
--- Windows must exist
-local wins = niri.state.windows()
-if #wins == 0 then
-  niri.log("No windows exist yet")
-end
+State queries like `niri.state.windows()` return empty arrays during config loading. Use event handlers to access state after niri is running:
 
--- Queries only work after niri:ready
-niri.events.on("niri:ready", function()
-  local wins = niri.state.windows()  -- ✓ Works
-  niri.log("Initial windows: " .. #wins)
+```lua
+niri.events:on("niri-ready", function()
+    local windows = niri.state.windows()
+    niri.utils.log("Windows: " .. #windows)
 end)
 ```
 
@@ -941,110 +697,13 @@ end)
 
 ## Examples
 
-### Example 1: Window Switcher
+See the `examples/` directory for complete configuration examples:
 
-```lua
--- Quick window switcher on Super+W
-
-local niri = require "niri"
-
-niri.config.set_keybind("Super+W", "window-switcher.show")
-
--- Show list of windows
-niri.events.on("window-switcher:show", function()
-  local windows = niri.state.windows()
-  
-  if #windows == 0 then
-    niri.log("No windows open")
-    return
-  end
-  
-  for i, win in ipairs(windows) do
-    niri.log(string.format(
-      "[%d] %s (%s)",
-      i,
-      win.title:sub(1, 40),  -- First 40 chars
-      win.app_id
-    ))
-  end
-end)
-```
-
-### Example 2: Workspace Manager
-
-```lua
--- Quick workspace switching
-
-local niri = require "niri"
-
--- Switch to workspace by number
-for i = 1, 9 do
-  niri.config.set_keybind(
-    "Super+" .. i,
-    "workspace-activate:" .. (i - 1)
-  )
-  
-  -- Also create on-demand
-  niri.config.set_keybind(
-    "Super+Shift+" .. i,
-    "workspace-create:" .. tostring(i - 1)
-  )
-end
-
--- Previous/next workspace
-niri.config.set_keybind("Super+N", "workspace-next")
-niri.config.set_keybind("Super+P", "workspace-previous")
-
--- Show workspace info
-niri.events.on("workspace:enter", function(ev)
-  local ws = ev.workspace
-  niri.log(string.format(
-    "Workspace: %s (%d windows)",
-    ws.name,
-    ws.window_count
-  ))
-end)
-```
-
-### Example 3: Auto-floating for Dialogs
-
-```lua
--- Automatically float dialog windows
-
-local niri = require "niri"
-
-niri.events.on("window:open", function(ev)
-  local win = ev.window
-  
-  -- List of apps that should be floating
-  local float_apps = {
-    "org.gnome.Calendar",
-    "pavucontrol",
-    "obs",
-    "blender",
-  }
-  
-  for _, app in ipairs(float_apps) do
-    if win.app_id == app then
-      niri.window.set_floating(win.id, true)
-      niri.log("Auto-floated: " .. win.title)
-      break
-    end
-  end
-end)
-```
+- `examples/niriv2.lua` - Full configuration example
+- `examples/config_api_demo.lua` - API demonstration
+- `examples/event_system_demo.lua` - Event handling examples
 
 ---
 
-## Resources
-
-- **Lua Documentation**: https://www.lua.org/manual/5.2/
-- **Niri Repository**: https://github.com/sodiboo/niri
-- **Example Plugins**: See `examples/plugins/` in Niri repository
-- **Type Definitions**: `docs/niri.d.lua` for IDE support
-
----
-
-**Document Version:** 1.0  
-**Last Updated:** November 15, 2025  
-**Author:** OpenCode Assistant
+**Document Version:** 2.0 (Reactive API)  
+**Last Updated:** December 2025

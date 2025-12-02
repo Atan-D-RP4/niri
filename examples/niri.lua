@@ -128,6 +128,19 @@ local input = {
 		-- middle_emulation = false,
 	},
 
+	-- Touch (touchscreen) configuration
+	touch = {
+		-- Disable touchscreen input
+		-- off = false,
+
+		-- Natural scrolling for touchscreen gestures (workspace switching, view scrolling)
+		-- When enabled, swiping up scrolls content up (like on phones/tablets)
+		natural_scroll = true,
+
+		-- Map touchscreen to specific output
+		-- map_to_output = "eDP-1",
+	},
+
 	-- Warp mouse cursor to center of newly focused windows
 	-- warp_mouse_to_focus = false,
 
@@ -579,6 +592,7 @@ local binds = {
 
 	-- Application launcher
 	{ key = "Mod+D", action = "spawn-sh", args = { "hyde-shell rofilaunch.sh" } },
+	{ key = "Mod+N", action = "spawn-sh", args = { "swaync-client --toggle-panel" } },
 
 	-- Screen locker
 	{ key = "Super+Alt+L", action = "spawn", args = { "hyde-shell hyprlock.sh" } },
@@ -934,7 +948,7 @@ local environment = {
 -- Ask clients to omit client-side decorations.
 -- After changing this, restart apps for it to take effect.
 
-local prefer_no_csd = false
+local prefer_no_csd = true
 
 -- ============================================================================
 -- WORKSPACES

@@ -646,6 +646,19 @@ impl XdgShellHandler for State {
             }
 
             self.niri.layout.set_fullscreen(&window, true);
+
+            // Emit window:fullscreen event
+            if let Some((mapped, _)) = self
+                .niri
+                .layout
+                .find_window_and_output_mut(toplevel.wl_surface())
+            {
+                let window_id = mapped.id().get() as u32;
+                let title = crate::utils::with_toplevel_role(&toplevel, |role| {
+                    role.title.clone().unwrap_or_default()
+                });
+                lua_event_hooks::emit_window_fullscreen(self, window_id, &title, true);
+            }
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -718,8 +731,15 @@ impl XdgShellHandler for State {
             // changes.
             mapped.set_needs_configure();
 
+            let window_id = mapped.id().get() as u32;
             let window = mapped.window.clone();
             self.niri.layout.set_fullscreen(&window, false);
+
+            // Emit window:fullscreen event
+            let title = crate::utils::with_toplevel_role(&toplevel, |role| {
+                role.title.clone().unwrap_or_default()
+            });
+            lua_event_hooks::emit_window_fullscreen(self, window_id, &title, false);
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -903,10 +923,34 @@ impl XdgShellHandler for State {
     }
 
     fn app_id_changed(&mut self, toplevel: ToplevelSurface) {
+        // Emit event before updating window rules
+        if let Some((mapped, _)) = self
+            .niri
+            .layout
+            .find_window_and_output_mut(toplevel.wl_surface())
+        {
+            let window_id = mapped.id().get() as u32;
+            let new_app_id = crate::utils::with_toplevel_role(&toplevel, |role| {
+                role.app_id.clone().unwrap_or_default()
+            });
+            lua_event_hooks::emit_window_app_id_changed(self, window_id, &new_app_id);
+        }
         self.update_window_rules(&toplevel);
     }
 
     fn title_changed(&mut self, toplevel: ToplevelSurface) {
+        // Emit event before updating window rules
+        if let Some((mapped, _)) = self
+            .niri
+            .layout
+            .find_window_and_output_mut(toplevel.wl_surface())
+        {
+            let window_id = mapped.id().get() as u32;
+            let new_title = crate::utils::with_toplevel_role(&toplevel, |role| {
+                role.title.clone().unwrap_or_default()
+            });
+            lua_event_hooks::emit_window_title_changed(self, window_id, &new_title);
+        }
         self.update_window_rules(&toplevel);
     }
 

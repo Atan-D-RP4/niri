@@ -9,9 +9,8 @@
 Create `~/.config/niri/config.lua`:
 
 ```lua
-local niri = require "niri"
-
-niri.log("Niri Lua config loaded!")
+-- Niri Lua configuration
+niri.utils.log("Niri Lua config loaded!")
 ```
 
 Restart Niri to apply.
@@ -21,108 +20,100 @@ Restart Niri to apply.
 ## Step 2: Add Basic Keybinds
 
 ```lua
-local niri = require "niri"
-
--- Quit
-niri.config.set_keybind("Super+Q", "quit")
+-- Quit niri
+niri.config.binds:add({ key = "Mod+Shift+E", action = "quit" })
 
 -- Terminal
-niri.config.set_keybind("Super+Return", "spawn alacritty")
+niri.config.binds:add({ key = "Mod+Return", action = "spawn", args = { "alacritty" } })
 
 -- Application launcher
-niri.config.set_keybind("Super+D", "spawn rofi -show drun")
+niri.config.binds:add({ key = "Mod+D", action = "spawn", args = { "rofi", "-show", "drun" } })
 
 -- Window movement
-niri.config.set_keybind("Super+Left", "focus-column-left")
-niri.config.set_keybind("Super+Right", "focus-column-right")
-niri.config.set_keybind("Super+Up", "focus-up")
-niri.config.set_keybind("Super+Down", "focus-down")
+niri.config.binds:add({ key = "Mod+Left", action = "focus-column-left" })
+niri.config.binds:add({ key = "Mod+Right", action = "focus-column-right" })
+niri.config.binds:add({ key = "Mod+Up", action = "focus-window-up" })
+niri.config.binds:add({ key = "Mod+Down", action = "focus-window-down" })
+
+-- Close window
+niri.config.binds:add({ key = "Mod+Q", action = "close-window" })
 ```
 
 ---
 
-## Step 3: Listen to Window Events
+## Step 3: Configure Layout and Appearance
 
 ```lua
-local niri = require "niri"
+-- Layout settings
+niri.config.layout.gaps = 16
+niri.config.layout.center_focused_column = "never"
 
--- Log when windows open
-niri.events.on("window:open", function(event)
-  niri.log("New window: " .. event.window.title)
-end)
+-- Border settings
+niri.config.layout.border.off = false
+niri.config.layout.border.width = 2
+niri.config.layout.border.active.color = "#ff8800"
+niri.config.layout.border.inactive.color = "#505050"
 
--- Log active window changes
-niri.events.on("window:focus", function(event)
-  niri.log("Focus: " .. event.window.title)
-end)
+-- Focus ring (alternative to border)
+niri.config.layout.focus_ring.off = true
+
+-- Input settings
+niri.config.input.keyboard.repeat_delay = 300
+niri.config.input.keyboard.repeat_rate = 50
+niri.config.input.touchpad.tap = true
+niri.config.input.touchpad.natural_scroll = true
+
+-- Cursor settings
+niri.config.cursor.xcursor_theme = "Adwaita"
+niri.config.cursor.xcursor_size = 24
 ```
 
 ---
 
-## Step 4: Query Running Windows
+## Step 4: Add Startup Commands
 
 ```lua
-local niri = require "niri"
-
--- On a hotkey, print all windows
-niri.config.set_keybind("Super+W", "show-windows")
-
--- Create a global to store handler for debugging
-local window_list_handler = function(event)
-  local windows = niri.state.windows()
-  niri.log("=== Open Windows ===")
-  for i, win in ipairs(windows) do
-    niri.log(string.format(
-      "%d. %s (%s)",
-      i,
-      win.title,
-      win.app_id
-    ))
-  end
-end
-
--- Trigger on workspace change
-niri.events.on("workspace:enter", window_list_handler)
+-- Spawn applications at startup
+niri.config.spawn_at_startup:add({ command = { "waybar" } })
+niri.config.spawn_at_startup:add({ command = { "swaybg", "-i", "/path/to/wallpaper.png" } })
+niri.config.spawn_at_startup:add({ command = { "dunst" } })
 ```
 
 ---
 
-## Step 5: Customize Your Desktop
+## Step 5: Add Window Rules
 
 ```lua
-local niri = require "niri"
-
--- Dark theme
-niri.config.set_appearance({
-  border = {
-    width = 4,
-    active_color = "#00ff00",
-    inactive_color = "#222222",
-  },
+-- Float specific applications
+niri.config.window_rules:add({
+    matches = { { app_id = "pavucontrol" } },
+    open_floating = true,
 })
 
--- Keyboard layout
-niri.config.set_input({
-  keyboard = {
-    xkb_layout = "us",
-    repeat_delay = 300,
-    repeat_rate = 50,
-  },
+-- Set default size for browsers
+niri.config.window_rules:add({
+    matches = { { app_id = "firefox" } },
+    default_column_width = { proportion = 0.6 },
 })
 
--- Layout
-niri.config.set_layout({
-  preset = "vertical",
-  gaps = 8,
+-- Picture-in-picture always floating
+niri.config.window_rules:add({
+    matches = {
+        { app_id = "firefox", title = "Picture-in-Picture" },
+    },
+    open_floating = true,
 })
+```
 
--- Animations
-niri.config.set_animations({
-  window_open = {
-    curve = "ease_out_cubic",
-    duration_ms = 200,
-  },
-})
+---
+
+## Step 6: Define Workspaces
+
+```lua
+-- Named workspaces
+niri.config.workspaces:add({ name = "main" })
+niri.config.workspaces:add({ name = "web" })
+niri.config.workspaces:add({ name = "dev", open_on_output = "eDP-1" })
 ```
 
 ---
@@ -132,134 +123,175 @@ niri.config.set_animations({
 Save this as `~/.config/niri/config.lua`:
 
 ```lua
-#!/usr/bin/env lua
--- Niri Configuration
+-- ============================================================================
+-- Niri Lua Configuration
 -- Place at: ~/.config/niri/config.lua
+-- ============================================================================
 
-local niri = require "niri"
+niri.utils.log("Loading Niri configuration...")
 
--- ========== Logging ==========
-niri.log("Loading Niri configuration...")
+-- ============================================================================
+-- INPUT SETTINGS
+-- ============================================================================
 
--- ========== Keybinds ==========
+niri.config.input.keyboard.repeat_delay = 300
+niri.config.input.keyboard.repeat_rate = 50
+
+niri.config.input.touchpad.tap = true
+niri.config.input.touchpad.natural_scroll = true
+niri.config.input.touchpad.dwt = true
+
+niri.config.input.mouse.natural_scroll = false
+
+-- ============================================================================
+-- LAYOUT SETTINGS
+-- ============================================================================
+
+niri.config.layout.gaps = 16
+niri.config.layout.center_focused_column = "never"
+
+-- Preset column widths (cycle with Mod+R)
+niri.config.layout.preset_column_widths = {
+    { proportion = 0.33 },
+    { proportion = 0.5 },
+    { proportion = 0.67 },
+}
+
+-- Default column width
+niri.config.layout.default_column_width = { proportion = 0.5 }
+
+-- Border
+niri.config.layout.border.off = false
+niri.config.layout.border.width = 2
+niri.config.layout.border.active.color = "#ff8800"
+niri.config.layout.border.inactive.color = "#505050"
+
+-- Focus ring (disabled when using border)
+niri.config.layout.focus_ring.off = true
+
+-- ============================================================================
+-- CURSOR SETTINGS
+-- ============================================================================
+
+niri.config.cursor.xcursor_theme = "Adwaita"
+niri.config.cursor.xcursor_size = 24
+niri.config.cursor.hide_when_typing = true
+
+-- ============================================================================
+-- MISCELLANEOUS
+-- ============================================================================
+
+niri.config.prefer_no_csd = true
+niri.config.hotkey_overlay.skip_at_startup = true
+
+-- ============================================================================
+-- ANIMATIONS
+-- ============================================================================
+
+niri.config.animations.slowdown = 1.0
+
+-- ============================================================================
+-- WORKSPACES
+-- ============================================================================
+
+niri.config.workspaces:add({ name = "main" })
+niri.config.workspaces:add({ name = "web" })
+niri.config.workspaces:add({ name = "dev" })
+
+-- ============================================================================
+-- STARTUP COMMANDS
+-- ============================================================================
+
+niri.config.spawn_at_startup:add({ command = { "waybar" } })
+
+-- ============================================================================
+-- KEYBINDINGS
+-- ============================================================================
 
 -- Session
-niri.config.set_keybind("Super+Q", "quit")
-niri.config.set_keybind("Super+Escape", "power-off-dialog")
+niri.config.binds:add({ key = "Mod+Shift+E", action = "quit" })
+niri.config.binds:add({ key = "Mod+Shift+P", action = "power-off-monitors" })
 
--- Spawn applications
-niri.config.set_keybind("Super+Return", "spawn alacritty")
-niri.config.set_keybind("Super+D", "spawn rofi -show drun")
-niri.config.set_keybind("Super+F", "spawn firefox")
+-- Applications
+niri.config.binds:add({ key = "Mod+Return", action = "spawn", args = { "alacritty" } })
+niri.config.binds:add({ key = "Mod+D", action = "spawn", args = { "rofi", "-show", "drun" } })
 
--- Focus
-niri.config.set_keybind("Super+Left", "focus-column-left")
-niri.config.set_keybind("Super+Right", "focus-column-right")
-niri.config.set_keybind("Super+Up", "focus-up")
-niri.config.set_keybind("Super+Down", "focus-down")
-niri.config.set_keybind("Super+Home", "focus-first")
-niri.config.set_keybind("Super+End", "focus-last")
+-- Window focus
+niri.config.binds:add({ key = "Mod+Left", action = "focus-column-left" })
+niri.config.binds:add({ key = "Mod+Right", action = "focus-column-right" })
+niri.config.binds:add({ key = "Mod+Up", action = "focus-window-up" })
+niri.config.binds:add({ key = "Mod+Down", action = "focus-window-down" })
+niri.config.binds:add({ key = "Mod+H", action = "focus-column-left" })
+niri.config.binds:add({ key = "Mod+L", action = "focus-column-right" })
+niri.config.binds:add({ key = "Mod+J", action = "focus-window-down" })
+niri.config.binds:add({ key = "Mod+K", action = "focus-window-up" })
 
--- Move
-niri.config.set_keybind("Super+Shift+Left", "move-column-left")
-niri.config.set_keybind("Super+Shift+Right", "move-column-right")
-niri.config.set_keybind("Super+Shift+Up", "move-up")
-niri.config.set_keybind("Super+Shift+Down", "move-down")
+-- Window movement
+niri.config.binds:add({ key = "Mod+Shift+Left", action = "move-column-left" })
+niri.config.binds:add({ key = "Mod+Shift+Right", action = "move-column-right" })
+niri.config.binds:add({ key = "Mod+Shift+Up", action = "move-window-up" })
+niri.config.binds:add({ key = "Mod+Shift+Down", action = "move-window-down" })
+niri.config.binds:add({ key = "Mod+Shift+H", action = "move-column-left" })
+niri.config.binds:add({ key = "Mod+Shift+L", action = "move-column-right" })
+niri.config.binds:add({ key = "Mod+Shift+J", action = "move-window-down" })
+niri.config.binds:add({ key = "Mod+Shift+K", action = "move-window-up" })
 
--- Windows
-niri.config.set_keybind("Super+F11", "toggle-fullscreen")
-niri.config.set_keybind("Super+Space", "toggle-floating")
-niri.config.set_keybind("Super+W", "close-window")
+-- Window management
+niri.config.binds:add({ key = "Mod+Q", action = "close-window" })
+niri.config.binds:add({ key = "Mod+F", action = "maximize-column" })
+niri.config.binds:add({ key = "Mod+Shift+F", action = "fullscreen-window" })
+niri.config.binds:add({ key = "Mod+V", action = "toggle-window-floating" })
 
--- Workspaces
+-- Column width
+niri.config.binds:add({ key = "Mod+R", action = "switch-preset-column-width" })
+niri.config.binds:add({ key = "Mod+Minus", action = "set-column-width", args = { "-10%" } })
+niri.config.binds:add({ key = "Mod+Equal", action = "set-column-width", args = { "+10%" } })
+
+-- Workspaces (1-9)
 for i = 1, 9 do
-  niri.config.set_keybind("Super+" .. i, "activate-workspace:" .. (i - 1))
-  niri.config.set_keybind("Super+Shift+" .. i, "move-window-to-workspace:" .. (i - 1))
+    niri.config.binds:add({ key = "Mod+" .. i, action = "focus-workspace", args = { i } })
+    niri.config.binds:add({ key = "Mod+Shift+" .. i, action = "move-window-to-workspace", args = { i } })
 end
 
-niri.config.set_keybind("Super+Bracketleft", "activate-workspace-previous")
-niri.config.set_keybind("Super+Bracketright", "activate-workspace-next")
+-- Workspace navigation
+niri.config.binds:add({ key = "Mod+Page_Up", action = "focus-workspace-up" })
+niri.config.binds:add({ key = "Mod+Page_Down", action = "focus-workspace-down" })
+niri.config.binds:add({ key = "Mod+U", action = "focus-workspace-up" })
+niri.config.binds:add({ key = "Mod+I", action = "focus-workspace-down" })
 
--- ========== Input ==========
-niri.config.set_input({
-  keyboard = {
-    xkb_layout = "us",
-    repeat_delay = 300,
-    repeat_rate = 50,
-  },
-  mouse = {
-    accel = { enabled = true, speed = 0.0 },
-    natural_scroll = false,
-  },
-  touchpad = {
-    accel = { enabled = true, speed = 1.0 },
-    natural_scroll = true,
-    tap_to_click = true,
-  },
+-- Screenshots
+niri.config.binds:add({ key = "Print", action = "screenshot" })
+niri.config.binds:add({ key = "Mod+Print", action = "screenshot-window" })
+
+-- ============================================================================
+-- WINDOW RULES
+-- ============================================================================
+
+-- Float dialogs and utilities
+niri.config.window_rules:add({
+    matches = { { app_id = "pavucontrol" } },
+    open_floating = true,
 })
 
--- ========== Layout ==========
-niri.config.set_layout({
-  preset = "vertical",
-  gaps = 8,
-})
-
--- ========== Appearance ==========
-niri.config.set_appearance({
-  border = {
-    width = 4,
-    active_color = "#00aa00",
-    inactive_color = "#333333",
-  },
-})
-
--- ========== Animations ==========
-niri.config.set_animations({
-  window_open = {
-    curve = "ease_out_cubic",
-    duration_ms = 200,
-  },
-  window_close = {
-    curve = "ease_out_cubic",
-    duration_ms = 150,
-  },
-  window_movement = {
-    curve = "linear",
-    duration_ms = 150,
-  },
-})
-
--- ========== Events ==========
-
--- Log window events
-niri.events.on("window:open", function(event)
-  niri.log("Window opened: " .. event.window.title)
-end)
-
-niri.events.on("window:close", function(event)
-  niri.log("Window closed: " .. event.window.title)
-end)
-
-niri.events.on("window:focus", function(event)
-  niri.log("Focus: " .. event.window.title)
-end)
-
--- Log workspace changes
-niri.events.on("workspace:enter", function(event)
-  niri.log("Workspace: " .. event.workspace.name)
-end)
-
--- Log when Niri is ready
-niri.events.on("niri:ready", function()
-  niri.log("Niri is ready!")
-  
-  -- Print initial window count
-  local windows = niri.state.windows()
-  niri.log("Initial windows: " .. #windows)
-end)
-
-niri.log("Configuration loaded successfully!")
+niri.utils.log("Configuration loaded successfully!")
 ```
+
+---
+
+## KDL vs Lua Differences
+
+The Lua configuration API has some syntax differences from the KDL config:
+
+| KDL Syntax | Lua Syntax |
+|------------|------------|
+| `Mod+Key` in binds | `"Mod+Key"` (quoted string) |
+| `spawn "alacritty"` | `action = "spawn", args = { "alacritty" }` |
+| `focus-workspace 1` | `action = "focus-workspace", args = { 1 }` |
+| `window-rule { match app-id="..." }` | `matches = { { app_id = "..." } }` |
+| `set-column-width "+10%"` | `action = "set-column-width", args = { "+10%" }` |
+| Hyphens in names | Underscores in Lua field names |
+
+**Note:** Action names use hyphens (e.g., `focus-column-left`), but Lua table keys use underscores (e.g., `app_id`, `open_floating`).
 
 ---
 
@@ -274,34 +306,10 @@ journalctl -eu niri -n 20
 You should see:
 
 ```
-Nov 15 14:30:00 host niri[1234]: Loading Niri configuration...
-Nov 15 14:30:00 host niri[1234]: Configuration loaded successfully!
-Nov 15 14:30:01 host niri[1234]: Niri is ready!
-Nov 15 14:30:01 host niri[1234]: Initial windows: 0
+Loading Niri configuration...
+Configuration loaded successfully!
+Applied N reactive config changes
 ```
-
----
-
-## Common Keybindings Reference
-
-| Key | Action |
-|-----|--------|
-| `Super` | Windows key |
-| `Super+Return` | Open terminal |
-| `Super+Q` | Quit Niri |
-| `Super+Arrows` | Focus/move windows |
-| `Super+1..9` | Switch workspaces |
-| `Super+F11` | Toggle fullscreen |
-| `Super+Space` | Toggle floating |
-
----
-
-## Next Steps
-
-1. **Read Full Guide** - See `LUA_GUIDE.md` for comprehensive docs
-2. **Create Plugin** - Build a custom plugin in `~/.config/niri/plugins/`
-3. **Explore Events** - Listen to all Niri events in your config
-4. **Query State** - Access windows, workspaces, monitors
 
 ---
 
@@ -309,13 +317,7 @@ Nov 15 14:30:01 host niri[1234]: Initial windows: 0
 
 ### Config won't load?
 
-Check syntax:
-
-```bash
-lua -c ~/.config/niri/config.lua
-```
-
-Check logs:
+Check logs for errors:
 
 ```bash
 journalctl -eu niri -n 50
@@ -326,16 +328,16 @@ journalctl -eu niri -n 50
 Restart Niri:
 
 ```bash
-niri --quit
-niri &
+niri msg action quit
+# Then restart your session
 ```
 
 ### Need help?
 
 - Check `LUA_GUIDE.md` for detailed docs
-- Review examples in `examples/plugins/`
+- Review examples in `examples/`
 - Check Niri logs: `journalctl -eu niri`
 
 ---
 
-**Happy configuring! 🚀**
+**Happy configuring!**

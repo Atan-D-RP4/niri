@@ -239,6 +239,15 @@ impl ConfigApi {
         trackpoint.set("natural_scroll", input_config.trackpoint.natural_scroll)?;
         input.set("trackpoint", trackpoint)?;
 
+        // Touch settings
+        let touch = lua.create_table()?;
+        touch.set("off", input_config.touch.off)?;
+        touch.set("natural_scroll", input_config.touch.natural_scroll)?;
+        if let Some(ref map_to_output) = input_config.touch.map_to_output {
+            touch.set("map_to_output", map_to_output.clone())?;
+        }
+        input.set("touch", touch)?;
+
         // Global input options
         if let Some(mode) = &input_config.warp_mouse_to_focus {
             if let Some(m) = &mode.mode {
@@ -665,8 +674,8 @@ impl ConfigApi {
     ) -> LuaResult<()> {
         let recent_windows_table = lua.create_table()?;
 
-        // on/off flag
-        recent_windows_table.set("on", recent_windows.on)?;
+        // off flag (true = disabled, matching KDL semantics)
+        recent_windows_table.set("off", !recent_windows.on)?;
 
         // Delay before the switcher appears
         recent_windows_table.set("open_delay_ms", recent_windows.open_delay_ms)?;

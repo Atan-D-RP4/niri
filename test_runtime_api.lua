@@ -1,13 +1,13 @@
--- Test script for Tier 3 Runtime API
--- This script tests the niri.runtime API functions
+-- Test script for Runtime State API
+-- This script tests the niri.state API functions
 
-print("=== Testing Tier 3 Runtime API ===")
+print("=== Testing Runtime State API ===")
 
--- Test 1: get_windows()
-print("\n[Test 1] Testing niri.runtime.get_windows()")
-local windows = niri.runtime.get_windows()
+-- Test 1: windows()
+print("\n[Test 1] Testing niri.state.windows()")
+local windows = niri.state.windows()
 if windows then
-    print("✓ get_windows() succeeded, got", #windows, "windows")
+    print("✓ windows() succeeded, got", #windows, "windows")
     if #windows > 0 then
         print("First window:")
         local win = windows[1]
@@ -19,26 +19,26 @@ if windows then
         print("  Is floating:", win.is_floating)
     end
 else
-    print("✗ get_windows() returned nil")
+    print("✗ windows() returned nil")
 end
 
--- Test 2: get_focused_window()
-print("\n[Test 2] Testing niri.runtime.get_focused_window()")
-local focused = niri.runtime.get_focused_window()
+-- Test 2: focused_window()
+print("\n[Test 2] Testing niri.state.focused_window()")
+local focused = niri.state.focused_window()
 if focused then
-    print("✓ get_focused_window() succeeded")
+    print("✓ focused_window() succeeded")
     print("  ID:", focused.id)
     print("  Title:", focused.title or "(no title)")
     print("  App ID:", focused.app_id or "(no app_id)")
 else
-    print("✓ get_focused_window() returned nil (no focused window)")
+    print("✓ focused_window() returned nil (no focused window)")
 end
 
--- Test 3: get_workspaces()
-print("\n[Test 3] Testing niri.runtime.get_workspaces()")
-local workspaces = niri.runtime.get_workspaces()
+-- Test 3: workspaces()
+print("\n[Test 3] Testing niri.state.workspaces()")
+local workspaces = niri.state.workspaces()
 if workspaces then
-    print("✓ get_workspaces() succeeded, got", #workspaces, "workspaces")
+    print("✓ workspaces() succeeded, got", #workspaces, "workspaces")
     if #workspaces > 0 then
         print("First workspace:")
         local ws = workspaces[1]
@@ -50,14 +50,14 @@ if workspaces then
         print("  Is focused:", ws.is_focused)
     end
 else
-    print("✗ get_workspaces() returned nil")
+    print("✗ workspaces() returned nil")
 end
 
--- Test 4: get_outputs()
-print("\n[Test 4] Testing niri.runtime.get_outputs()")
-local outputs = niri.runtime.get_outputs()
+-- Test 4: outputs()
+print("\n[Test 4] Testing niri.state.outputs()")
+local outputs = niri.state.outputs()
 if outputs then
-    print("✓ get_outputs() succeeded, got", #outputs, "outputs")
+    print("✓ outputs() succeeded, got", #outputs, "outputs")
     if #outputs > 0 then
         print("First output:")
         local out = outputs[1]
@@ -68,7 +68,7 @@ if outputs then
         print("  Height:", out.logical and out.logical.height or "(unknown)")
     end
 else
-    print("✗ get_outputs() returned nil")
+    print("✗ outputs() returned nil")
 end
 
-print("\n=== Tier 3 Runtime API Tests Complete ===")
+print("\n=== Runtime State API Tests Complete ===")

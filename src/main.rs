@@ -18,7 +18,7 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
-use niri::lua_extensions::{apply_lua_config, LuaConfig};
+use niri::lua_extensions::LuaConfig;
 use niri::niri::State;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
@@ -159,53 +159,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Variable to hold the Lua runtime if a config file is loaded
     let mut lua_runtime: Option<niri_lua::LuaRuntime> = None;
 
-    // Try to load Lua config if it exists
-    if let ConfigPath::Regular { user_path, .. } = &config_path {
-        if let Some(config_dir) = user_path.parent() {
-            let lua_files = [config_dir.join("niri.lua"), config_dir.join("init.lua")];
-            for lua_file in lua_files {
-                if lua_file.exists() {
-                    match LuaConfig::from_file(&lua_file) {
-                        Ok(lua_config) => {
-                            info!("Loaded Lua config from {}", lua_file.display());
-                            // Log bind count before applying Lua config
-                            let binds_before = config.binds.0.len();
-                            let startup_before = config.spawn_at_startup.len();
-                            info!("Config state BEFORE Lua application: {} binds, {} startup commands", binds_before, startup_before);
+    // Determine Lua config file paths to try
+    let lua_files_to_try: Vec<PathBuf> = match &config_path {
+        // Explicit Lua config file specified via -c flag
+        ConfigPath::Explicit(path) if ConfigPath::is_lua_config(path) => {
+            vec![path.clone()]
+        }
+        // Regular config path - check for niri.lua or init.lua in the config directory
+        ConfigPath::Regular { user_path, .. } => {
+            if let Some(config_dir) = user_path.parent() {
+                vec![config_dir.join("niri.lua"), config_dir.join("init.lua")]
+            } else {
+                vec![]
+            }
+        }
+        // Explicit non-Lua config - don't try to load Lua
+        ConfigPath::Explicit(_) => vec![],
+    };
 
-                            // Apply Lua configuration to the loaded config
-                            let runtime = lua_config.runtime();
-                            match apply_lua_config(runtime, &mut config) {
-                                Ok(_) => {
-                                    let binds_after = config.binds.0.len();
-                                    let startup_after = config.spawn_at_startup.len();
-                                    info!("Applied Lua configuration successfully");
-                                    info!(
-                                        "Config state AFTER Lua application: {} binds (+{}), {} startup commands (+{})",
-                                        binds_after,
-                                        (binds_after as i32 - binds_before as i32),
-                                        startup_after,
-                                        (startup_after as i32 - startup_before as i32));
+    // Try to load Lua config files
+    for lua_file in lua_files_to_try {
+        if lua_file.exists() {
+            match LuaConfig::from_file(&lua_file) {
+                Ok(lua_config) => {
+                    info!("Loaded Lua config from {}", lua_file.display());
+                    // Log bind count before applying Lua config
+                    let binds_before = config.binds.0.len();
+                    let startup_before = config.spawn_at_startup.len();
+                    info!(
+                        "Config state BEFORE Lua application: {} binds, {} startup commands",
+                        binds_before, startup_before
+                    );
 
-                                    // Store the runtime for later use
-                                    lua_runtime = Some(lua_config.into_runtime());
-                                }
-                                Err(e) => {
-                                    warn!("Failed to apply Lua config settings: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Failed to load Lua config from {}: {}",
-                                lua_file.display(),
-                                e
-                            );
-                        }
-                    }
-                    break; // Only load the first one found
+                    // Apply pending config changes from the reactive API
+                    // (niri.config.binds:add(), niri.config.layout.gaps = 16, etc.)
+                    let runtime = lua_config.runtime();
+                    let pending_changes = niri_lua::apply_pending_lua_config(runtime, &mut config);
+                    
+                    let binds_after = config.binds.0.len();
+                    let startup_after = config.spawn_at_startup.len();
+                    info!(
+                        "Applied {} reactive config changes: {} binds (+{}), {} startup commands (+{})",
+                        pending_changes,
+                        binds_after,
+                        (binds_after as i32 - binds_before as i32),
+                        startup_after,
+                        (startup_after as i32 - startup_before as i32)
+                    );
+
+                    // Store the runtime for later use
+                    lua_runtime = Some(lua_config.into_runtime());
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to load Lua config from {}: {}",
+                        lua_file.display(),
+                        e
+                    );
                 }
             }
+            break; // Only load the first one found
         }
     }
 
@@ -244,10 +257,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register the runtime API with the Lua runtime if present
     // This allows Lua scripts to query live compositor state (windows, workspaces, etc.)
-    if let Some(ref runtime) = state.niri.lua_runtime {
+    if let Some(ref mut runtime) = state.niri.lua_runtime {
         let runtime_api = niri_lua::RuntimeApi::new(event_loop.handle());
         if let Err(e) = runtime.register_runtime_api(runtime_api) {
             warn!("Failed to register Lua runtime API: {}", e);
+        }
+
+        // Register the config proxy API to enable reactive config access
+        // This allows Lua scripts to read/write config values via niri.config
+        let config = state.niri.config.borrow();
+        if let Err(e) = runtime.register_config_proxy_api(&config) {
+            warn!("Failed to register Lua config proxy API: {}", e);
         }
     }
 

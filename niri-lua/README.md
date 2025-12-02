@@ -6,61 +6,86 @@ This crate provides Lua scripting capabilities to Niri, allowing users to config
 
 ## Features
 
-- **Configuration API**: Define Niri configuration using Lua scripts
-- **Event System**: Event emitter for handling Niri events
-- **Hot Reload**: Automatic reloading of Lua configuration files on change
-- **Plugin System**: Support for Lua plugins
-- **Module Loader**: Custom Lua module loading system
-- **Validators**: Configuration validation helpers
-- **Type-safe Bindings**: Lua types that map to Niri configuration structures
+- **Reactive Configuration API**: Configure Niri using `niri.config.*` proxy tables
+- **Event System**: Subscribe to compositor events via `niri.events:on()`
+- **Action System**: Execute compositor actions via `niri.action:*()`
+- **State Queries**: Query windows, workspaces, outputs via `niri.state.*`
+- **Runtime Changes**: Modify configuration at runtime via IPC
 
 ## Architecture
 
-The niri-lua crate is organized into several tiers:
-
-### Tier 1: Foundation Layer
-- `module_loader`: Custom Lua module loading
-- `plugin_system`: Plugin discovery and management
-- `event_emitter`: Event handling system
-- `hot_reload`: File watching and hot reloading
-
-### Tier 2: Configuration API
-- `lua_types`: Lua representations of Niri types
-- `validators`: Configuration validation
-- `config_api`: Configuration access from Lua
-
 ### Core Components
-- `config`: Lua configuration loading
-- `config_converter`: Converting Lua config to Niri Config
-- `niri_api`: Niri API exposed to Lua scripts
+
+- `config_proxy`: Reactive configuration system with `niri.config.*` proxies
+- `config_converter`: Applies pending config changes to Niri Config
+- `action_proxy`: ~90 compositor actions via `niri.action:*()`
+- `events_proxy`: Event subscription via `niri.events:on/once/off()`
+- `runtime_api`: State queries via `niri.state.*`
 - `runtime`: Lua runtime management
 
 ## Usage
 
 ```rust
-use niri_lua::{LuaConfig, apply_lua_config};
+use niri_lua::{LuaConfig, apply_pending_lua_config};
 use niri_config::Config;
 
 // Load Lua configuration
 let lua_config = LuaConfig::from_file("config.lua")?;
 
+// Get pending changes from the reactive API
+let pending = lua_config.runtime().get_pending_config_changes()?;
+
 // Apply to Niri config
 let mut config = Config::default();
-apply_lua_config(&lua_config, &mut config)?;
+apply_pending_lua_config(&pending, &mut config)?;
 ```
 
 ## Example Lua Configuration
 
 ```lua
-niri.config.binds = {
-    { key = "Super+A", action = "spawn", args = { "alacritty" } },
-    { key = "Super+Q", action = "close-window", args = {} },
-}
+-- Layout configuration
+niri.config.layout.gaps = 16
+niri.config.layout.center_focused_column = "never"
 
-niri.config.startup = {
-    { command = { "waybar" } },
-}
+-- Input configuration
+niri.config.input.keyboard.xkb.layout = "us"
+niri.config.input.touchpad.natural_scroll = true
+
+-- Add keybindings (uses :add() for collections)
+niri.config.binds:add({
+    { key = "Super+Return", action = "spawn", args = { "alacritty" } },
+    { key = "Super+Q", action = "close-window" },
+    { key = "Super+H", action = "focus-column-left" },
+    { key = "Super+L", action = "focus-column-right" },
+})
+
+-- Add window rules
+niri.config.window_rules:add({
+    {
+        match = { app_id = "firefox" },
+        open_maximized = true,
+    },
+})
+
+-- Spawn programs at startup
+niri.action:spawn({ "waybar" })
+niri.action:spawn({ "mako" })
+
+-- Subscribe to events
+niri.events:on("window:open", function(data)
+    niri.utils.log("Window opened: " .. data.app_id)
+end)
 ```
+
+## API Namespaces
+
+| Namespace | Purpose | Example |
+|-----------|---------|---------|
+| `niri.config` | Configuration proxy | `niri.config.layout.gaps = 16` |
+| `niri.action` | Compositor actions | `niri.action:spawn({"kitty"})` |
+| `niri.events` | Event system | `niri.events:on("window:open", fn)` |
+| `niri.state` | Query compositor state | `niri.state.windows()` |
+| `niri.utils` | Logging and utilities | `niri.utils.log("msg")` |
 
 ## Dependencies
 
@@ -68,9 +93,7 @@ niri.config.startup = {
 - `niri-config`: Niri configuration structures
 - `niri-ipc`: Niri IPC types
 - `anyhow`: Error handling
-- `log`: Logging
-- `regex`: Regular expressions
-- `serde`: Serialization
+- `serde_json`: JSON serialization for config changes
 
 ## Testing
 

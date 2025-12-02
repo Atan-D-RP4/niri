@@ -1,19 +1,28 @@
-//! Runtime API for querying compositor state from Lua scripts.
+//! Runtime state API for querying compositor state from Lua scripts.
 //!
-//! This module provides the `niri.runtime` API that allows Lua scripts to query the current
+//! This module provides the `niri.state` API that allows Lua scripts to query the current
 //! compositor state, including windows, workspaces, and outputs.
 //!
 //! ## Architecture
 //!
-//! This uses the same event loop message passing pattern as the IPC server:
-//! - Lua calls a function like `niri.runtime.get_windows()`
+//! This module supports two modes of operation:
+//!
+//! ### 1. Event Handler Context (synchronous, no deadlock)
+//! When called from within an event handler (e.g., `niri.events:on("window:open", ...)`),
+//! we use pre-captured state snapshot stored in a thread-local. This avoids the deadlock
+//! that would occur if we tried to use the idle callback pattern while the event loop
+//! is blocked waiting for the Lua handler to complete.
+//!
+//! ### 2. Normal Context (async via idle callback)
+//! When called from other contexts (e.g., REPL, timers), we use the event loop message
+//! passing pattern like the IPC server:
+//! - Lua calls a function like `niri.state.windows()`
 //! - We create a channel and send a message to the event loop via `insert_idle()`
 //! - The event loop handler runs on the main thread with access to State
 //! - The handler collects the data and sends it back through the channel
 //! - The Lua function blocks waiting for the response (from Lua's perspective)
-//!
-//! This approach avoids all lifetime issues, requires zero unsafe code, and is proven in
-//! production by the IPC server.
+
+use std::cell::RefCell;
 
 use async_channel::{bounded, Sender};
 use calloop::LoopHandle;
@@ -21,6 +30,75 @@ use mlua::{Lua, Result, Table, Value};
 use niri_ipc::{Output, Window, Workspace};
 
 use crate::ipc_bridge::{output_to_lua, window_to_lua, windows_to_lua, workspaces_to_lua};
+
+// Thread-local storage for state snapshot during event handler execution.
+//
+// This allows `niri.state.*` functions to access pre-captured state data
+// when called from within event handlers, avoiding the deadlock that would
+// occur with the idle callback pattern.
+thread_local! {
+    static EVENT_CONTEXT_STATE: RefCell<Option<StateSnapshot>> = const { RefCell::new(None) };
+}
+
+/// A snapshot of compositor state captured before event handler execution.
+///
+/// This is used to provide state access within event handlers without
+/// needing to query the event loop (which would deadlock).
+#[derive(Clone, Default)]
+pub struct StateSnapshot {
+    pub windows: Vec<Window>,
+    pub workspaces: Vec<Workspace>,
+    pub outputs: Vec<Output>,
+}
+
+impl StateSnapshot {
+    /// Create a new state snapshot from the compositor state.
+    pub fn from_compositor_state<S: CompositorState>(state: &S) -> Self {
+        Self {
+            windows: state.get_windows(),
+            workspaces: state.get_workspaces(),
+            outputs: state.get_outputs(),
+        }
+    }
+
+    /// Get the focused window from the snapshot.
+    pub fn get_focused_window(&self) -> Option<&Window> {
+        self.windows.iter().find(|w| w.is_focused)
+    }
+}
+
+/// Set the event context state snapshot for the current thread.
+///
+/// This should be called before invoking Lua event handlers, and cleared
+/// afterwards using `clear_event_context_state()`.
+///
+/// # Example
+///
+/// ```ignore
+/// let snapshot = StateSnapshot::from_compositor_state(&state);
+/// set_event_context_state(snapshot);
+/// // ... call Lua event handlers ...
+/// clear_event_context_state();
+/// ```
+pub fn set_event_context_state(snapshot: StateSnapshot) {
+    EVENT_CONTEXT_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(snapshot);
+    });
+}
+
+/// Clear the event context state snapshot for the current thread.
+///
+/// This should be called after Lua event handlers have completed.
+pub fn clear_event_context_state() {
+    EVENT_CONTEXT_STATE.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+/// Get a clone of the event context state snapshot, if available.
+fn get_event_context_state() -> Option<StateSnapshot> {
+    EVENT_CONTEXT_STATE.with(|cell| cell.borrow().clone())
+}
 
 /// Generic runtime API that can query state from the compositor.
 ///
@@ -79,23 +157,23 @@ pub trait CompositorState {
     fn get_outputs(&self) -> Vec<Output>;
 }
 
-/// Register the runtime API in a Lua context.
+/// Register the runtime state API in a Lua context.
 ///
-/// This creates the `niri.runtime` table with the following functions:
-/// - `get_windows()` - Returns an array of all window tables
-/// - `get_focused_window()` - Returns the focused window table, or nil
-/// - `get_workspaces()` - Returns an array of all workspace tables
-/// - `get_outputs()` - Returns an array of all output tables
+/// This creates the `niri.state` table with the following functions:
+/// - `windows()` - Returns an array of all window tables
+/// - `focused_window()` - Returns the focused window table, or nil
+/// - `workspaces()` - Returns an array of all workspace tables
+/// - `outputs()` - Returns an array of all output tables
 ///
 /// # Example
 ///
 /// ```lua
-/// local windows = niri.runtime.get_windows()
+/// local windows = niri.state.windows()
 /// for i, win in ipairs(windows) do
 ///     print(win.id, win.title, win.app_id)
 /// end
 ///
-/// local focused = niri.runtime.get_focused_window()
+/// local focused = niri.state.focused_window()
 /// if focused then
 ///     print("Focused:", focused.title)
 /// end
@@ -114,13 +192,19 @@ where
         }
     };
 
-    // Create the runtime table
-    let runtime = lua.create_table()?;
+    // Create the state table
+    let state_table = lua.create_table()?;
 
-    // get_windows() -> array of window tables
+    // windows() -> array of window tables
     {
         let api = api.event_loop.clone();
-        let get_windows = lua.create_function(move |lua, ()| {
+        let windows_fn = lua.create_function(move |lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                return windows_to_lua(lua, &snapshot.windows);
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
             let runtime_api = RuntimeApi {
                 event_loop: api.clone(),
             };
@@ -133,13 +217,22 @@ where
 
             windows_to_lua(lua, &windows)
         })?;
-        runtime.set("get_windows", get_windows)?;
+        state_table.set("windows", windows_fn)?;
     }
 
-    // get_focused_window() -> window table or nil
+    // focused_window() -> window table or nil
     {
         let api = api.event_loop.clone();
-        let get_focused_window = lua.create_function(move |lua, ()| {
+        let focused_window_fn = lua.create_function(move |lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                return match snapshot.get_focused_window() {
+                    Some(win) => window_to_lua(lua, win).map(Value::Table),
+                    None => Ok(Value::Nil),
+                };
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
             let runtime_api = RuntimeApi {
                 event_loop: api.clone(),
             };
@@ -155,13 +248,19 @@ where
                 None => Ok(Value::Nil),
             }
         })?;
-        runtime.set("get_focused_window", get_focused_window)?;
+        state_table.set("focused_window", focused_window_fn)?;
     }
 
-    // get_workspaces() -> array of workspace tables
+    // workspaces() -> array of workspace tables
     {
         let api = api.event_loop.clone();
-        let get_workspaces = lua.create_function(move |lua, ()| {
+        let workspaces_fn = lua.create_function(move |lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                return workspaces_to_lua(lua, &snapshot.workspaces);
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
             let runtime_api = RuntimeApi {
                 event_loop: api.clone(),
             };
@@ -174,13 +273,24 @@ where
 
             workspaces_to_lua(lua, &workspaces)
         })?;
-        runtime.set("get_workspaces", get_workspaces)?;
+        state_table.set("workspaces", workspaces_fn)?;
     }
 
-    // get_outputs() -> array of output tables
+    // outputs() -> array of output tables
     {
         let api = api.event_loop;
-        let get_outputs = lua.create_function(move |lua, ()| {
+        let outputs_fn = lua.create_function(move |lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                let table = lua.create_table()?;
+                for (i, output) in snapshot.outputs.iter().enumerate() {
+                    let output_table = output_to_lua(lua, output)?;
+                    table.set(i + 1, output_table)?;
+                }
+                return Ok(table);
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
             let runtime_api = RuntimeApi {
                 event_loop: api.clone(),
             };
@@ -199,11 +309,11 @@ where
             }
             Ok(table)
         })?;
-        runtime.set("get_outputs", get_outputs)?;
+        state_table.set("outputs", outputs_fn)?;
     }
 
-    // Set niri.runtime
-    niri.set("runtime", runtime)?;
+    // Set niri.state
+    niri.set("state", state_table)?;
 
     Ok(())
 }
@@ -211,9 +321,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use niri_ipc::{LogicalOutput, Mode, Timestamp, Transform, WindowLayout};
 
-    // Mock state for testing
-    #[derive(Clone)]
+    // ========================================================================
+    // Test Fixtures
+    // ========================================================================
+
+    /// Mock state for testing CompositorState trait implementation.
+    #[derive(Clone, Default)]
     struct MockState {
         windows: Vec<Window>,
         workspaces: Vec<Workspace>,
@@ -238,338 +353,277 @@ mod tests {
         }
     }
 
+    /// Create a test window with the given properties.
+    fn make_window(id: u64, title: &str, app_id: &str, is_focused: bool) -> Window {
+        Window {
+            id,
+            title: Some(title.to_string()),
+            app_id: Some(app_id.to_string()),
+            pid: Some(1000 + id as i32),
+            workspace_id: Some(1),
+            is_focused,
+            is_floating: false,
+            is_urgent: false,
+            focus_timestamp: if is_focused {
+                Some(Timestamp { secs: 1234, nanos: 0 })
+            } else {
+                None
+            },
+            layout: WindowLayout {
+                pos_in_scrolling_layout: Some((1, 1)),
+                tile_size: (800.0, 600.0),
+                window_size: (800, 600),
+                tile_pos_in_workspace_view: Some((0.0, 0.0)),
+                window_offset_in_tile: (0.0, 0.0),
+            },
+        }
+    }
+
+    /// Create a test workspace with the given properties.
+    fn make_workspace(id: u64, idx: u8, name: Option<&str>, is_active: bool) -> Workspace {
+        Workspace {
+            id,
+            idx,
+            name: name.map(|s| s.to_string()),
+            output: Some("DP-1".to_string()),
+            is_urgent: false,
+            is_active,
+            is_focused: is_active,
+            active_window_id: None,
+        }
+    }
+
+    /// Create a test output with the given properties.
+    fn make_output(name: &str, is_enabled: bool) -> Output {
+        Output {
+            name: name.to_string(),
+            make: "Test Make".to_string(),
+            model: "Test Model".to_string(),
+            serial: Some("12345".to_string()),
+            physical_size: Some((600, 340)),
+            modes: vec![Mode {
+                width: 1920,
+                height: 1080,
+                refresh_rate: 60000,
+                is_preferred: true,
+            }],
+            current_mode: if is_enabled { Some(0) } else { None },
+            is_custom_mode: false,
+            vrr_supported: false,
+            vrr_enabled: false,
+            logical: if is_enabled {
+                Some(LogicalOutput {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1080,
+                    scale: 1.0,
+                    transform: Transform::Normal,
+                })
+            } else {
+                None
+            },
+        }
+    }
+
     // ========================================================================
-    // RuntimeApi::new tests
+    // RuntimeApi Construction Tests
     // ========================================================================
 
     #[test]
-    fn runtime_api_construction() {
-        // We can test that RuntimeApi can be constructed
-        // Full testing requires a real event loop which is integration-level
-        // This test verifies the type system works correctly
+    fn runtime_api_type_system() {
+        // Verify RuntimeApi can be constructed with generic CompositorState types.
+        // Full event loop testing is integration-level.
         let _ = std::mem::size_of::<RuntimeApi<MockState>>();
-    }
 
-    // ========================================================================
-    // CompositorState trait implementation tests with empty collections
-    // ========================================================================
-
-    #[test]
-    fn mock_state_get_windows_empty() {
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let result = state.get_windows();
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn mock_state_get_focused_window_none() {
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let result = state.get_focused_window();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn mock_state_get_workspaces_empty() {
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let result = state.get_workspaces();
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn mock_state_get_outputs_empty() {
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let result = state.get_outputs();
-        assert_eq!(result.len(), 0);
-    }
-
-    // ========================================================================
-    // Trait composition and polymorphism tests
-    // ========================================================================
-
-    #[test]
-    fn compositor_state_trait_object() {
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        // Test that we can use state as a trait object
-        let trait_obj: &dyn CompositorState = &state;
-        assert_eq!(trait_obj.get_windows().len(), 0);
-        assert_eq!(trait_obj.get_workspaces().len(), 0);
-        assert_eq!(trait_obj.get_outputs().len(), 0);
-    }
-
-    // ========================================================================
-    // CompositorState trait documentation tests
-    // ========================================================================
-
-    #[test]
-    fn compositor_state_get_windows_returns_vec() {
-        // Ensures get_windows returns a Vec that can be checked for length
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-        let windows = state.get_windows();
-        assert!(windows.is_empty());
-    }
-
-    #[test]
-    fn compositor_state_get_focused_window_returns_option() {
-        // Ensures get_focused_window returns an Option that can be checked
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-        let focused = state.get_focused_window();
-        assert!(matches!(focused, None));
-    }
-
-    #[test]
-    fn compositor_state_get_workspaces_returns_vec() {
-        // Ensures get_workspaces returns a Vec that can be checked for length
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-        let workspaces = state.get_workspaces();
-        assert!(workspaces.is_empty());
-    }
-
-    #[test]
-    fn compositor_state_get_outputs_returns_vec() {
-        // Ensures get_outputs returns a Vec that can be checked for length
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-        let outputs = state.get_outputs();
-        assert!(outputs.is_empty());
-    }
-
-    // ========================================================================
-    // RuntimeApi trait generic parameter tests
-    // ========================================================================
-
-    #[test]
-    fn runtime_api_generic_constraint() {
-        // This test verifies that RuntimeApi can work with any type implementing
-        // CompositorState, not just MockState
-        fn create_runtime_api<S: CompositorState + 'static>(_state: &S) {
+        // Verify generic constraint works with any CompositorState impl
+        fn accepts_compositor_state<S: CompositorState + 'static>(_state: &S) {
             let _ = std::mem::size_of::<RuntimeApi<S>>();
         }
-
-        let mock_state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-        create_runtime_api(&mock_state);
+        accepts_compositor_state(&MockState::default());
     }
 
     // ========================================================================
-    // CompositorState trait cloning tests
+    // Empty State Tests
     // ========================================================================
 
     #[test]
-    fn compositor_state_cloning_preserves_data() {
-        // Verify that cloning state preserves empty collections correctly
+    fn empty_state_returns_empty_collections() {
+        let state = MockState::default();
+
+        assert!(state.get_windows().is_empty());
+        assert!(state.get_focused_window().is_none());
+        assert!(state.get_workspaces().is_empty());
+        assert!(state.get_outputs().is_empty());
+    }
+
+    #[test]
+    fn empty_state_trait_object() {
+        let state = MockState::default();
+        let trait_obj: &dyn CompositorState = &state;
+
+        assert!(trait_obj.get_windows().is_empty());
+        assert!(trait_obj.get_focused_window().is_none());
+        assert!(trait_obj.get_workspaces().is_empty());
+        assert!(trait_obj.get_outputs().is_empty());
+    }
+
+    // ========================================================================
+    // Populated State Tests - Windows
+    // ========================================================================
+
+    #[test]
+    fn windows_returns_all_windows() {
+        let state = MockState {
+            windows: vec![
+                make_window(1, "Firefox", "firefox", false),
+                make_window(2, "Terminal", "kitty", true),
+                make_window(3, "Editor", "code", false),
+            ],
+            ..Default::default()
+        };
+
+        let windows = state.get_windows();
+        assert_eq!(windows.len(), 3);
+        assert_eq!(windows[0].id, 1);
+        assert_eq!(windows[0].title.as_deref(), Some("Firefox"));
+        assert_eq!(windows[1].id, 2);
+        assert_eq!(windows[2].id, 3);
+    }
+
+    #[test]
+    fn focused_window_returns_focused() {
+        let state = MockState {
+            windows: vec![
+                make_window(1, "Firefox", "firefox", false),
+                make_window(2, "Terminal", "kitty", true), // focused
+                make_window(3, "Editor", "code", false),
+            ],
+            ..Default::default()
+        };
+
+        let focused = state.get_focused_window();
+        assert!(focused.is_some());
+        let focused = focused.unwrap();
+        assert_eq!(focused.id, 2);
+        assert_eq!(focused.title.as_deref(), Some("Terminal"));
+        assert!(focused.is_focused);
+    }
+
+    #[test]
+    fn focused_window_none_when_no_focus() {
+        let state = MockState {
+            windows: vec![
+                make_window(1, "Firefox", "firefox", false),
+                make_window(2, "Terminal", "kitty", false), // none focused
+            ],
+            ..Default::default()
+        };
+
+        assert!(state.get_focused_window().is_none());
+    }
+
+    #[test]
+    fn focused_window_first_match_when_multiple_focused() {
+        // Edge case: multiple windows marked focused (shouldn't happen, but test the behavior)
+        let state = MockState {
+            windows: vec![
+                make_window(1, "Firefox", "firefox", true),
+                make_window(2, "Terminal", "kitty", true),
+            ],
+            ..Default::default()
+        };
+
+        let focused = state.get_focused_window();
+        assert!(focused.is_some());
+        assert_eq!(focused.unwrap().id, 1); // First match
+    }
+
+    // ========================================================================
+    // Populated State Tests - Workspaces
+    // ========================================================================
+
+    #[test]
+    fn workspaces_returns_all_workspaces() {
+        let state = MockState {
+            workspaces: vec![
+                make_workspace(1, 1, Some("main"), true),
+                make_workspace(2, 2, Some("dev"), false),
+                make_workspace(3, 3, None, false), // unnamed workspace
+            ],
+            ..Default::default()
+        };
+
+        let workspaces = state.get_workspaces();
+        assert_eq!(workspaces.len(), 3);
+        assert_eq!(workspaces[0].name.as_deref(), Some("main"));
+        assert!(workspaces[0].is_active);
+        assert_eq!(workspaces[1].name.as_deref(), Some("dev"));
+        assert!(!workspaces[1].is_active);
+        assert!(workspaces[2].name.is_none());
+    }
+
+    // ========================================================================
+    // Populated State Tests - Outputs
+    // ========================================================================
+
+    #[test]
+    fn outputs_returns_all_outputs() {
+        let state = MockState {
+            outputs: vec![
+                make_output("DP-1", true),
+                make_output("HDMI-1", true),
+                make_output("eDP-1", false), // disabled
+            ],
+            ..Default::default()
+        };
+
+        let outputs = state.get_outputs();
+        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs[0].name, "DP-1");
+        assert!(outputs[0].logical.is_some());
+        assert_eq!(outputs[2].name, "eDP-1");
+        assert!(outputs[2].logical.is_none()); // disabled = no logical
+    }
+
+    // ========================================================================
+    // State Independence and Cloning Tests
+    // ========================================================================
+
+    #[test]
+    fn state_cloning_preserves_data() {
         let state1 = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
+            windows: vec![make_window(1, "Test", "test", true)],
+            workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
+            outputs: vec![make_output("DP-1", true)],
         };
 
         let state2 = state1.clone();
-        assert_eq!(state2.get_windows().len(), state1.get_windows().len());
-        assert_eq!(state2.get_workspaces().len(), state1.get_workspaces().len());
-        assert_eq!(state2.get_outputs().len(), state1.get_outputs().len());
-    }
 
-    // ========================================================================
-    // CompositorState trait behavior consistency tests
-    // ========================================================================
-
-    #[test]
-    fn focused_window_filter_consistency() {
-        // Verify that get_focused_window filters correctly from get_windows
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let all_windows = state.get_windows();
-        let focused = state.get_focused_window();
-
-        // When no windows, focused should be None
-        assert!(all_windows.is_empty());
-        assert!(focused.is_none());
-    }
-
-    // ========================================================================
-    // NEW: Runtime API documentation and usage tests
-    // ========================================================================
-
-    #[test]
-    fn runtime_api_example_get_windows() {
-        // Example usage: Getting all windows
-        // In a real scenario, this would be called from Lua:
-        // local windows = niri.runtime.get_windows()
-
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let windows = state.get_windows();
-        assert_eq!(windows.len(), 0);
+        assert_eq!(state2.get_windows().len(), 1);
+        assert_eq!(state2.get_workspaces().len(), 1);
+        assert_eq!(state2.get_outputs().len(), 1);
+        assert_eq!(state2.get_windows()[0].id, state1.get_windows()[0].id);
     }
 
     #[test]
-    fn runtime_api_example_get_focused_window() {
-        // Example usage: Getting the focused window
-        // In a real scenario, this would be called from Lua:
-        // local focused = niri.runtime.get_focused_window()
-        // if focused then
-        //     print("Focused window:", focused.title)
-        // end
-
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let focused = state.get_focused_window();
-        assert!(focused.is_none());
-    }
-
-    #[test]
-    fn runtime_api_example_get_workspaces() {
-        // Example usage: Getting all workspaces
-        // In a real scenario, this would be called from Lua:
-        // local workspaces = niri.runtime.get_workspaces()
-        // for i, ws in ipairs(workspaces) do
-        //     print("Workspace:", ws.name or ws.idx, "active:", ws.is_active)
-        // end
-
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let workspaces = state.get_workspaces();
-        assert_eq!(workspaces.len(), 0);
-    }
-
-    #[test]
-    fn runtime_api_example_get_outputs() {
-        // Example usage: Getting all outputs (monitors)
-        // In a real scenario, this would be called from Lua:
-        // local outputs = niri.runtime.get_outputs()
-        // for i, output in ipairs(outputs) do
-        //     print("Output:", output.name, "enabled:", output.is_enabled)
-        // end
-
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let outputs = state.get_outputs();
-        assert_eq!(outputs.len(), 0);
-    }
-
-    #[test]
-    fn runtime_api_compositor_state_contract() {
-        // Test that CompositorState trait contract is upheld
-        // All methods should be callable without panicking
-
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        // All of these should be callable
-        let _ = state.get_windows();
-        let _ = state.get_focused_window();
-        let _ = state.get_workspaces();
-        let _ = state.get_outputs();
-    }
-
-    #[test]
-    fn runtime_api_trait_object_polymorphism() {
-        // Test that CompositorState works correctly as a trait object
-
-        let state = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-        };
-
-        let trait_obj: &dyn CompositorState = &state;
-
-        // Should be able to call all methods via trait object
-        let windows = trait_obj.get_windows();
-        let workspaces = trait_obj.get_workspaces();
-        let outputs = trait_obj.get_outputs();
-        let focused = trait_obj.get_focused_window();
-
-        assert_eq!(windows.len(), 0);
-        assert_eq!(workspaces.len(), 0);
-        assert_eq!(outputs.len(), 0);
-        assert!(focused.is_none());
-    }
-
-    #[test]
-    fn runtime_api_multiple_state_instances() {
-        // Test that multiple state instances work independently
-
+    fn multiple_state_instances_independent() {
         let state1 = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
+            windows: vec![make_window(1, "Win1", "app1", true)],
+            ..Default::default()
         };
 
         let state2 = MockState {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
+            windows: vec![
+                make_window(2, "Win2", "app2", false),
+                make_window(3, "Win3", "app3", true),
+            ],
+            ..Default::default()
         };
 
-        // Both should work independently
-        assert_eq!(state1.get_windows().len(), 0);
-        assert_eq!(state2.get_windows().len(), 0);
+        assert_eq!(state1.get_windows().len(), 1);
+        assert_eq!(state2.get_windows().len(), 2);
+        assert_eq!(state1.get_focused_window().unwrap().id, 1);
+        assert_eq!(state2.get_focused_window().unwrap().id, 3);
     }
 }

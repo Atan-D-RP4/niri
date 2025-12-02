@@ -83,8 +83,8 @@ local animations = {
 -- You can read the recent_windows configuration from the Lua runtime API
 
 if niri then
-	-- Check if recent windows is enabled
-	if niri.config.recent_windows.on then
+	-- Check if recent windows is enabled (off = false means it's enabled)
+	if not niri.config.recent_windows.off then
 		niri.log("Recent windows is enabled")
 		niri.log(string.format("Open delay: %dms", niri.config.recent_windows.open_delay_ms))
 		niri.log(string.format("Preview max height: %d", niri.config.recent_windows.previews.max_height))

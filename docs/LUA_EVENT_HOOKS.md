@@ -12,19 +12,19 @@ The event system is based on a pub-sub pattern where scripts register handlers (
 niri.apply_config({})
 
 -- Listen to window open events
-niri.on("window:open", function(data)
-    niri.log("Window opened: " .. (data.title or "unnamed"))
+niri.events:on("window:open", function(data)
+    niri.utils.log("Window opened: " .. (data.title or "unnamed"))
 end)
 
 -- Listen to workspace activation
-niri.on("workspace:activate", function(data)
-    niri.log("Workspace activated: " .. data.name .. " (index: " .. data.index .. ")")
+niri.events:on("workspace:activate", function(data)
+    niri.utils.log("Workspace activated: " .. data.name .. " (index: " .. data.index .. ")")
 end)
 ```
 
 ## API Reference
 
-### niri.on(event_type, callback)
+### niri.events:on(event_type, callback)
 
 Register a persistent event handler. The callback will be called every time the event occurs.
 
@@ -36,12 +36,12 @@ Register a persistent event handler. The callback will be called every time the 
 
 **Example:**
 ```lua
-local handler_id = niri.on("window:focus", function(data)
+local handler_id = niri.events:on("window:focus", function(data)
     print("Window focused: " .. data.title)
 end)
 ```
 
-### niri.once(event_type, callback)
+### niri.events:once(event_type, callback)
 
 Register a one-time event handler. The callback will be called only the next time the event occurs, then automatically unregistered.
 
@@ -53,27 +53,27 @@ Register a one-time event handler. The callback will be called only the next tim
 
 **Example:**
 ```lua
-niri.once("window:open", function(data)
-    niri.log("First window opened!")
+niri.events:once("window:open", function(data)
+    niri.utils.log("First window opened!")
 end)
 ```
 
-### niri.off(event_type, handler_id)
+### niri.events:off(event_type, handler_id)
 
 Unregister an event handler.
 
 **Parameters:**
 - `event_type` (string): The type of event
-- `handler_id` (number): The handler ID returned by `niri.on()` or `niri.once()`
+- `handler_id` (number): The handler ID returned by `niri.events:on()` or `niri.events:once()`
 
 **Example:**
 ```lua
-local id = niri.on("window:focus", function(data)
+local id = niri.events:on("window:focus", function(data)
     print("Window: " .. data.title)
 end)
 
 -- Later, unregister it:
-niri.off("window:focus", id)
+niri.events:off("window:focus", id)
 ```
 
 ## Event Types
@@ -215,14 +215,14 @@ niri.apply_config({})
 
 local windows = {}
 
-niri.on("window:open", function(data)
+niri.events:on("window:open", function(data)
     windows[data.id] = data.title
-    niri.log("Windows open: " .. table.concat(windows, ", "))
+    niri.utils.log("Windows open: " .. table.concat(windows, ", "))
 end)
 
-niri.on("window:close", function(data)
+niri.events:on("window:close", function(data)
     windows[data.id] = nil
-    niri.log("Windows open: " .. table.concat(windows, ", "))
+    niri.utils.log("Windows open: " .. table.concat(windows, ", "))
 end)
 ```
 
@@ -233,12 +233,12 @@ Log workspace switches:
 ```lua
 niri.apply_config({})
 
-niri.on("workspace:activate", function(data)
-    niri.log("Active workspace: " .. data.name .. " (#" .. data.index .. ")")
+niri.events:on("workspace:activate", function(data)
+    niri.utils.log("Active workspace: " .. data.name .. " (#" .. data.index .. ")")
 end)
 
-niri.on("workspace:deactivate", function(data)
-    niri.log("Workspace deactivated: " .. data.name)
+niri.events:on("workspace:deactivate", function(data)
+    niri.utils.log("Workspace deactivated: " .. data.name)
 end)
 ```
 
@@ -249,11 +249,11 @@ Listen to window open events and track specific applications:
 ```lua
 niri.apply_config({})
 
-niri.on("window:open", function(data)
+niri.events:on("window:open", function(data)
     local title = data.title or ""
     -- Could use this data later to auto-float certain windows
     -- by tracking their properties
-    niri.log("New window: " .. title)
+    niri.utils.log("New window: " .. title)
 end)
 ```
 
@@ -266,14 +266,14 @@ niri.apply_config({})
 
 local focused_window = nil
 
-niri.on("window:focus", function(data)
+niri.events:on("window:focus", function(data)
     focused_window = data.title
-    niri.log(">>> Focused: " .. (data.title or "unnamed"))
+    niri.utils.log(">>> Focused: " .. (data.title or "unnamed"))
 end)
 
-niri.on("window:blur", function(data)
+niri.events:on("window:blur", function(data)
     if focused_window == data.title then
-        niri.log("<<< Blurred: " .. (data.title or "unnamed"))
+        niri.utils.log("<<< Blurred: " .. (data.title or "unnamed"))
     end
 end)
 ```
@@ -285,8 +285,8 @@ Monitor layout mode changes:
 ```lua
 niri.apply_config({})
 
-niri.on("layout:mode_changed", function(data)
-    niri.log("Layout mode: " .. data.mode)
+niri.events:on("layout:mode_changed", function(data)
+    niri.utils.log("Layout mode: " .. data.mode)
 end)
 ```
 
@@ -315,68 +315,68 @@ local stats = {
 
 -- Window events
 if config.show_window_events then
-    niri.on("window:open", function(data)
+    niri.events:on("window:open", function(data)
         stats.windows_opened = stats.windows_opened + 1
-        niri.log("[WINDOW] Opened: " .. (data.title or "unnamed"))
+        niri.utils.log("[WINDOW] Opened: " .. (data.title or "unnamed"))
     end)
     
-    niri.on("window:close", function(data)
+    niri.events:on("window:close", function(data)
         stats.windows_closed = stats.windows_closed + 1
-        niri.log("[WINDOW] Closed: " .. (data.title or "unnamed"))
+        niri.utils.log("[WINDOW] Closed: " .. (data.title or "unnamed"))
     end)
     
-    niri.on("window:focus", function(data)
-        niri.log("[FOCUS] -> " .. (data.title or "unnamed"))
+    niri.events:on("window:focus", function(data)
+        niri.utils.log("[FOCUS] -> " .. (data.title or "unnamed"))
     end)
     
-    niri.on("window:blur", function(data)
-        niri.log("[BLUR] <- " .. (data.title or "unnamed"))
+    niri.events:on("window:blur", function(data)
+        niri.utils.log("[BLUR] <- " .. (data.title or "unnamed"))
     end)
 end
 
 -- Workspace events
 if config.show_workspace_events then
-    niri.on("workspace:activate", function(data)
+    niri.events:on("workspace:activate", function(data)
         stats.workspace_changes = stats.workspace_changes + 1
-        niri.log("[WORKSPACE] Activated: " .. data.name .. " (idx: " .. data.index .. ")")
+        niri.utils.log("[WORKSPACE] Activated: " .. data.name .. " (idx: " .. data.index .. ")")
     end)
     
-    niri.on("workspace:deactivate", function(data)
-        niri.log("[WORKSPACE] Deactivated: " .. data.name)
+    niri.events:on("workspace:deactivate", function(data)
+        niri.utils.log("[WORKSPACE] Deactivated: " .. data.name)
     end)
 end
 
 -- Monitor events
 if config.show_monitor_events then
-    niri.on("monitor:connect", function(data)
+    niri.events:on("monitor:connect", function(data)
         stats.monitor_changes = stats.monitor_changes + 1
-        niri.log("[MONITOR] Connected: " .. data.name .. " (" .. data.connector .. ")")
+        niri.utils.log("[MONITOR] Connected: " .. data.name .. " (" .. data.connector .. ")")
     end)
     
-    niri.on("monitor:disconnect", function(data)
+    niri.events:on("monitor:disconnect", function(data)
         stats.monitor_changes = stats.monitor_changes + 1
-        niri.log("[MONITOR] Disconnected: " .. data.name .. " (" .. data.connector .. ")")
+        niri.utils.log("[MONITOR] Disconnected: " .. data.name .. " (" .. data.connector .. ")")
     end)
 end
 
 -- Layout events
 if config.show_layout_events then
-    niri.on("layout:mode_changed", function(data)
-        niri.log("[LAYOUT] Mode changed: " .. data.mode)
+    niri.events:on("layout:mode_changed", function(data)
+        niri.utils.log("[LAYOUT] Mode changed: " .. data.mode)
     end)
     
-    niri.on("layout:window_added", function(data)
-        niri.log("[LAYOUT] Window added (id: " .. data.id .. ")")
+    niri.events:on("layout:window_added", function(data)
+        niri.utils.log("[LAYOUT] Window added (id: " .. data.id .. ")")
     end)
     
-    niri.on("layout:window_removed", function(data)
-        niri.log("[LAYOUT] Window removed (id: " .. data.id .. ")")
+    niri.events:on("layout:window_removed", function(data)
+        niri.utils.log("[LAYOUT] Window removed (id: " .. data.id .. ")")
     end)
 end
 
 -- Log summary on startup
-niri.log("=== Niri Event System Ready ===")
-niri.log("Configuration: " .. (config.show_window_events and "Windows " or "") ..
+niri.utils.log("=== Niri Event System Ready ===")
+niri.utils.log("Configuration: " .. (config.show_window_events and "Windows " or "") ..
                             (config.show_workspace_events and "Workspaces " or "") ..
                             (config.show_monitor_events and "Monitors " or "") ..
                             (config.show_layout_events and "Layout" or ""))
@@ -388,7 +388,7 @@ niri.log("Configuration: " .. (config.show_window_events and "Windows " or "") .
 Keep track of what each event represents:
 
 ```lua
-niri.on("window:focus", function(data)
+niri.events:on("window:focus", function(data)
     -- Clear, descriptive action
     update_window_title_display(data.title)
 end)
@@ -398,19 +398,19 @@ end)
 Not all events may have complete data. Always check:
 
 ```lua
-niri.on("window:open", function(data)
+niri.events:on("window:open", function(data)
     local title = data.title or "unknown"
-    niri.log("Opened: " .. title)
+    niri.utils.log("Opened: " .. title)
 end)
 ```
 
 ### 3. Use One-Time Handlers for Initialization
-Use `niri.once()` for events that should only happen once:
+Use `niri.events:once()` for events that should only happen once:
 
 ```lua
 -- Set up notification on first window
-niri.once("window:open", function(data)
-    niri.log("First window opened, system ready!")
+niri.events:once("window:open", function(data)
+    niri.utils.log("First window opened, system ready!")
 end)
 ```
 
@@ -421,12 +421,12 @@ If you register handlers dynamically, clean them up:
 local handler_ids = {}
 
 function enable_monitoring()
-    table.insert(handler_ids, niri.on("window:focus", handle_focus))
+    table.insert(handler_ids, niri.events:on("window:focus", handle_focus))
 end
 
 function disable_monitoring()
     for _, id in ipairs(handler_ids) do
-        niri.off("window:focus", id)
+        niri.events:off("window:focus", id)
     end
     handler_ids = {}
 end
@@ -437,12 +437,12 @@ Avoid heavy computations in event handlers as they run synchronously:
 
 ```lua
 -- Good: Quick, responsive
-niri.on("window:focus", function(data)
-    niri.log("Focus: " .. data.title)
+niri.events:on("window:focus", function(data)
+    niri.utils.log("Focus: " .. data.title)
 end)
 
 -- Bad: Heavy computation blocks the compositor
-niri.on("window:focus", function(data)
+niri.events:on("window:focus", function(data)
     for i = 1, 1000000 do
         -- expensive computation
     end
@@ -465,12 +465,12 @@ You can use events together with the Runtime API to create powerful automations:
 ```lua
 niri.apply_config({})
 
-niri.on("window:focus", function(data)
+niri.events:on("window:focus", function(data)
     -- Get current window info from Runtime API
     if niri.runtime then
         local window = niri.runtime.get_focused_window()
         if window then
-            niri.log("Focused: " .. window.title .. " (app: " .. window.app_id .. ")")
+            niri.utils.log("Focused: " .. window.title .. " (app: " .. window.app_id .. ")")
         end
     end
 end)
@@ -486,26 +486,26 @@ end)
 ### Handler Not Called
 1. Verify the event type name matches exactly
 2. Check if the callback function has any errors
-3. Use `niri.log()` to debug:
+3. Use `niri.utils.log()` to debug:
 
 ```lua
-niri.on("window:focus", function(data)
-    niri.log("Handler called with data: " .. (data and "table" or "nil"))
+niri.events:on("window:focus", function(data)
+    niri.utils.log("Handler called with data: " .. (data and "table" or "nil"))
 end)
 ```
 
 ### Performance Issues
 1. Avoid heavy computation in handlers
-2. Consider using `niri.once()` instead of `niri.on()` when appropriate
+2. Consider using `niri.events:once()` instead of `niri.events:on()` when appropriate
 3. Profile your handlers with timing:
 
 ```lua
-niri.on("window:focus", function(data)
+niri.events:on("window:focus", function(data)
     local start = os.clock()
     -- your handler code
     local elapsed = os.clock() - start
     if elapsed > 0.01 then
-        niri.log("Slow handler: " .. elapsed .. "s")
+        niri.utils.log("Slow handler: " .. elapsed .. "s")
     end
 end)
 ```
