@@ -4,6 +4,25 @@ Lua scripting API for the Niri compositor.
 
 This crate provides Lua scripting capabilities to Niri, allowing users to configure and extend Niri using Lua scripts.
 
+## Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Configuration API | ✅ Complete | Full KDL parity |
+| Action System | ✅ Complete | ~90 actions implemented |
+| State Queries | ✅ Partial | 4 queries (windows, focused_window, workspaces, outputs) |
+| Event System | ⚠️ Partial | Infrastructure complete, most events not wired |
+| Plugin System | 🚧 Stub | Discovery works, sandbox/lifecycle not implemented |
+| Hot Reload | ✅ Complete | Uses polling (not inotify) |
+| Async/Safety | 🚧 Planned | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
+| LSP Support | 🚧 Planned | EmmyLua type definitions not yet generated |
+
+> **TODO: Simplify config_proxy.rs** - The config proxy uses `serde_json::Value` as an intermediary
+> format. Consider whether direct Lua-to-Config conversion would be more efficient.
+
+> **TODO: Unify event_emitter.rs** - Contains two parallel implementations (Rust struct and
+> Lua-based global tables). Evaluate which is better and prune the unused code.
+
 ## Features
 
 - **Reactive Configuration API**: Configure Niri using `niri.config.*` proxy tables

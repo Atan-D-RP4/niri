@@ -81,16 +81,23 @@ lua.load(r#"
 
 ### Current Implementation Location
 
-All Lua integration code lives in:
+All Lua integration code lives in the `niri-lua` crate:
 
 ```
-src/lua_extensions/
-├── mod.rs              - Module exports, VM initialization
-├── config.rs           - Configuration API
-├── niri_api.rs         - Core Niri API binding
-├── config_converter.rs - Config↔Lua conversion
-└── runtime.rs          - Runtime management
+niri-lua/src/
+├── lib.rs              - Module exports, VM initialization
+├── config_api.rs       - Configuration API (niri.config.*)
+├── config_proxy.rs     - Reactive config proxy
+├── runtime_api.rs      - Runtime state queries (niri.state.*)
+├── action_proxy.rs     - Action execution (niri.action.*)
+├── event_emitter.rs    - Event system (niri.events.*)
+├── plugin_system.rs    - Plugin discovery and loading
+├── module_loader.rs    - Lua require() implementation
+├── hot_reload.rs       - File change detection
+└── ...                 - Additional support modules
 ```
+
+> **Note:** The crate is used directly as `niri_lua` in imports (e.g., `use niri_lua::LuaConfig;`).
 
 ---
 
@@ -164,7 +171,7 @@ Event Handling:
 
 ### 1. Configuration Loading
 
-**File:** `src/lua_extensions/config.rs`
+**File:** `niri-lua/src/config_api.rs` and `niri-lua/src/config_proxy.rs`
 
 ```rust
 pub fn load_lua_config() -> Result<Config> {
@@ -214,7 +221,9 @@ pub fn handle_window_open(window: &Window) {
 
 ### 3. Plugin Loading
 
-**File:** `src/lua_extensions/plugin_system.rs` (Tier 1, pending)
+**File:** `niri-lua/src/plugin_system.rs`
+
+> **Status:** Basic discovery implemented. Sandbox and lifecycle hooks are TODO.
 
 Search paths (in order):
 1. `~/.config/niri/plugins/`
@@ -380,10 +389,10 @@ Backend:
 
 ### Adding a New Lua API Function
 
-**Step 1: Add to `niri_api.rs`**
+**Step 1: Add to the appropriate module in `niri-lua/src/`**
 
 ```rust
-// src/lua_extensions/niri_api.rs
+// niri-lua/src/your_module.rs
 
 fn register_niri_module(lua: &Lua) -> Result<()> {
   let niri = lua.create_table()?;
@@ -448,8 +457,8 @@ Enable debug logging:
 # Run Niri with Lua debug output
 RUST_LOG=debug niri
 
-# Or filter to Lua only
-RUST_LOG=niri::lua_extensions=debug niri
+# Or filter to niri-lua only
+RUST_LOG=niri_lua=debug niri
 ```
 
 In your Lua code:
@@ -578,8 +587,8 @@ Look for:
 
 ### Source Code
 
-- **Configuration handling:** `src/lua_extensions/config.rs`
-- **Core API bindings:** `src/lua_extensions/niri_api.rs`
+- **Lua crate:** `niri-lua/src/` (all Lua integration)
+- **Event wiring:** `src/lua_event_hooks.rs`
 - **Event integration:** `src/handlers/*.rs` (multiple files)
 
 ---

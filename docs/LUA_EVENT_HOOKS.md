@@ -6,6 +6,12 @@ The Niri Lua event system provides a way for Lua scripts to listen to and react 
 
 The event system is based on a pub-sub pattern where scripts register handlers (callbacks) for specific event types, and the compositor emits events when things happen.
 
+> **Implementation Status:** The event infrastructure is complete, but **not all events are wired** to compositor code yet. See the [Event Wiring Status](#event-wiring-status) section for details.
+
+> **TODO: Simplify event_emitter.rs** - The current implementation has two parallel architectures:
+> a Rust `EventEmitter` struct (unused) and a Lua-based implementation via global tables.
+> These should be evaluated to determine which approach is better, and the unused code pruned.
+
 ## Quick Start
 
 ```lua
@@ -123,12 +129,40 @@ Remove all handlers for a specific event type.
 niri.events:clear("window:focus")
 ```
 
+## Event Wiring Status
+
+The event infrastructure is complete, but many events need to be wired to compositor code paths. Here's the current status:
+
+| Event | Status | Notes |
+|-------|--------|-------|
+| `startup` | ✅ Wired | Emitted before event loop starts |
+| `shutdown` | ✅ Wired | Emitted after event loop exits |
+| `window:open` | ⚠️ Partial | Wired but emits placeholder data (id=0, title="window") |
+| `window:close` | 🚧 TODO | Defined but not wired |
+| `window:focus` | 🚧 TODO | Defined but not wired |
+| `window:blur` | 🚧 TODO | Defined but not wired |
+| `window:title_changed` | 🚧 TODO | Defined but not wired |
+| `window:app_id_changed` | 🚧 TODO | Defined but not wired |
+| `window:fullscreen` | 🚧 TODO | Defined but not wired |
+| `workspace:activate` | ✅ Wired | Emitted on workspace switch |
+| `workspace:deactivate` | 🚧 TODO | Defined but not wired |
+| `monitor:connect` | 🚧 TODO | Defined but not wired |
+| `monitor:disconnect` | 🚧 TODO | Defined but not wired |
+| `layout:mode_changed` | 🚧 TODO | Defined but not wired |
+| `layout:window_added` | 🚧 TODO | Defined but not wired |
+| `layout:window_removed` | 🚧 TODO | Defined but not wired |
+| `config:reload` | 🚧 TODO | Defined but not wired |
+| `overview:open` | 🚧 TODO | Defined but not wired |
+| `overview:close` | 🚧 TODO | Defined but not wired |
+
 ## Event Types
 
 ### Window Events
 
 #### window:open
 Emitted when a new window is created.
+
+> **Status:** ⚠️ Partially wired - currently emits placeholder data. TODO: Wire with real window info.
 
 **Event data:**
 ```lua

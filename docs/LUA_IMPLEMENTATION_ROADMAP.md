@@ -6,12 +6,25 @@
 |-------|--------|-------------|
 | Tier 1: Module System | ✅ COMPLETE | Module loader, plugin discovery, event emitter, hot reload |
 | Tier 2: Configuration API | ✅ COMPLETE | Full config API, Lua types, validators, extractors |
-| Tier 3: Runtime State | ✅ COMPLETE | Window/workspace/output queries, IPC REPL |
-| Tier 4: Event System | ✅ COMPLETE | 20+ event types implemented, lock/startup/shutdown wired |
+| Tier 3: Runtime State | ✅ COMPLETE | 4 query functions (windows, focused_window, workspaces, outputs) |
+| Tier 4: Event System | ⚠️ PARTIAL | Infrastructure complete; most events not wired to compositor |
 | API Refactor R1-R13 | ✅ COMPLETE | Reactive config proxy, `niri.state/action/events/utils` namespaces |
 | Config Side Effects | ✅ COMPLETE | Cursor, keyboard, libinput settings properly applied |
-| Tier 5: Plugin Ecosystem | ⚙️ PARTIAL | Basic infrastructure done; lifecycle/sandbox pending |
+| Async/Safety | 🚧 PLANNED | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
+| Tier 5: Plugin Ecosystem | 🚧 NOT IMPLEMENTED | Basic discovery only; lifecycle/sandbox/IPC pending |
 | Tier 6: Developer Experience | ⚙️ PARTIAL | REPL/docs done; type definitions/LSP pending |
+
+---
+
+## Architecture TODOs
+
+> **TODO: Simplify config_proxy.rs** - Uses `serde_json::Value` as intermediary format.
+> Evaluate whether direct Lua-to-Config conversion would be more efficient.
+
+> **TODO: Unify event_emitter.rs** - Contains two parallel implementations:
+> 1. Rust `EventEmitter` struct (lines 48-178) - currently unused
+> 2. Lua-based implementation via global tables (lines 180-306) - actually used
+> Evaluate which approach is better and prune the unused code.
 
 ---
 
@@ -46,41 +59,48 @@ The `apply_pending_lua_config()` function in `src/niri.rs` now properly applies 
 
 **Note:** Output reconfiguration is not yet handled - outputs need explicit reconfiguration via actions.
 
-### Event System: Implemented vs Missing
+### Event System: Wiring Status
 
-**Currently implemented events (in `src/lua_event_hooks.rs`):**
+**Currently wired events:**
 
-| Category | Events | Status |
-|----------|--------|--------|
-| Window | `window:open`, `window:close`, `window:focus`, `window:blur` | ✅ Wired up |
-| Window | `window:title_changed`, `window:app_id_changed`, `window:fullscreen` | ✅ Wired up |
-| Window | `window:move`, `window:resize`, `window:maximize` | ✅ Defined |
-| Workspace | `workspace:activate`, `workspace:deactivate` | ✅ Wired up |
-| Workspace | `workspace:create`, `workspace:destroy`, `workspace:rename` | ✅ Defined |
-| Monitor | `monitor:connect`, `monitor:disconnect` | ✅ Wired up |
-| Output | `output:mode_change` | ✅ Defined |
-| Layout | `layout:mode_changed`, `layout:window_added`, `layout:window_removed` | ✅ Wired up |
-| Overview | `overview:open`, `overview:close` | ✅ Wired up |
-| Config | `config:reload` | ✅ Wired up |
-| Lock | `lock:activate`, `lock:deactivate` | ✅ Wired up |
-| Lifecycle | `startup`, `shutdown` | ✅ Wired up |
-| Idle | `idle:start`, `idle:end` | ✅ Defined |
-| Keyboard | `key:press`, `key:release` | ✅ Defined |
+| Category | Event | Status |
+|----------|-------|--------|
+| Lifecycle | `startup` | ✅ Wired (main.rs) |
+| Lifecycle | `shutdown` | ✅ Wired (main.rs) |
+| Window | `window:open` | ⚠️ Partial (placeholder data) |
+| Workspace | `workspace:activate` | ✅ Wired |
 
-**Event Wiring Notes:**
-- Lock events use `complete_lock()` helper that atomically sets lock state and emits event
-- Startup event emitted in `main.rs` before event loop starts
-- Shutdown event emitted in `main.rs` after event loop exits
-- Window resize/maximize, idle, and key events are defined but not yet wired to call sites
-- These events can be wired when specific use cases require them
+**Defined but NOT wired (TODO):**
+
+| Category | Events |
+|----------|--------|
+| Window | `window:close`, `window:focus`, `window:blur`, `window:title_changed`, `window:app_id_changed`, `window:fullscreen`, `window:move`, `window:resize`, `window:maximize` |
+| Workspace | `workspace:deactivate`, `workspace:create`, `workspace:destroy`, `workspace:rename` |
+| Monitor | `monitor:connect`, `monitor:disconnect` |
+| Output | `output:mode_change` |
+| Layout | `layout:mode_changed`, `layout:window_added`, `layout:window_removed` |
+| Overview | `overview:open`, `overview:close` |
+| Config | `config:reload` |
+| Lock | `lock:activate`, `lock:deactivate` |
+| Idle | `idle:start`, `idle:end` |
+| Keyboard | `key:press`, `key:release` |
+
+**Note:** Event emission helper functions exist in `src/lua_event_hooks.rs`, but need to be called from the appropriate compositor code paths.
 
 ### Tier 5: Plugin Ecosystem
 
 See [LUA_TIER5_SPEC.md](LUA_TIER5_SPEC.md) for details.
 
+**Status:** 🚧 NOT IMPLEMENTED (discovery only)
+
+**Current state:**
+- ✅ Plugin discovery in `~/.config/niri/plugins/`
+- ✅ Plugin metadata parsing
+- 🚧 Sandbox is a stub - `create_plugin_env()` just copies all globals without restrictions
+
 **TODO:**
 - Plugin lifecycle management (enable/disable, on_load/on_unload hooks)
-- Plugin sandbox for isolation
+- Plugin sandbox with capability-based permissions
 - Dependency resolution with version constraints
 - IPC commands: `niri msg plugin list/enable/disable/info`
 

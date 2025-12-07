@@ -1,24 +1,26 @@
 # Niri Lua API - Implementation Status
 
-**Last Updated:** November 20, 2025  
-**Current Version:** niri v25.8.0  
-**Lua Runtime:** mlua 0.11.4 with LuaJIT (Lua 5.2 compatible)
+**Last Updated:** December 7, 2025  
+**Lua Runtime:** mlua with LuaJIT (Lua 5.2 compatible)
 
 ## Executive Summary
 
-Niri has achieved **production-ready Lua API support** with 3 complete implementation tiers:
+The Lua API for Niri provides a comprehensive alternative to KDL configuration with runtime scripting capabilities. Implementation status by tier:
 
-- ✅ **Tier 1: Module System** (100% Complete) - 127/127 tests passing
-- ✅ **Tier 2: Configuration API** (100% Complete) - **Full KDL parity** (24/24 Config fields)
-- ✅ **Tier 3: Runtime State Access** (100% Complete) - Live compositor state queries
+- ✅ **Tier 1: Module System** - Module loader, plugin discovery (sandbox is TODO)
+- ✅ **Tier 2: Configuration API** - Full KDL parity (24/24 Config fields)
+- ✅ **Tier 3: Runtime State Access** - 4 query functions implemented
+- ⚠️ **Tier 4: Event System** - Infrastructure complete, some events not yet wired to compositor
+- 🚧 **Tier 5: Plugin Ecosystem** - Not implemented (lifecycle hooks, sandbox, IPC commands)
+- 🚧 **Tier 6: Developer Experience** - Partially implemented (REPL works, LSP/type defs TODO)
 
 **Total Implementation:** ~8,500 lines of Rust code across 15 modules  
-**Configuration Coverage:** 100% parity with KDL configuration (622 KDL lines → 763 Lua lines)  
-**Test Coverage:** 127 passing tests (100% pass rate)
+**Configuration Coverage:** 100% parity with KDL configuration  
+**Test Coverage:** 127 passing tests
 
 ---
 
-## Tier 1: Module System ✅ 100% COMPLETE
+## Tier 1: Module System ✅ COMPLETE
 
 ### What's Implemented
 
@@ -36,6 +38,9 @@ Niri has achieved **production-ready Lua API support** with 3 complete implement
 - Error isolation (plugin failures don't crash Niri)
 - `niri.plugins` API table
 
+> **TODO: Plugin Sandbox** - Currently `create_plugin_env()` copies all globals without restrictions.
+> A proper sandbox with capability-based permissions is planned for Tier 5.
+
 **Event Emitter** (`niri-lua/src/event_emitter.rs` - 198 lines)
 - Event registration with `on(event_name, handler)`
 - Event emission with `emit(event_name, data)`
@@ -44,11 +49,12 @@ Niri has achieved **production-ready Lua API support** with 3 complete implement
 - Event namespacing
 
 **Hot Reload** (`niri-lua/src/hot_reload.rs` - 157 lines)
-- File watching with inotify
+- File metadata polling for change detection
 - Automatic config reload on changes
-- Debouncing to prevent rapid reloads
 - Error handling (bad configs don't break running state)
 - Reload notifications via events
+
+> **Note:** Hot reload uses filesystem metadata polling, not inotify. This is simpler but less efficient for large numbers of files.
 
 ### API Surface
 
@@ -78,14 +84,12 @@ niri.emit("custom_event", { data = "value" })
 
 ---
 
-## Tier 2: Configuration API ✅ 100% COMPLETE
+## Tier 2: Configuration API ✅ COMPLETE
 
 ### Achievement: Full KDL Parity
 
 **All 24 Config struct fields are supported in Lua!**  
-**All configuration options are now READABLE from Lua scripts!**
-
-This is a major enhancement - the Configuration API now supports **both reading AND writing** of all Niri settings.
+**All configuration options are now READABLE and WRITABLE from Lua scripts!**
 
 Comparison:
 - **KDL example:** `resources/default-config.kdl` (900+ lines)
@@ -418,7 +422,7 @@ animations = {
 
 ---
 
-## Tier 3: Runtime State Access ✅ 100% COMPLETE
+## Tier 3: Runtime State Access ✅ COMPLETE
 
 ### Architecture
 
@@ -447,7 +451,16 @@ Lua receives Vec<Window>
 
 ### Implemented Functions
 
-**1. `niri.state.windows()` → `Window[]`**
+Currently 4 query functions are implemented:
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `niri.state.windows()` | `Window[]` | All windows |
+| `niri.state.focused_window()` | `Window?` | Currently focused window |
+| `niri.state.workspaces()` | `Workspace[]` | All workspaces |
+| `niri.state.outputs()` | `Output[]` | All monitors |
+
+> **TODO:** Additional queries like `focused_output()`, `layers()`, `keyboard_layouts()` are not yet implemented.
 
 Returns array of all windows. Each window has:
 ```lua
@@ -712,15 +725,13 @@ return {
 
 ---
 
-## Next Steps: Tier 4 - Event System - ⏳ IN PROGRESS
+## Next Steps: Tier 4 - Event System - ⚠️ PARTIALLY COMPLETE
 
-**Current Status**: Foundation Phase Complete (Phase 1 ✅)  
-**Phase 1 Completion**: November 20, 2025  
-**Next Phase**: Phase 2 - Event Integration (Ready to implement)
+**Current Status**: Infrastructure complete, but not all events are wired to compositor call sites.
 
 ### Tier 4: Event System Architecture
 
-The event system is organized into 2 phases:
+The event system infrastructure is complete with registration, emission, and handler management. However, **many events are defined but not yet wired** to actual compositor code paths.
 
 #### Phase 1: Foundation ✅ COMPLETE (2,175 lines)
 
@@ -728,9 +739,7 @@ The event system is organized into 2 phases:
 - **event_emitter.rs** (198 lines) - Event registration and emission
 - **event_handlers.rs** (328 lines) - Handler registry with lifecycle management
 - **event_system.rs** (243 lines) - Thread-safe wrapper and Lua API
-- **event_data.rs** (706 lines) - NEW Event type converters for Lua
-
-**Test Coverage**: 34 tests, all passing (21 event handler + system tests, 13 event_data tests)
+- **event_data.rs** (706 lines) - Event type converters for Lua
 
 **What's Implemented**:
 1. ✅ Core event handler registry with HashMap storage
@@ -738,81 +747,81 @@ The event system is organized into 2 phases:
 3. ✅ Support for persistent and one-time handlers
 4. ✅ Error isolation (handler failures don't crash Niri)
 5. ✅ Automatic cleanup of one-time handlers
-6. ✅ Lua API registration (niri.on(), niri.once(), niri.off())
+6. ✅ Lua API registration (niri.events:on(), niri.events:once(), niri.events:off())
 7. ✅ Thread-safe Arc<parking_lot::Mutex> wrapper
-8. ✅ Event data conversion to Lua tables:
-   - Window events (open, close, focus, blur)
-   - Workspace events (activate, deactivate)
-   - Monitor events (connect, disconnect)
-   - Layout events (mode_changed, window_added, window_removed)
-9. ✅ Comprehensive documentation and integration guide
 
-**Example Usage**:
+#### Phase 2: Event Wiring Status
+
+| Event | Status | Notes |
+|-------|--------|-------|
+| `startup` | ✅ Wired | Emitted in main.rs before event loop |
+| `shutdown` | ✅ Wired | Emitted in main.rs after event loop exits |
+| `window:open` | ⚠️ Partial | Wired but with placeholder data (id=0, title="window") |
+| `window:close` | 🚧 TODO | Defined but not wired |
+| `window:focus` | 🚧 TODO | Defined but not wired |
+| `window:blur` | 🚧 TODO | Defined but not wired |
+| `window:title_changed` | 🚧 TODO | Defined but not wired |
+| `window:app_id_changed` | 🚧 TODO | Defined but not wired |
+| `window:fullscreen` | 🚧 TODO | Defined but not wired |
+| `window:move` | 🚧 TODO | Defined but not wired |
+| `window:resize` | 🚧 TODO | Defined but not wired |
+| `window:maximize` | 🚧 TODO | Defined but not wired |
+| `workspace:activate` | ✅ Wired | Emitted on workspace switch |
+| `workspace:deactivate` | 🚧 TODO | Defined but not wired |
+| `workspace:create` | 🚧 TODO | Defined but not wired |
+| `workspace:destroy` | 🚧 TODO | Defined but not wired |
+| `workspace:rename` | 🚧 TODO | Defined but not wired |
+| `monitor:connect` | 🚧 TODO | Defined but not wired |
+| `monitor:disconnect` | 🚧 TODO | Defined but not wired |
+| `layout:mode_changed` | 🚧 TODO | Defined but not wired |
+| `layout:window_added` | 🚧 TODO | Defined but not wired |
+| `layout:window_removed` | 🚧 TODO | Defined but not wired |
+| `overview:open` | 🚧 TODO | Defined but not wired |
+| `overview:close` | 🚧 TODO | Defined but not wired |
+| `config:reload` | 🚧 TODO | Defined but not wired |
+| `lock:activate` | 🚧 TODO | Defined but not wired |
+| `lock:deactivate` | 🚧 TODO | Defined but not wired |
+| `idle:start` | 🚧 TODO | Defined but not wired |
+| `idle:end` | 🚧 TODO | Defined but not wired |
+| `key:press` | 🚧 TODO | Defined but not wired |
+| `key:release` | 🚧 TODO | Defined but not wired |
+| `output:mode_change` | 🚧 TODO | Defined but not wired |
+
+**Example Usage** (for wired events):
 ```lua
 -- Listen for window events
-niri.on("window:open", function(event)
-    niri.log("Window opened: " .. event.window.title)
+niri.events:on("window:open", function(event)
+    niri.utils.log("Window opened: " .. (event.title or "unknown"))
 end)
 
--- One-time workspace activation
-niri.once("workspace:activate", function(event)
-    niri.log("First workspace activated: " .. event.workspace.name)
+-- Startup hook
+niri.events:on("startup", function()
+    niri.utils.log("Niri started!")
 end)
 
--- Monitor connection
-niri.on("monitor:connect", function(event)
-    niri.log("Monitor connected: " .. event.output.name)
+-- Workspace switch
+niri.events:on("workspace:activate", function(event)
+    niri.utils.log("Workspace activated: " .. event.name)
 end)
-
--- Remove handler
-niri.off("window:open", handler_id)
 ```
-
-#### Phase 2: Integration ⏳ READY TO IMPLEMENT
-
-**Files Created**:
-- `docs/TIER4_INTEGRATION_GUIDE.md` - Comprehensive 350+ line integration guide
-
-**What's Needed for Phase 2**:
-1. Create `src/lua_event_hooks.rs` - Emission functions
-2. Add `lua_event_handlers: Option<SharedEventHandlers>` to State
-3. Wire events in compositor handlers:
-   - Window events: `src/handlers/xdg_shell.rs`
-   - Workspace events: `src/layout/mod.rs`
-   - Monitor events: `src/backend/mod.rs`
-4. Add Phase 2 integration tests
-5. Test with real window open/close scenarios
-
-**Estimated Lines**: ~500-700 lines (mostly in emission points)
-
-**Event Emission Points**:
-
-| Event | Location | Trigger |
-|-------|----------|---------|
-| window:open | xdg_shell.rs:59-64 | new_toplevel() |
-| window:close | xdg_shell.rs:842-904 | toplevel_destroyed() |
-| window:focus | layout/mod.rs | focus change |
-| window:blur | layout/mod.rs | focus moves away |
-| workspace:activate | layout/mod.rs | workspace switch |
-| workspace:deactivate | layout/mod.rs | workspace loses focus |
-| monitor:connect | backend/mod.rs | output added |
-| monitor:disconnect | backend/mod.rs | output removed |
-| layout:mode_changed | workspace.rs | floating toggle |
-| layout:window_added | workspace.rs | add_tile() |
-| layout:window_removed | workspace.rs | remove_tile() |
-
-**Documentation Location**: `docs/TIER4_INTEGRATION_GUIDE.md` - Complete implementation guide with code examples
 
 ---
 
-## Next Steps: Tier 4 - Event System (Roadmap)
+## Implementation Roadmap
 
-- ✅ Tier 1: Module System (Weeks 1-2) - **COMPLETE**
-- ✅ Tier 2: Configuration API (Weeks 3-4) - **COMPLETE**
-- ✅ Tier 3: Runtime State Access (Weeks 5-6) - **COMPLETE**
-- ⏳ Tier 4: Event System (Weeks 7-8) - **NEXT**
-- ⏸️ Tier 5: Plugin API Extensions (Weeks 9-10)
-- ⏸️ Tier 6: Developer Experience (Weeks 11-12)
+- ✅ Tier 1: Module System - **COMPLETE**
+- ✅ Tier 2: Configuration API - **COMPLETE**
+- ✅ Tier 3: Runtime State Access - **COMPLETE**
+- ⚠️ Tier 4: Event System - **PARTIAL** (infrastructure done, event wiring TODO)
+- 🚧 Tier 5: Plugin Ecosystem - **NOT IMPLEMENTED** (see LUA_TIER5_SPEC.md)
+- 🚧 Tier 6: Developer Experience - **PARTIAL** (see LUA_TIER6_SPEC.md)
+
+### Next Priority: Async Infrastructure
+
+See `docs/LUA_ASYNC_IMPLEMENTATION.md` for the planned async/safety implementation including:
+- Execution timeouts to prevent compositor freezes
+- `niri.schedule()` for deferred callbacks
+- Timer API for periodic tasks
 
 ---
 

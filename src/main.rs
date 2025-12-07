@@ -18,8 +18,8 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
-use niri::lua_extensions::LuaConfig;
 use niri::niri::State;
+use niri_lua::LuaConfig;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
     REMOVE_ENV_RUST_BACKTRACE, REMOVE_ENV_RUST_LIB_BACKTRACE,

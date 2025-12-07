@@ -636,15 +636,24 @@ niri.action.focus_workspace(1)
 
 ### Event Handling
 
+> **Note:** Event system infrastructure is complete, but not all events are wired to compositor code yet.
+> See `docs/LUA_CONFIG_STATUS.md` for the current event wiring status.
+
 ```lua
--- Listen for events
-niri.events:on("window-open", function(event)
-    niri.utils.log("Window opened: " .. event.window.title)
+-- Listen for events (use colon delimiter for event names)
+niri.events:on("window:open", function(event)
+    niri.utils.log("Window opened: " .. (event.title or "unknown"))
 end)
 
-niri.events:on("workspace-active", function(event)
-    niri.utils.log("Workspace activated: " .. event.workspace.name)
+niri.events:on("workspace:activate", function(event)
+    niri.utils.log("Workspace activated: " .. event.name)
 end)
+
+-- Currently wired events:
+-- - startup
+-- - shutdown  
+-- - window:open (partial - placeholder data)
+-- - workspace:activate
 ```
 
 ### Utility Functions

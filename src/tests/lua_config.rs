@@ -6,8 +6,7 @@
 #[cfg(test)]
 mod lua_config_tests {
     use niri_config::Config;
-
-    use crate::lua_extensions::LuaConfig;
+    use niri_lua::LuaConfig;
 
     #[test]
     fn test_lua_config_loads_successfully() {

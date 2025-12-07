@@ -2,6 +2,18 @@
 
 The Runtime State API allows Lua scripts to query the current state of the Niri compositor, including information about windows, workspaces, outputs (monitors), and focus state.
 
+## Implementation Status
+
+| Function | Status | Notes |
+|----------|--------|-------|
+| `niri.state.windows()` | ✅ Implemented | Returns all windows |
+| `niri.state.focused_window()` | ✅ Implemented | Returns focused window or nil |
+| `niri.state.workspaces()` | ✅ Implemented | Returns all workspaces |
+| `niri.state.outputs()` | ✅ Implemented | Returns all outputs |
+| `niri.state.focused_output()` | 🚧 TODO | Not yet implemented |
+| `niri.state.layers()` | 🚧 TODO | Layer shell surfaces not exposed |
+| `niri.state.keyboard_layouts()` | 🚧 TODO | Keyboard layout state not exposed |
+
 ## Overview
 
 The Runtime State API is accessed through `niri.state` and provides four main query functions:
