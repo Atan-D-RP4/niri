@@ -40,7 +40,6 @@ pub mod runtime_api;
 
 // Tier 4: Async Primitives
 pub mod loop_api;
-pub mod worker;
 
 // Testing utilities (only available in tests)
 #[cfg(test)]
@@ -79,10 +78,6 @@ pub use runtime::LuaRuntime;
 pub use runtime_api::{
     clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,
     RuntimeApi, StateSnapshot,
-};
-pub use worker::{
-    create_worker_callbacks, deliver_worker_result, register_worker_api, WorkerCallbacks,
-    WorkerResult,
 };
 
 /// Trait for registering Lua components to the global context.

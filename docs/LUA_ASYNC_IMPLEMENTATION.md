@@ -11,10 +11,9 @@ This document outlines the implementation plan for improving the niri-lua runtim
 5. [Phase 1: Remove parking_lot Dependency](#phase-1-remove-parking_lot-dependency)
 6. [Phase 2: Execution Timeouts with Luau](#phase-2-execution-timeouts-with-luau)
 7. [Phase 3: niri.schedule() Implementation](#phase-3-nirischedule-implementation)
-8. [Phase 4: Worker Threads](#phase-4-worker-threads)
-9. [Phase 5: niri.loop API](#phase-5-niriloop-api)
-10. [Testing Strategy](#testing-strategy)
-11. [Migration Guide](#migration-guide)
+8. [Phase 4: niri.loop API](#phase-4-niriloop-api)
+9. [Testing Strategy](#testing-strategy)
+10. [Migration Guide](#migration-guide)
 
 ---
 
@@ -63,8 +62,7 @@ This document outlines the implementation plan for improving the niri-lua runtim
 1. **Remove `parking_lot` dependency** - Use `std::sync::Mutex` for shared state (re-entrancy safe)
 2. **Add timeout protection** - Use Luau's `set_interrupt` for wall-clock timeouts
 3. **Implement `niri.schedule(fn)`** - Defer Lua callbacks to the compositor event loop
-4. **Support worker threads** - Allow heavy computation off the main thread
-5. **Provide `niri.loop` API** - Timer capabilities integrated with calloop
+4. **Provide `niri.loop` API** - Timer capabilities integrated with calloop
 
 ---
 
@@ -124,7 +122,6 @@ Key architectural decisions:
 | mlua `send` feature | **Not used** | Performance overhead unacceptable |
 | Timeout mechanism | `set_interrupt` with wall-clock | Clean, no unsafe code, reliable |
 | Default timeout | 1 second | Sufficient for config/events, catches infinite loops |
-| Worker data transfer | JSON serialization | Simple, no `send` feature required |
 | Callback queue flush | Hybrid with limit (16) | Bounds latency while allowing some chaining |
 | Timer lifetime | Persist until explicit `close()` | Matches Neovim/libuv semantics |
 
@@ -308,91 +305,7 @@ impl LuaRuntime {
 
 ---
 
-## Phase 4: Worker Threads
-
-**Status: ✅ Complete**
-
-### Rationale
-
-For truly heavy computation (large data processing, complex algorithms), even `niri.schedule()` isn't enough - the work still runs on the main thread. Worker threads allow offloading to a separate OS thread.
-
-### Design: Isolated Lua States (Neovim Model)
-
-We use **isolated Lua states** per worker thread, avoiding the mlua `send` feature:
-
-| Approach | Requires `send` feature? | Performance Impact |
-|----------|-------------------------|-------------------|
-| Shared Lua state | Yes | 10-20% overhead on ALL Lua ops |
-| **Isolated Lua states** | **No** | **No overhead** |
-
-### Data Serialization
-
-Workers use JSON serialization for data transfer:
-- **Supported**: `nil`, booleans, numbers, strings, arrays, objects
-- **Not supported**: functions, metatables, userdata, circular references
-
-### API
-
-```lua
--- Create a worker with a Lua script
-local worker = niri.worker.new([[
-    -- This runs in a separate thread with isolated Lua state
-    -- Limited API: no niri.events, no niri.action, only pure computation
-    local result = 0
-    for i = 1, 1000000 do
-        result = result + i
-    end
-    return result
-]])
-
--- Execute with callback (non-blocking)
-worker:run(function(result, err)
-    if err then
-        print("Worker error:", err)
-    else
-        print("Worker result:", result)
-    end
-end)
-
--- With arguments
-local worker2 = niri.worker.new([[
-    local args = ...
-    return args.x + args.y
-]])
-worker2:run({ x = 10, y = 20 }, function(result, err)
-    print("Sum:", result)  -- 30
-end)
-
--- Cancel a pending worker (cleans up callback)
-worker:cancel()
-```
-
-### Implementation
-
-Workers deliver results via an `async_channel`. The callback is stored in a Lua registry on the main thread and executed when the result arrives.
-
-Key components in `niri-lua/src/worker.rs`:
-- `Worker` userdata with `run()`, `cancel()` methods
-- `WorkerResult` for returning JSON-serialized results
-- `WorkerCallbacks` for storing pending callbacks by worker ID
-- `execute_worker_script()` runs in isolated Lua state with timeout
-- `deliver_worker_result()` executes callback on main thread
-
-```rust
-// Register the worker API
-let worker_callbacks = create_worker_callbacks();
-let (worker_tx, worker_rx) = async_channel::unbounded();
-register_worker_api(&lua, worker_tx, worker_callbacks.clone())?;
-
-// In event loop: deliver results when received
-for result in worker_rx.try_iter() {
-    deliver_worker_result(&lua, &worker_callbacks, result)?;
-}
-```
-
----
-
-## Phase 5: niri.loop API
+## Phase 4: niri.loop API
 
 **Status: ✅ Complete**
 
@@ -608,12 +521,11 @@ Move CPU-intensive code to workers:
 -- OK but blocks main thread until timeout or completion:
 local result = expensive_computation(data)
 
--- BETTER: Runs in background thread
-niri.worker.new([[
-    return expensive_computation(...)
-]]):run(data, function(result)
-    use_result(result)
-end)
+-- BETTER: Use niri.schedule() to break up work
+local function process_chunk()
+    -- Process in chunks, deferring to avoid blocking
+    niri.schedule(process_next_chunk)
+end
 ```
 
 ### For Developers
@@ -632,14 +544,13 @@ end)
 | `LuaRuntime::init_scheduler()` | Set up `niri.schedule()` |
 | `LuaRuntime::flush_scheduled()` | Execute queued callbacks |
 | `niri.schedule(fn)` | Defer Lua callback to next event loop iteration |
-| `niri.worker.new(script)` | Create worker for background computation |
 | `niri.loop.new_timer()` | Create timer integrated with calloop |
 
 #### Integration Points
 
 1. Call `flush_scheduled()` in the compositor's refresh cycle
 2. Set up wake channel for `niri.schedule()` to wake event loop
-3. Set up worker result channel for delivering worker results
+3. Call `fire_due_timers()` to execute timer callbacks
 4. Call `cleanup_all()` on callback store during runtime shutdown
 
 ---
@@ -649,13 +560,11 @@ end)
 1. **Phase 1**: Remove `parking_lot` → `std::sync::Mutex` ✅ Complete
 2. **Phase 2**: Execution timeouts with Luau `set_interrupt` ✅ Complete
 3. **Phase 3**: Implement `niri.schedule()` ✅ Complete
-4. **Phase 4**: Add worker threads (for heavy computation) ✅ Complete
-5. **Phase 5**: Implement `niri.loop` timers ✅ Complete
+4. **Phase 4**: Implement `niri.loop` timers ✅ Complete
 
 All phases are complete. The implementation provides:
 - Timeout protection via Luau's `set_interrupt`
 - Deferred execution via `niri.schedule(fn)`
-- Background computation via `niri.worker`
 - Timer functionality via `niri.loop`
 
 ### Dependencies
@@ -667,11 +576,7 @@ Phase 2 (Luau timeouts) ✅
     ↓
 Phase 3 (niri.schedule) ✅
     ↓
-Phase 4 (workers) ✅ ←── uses calloop channel,
-    │                   registry pattern,
-    │                   JSON serialization
-    ↓
-Phase 5 (timers) ✅ ←── similar registry pattern
+Phase 4 (timers) ✅ ←── uses registry pattern
 ```
 
 ---
