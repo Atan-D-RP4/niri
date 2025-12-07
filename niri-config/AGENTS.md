@@ -1,3 +1,21 @@
+## Build & Test Commands
+- **Build**: `cargo build` (or `cargo build --release`)
+- **Lint**: `cargo clippy --all-targets --all-features`
+- **Format**: `cargo +nightly fmt --all` (check: `cargo +nightly fmt --all -- --check`)
+- **Test all**: `cargo test`
+- **Single test**: `cargo test test_name` or `cargo test module::test_name`
+- **Update snapshots**: `cargo insta review` (uses insta for snapshot testing)
+
+## Code Style
+- **Imports**: Module-level granularity, grouped as std/external/crate (see rustfmt.toml)
+- **Comments**: Wrap at 100 chars
+- **Naming**: snake_case for functions/variables, CamelCase for types
+- **Errors**: Use `anyhow` for error handling with `.context()` for context
+- **Commits**: Small, focused, self-contained; each must build and pass tests
+- **Clippy**: `new_without_default` is allowed; interior mutability ignored for Smithay types
+
+---
+
 ## Niri Config Crate Architecture
 
 Comprehensive architecture of the configuration system. Covers configuration file loading and parsing [1a-1f], key binding resolution [2a-2e], and configuration subsystems including layout, output, input, animations, and window rules.

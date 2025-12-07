@@ -1264,14 +1264,98 @@ impl State {
                 self.niri.queue_redraw_all();
             }
             Action::MoveWindowToWorkspaceDown(focus) => {
+                // Capture window info and source workspace/output before move
+                let move_info = self.niri.layout.focus().map(|mapped| {
+                    let window_id = mapped.id().get() as u32;
+                    let window_title =
+                        crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                            role.title.clone().unwrap_or_default()
+                        });
+                    let from_ws = self
+                        .niri
+                        .layout
+                        .active_workspace()
+                        .and_then(|ws| ws.name().cloned());
+                    let from_output = self.niri.layout.active_output().map(|o| o.name());
+                    (window_id, window_title, from_ws, from_output)
+                });
+
                 self.niri.layout.move_to_workspace_down(focus);
                 self.maybe_warp_cursor_to_focus();
+
+                // Emit event with destination workspace/output info
+                if let Some((window_id, window_title, from_ws, from_output)) = move_info {
+                    let to_ws = self
+                        .niri
+                        .layout
+                        .active_workspace()
+                        .and_then(|ws| ws.name().cloned())
+                        .unwrap_or_default();
+                    let to_output = self
+                        .niri
+                        .layout
+                        .active_output()
+                        .map(|o| o.name())
+                        .unwrap_or_default();
+                    lua_event_hooks::emit_window_move(
+                        self,
+                        window_id,
+                        &window_title,
+                        from_ws.as_deref(),
+                        &to_ws,
+                        from_output.as_deref(),
+                        &to_output,
+                    );
+                }
+
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
             Action::MoveWindowToWorkspaceUp(focus) => {
+                // Capture window info and source workspace/output before move
+                let move_info = self.niri.layout.focus().map(|mapped| {
+                    let window_id = mapped.id().get() as u32;
+                    let window_title =
+                        crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                            role.title.clone().unwrap_or_default()
+                        });
+                    let from_ws = self
+                        .niri
+                        .layout
+                        .active_workspace()
+                        .and_then(|ws| ws.name().cloned());
+                    let from_output = self.niri.layout.active_output().map(|o| o.name());
+                    (window_id, window_title, from_ws, from_output)
+                });
+
                 self.niri.layout.move_to_workspace_up(focus);
                 self.maybe_warp_cursor_to_focus();
+
+                // Emit event with destination workspace/output info
+                if let Some((window_id, window_title, from_ws, from_output)) = move_info {
+                    let to_ws = self
+                        .niri
+                        .layout
+                        .active_workspace()
+                        .and_then(|ws| ws.name().cloned())
+                        .unwrap_or_default();
+                    let to_output = self
+                        .niri
+                        .layout
+                        .active_output()
+                        .map(|o| o.name())
+                        .unwrap_or_default();
+                    lua_event_hooks::emit_window_move(
+                        self,
+                        window_id,
+                        &window_title,
+                        from_ws.as_deref(),
+                        &to_ws,
+                        from_output.as_deref(),
+                        &to_output,
+                    );
+                }
+
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
@@ -1514,7 +1598,30 @@ impl State {
                 }
             }
             Action::SetWorkspaceName(name) => {
+                // Capture old name before renaming for event
+                let old_name = self
+                    .niri
+                    .layout
+                    .active_workspace()
+                    .and_then(|ws| ws.name().cloned());
+                let output = self
+                    .niri
+                    .layout
+                    .active_output()
+                    .map(|o| o.name())
+                    .unwrap_or_default();
+                let new_name = name.clone();
                 self.niri.layout.set_workspace_name(name, None);
+                // Emit rename event if name changed
+                if old_name.as_deref() != Some(new_name.as_str()) {
+                    lua_event_hooks::emit_workspace_rename(
+                        self,
+                        0,
+                        old_name.as_deref(),
+                        Some(new_name.as_str()),
+                        &output,
+                    );
+                }
             }
             Action::SetWorkspaceNameByRef { name, reference } => {
                 self.niri.layout.set_workspace_name(name, Some(reference));

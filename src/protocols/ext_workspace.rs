@@ -95,10 +95,25 @@ pub fn refresh(state: &mut State) {
         seen_workspaces.insert(ws.id(), output);
     }
 
+    // Track removed workspaces for Lua events (name, idx, output)
+    let mut removed_workspaces: Vec<(String, u32, String)> = Vec::new();
+
     protocol_state.workspaces.retain(|id, workspace| {
         if seen_workspaces.contains_key(id) {
             return true;
         }
+
+        // Capture workspace info before removal for Lua event
+        let output_name = workspace
+            .output
+            .as_ref()
+            .map(|o| o.name())
+            .unwrap_or_default();
+        removed_workspaces.push((
+            workspace.name.clone(),
+            workspace.coordinates[1],
+            output_name,
+        ));
 
         remove_workspace_instances(&protocol_state.workspace_groups, workspace);
         changed = true;
@@ -132,6 +147,20 @@ pub fn refresh(state: &mut State) {
     });
 
     // Update existing workspaces and create new ones.
+    // First, identify which workspaces are new (not yet tracked in protocol_state.workspaces)
+    let mut new_workspaces: Vec<(String, u32, String)> = Vec::new();
+    for (mon, ws_idx, ws) in state.niri.layout.workspaces() {
+        if !protocol_state.workspaces.contains_key(&ws.id()) {
+            // This is a new workspace - capture info for Lua event
+            let name = ws
+                .name()
+                .cloned()
+                .unwrap_or_else(|| (ws_idx + 1).to_string());
+            let output_name = mon.map(|m| m.output().name()).unwrap_or_default();
+            new_workspaces.push((name, ws_idx as u32, output_name));
+        }
+    }
+
     for (mon, ws_idx, ws) in state.niri.layout.workspaces() {
         changed |= refresh_workspace(protocol_state, mon, ws_idx, ws);
     }
@@ -145,6 +174,14 @@ pub fn refresh(state: &mut State) {
         for manager in protocol_state.instances.keys() {
             manager.done();
         }
+    }
+
+    // Emit Lua events for workspace changes
+    for (name, idx, output) in removed_workspaces {
+        crate::lua_event_hooks::emit_workspace_destroy(state, &name, idx, &output);
+    }
+    for (name, idx, output) in new_workspaces {
+        crate::lua_event_hooks::emit_workspace_create(state, &name, idx, &output);
     }
 }
 

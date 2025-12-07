@@ -16,7 +16,7 @@ log.workspace = true
 mlua.workspace = true
 niri-config = { version = "25.8.0", path = "../niri-config" }
 niri-ipc = { version = "25.8.0", path = "../niri-ipc" }
-parking_lot = "0.12.3"
+
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

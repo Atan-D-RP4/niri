@@ -19,7 +19,6 @@ use niri::cli::{Cli, CompletionShell, Sub};
 use niri::dbus;
 use niri::ipc::client::handle_msg;
 use niri::niri::State;
-use niri_lua::LuaConfig;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
     REMOVE_ENV_RUST_BACKTRACE, REMOVE_ENV_RUST_LIB_BACKTRACE,
@@ -27,6 +26,7 @@ use niri::utils::spawning::{
 use niri::utils::{cause_panic, version, watcher, xwayland, IS_SYSTEMD_SERVICE};
 use niri_config::{Config, ConfigPath};
 use niri_ipc::socket::SOCKET_PATH_ENV;
+use niri_lua::LuaConfig;
 use portable_atomic::Ordering;
 use sd_notify::NotifyState;
 use smithay::reexports::wayland_server::Display;
@@ -234,6 +234,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle Ctrl+C and other signals.
     niri::utils::signals::listen(&event_loop.handle());
 
+    // Create a channel for Lua actions - sender is Send+Sync for the callback
+    let (lua_action_tx, lua_action_rx) = calloop::channel::channel::<niri_ipc::Action>();
+
+    // Register the Lua action channel receiver with the event loop
+    event_loop
+        .handle()
+        .insert_source(lua_action_rx, |event, _, state| {
+            if let calloop::channel::Event::Msg(action) = event {
+                let action = niri_config::Action::from(action);
+                state.niri.advance_animations();
+                state.do_action(action, false);
+            }
+        })
+        .expect("Failed to insert Lua action channel source");
+
     // Create the compositor.
     let display = Display::new().unwrap();
     info!(
@@ -268,6 +283,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = state.niri.config.borrow();
         if let Err(e) = runtime.register_config_proxy_api(&config) {
             warn!("Failed to register Lua config proxy API: {}", e);
+        }
+
+        // Register live action callback for IPC Lua execution
+        // This replaces the config-load callback that deferred/ignored actions
+        let action_tx = lua_action_tx.clone();
+        let action_callback: niri_lua::ActionCallback =
+            std::sync::Arc::new(move |action: niri_ipc::Action| {
+                action_tx
+                    .send(action)
+                    .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
+            });
+        if let Err(e) = runtime.register_action_proxy(action_callback) {
+            warn!("Failed to register Lua action proxy: {}", e);
         }
     }
 

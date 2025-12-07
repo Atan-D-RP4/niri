@@ -211,7 +211,9 @@ where
             let windows: Vec<Window> = runtime_api
                 .query(|state, tx| {
                     let windows = state.get_windows();
-                    let _ = tx.send_blocking(windows);
+                    if let Err(e) = tx.send_blocking(windows) {
+                        log::warn!("Failed to send windows query result: {}", e);
+                    }
                 })
                 .map_err(mlua::Error::external)?;
 
@@ -239,7 +241,9 @@ where
             let window = runtime_api
                 .query(|state, tx| {
                     let window = state.get_focused_window();
-                    let _ = tx.send_blocking(window);
+                    if let Err(e) = tx.send_blocking(window) {
+                        log::warn!("Failed to send focused_window query result: {}", e);
+                    }
                 })
                 .map_err(mlua::Error::external)?;
 
@@ -267,7 +271,9 @@ where
             let workspaces: Vec<Workspace> = runtime_api
                 .query(|state, tx| {
                     let workspaces = state.get_workspaces();
-                    let _ = tx.send_blocking(workspaces);
+                    if let Err(e) = tx.send_blocking(workspaces) {
+                        log::warn!("Failed to send workspaces query result: {}", e);
+                    }
                 })
                 .map_err(mlua::Error::external)?;
 
@@ -297,7 +303,9 @@ where
             let outputs: Vec<Output> = runtime_api
                 .query(|state, tx| {
                     let outputs = state.get_outputs();
-                    let _ = tx.send_blocking(outputs);
+                    if let Err(e) = tx.send_blocking(outputs) {
+                        log::warn!("Failed to send outputs query result: {}", e);
+                    }
                 })
                 .map_err(mlua::Error::external)?;
 

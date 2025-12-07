@@ -6,12 +6,6 @@ The Niri Lua event system provides a way for Lua scripts to listen to and react 
 
 The event system is based on a pub-sub pattern where scripts register handlers (callbacks) for specific event types, and the compositor emits events when things happen.
 
-> **Implementation Status:** The event infrastructure is complete, but **not all events are wired** to compositor code yet. See the [Event Wiring Status](#event-wiring-status) section for details.
-
-> **TODO: Simplify event_emitter.rs** - The current implementation has two parallel architectures:
-> a Rust `EventEmitter` struct (unused) and a Lua-based implementation via global tables.
-> These should be evaluated to determine which approach is better, and the unused code pruned.
-
 ## Quick Start
 
 ```lua
@@ -131,29 +125,51 @@ niri.events:clear("window:focus")
 
 ## Event Wiring Status
 
-The event infrastructure is complete, but many events need to be wired to compositor code paths. Here's the current status:
+The event infrastructure is complete. Here's the current status of all events:
 
 | Event | Status | Notes |
 |-------|--------|-------|
 | `startup` | ✅ Wired | Emitted before event loop starts |
 | `shutdown` | ✅ Wired | Emitted after event loop exits |
-| `window:open` | ⚠️ Partial | Wired but emits placeholder data (id=0, title="window") |
-| `window:close` | 🚧 TODO | Defined but not wired |
-| `window:focus` | 🚧 TODO | Defined but not wired |
-| `window:blur` | 🚧 TODO | Defined but not wired |
-| `window:title_changed` | 🚧 TODO | Defined but not wired |
-| `window:app_id_changed` | 🚧 TODO | Defined but not wired |
-| `window:fullscreen` | 🚧 TODO | Defined but not wired |
+| `window:open` | ✅ Wired | Real window ID, title, app_id |
+| `window:close` | ✅ Wired | Real window ID, title, app_id |
+| `window:focus` | ✅ Wired | Emitted on keyboard focus gain |
+| `window:blur` | ✅ Wired | Emitted on keyboard focus loss |
+| `window:title_changed` | ✅ Wired | Old and new title provided |
+| `window:app_id_changed` | ✅ Wired | Old and new app_id provided |
+| `window:fullscreen` | ✅ Wired | is_fullscreen boolean |
+| `window:maximize` | ✅ Wired | is_maximized boolean |
+| `window:move` | ✅ Wired | from/to workspace and output |
+| `window:resize` | ✅ Wired | Final width and height |
 | `workspace:activate` | ✅ Wired | Emitted on workspace switch |
-| `workspace:deactivate` | 🚧 TODO | Defined but not wired |
-| `monitor:connect` | 🚧 TODO | Defined but not wired |
-| `monitor:disconnect` | 🚧 TODO | Defined but not wired |
-| `layout:mode_changed` | 🚧 TODO | Defined but not wired |
-| `layout:window_added` | 🚧 TODO | Defined but not wired |
-| `layout:window_removed` | 🚧 TODO | Defined but not wired |
-| `config:reload` | 🚧 TODO | Defined but not wired |
-| `overview:open` | 🚧 TODO | Defined but not wired |
-| `overview:close` | 🚧 TODO | Defined but not wired |
+| `workspace:deactivate` | ✅ Wired | Emitted when workspace loses focus |
+| `workspace:create` | ✅ Wired | Emitted when workspace is created |
+| `workspace:destroy` | ✅ Wired | Emitted when workspace is destroyed |
+| `workspace:rename` | ✅ Wired | Old and new name provided |
+| `output:connect` | ✅ Wired | Output name and connector |
+| `output:disconnect` | ✅ Wired | Output name and connector |
+| `output:mode_change` | ✅ Wired | Width, height, refresh rate |
+| `layout:mode_changed` | ✅ Wired | "tiling" or "floating" |
+| `layout:window_added` | ✅ Wired | Window ID |
+| `layout:window_removed` | ✅ Wired | Window ID |
+| `config:reload` | ✅ Wired | Success boolean |
+| `overview:open` | ✅ Wired | is_open = true |
+| `overview:close` | ✅ Wired | is_open = false |
+| `lock:activate` | ✅ Wired | Emitted when session locks |
+| `lock:deactivate` | ✅ Wired | Emitted when session unlocks |
+
+### Events Not Supported
+
+The following events are intentionally **not supported**:
+
+| Event | Reason |
+|-------|--------|
+| `idle:start` | Not exposed via IPC; Smithay's IdleNotifierState has no Rust callbacks |
+| `idle:end` | Not exposed via IPC; Smithay's IdleNotifierState has no Rust callbacks |
+| `key:press` | Security concern (keylogging); very noisy (every keystroke); not exposed via IPC |
+| `key:release` | Security concern (keylogging); very noisy (every keystroke); not exposed via IPC |
+
+**Note:** AwesomeWM also does not expose raw key events to Lua. Instead, use the key binding model via configuration.
 
 ## Event Types
 
@@ -162,13 +178,12 @@ The event infrastructure is complete, but many events need to be wired to compos
 #### window:open
 Emitted when a new window is created.
 
-> **Status:** ⚠️ Partially wired - currently emits placeholder data. TODO: Wire with real window info.
-
 **Event data:**
 ```lua
 {
-    id = 12345,          -- Window ID (number)
-    title = "App Name"   -- Window title (string)
+    id = 12345,              -- Window ID (number)
+    title = "App Name",      -- Window title (string)
+    app_id = "org.app.Name"  -- Application ID (string)
 }
 ```
 
@@ -179,7 +194,8 @@ Emitted when a window is destroyed.
 ```lua
 {
     id = 12345,
-    title = "App Name"
+    title = "App Name",
+    app_id = "org.app.Name"
 }
 ```
 
@@ -190,7 +206,8 @@ Emitted when a window receives keyboard focus.
 ```lua
 {
     id = 12345,
-    title = "App Name"
+    title = "App Name",
+    app_id = "org.app.Name"
 }
 ```
 
@@ -201,7 +218,51 @@ Emitted when a window loses keyboard focus.
 ```lua
 {
     id = 12345,
-    title = "App Name"
+    title = "App Name",
+    app_id = "org.app.Name"
+}
+```
+
+#### window:maximize
+Emitted when a window enters or exits maximized state.
+
+**Event data:**
+```lua
+{
+    id = 12345,
+    title = "App Name",
+    app_id = "org.app.Name",
+    is_maximized = true  -- or false
+}
+```
+
+#### window:move
+Emitted when a window is moved to a different workspace or output.
+
+**Event data:**
+```lua
+{
+    id = 12345,
+    title = "App Name",
+    app_id = "org.app.Name",
+    from_workspace = "1",      -- Previous workspace name
+    to_workspace = "2",        -- New workspace name
+    from_output = "DP-1",      -- Previous output name
+    to_output = "HDMI-1"       -- New output name
+}
+```
+
+#### window:resize
+Emitted when a window resize operation completes.
+
+**Event data:**
+```lua
+{
+    id = 12345,
+    title = "App Name",
+    app_id = "org.app.Name",
+    width = 1920,              -- Final width in pixels
+    height = 1080              -- Final height in pixels
 }
 ```
 
@@ -263,10 +324,47 @@ Emitted when a workspace is no longer the active workspace.
 }
 ```
 
-### Monitor Events
+#### workspace:create
+Emitted when a new workspace is created.
 
-#### monitor:connect
-Emitted when a monitor is connected.
+**Event data:**
+```lua
+{
+    name = "3",          -- Workspace name (string)
+    index = 2,           -- Workspace index (number, 0-indexed)
+    output = "DP-1"      -- Output the workspace belongs to
+}
+```
+
+#### workspace:destroy
+Emitted when a workspace is destroyed.
+
+**Event data:**
+```lua
+{
+    name = "3",          -- Workspace name (string)
+    index = 2,           -- Workspace index (number, 0-indexed)
+    output = "DP-1"      -- Output the workspace belonged to
+}
+```
+
+#### workspace:rename
+Emitted when a workspace is renamed.
+
+**Event data:**
+```lua
+{
+    index = 1,           -- Workspace index (number, 0-indexed)
+    old_name = "1",      -- Previous name
+    new_name = "work",   -- New name
+    output = "DP-1"      -- Output the workspace belongs to
+}
+```
+
+### Output Events
+
+#### output:connect
+Emitted when an output (monitor) is connected.
 
 **Event data:**
 ```lua
@@ -276,14 +374,27 @@ Emitted when a monitor is connected.
 }
 ```
 
-#### monitor:disconnect
-Emitted when a monitor is disconnected.
+#### output:disconnect
+Emitted when an output (monitor) is disconnected.
 
 **Event data:**
 ```lua
 {
     name = "HDMI-1",
     connector = "HDMI-1"
+}
+```
+
+#### output:mode_change
+Emitted when an output's display mode changes (resolution or refresh rate).
+
+**Event data:**
+```lua
+{
+    name = "DP-1",          -- Output name (string)
+    width = 2560,           -- New width in pixels
+    height = 1440,          -- New height in pixels
+    refresh = 144000        -- Refresh rate in millihertz (144000 = 144Hz)
 }
 ```
 
@@ -348,6 +459,28 @@ Emitted when the overview mode is closed.
 ```lua
 {
     is_open = false
+}
+```
+
+### Lock Events
+
+#### lock:activate
+Emitted when the session is locked.
+
+**Event data:**
+```lua
+{
+    locked = true
+}
+```
+
+#### lock:deactivate
+Emitted when the session is unlocked.
+
+**Event data:**
+```lua
+{
+    locked = false
 }
 ```
 
@@ -448,7 +581,7 @@ niri.apply_config({})
 local config = {
     show_window_events = true,
     show_workspace_events = true,
-    show_monitor_events = true,
+    show_output_events = true,
     show_layout_events = true,
 }
 
@@ -457,7 +590,7 @@ local stats = {
     windows_opened = 0,
     windows_closed = 0,
     workspace_changes = 0,
-    monitor_changes = 0,
+    output_changes = 0,
 }
 
 -- Window events
@@ -493,16 +626,20 @@ if config.show_workspace_events then
     end)
 end
 
--- Monitor events
-if config.show_monitor_events then
-    niri.events:on("monitor:connect", function(data)
-        stats.monitor_changes = stats.monitor_changes + 1
-        niri.utils.log("[MONITOR] Connected: " .. data.name .. " (" .. data.connector .. ")")
+-- Output events
+if config.show_output_events then
+    niri.events:on("output:connect", function(data)
+        stats.output_changes = stats.output_changes + 1
+        niri.utils.log("[OUTPUT] Connected: " .. data.name .. " (" .. data.connector .. ")")
     end)
     
-    niri.events:on("monitor:disconnect", function(data)
-        stats.monitor_changes = stats.monitor_changes + 1
-        niri.utils.log("[MONITOR] Disconnected: " .. data.name .. " (" .. data.connector .. ")")
+    niri.events:on("output:disconnect", function(data)
+        stats.output_changes = stats.output_changes + 1
+        niri.utils.log("[OUTPUT] Disconnected: " .. data.name .. " (" .. data.connector .. ")")
+    end)
+    
+    niri.events:on("output:mode_change", function(data)
+        niri.utils.log("[OUTPUT] Mode changed: " .. data.name .. " " .. data.width .. "x" .. data.height)
     end)
 end
 
@@ -525,7 +662,7 @@ end
 niri.utils.log("=== Niri Event System Ready ===")
 niri.utils.log("Configuration: " .. (config.show_window_events and "Windows " or "") ..
                             (config.show_workspace_events and "Workspaces " or "") ..
-                            (config.show_monitor_events and "Monitors " or "") ..
+                            (config.show_output_events and "Outputs " or "") ..
                             (config.show_layout_events and "Layout" or ""))
 ```
 

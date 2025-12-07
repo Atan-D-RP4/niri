@@ -77,12 +77,38 @@ pub fn emit_window_open(state: &State, window_id: u32, window_title: &str) {
     });
 }
 
+/// Emit a window:open event with full window data including app_id
+///
+/// Call this when a window is created and mapped to the layout
+pub fn emit_window_open_full(state: &State, window_id: u32, window_title: &str, app_id: &str) {
+    emit_with_state_context(state, "window:open", |lua| {
+        let table = lua.create_table()?;
+        table.set("id", window_id)?;
+        table.set("title", window_title)?;
+        table.set("app_id", app_id)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
 /// Emit a window:close event
 ///
 /// Call this when a window is destroyed
 pub fn emit_window_close(state: &State, window_id: u32, window_title: &str) {
     emit_with_state_context(state, "window:close", |lua| {
         create_window_event_table(lua, window_id, window_title)
+    });
+}
+
+/// Emit a window:close event with full window data including app_id
+///
+/// Call this when a window is destroyed
+pub fn emit_window_close_full(state: &State, window_id: u32, window_title: &str, app_id: &str) {
+    emit_with_state_context(state, "window:close", |lua| {
+        let table = lua.create_table()?;
+        table.set("id", window_id)?;
+        table.set("title", window_title)?;
+        table.set("app_id", app_id)?;
+        Ok(LuaValue::Table(table))
     });
 }
 

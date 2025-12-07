@@ -38,7 +38,7 @@ impl LuaUserData for EventsProxy {
         methods.add_method(
             "on",
             |_lua, this, (event_type, callback): (String, LuaFunction)| {
-                let mut h = this.handlers.lock();
+                let mut h = this.handlers.lock().unwrap();
                 let handler_id = h.register_handler(&event_type, callback, false);
                 debug!(
                     "events:on('{}') registered handler {}",
@@ -53,7 +53,7 @@ impl LuaUserData for EventsProxy {
         methods.add_method(
             "once",
             |_lua, this, (event_type, callback): (String, LuaFunction)| {
-                let mut h = this.handlers.lock();
+                let mut h = this.handlers.lock().unwrap();
                 let handler_id = h.register_handler(&event_type, callback, true);
                 debug!(
                     "events:once('{}') registered handler {}",
@@ -68,7 +68,7 @@ impl LuaUserData for EventsProxy {
         methods.add_method(
             "off",
             |_lua, this, (event_type, handler_id): (String, EventHandlerId)| {
-                let mut h = this.handlers.lock();
+                let mut h = this.handlers.lock().unwrap();
                 let removed = h.unregister_handler(&event_type, handler_id);
                 debug!(
                     "events:off('{}', {}) -> removed={}",
@@ -88,7 +88,7 @@ impl LuaUserData for EventsProxy {
                 // flexibility
                 debug!("events:emit('{}') triggered", event_type);
 
-                let mut h = this.handlers.lock();
+                let mut h = this.handlers.lock().unwrap();
 
                 // Convert the data to a table if it isn't already, wrapping primitives
                 let event_data = match &data {
@@ -114,7 +114,7 @@ impl LuaUserData for EventsProxy {
         // niri.events:list(event_name?)
         // List registered handler IDs for an event, or all events if no name given
         methods.add_method("list", |lua, this, event_type: Option<String>| {
-            let h = this.handlers.lock();
+            let h = this.handlers.lock().unwrap();
             let result = lua.create_table()?;
 
             if let Some(event) = event_type {
@@ -142,7 +142,7 @@ impl LuaUserData for EventsProxy {
         // niri.events:clear(event_name?)
         // Clear handlers for a specific event, or all handlers if no name given
         methods.add_method("clear", |_lua, this, event_type: Option<String>| {
-            let mut h = this.handlers.lock();
+            let mut h = this.handlers.lock().unwrap();
 
             if let Some(event) = event_type {
                 debug!("events:clear('{}') clearing handlers", event);
@@ -191,9 +191,7 @@ pub fn register_events_proxy(lua: &Lua, handlers: SharedEventHandlers) -> LuaRes
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use parking_lot::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::event_handlers::EventHandlers;
@@ -241,7 +239,7 @@ mod tests {
         assert_eq!(handler_id, 1);
 
         // Verify handler was registered
-        let h = handlers.lock();
+        let h = handlers.lock().unwrap();
         assert_eq!(h.handler_count("test:event"), 1);
     }
 
@@ -265,7 +263,7 @@ mod tests {
         assert_eq!(handler_id, 1);
 
         // Verify handler was registered
-        let h = handlers.lock();
+        let h = handlers.lock().unwrap();
         assert_eq!(h.handler_count("test:event"), 1);
     }
 
@@ -284,7 +282,7 @@ mod tests {
         .unwrap();
 
         // Verify handler was removed
-        let h = handlers.lock();
+        let h = handlers.lock().unwrap();
         assert_eq!(h.handler_count("test:event"), 0);
     }
 
@@ -388,7 +386,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock();
+        let h = handlers.lock().unwrap();
         assert_eq!(h.handler_count("event1"), 0);
         assert_eq!(h.handler_count("event2"), 1);
     }
@@ -408,7 +406,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock();
+        let h = handlers.lock().unwrap();
         assert_eq!(h.total_handlers(), 0);
     }
 

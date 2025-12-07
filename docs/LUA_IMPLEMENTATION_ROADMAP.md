@@ -7,7 +7,7 @@
 | Tier 1: Module System | ✅ COMPLETE | Module loader, plugin discovery, event emitter, hot reload |
 | Tier 2: Configuration API | ✅ COMPLETE | Full config API, Lua types, validators, extractors |
 | Tier 3: Runtime State | ✅ COMPLETE | 4 query functions (windows, focused_window, workspaces, outputs) |
-| Tier 4: Event System | ⚠️ PARTIAL | Infrastructure complete; most events not wired to compositor |
+| Tier 4: Event System | ✅ MOSTLY COMPLETE | Core events wired (window, workspace, monitor, overview, config) |
 | API Refactor R1-R13 | ✅ COMPLETE | Reactive config proxy, `niri.state/action/events/utils` namespaces |
 | Config Side Effects | ✅ COMPLETE | Cursor, keyboard, libinput settings properly applied |
 | Async/Safety | 🚧 PLANNED | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
@@ -21,10 +21,32 @@
 > **TODO: Simplify config_proxy.rs** - Uses `serde_json::Value` as intermediary format.
 > Evaluate whether direct Lua-to-Config conversion would be more efficient.
 
-> **TODO: Unify event_emitter.rs** - Contains two parallel implementations:
-> 1. Rust `EventEmitter` struct (lines 48-178) - currently unused
-> 2. Lua-based implementation via global tables (lines 180-306) - actually used
-> Evaluate which approach is better and prune the unused code.
+> ~~**TODO: Unify event_emitter.rs**~~ - ✅ COMPLETED: Removed unused Rust `EventEmitter` struct,
+> kept Lua-based implementation via global tables. File reduced from ~270 to ~240 lines.
+
+## Code Quality Issues
+
+> ~~**TODO: Replace unsafe code in runtime.rs:300-306**~~ - ✅ COMPLETED: Replaced raw pointer
+> with `Rc<RefCell<Vec<String>>>` for safe interior mutability.
+
+> ~~**TODO: Add logging for silent .ok()? patterns**~~ - ✅ COMPLETED: Added `trace!` logging
+> to 14 locations in config_converter.rs where parse errors were silently swallowed.
+
+> ~~**TODO: Handle channel send failures in runtime_api.rs**~~ - ✅ COMPLETED: Added `log::warn!`
+> on channel send failures at lines 214, 242, 270, 300.
+
+> ~~**TODO: Complete extractors.rs**~~ - ✅ CLARIFIED: The extractors for Input, Layout, Output,
+> and WindowRule are already implemented in `config_converter.rs` using JSON as an intermediary.
+> The `extractors.rs` module contains basic utility functions but is currently unused (dead code).
+> Consider removing or integrating it in a future cleanup.
+
+> ~~**TODO: Add doc comments**~~ - ✅ VERIFIED COMPLETE: Both `config_proxy.rs` and `validators.rs`
+> have comprehensive documentation including module-level docs, struct/enum docs, field docs,
+> and method docs with valid ranges.
+
+> ~~**TODO: Register live action callback for IPC execution**~~ - ✅ COMPLETED: Added calloop
+> channel in `main.rs` to pipe Lua actions to `state.do_action()`. Actions executed via
+> `niri msg lua` now work correctly (e.g., `niri.action:spawn_sh("kitty")`).
 
 ---
 
@@ -67,25 +89,39 @@ The `apply_pending_lua_config()` function in `src/niri.rs` now properly applies 
 |----------|-------|--------|
 | Lifecycle | `startup` | ✅ Wired (main.rs) |
 | Lifecycle | `shutdown` | ✅ Wired (main.rs) |
-| Window | `window:open` | ⚠️ Partial (placeholder data) |
+| Window | `window:open` | ✅ Wired with real data (id, title, app_id) |
+| Window | `window:close` | ✅ Wired with real data (id, title, app_id) |
+| Window | `window:focus` | ✅ Wired with real data (niri.rs:focus_window) |
+| Window | `window:blur` | ✅ Wired with real data (niri.rs:focus_window) |
+| Window | `window:title_changed` | ✅ Wired (xdg_shell.rs) |
+| Window | `window:fullscreen` | ✅ Wired (xdg_shell.rs) |
 | Workspace | `workspace:activate` | ✅ Wired |
+| Workspace | `workspace:deactivate` | ✅ Wired |
+| Workspace | `workspace:create` | ✅ Wired (ext_workspace.rs) |
+| Workspace | `workspace:destroy` | ✅ Wired (ext_workspace.rs) |
+| Workspace | `workspace:rename` | ✅ Wired (input/mod.rs) |
+| Monitor | `monitor:connect` | ✅ Wired (backend/tty.rs) |
+| Monitor | `monitor:disconnect` | ✅ Wired (backend/tty.rs) |
+| Output | `output:mode_change` | ✅ Wired (niri.rs:output_resized) |
+| Overview | `overview:open` | ✅ Wired (input/mod.rs) |
+| Overview | `overview:close` | ✅ Wired (input/mod.rs) |
+| Config | `config:reload` | ✅ Wired (niri.rs) |
+| Layout | `layout:window_added` | ✅ Wired (compositor.rs) |
+| Layout | `layout:window_removed` | ✅ Wired (xdg_shell.rs) |
+| Layout | `layout:mode_changed` | ✅ Wired (input/mod.rs) |
+| Lock | `lock:activate` | ✅ Wired (niri.rs) |
+| Lock | `lock:deactivate` | ✅ Wired (niri.rs) |
+| Window | `window:app_id_changed` | ✅ Wired (xdg_shell.rs) |
+| Window | `window:move` | ✅ Wired (input/mod.rs - MoveWindowToWorkspaceUp/Down) |
+| Window | `window:resize` | ✅ Wired (resize_grab.rs, touch_resize_grab.rs) |
+| Window | `window:maximize` | ✅ Wired (xdg_shell.rs - maximize/unmaximize_request) |
 
-**Defined but NOT wired (TODO):**
+**Not supported (by design):**
 
-| Category | Events |
-|----------|--------|
-| Window | `window:close`, `window:focus`, `window:blur`, `window:title_changed`, `window:app_id_changed`, `window:fullscreen`, `window:move`, `window:resize`, `window:maximize` |
-| Workspace | `workspace:deactivate`, `workspace:create`, `workspace:destroy`, `workspace:rename` |
-| Monitor | `monitor:connect`, `monitor:disconnect` |
-| Output | `output:mode_change` |
-| Layout | `layout:mode_changed`, `layout:window_added`, `layout:window_removed` |
-| Overview | `overview:open`, `overview:close` |
-| Config | `config:reload` |
-| Lock | `lock:activate`, `lock:deactivate` |
-| Idle | `idle:start`, `idle:end` |
-| Keyboard | `key:press`, `key:release` |
-
-**Note:** Event emission helper functions exist in `src/lua_event_hooks.rs`, but need to be called from the appropriate compositor code paths.
+| Category | Events | Rationale |
+|----------|--------|-----------|
+| Idle | `idle:start`, `idle:end` | Not exposed via IPC. Smithay's IdleNotifierState doesn't provide Rust callbacks. Idle behavior is better controlled via configuration (timeouts, inhibitors). |
+| Keyboard | `key:press`, `key:release` | Not exposed via IPC. Raw key events are extremely noisy (every keystroke), have security concerns (keylogging potential), and are not needed - keybindings cover the use cases. AwesomeWM also does not expose raw key events, using a keybinding registration model instead. |
 
 ### Tier 5: Plugin Ecosystem
 

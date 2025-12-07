@@ -3,7 +3,7 @@
 //! This module provides utilities for extracting configuration values from a Lua runtime
 //! and applying them to Niri's Config struct.
 
-use log::{debug, info};
+use log::{debug, info, trace};
 use niri_config::binds::{Action, Bind, Key, WorkspaceReference};
 use niri_config::input::{
     AccelProfile, ClickMethod, FocusFollowsMouse, ScrollMethod, TapButtonMap, WarpMouseToFocus,
@@ -23,25 +23,61 @@ fn parse_size_change(s: &str) -> Option<SizeChange> {
     if let Some(num_str) = s.strip_suffix('%') {
         // Percentage change
         if let Some(stripped) = num_str.strip_prefix('+') {
-            let val: f64 = stripped.parse().ok()?;
+            let val: f64 = match stripped.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse percentage value '{}': {}", stripped, e);
+                    return None;
+                }
+            };
             Some(SizeChange::AdjustProportion(val / 100.0))
         } else if let Some(stripped) = num_str.strip_prefix('-') {
-            let val: f64 = stripped.parse().ok()?;
+            let val: f64 = match stripped.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse percentage value '{}': {}", stripped, e);
+                    return None;
+                }
+            };
             Some(SizeChange::AdjustProportion(-val / 100.0))
         } else {
-            let val: f64 = num_str.parse().ok()?;
+            let val: f64 = match num_str.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse percentage value '{}': {}", num_str, e);
+                    return None;
+                }
+            };
             Some(SizeChange::SetProportion(val / 100.0))
         }
     } else {
         // Fixed pixel change
         if let Some(stripped) = s.strip_prefix('+') {
-            let val: i32 = stripped.parse().ok()?;
+            let val: i32 = match stripped.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse fixed pixel value '{}': {}", stripped, e);
+                    return None;
+                }
+            };
             Some(SizeChange::AdjustFixed(val))
         } else if s.starts_with('-') {
-            let val: i32 = s.parse().ok()?; // includes the minus sign
+            let val: i32 = match s.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse fixed pixel value '{}': {}", s, e);
+                    return None;
+                }
+            };
             Some(SizeChange::AdjustFixed(val))
         } else {
-            let val: i32 = s.parse().ok()?;
+            let val: i32 = match s.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse fixed pixel value '{}': {}", s, e);
+                    return None;
+                }
+            };
             Some(SizeChange::SetFixed(val))
         }
     }
@@ -76,7 +112,7 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
             }
         };
 
-        let mut pending = pending_ref.lock();
+        let mut pending = pending_ref.lock().unwrap();
         if !pending.has_changes() {
             debug!("No pending config changes to apply");
             return 0;
@@ -971,7 +1007,13 @@ fn json_to_bind(json: &serde_json::Value) -> Option<Bind> {
 
     // Parse the key string (e.g., "Mod+T")
     let key_str = obj.get("key")?.as_str()?;
-    let key: Key = key_str.parse().ok()?;
+    let key: Key = match key_str.parse() {
+        Ok(k) => k,
+        Err(e) => {
+            trace!("Failed to parse key '{}': {}", key_str, e);
+            return None;
+        }
+    };
 
     // Parse the action
     let action_str = obj.get("action")?.as_str()?;
@@ -1157,21 +1199,39 @@ fn parse_action_from_str(action_str: &str, args: &[String]) -> Option<Action> {
             if args.is_empty() {
                 return None;
             }
-            let index: u8 = args[0].parse().ok()?;
+            let index: u8 = match args[0].parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse workspace index '{}': {}", args[0], e);
+                    return None;
+                }
+            };
             Action::FocusWorkspace(WorkspaceReference::Index(index))
         }
         "move-column-to-workspace" => {
             if args.is_empty() {
                 return None;
             }
-            let index: u8 = args[0].parse().ok()?;
+            let index: u8 = match args[0].parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse workspace index '{}': {}", args[0], e);
+                    return None;
+                }
+            };
             Action::MoveColumnToWorkspace(WorkspaceReference::Index(index), true)
         }
         "move-window-to-workspace" => {
             if args.is_empty() {
                 return None;
             }
-            let index: u8 = args[0].parse().ok()?;
+            let index: u8 = match args[0].parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    trace!("Failed to parse workspace index '{}': {}", args[0], e);
+                    return None;
+                }
+            };
             Action::MoveWindowToWorkspace(WorkspaceReference::Index(index), false)
         }
         "set-column-width" => {
@@ -1694,14 +1754,54 @@ fn json_to_color(value: &serde_json::Value) -> Option<niri_config::Color> {
     // Handle string format (e.g., "#ff0000" or "rgba(255, 0, 0, 1.0)")
     if let Some(s) = value.as_str() {
         // Try parsing as hex color
-        if let Some(s) = s.strip_prefix('#') {
-            let len = s.len();
+        if let Some(hex) = s.strip_prefix('#') {
+            let len = hex.len();
             if len == 6 || len == 8 {
-                let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-                let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-                let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+                let r = match u8::from_str_radix(&hex[0..2], 16) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        trace!(
+                            "Failed to parse hex color red component '{}': {}",
+                            &hex[0..2],
+                            e
+                        );
+                        return None;
+                    }
+                };
+                let g = match u8::from_str_radix(&hex[2..4], 16) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        trace!(
+                            "Failed to parse hex color green component '{}': {}",
+                            &hex[2..4],
+                            e
+                        );
+                        return None;
+                    }
+                };
+                let b = match u8::from_str_radix(&hex[4..6], 16) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        trace!(
+                            "Failed to parse hex color blue component '{}': {}",
+                            &hex[4..6],
+                            e
+                        );
+                        return None;
+                    }
+                };
                 let a = if len == 8 {
-                    u8::from_str_radix(&s[6..8], 16).ok()?
+                    match u8::from_str_radix(&hex[6..8], 16) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            trace!(
+                                "Failed to parse hex color alpha component '{}': {}",
+                                &hex[6..8],
+                                e
+                            );
+                            return None;
+                        }
+                    }
                 } else {
                     255
                 };
@@ -1894,9 +1994,7 @@ fn json_to_workspace(json: &serde_json::Value) -> Option<niri_config::Workspace>
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use parking_lot::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::config_proxy::PendingConfigChanges;

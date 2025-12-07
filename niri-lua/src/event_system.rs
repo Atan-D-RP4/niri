@@ -3,14 +3,14 @@
 //! This module provides the public interface for emitting events from Niri core
 //! to Lua event handlers registered via the `niri.events` proxy API.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mlua::prelude::*;
 
 use crate::event_handlers::EventHandlers;
 
 /// Thread-safe wrapper around EventHandlers for Lua integration
-pub type SharedEventHandlers = Arc<parking_lot::Mutex<EventHandlers>>;
+pub type SharedEventHandlers = Arc<Mutex<EventHandlers>>;
 
 /// Public interface for emitting events from Niri core
 pub struct EventSystem {
@@ -32,13 +32,13 @@ impl EventSystem {
     /// # Returns
     /// LuaResult indicating success or Lua error
     pub fn emit(&self, event_type: &str, event_data: LuaValue) -> LuaResult<()> {
-        let mut h = self.handlers.lock();
+        let mut h = self.handlers.lock().unwrap();
         h.emit_event(event_type, event_data)
     }
 
     /// Get statistics about registered handlers
     pub fn stats(&self) -> EventSystemStats {
-        let h = self.handlers.lock();
+        let h = self.handlers.lock().unwrap();
         EventSystemStats {
             total_handlers: h.total_handlers(),
             event_types: h.event_types().len(),
@@ -58,7 +58,7 @@ mod tests {
 
     fn create_test_system() -> (Lua, EventSystem) {
         let lua = Lua::new();
-        let handlers = Arc::new(parking_lot::Mutex::new(EventHandlers::new()));
+        let handlers = Arc::new(Mutex::new(EventHandlers::new()));
         let event_system = EventSystem::new(handlers);
         (lua, event_system)
     }

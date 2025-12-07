@@ -12,8 +12,8 @@
 -- - Tier 1: Module System (100% complete)
 -- - Tier 2: Configuration API (100% complete)
 -- - Tier 3: Runtime State Access (100% complete)
+-- - Tier 4: Event System (100% complete - 29 events wired)
 -- - Full keybinding converter support
--- - Event system integration (in progress)
 
 -- Key Feature: niri.apply_config()
 -- This example uses niri.apply_config() which allows you to:
@@ -1024,11 +1024,56 @@ niri.apply_config({
 -- Everything below this line runs AFTER the configuration has been applied.
 -- This is the perfect place to add:
 
--- 1. Event listeners (when event system is implemented)
---    Example:
--- niri.on("window_opened", function(window)
--- 	niri.log("New window: " .. window.title)
+-- 1. Event listeners using niri.events
+--    The event system provides 29 wired events across these categories:
+--    - Lifecycle: startup, shutdown
+--    - Window: open, close, focus, blur, title_changed, app_id_changed,
+--              fullscreen, maximize, move, resize
+--    - Workspace: activate, deactivate, create, destroy, rename
+--    - Output: connect, disconnect, mode_change
+--    - Layout: mode_changed, window_added, window_removed
+--    - Config: reload
+--    - Overview: open, close
+--    - Lock: activate, deactivate
+
+-- Example: Log window events
+-- niri.events:on("window:open", function(data)
+--     niri.log("Window opened: " .. data.title .. " (" .. data.app_id .. ")")
 -- end)
+
+-- niri.events:on("window:focus", function(data)
+--     niri.log("Focused: " .. data.title)
+-- end)
+
+-- Example: Track workspace changes
+-- niri.events:on("workspace:activate", function(data)
+--     niri.log("Switched to workspace: " .. data.name)
+-- end)
+
+-- niri.events:on("workspace:create", function(data)
+--     niri.log("New workspace created: " .. data.name .. " on " .. data.output)
+-- end)
+
+-- Example: Monitor output changes
+-- niri.events:on("output:connect", function(data)
+--     niri.log("Monitor connected: " .. data.name)
+-- end)
+
+-- niri.events:on("output:mode_change", function(data)
+--     niri.log("Output mode: " .. data.name .. " " .. data.width .. "x" .. data.height)
+-- end)
+
+-- Example: One-time listener (automatically removed after first call)
+-- niri.events:once("startup", function()
+--     niri.log("Niri started!")
+-- end)
+
+-- Example: Remove a listener
+-- local function on_focus(data)
+--     niri.log("Focus: " .. data.title)
+-- end
+-- niri.events:on("window:focus", on_focus)
+-- -- Later: niri.events:off("window:focus", on_focus)
 
 -- 2. Runtime state queries
 --    Example:

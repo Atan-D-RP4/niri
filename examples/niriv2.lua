@@ -7,6 +7,9 @@
 --   niri.action   - Execute compositor actions (method-style with :)
 --   niri.events   - Event system (niri.events:on/once/off)
 --   niri.utils    - Utilities (log, debug, warn, error, spawn)
+--   niri.schedule - Defer execution to next event loop iteration
+--   niri.loop     - Timers and time functions (new_timer, now)
+--   niri.worker   - Background computation in isolated threads
 
 -- Key differences from v1:
 -- - No `return { ... }` - use proxy tables and explicit apply
@@ -539,8 +542,191 @@ end)
 -- ============================================================================
 -- LOG SUCCESS
 -- ============================================================================
-niri.config.prefer_no_csd = false
 
 local binds_count = #niri.config.binds:list()
 niri.utils.log("Niri v2 configuration loaded!")
 niri.utils.log("Loaded " .. binds_count .. " keybindings")
+
+-- ============================================================================
+-- ASYNC PRIMITIVES EXAMPLES (Phase 4 & 5)
+-- ============================================================================
+-- These APIs allow non-blocking operations in the compositor
+
+-- ----------------------------------------------------------------------------
+-- niri.schedule(fn) - Defer execution to next event loop iteration
+-- ----------------------------------------------------------------------------
+-- Use this to break up work and avoid blocking the compositor
+
+-- Example: Deferred logging after config loads
+niri.schedule(function()
+	niri.utils.log("Deferred: Config fully loaded at " .. niri.loop.now() .. "ms")
+end)
+
+-- Example: Break up heavy work in event handlers
+-- niri.events:on("window:open", function(ev)
+-- 	-- Quick work synchronously
+-- 	local window_id = ev.id
+--
+-- 	-- Defer heavy work to not block the window from appearing
+-- 	niri.schedule(function()
+-- 		-- This runs after the window is shown
+-- 		niri.utils.log("Deferred analysis of window: " .. window_id)
+-- 	end)
+-- end)
+
+-- ----------------------------------------------------------------------------
+-- niri.loop.now() - Get monotonic time in milliseconds
+-- ----------------------------------------------------------------------------
+-- Useful for timing operations and animations
+
+local startup_time = niri.loop.now()
+niri.utils.log("Config evaluation started at: " .. startup_time .. "ms since compositor start")
+
+-- ----------------------------------------------------------------------------
+-- niri.loop.new_timer() - Create timers for delayed/repeated execution
+-- ----------------------------------------------------------------------------
+-- Timers persist until explicitly closed (Neovim model)
+
+-- Example: One-shot timer (runs once after delay)
+-- local delayed_timer = niri.loop.new_timer()
+-- delayed_timer:start(5000, 0, function()
+-- 	niri.utils.log("5 seconds after config load!")
+-- 	delayed_timer:close()  -- Clean up (required!)
+-- end)
+
+-- Example: Repeating timer (runs every N milliseconds)
+-- local tick_count = 0
+-- local repeating_timer = niri.loop.new_timer()
+-- repeating_timer:start(0, 60000, function()  -- Every 60 seconds
+-- 	tick_count = tick_count + 1
+-- 	niri.utils.log("Heartbeat #" .. tick_count)
+-- 	-- To stop: repeating_timer:close()
+-- end)
+
+-- Example: Debounced operation (useful for rapid events)
+-- local debounce_timer = niri.loop.new_timer()
+-- local pending_action = nil
+--
+-- local function debounced_log(msg)
+-- 	pending_action = msg
+-- 	debounce_timer:stop()  -- Cancel previous
+-- 	debounce_timer:start(100, 0, function()  -- 100ms debounce
+-- 		if pending_action then
+-- 			niri.utils.log("Debounced: " .. pending_action)
+-- 			pending_action = nil
+-- 		end
+-- 	end)
+-- end
+
+-- Example: set_timeout helper (Neovim-style)
+-- local function set_timeout(timeout_ms, callback)
+-- 	local timer = niri.loop.new_timer()
+-- 	timer:start(timeout_ms, 0, function()
+-- 		timer:stop()
+-- 		timer:close()
+-- 		callback()
+-- 	end)
+-- 	return timer
+-- end
+--
+-- set_timeout(1000, function()
+-- 	niri.utils.log("This runs after 1 second")
+-- end)
+
+-- Example: set_interval helper (Neovim-style)
+-- local function set_interval(interval_ms, callback)
+-- 	local timer = niri.loop.new_timer()
+-- 	timer:start(0, interval_ms, function()
+-- 		callback()
+-- 	end)
+-- 	return timer
+-- end
+--
+-- local interval = set_interval(5000, function()
+-- 	niri.utils.log("Every 5 seconds")
+-- end)
+-- -- Later: interval:close()
+
+-- ----------------------------------------------------------------------------
+-- niri.worker.new(script) - Background computation in separate thread
+-- ----------------------------------------------------------------------------
+-- Workers run in isolated Lua states with no niri API access
+-- Data is transferred via JSON serialization
+-- Use for CPU-intensive operations that would block the compositor
+
+-- Example: Simple computation
+-- local sum_worker = niri.worker.new([[
+-- 	local result = 0
+-- 	for i = 1, 1000000 do
+-- 		result = result + i
+-- 	end
+-- 	return result
+-- ]])
+--
+-- sum_worker:run(function(result, err)
+-- 	if err then
+-- 		niri.utils.warn("Worker error: " .. err)
+-- 	else
+-- 		niri.utils.log("Sum of 1..1000000 = " .. result)
+-- 	end
+-- end)
+
+-- Example: Worker with arguments
+-- local multiply_worker = niri.worker.new([[
+-- 	local args = ...
+-- 	return args.x * args.y
+-- ]])
+--
+-- multiply_worker:run({ x = 42, y = 100 }, function(result, err)
+-- 	if err then
+-- 		niri.utils.warn("Multiply error: " .. err)
+-- 	else
+-- 		niri.utils.log("42 * 100 = " .. result)
+-- 	end
+-- end)
+
+-- Example: Worker returning complex data
+-- local data_worker = niri.worker.new([[
+-- 	return {
+-- 		numbers = {1, 2, 3, 4, 5},
+-- 		message = "Hello from worker",
+-- 		nested = { a = 1, b = 2 }
+-- 	}
+-- ]])
+--
+-- data_worker:run(function(result, err)
+-- 	if err then
+-- 		niri.utils.warn("Data worker error: " .. err)
+-- 	else
+-- 		niri.utils.log("Got message: " .. result.message)
+-- 		niri.utils.log("First number: " .. result.numbers[1])
+-- 	end
+-- end)
+
+-- Example: Cancel a worker before it completes
+-- local slow_worker = niri.worker.new([[
+-- 	-- Simulate slow work
+-- 	local result = 0
+-- 	for i = 1, 100000000 do
+-- 		result = result + i
+-- 	end
+-- 	return result
+-- ]])
+--
+-- slow_worker:run(function(result, err)
+-- 	-- This callback won't be called if cancelled
+-- 	niri.utils.log("Slow worker done: " .. result)
+-- end)
+--
+-- -- Cancel immediately (callback won't fire)
+-- slow_worker:cancel()
+
+-- ============================================================================
+-- PRACTICAL ASYNC EXAMPLES
+-- ============================================================================
+
+-- Example: Log timing of config load
+niri.schedule(function()
+	local end_time = niri.loop.now()
+	niri.utils.log("Config load completed in " .. (end_time - startup_time) .. "ms")
+end)

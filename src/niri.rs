@@ -957,17 +957,42 @@ impl State {
         let active_output = self.niri.layout.active_output().cloned();
 
         // Get the previously focused window to emit blur event
-        let prev_focused = self.niri.layout.focus().map(|w| w.id());
+        let prev_focused_info = self.niri.layout.focus().map(|mapped| {
+            let id = mapped.id().get() as u32;
+            let (title, app_id) = crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                (
+                    role.title.clone().unwrap_or_default(),
+                    role.app_id.clone().unwrap_or_default(),
+                )
+            });
+            (id, title, app_id)
+        });
 
         self.niri.layout.activate_window(window);
 
-        // Emit blur event for previously focused window
-        if let Some(_prev_window) = prev_focused {
-            lua_event_hooks::emit_window_blur(self, 0, "window");
+        // Get the newly focused window info
+        let new_focused_info = self.niri.layout.focus().map(|mapped| {
+            let id = mapped.id().get() as u32;
+            let (title, app_id) = crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                (
+                    role.title.clone().unwrap_or_default(),
+                    role.app_id.clone().unwrap_or_default(),
+                )
+            });
+            (id, title, app_id)
+        });
+
+        // Emit blur event for previously focused window (if different from new focus)
+        if let Some((prev_id, ref prev_title, ref _prev_app_id)) = prev_focused_info {
+            if new_focused_info.as_ref().map(|(id, _, _)| *id) != Some(prev_id) {
+                lua_event_hooks::emit_window_blur(self, prev_id, prev_title);
+            }
         }
 
         // Emit focus event for newly focused window
-        lua_event_hooks::emit_window_focus(self, 0, "window");
+        if let Some((new_id, ref new_title, ref _new_app_id)) = new_focused_info {
+            lua_event_hooks::emit_window_focus(self, new_id, new_title);
+        }
 
         let new_active = self.niri.layout.active_output().cloned();
         #[allow(clippy::collapsible_if)]
@@ -4185,6 +4210,18 @@ impl Niri {
         }
 
         self.queue_redraw(output);
+
+        // Emit Lua event for output mode change
+        if let Some(mode) = output.current_mode() {
+            let refresh_rate = Some(mode.refresh as f64 / 1000.0);
+            lua_event_hooks::emit_output_mode_change(
+                self,
+                &output.name(),
+                mode.size.w,
+                mode.size.h,
+                refresh_rate,
+            );
+        }
     }
 
     pub fn deactivate_monitors(&mut self, backend: &mut Backend) {

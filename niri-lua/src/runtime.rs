@@ -20,7 +20,7 @@
 //!
 //! The runtime uses Luau's Compiler with optimization level 2 for:
 //! - Function inlining
-//! - Loop unrolling  
+//! - Loop unrolling
 //! - Constant folding
 //! - Dead code elimination
 //!
@@ -175,9 +175,7 @@ impl LuaRuntime {
 
         // Create optimized compiler for Luau
         // Level 2 enables function inlining, loop unrolling, constant folding
-        let compiler = Compiler::new()
-            .set_optimization_level(2)
-            .set_debug_level(1); // Keep line info for error messages
+        let compiler = Compiler::new().set_optimization_level(2).set_debug_level(1); // Keep line info for error messages
 
         Ok(Self {
             lua,
@@ -200,7 +198,8 @@ impl LuaRuntime {
     /// This is called internally before executing Lua code.
     fn set_deadline(&self) {
         if self.limits.timeout > Duration::ZERO {
-            self.deadline.set(Some(Instant::now() + self.limits.timeout));
+            self.deadline
+                .set(Some(Instant::now() + self.limits.timeout));
         }
     }
 
@@ -248,7 +247,7 @@ impl LuaRuntime {
     pub fn eval_with_timeout<R: mlua::FromLua>(&self, code: &str) -> LuaResult<R> {
         // Compile with optimizations
         let bytecode = self.compiler.compile(code)?;
-        
+
         self.set_deadline();
         let result = self.lua.load(bytecode).eval::<R>();
         self.clear_deadline();
@@ -277,23 +276,25 @@ impl LuaRuntime {
         let niri_table: LuaTable = self.lua.globals().get("niri")?;
         let queue = self.scheduled_callbacks.clone();
 
-        let schedule_fn = self.lua.create_function(move |lua, callback: LuaFunction| {
-            let mut q = queue.borrow_mut();
+        let schedule_fn = self
+            .lua
+            .create_function(move |lua, callback: LuaFunction| {
+                let mut q = queue.borrow_mut();
 
-            // Enforce queue size limit
-            if q.len() >= MAX_QUEUE_SIZE {
-                return Err(LuaError::external(format!(
-                    "Schedule queue full (max {} callbacks)",
-                    MAX_QUEUE_SIZE
-                )));
-            }
+                // Enforce queue size limit
+                if q.len() >= MAX_QUEUE_SIZE {
+                    return Err(LuaError::external(format!(
+                        "Schedule queue full (max {} callbacks)",
+                        MAX_QUEUE_SIZE
+                    )));
+                }
 
-            // Store callback in registry so it persists
-            let key = lua.create_registry_value(callback)?;
-            q.push_back(key);
+                // Store callback in registry so it persists
+                let key = lua.create_registry_value(callback)?;
+                q.push_back(key);
 
-            Ok(())
-        })?;
+                Ok(())
+            })?;
 
         niri_table.set("schedule", schedule_fn)?;
         Ok(())

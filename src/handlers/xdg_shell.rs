@@ -61,9 +61,8 @@ impl XdgShellHandler for State {
         let unmapped = Unmapped::new(Window::new_wayland_window(surface));
         let existing = self.niri.unmapped_windows.insert(wl_surface, unmapped);
         assert!(existing.is_none());
-
-        // Emit window:open event for Lua handlers
-        lua_event_hooks::emit_window_open(self, 0, "window");
+        // Note: window:open event is emitted when the window is mapped to the layout
+        // in compositor.rs, where we have access to the window's ID, title, and app_id
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -425,8 +424,16 @@ impl XdgShellHandler for State {
             // changes.
             mapped.set_needs_configure();
 
+            let window_id = mapped.id().get() as u32;
+            let window_title = crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                role.title.clone().unwrap_or_default()
+            });
+
             let window = mapped.window.clone();
             self.niri.layout.set_maximized(&window, true);
+
+            // Emit Lua event for maximize
+            lua_event_hooks::emit_window_maximize(self, window_id, &window_title, true);
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -507,8 +514,16 @@ impl XdgShellHandler for State {
             // changes.
             mapped.set_needs_configure();
 
+            let window_id = mapped.id().get() as u32;
+            let window_title = crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                role.title.clone().unwrap_or_default()
+            });
+
             let window = mapped.window.clone();
             self.niri.layout.set_maximized(&window, false);
+
+            // Emit Lua event for unmaximize
+            lua_event_hooks::emit_window_maximize(self, window_id, &window_title, false);
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -872,6 +887,12 @@ impl XdgShellHandler for State {
         let output = output.cloned();
 
         let id = mapped.id();
+
+        // Get window title/app_id BEFORE any mutable borrows (to avoid borrow conflicts)
+        let (title, app_id) = crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+            (role.title.clone(), role.app_id.clone())
+        });
+
         self.niri
             .stop_casts_for_target(CastTarget::Window { id: id.get() });
 
@@ -897,8 +918,13 @@ impl XdgShellHandler for State {
         // Emit layout:window_removed event for Lua handlers
         lua_event_hooks::emit_layout_window_removed(self, id.get() as u32);
 
-        // Emit window:close event for Lua handlers
-        lua_event_hooks::emit_window_close(self, id.get() as u32, "window");
+        // Emit window:close event with real window data
+        lua_event_hooks::emit_window_close_full(
+            self,
+            id.get() as u32,
+            title.as_deref().unwrap_or(""),
+            app_id.as_deref().unwrap_or(""),
+        );
 
         // If this is the only instance, then this transaction will complete immediately, so no
         // need to set the timer.

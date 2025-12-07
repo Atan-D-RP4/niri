@@ -1,10 +1,28 @@
+## Build & Test Commands
+- **Build**: `cargo build` (or `cargo build --release`)
+- **Lint**: `cargo clippy --all-targets --all-features`
+- **Format**: `cargo +nightly fmt --all` (check: `cargo +nightly fmt --all -- --check`)
+- **Test all**: `cargo test`
+- **Single test**: `cargo test test_name` or `cargo test module::test_name`
+- **Update snapshots**: `cargo insta review` (uses insta for snapshot testing)
+
+## Code Style
+- **Imports**: Module-level granularity, grouped as std/external/crate (see rustfmt.toml)
+- **Comments**: Wrap at 100 chars
+- **Naming**: snake_case for functions/variables, CamelCase for types
+- **Errors**: Use `anyhow` for error handling with `.context()` for context
+- **Commits**: Small, focused, self-contained; each must build and pass tests
+- **Clippy**: `new_without_default` is allowed; interior mutability ignored for Smithay types
+
+---
+
 ## Niri Wayland Compositor Architecture
 
 Comprehensive architecture map of Niri, a scrollable-tiling Wayland compositor. Covers startup sequence [1a-1d], input processing pipeline [2a-2d], innovative Overview feature [3a-3d], layout engine [4a-4d], rendering system [5a-5d], and IPC control interface [6a-6d].
 
-### Sub-Crate Architecture Documentation
+### Sub-Crate Documentation
 
-For detailed architecture documentation of individual crates, see:
+Each sub-crate has its own AGENTS.md with the same build/test/style conventions above, plus crate-specific architecture:
 
 - **[niri-ipc](niri-ipc/AGENTS.md)** - IPC communication system with Unix domain sockets, JSON serialization, and event stream state synchronization
 - **[niri-config](niri-config/AGENTS.md)** - KDL configuration parsing with includes, key binding resolution, and modular subsystems

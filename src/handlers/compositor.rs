@@ -228,6 +228,19 @@ impl CompositorHandler for State {
                         // Emit layout:window_added event
                         lua_event_hooks::emit_layout_window_added(self, mapped.id().get() as u32);
 
+                        // Emit window:open event with real window data
+                        let window_id = mapped.id().get() as u32;
+                        let (title, app_id) =
+                            crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
+                                (role.title.clone(), role.app_id.clone())
+                            });
+                        lua_event_hooks::emit_window_open_full(
+                            self,
+                            window_id,
+                            title.as_deref().unwrap_or(""),
+                            app_id.as_deref().unwrap_or(""),
+                        );
+
                         if mapped.pending_sizing_mode().is_fullscreen() && is_pending_maximized {
                             self.niri.layout.set_maximized(&window, true);
                         }

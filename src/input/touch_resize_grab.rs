@@ -5,8 +5,11 @@ use smithay::input::touch::{
 };
 use smithay::input::SeatHandler;
 use smithay::utils::{IsAlive, Logical, Point, Serial};
+use smithay::wayland::seat::WaylandFocus;
 
+use crate::layout::LayoutElement;
 use crate::niri::State;
+use crate::{lua_event_hooks, utils};
 
 pub struct TouchResizeGrab {
     start_data: TouchGrabStartData<State>,
@@ -20,6 +23,24 @@ impl TouchResizeGrab {
 
     fn on_ungrab(&mut self, state: &mut State) {
         state.niri.layout.interactive_resize_end(&self.window);
+
+        // Emit resize event with final window size
+        if let Some(wl_surface) = self.window.wl_surface() {
+            if let Some((mapped, _)) = state.niri.layout.find_window_and_output(&wl_surface) {
+                let window_id = mapped.id().get() as u32;
+                let window_title = utils::with_toplevel_role(mapped.toplevel(), |role| {
+                    role.title.clone().unwrap_or_default()
+                });
+                let size = mapped.size();
+                lua_event_hooks::emit_window_resize(
+                    state,
+                    window_id,
+                    &window_title,
+                    size.w,
+                    size.h,
+                );
+            }
+        }
     }
 }
 

@@ -7,10 +7,9 @@
 //! - `niri.config:apply()` and `:auto_apply()` methods
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mlua::prelude::*;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 /// Represents a pending configuration change.
@@ -150,7 +149,7 @@ impl LuaUserData for ConfigSectionProxy {
                 format!("{}.{}", this.path, key)
             };
 
-            let pending = this.pending.lock();
+            let pending = this.pending.lock().unwrap();
             if let Some(value) = pending.scalar_changes.get(&full_path) {
                 // For pending scalar values, return directly (not objects)
                 if !value.is_object() {
@@ -160,7 +159,7 @@ impl LuaUserData for ConfigSectionProxy {
             drop(pending);
 
             // Check current values
-            let current = this.current_values.lock();
+            let current = this.current_values.lock().unwrap();
             if let Some(value) = current.get(&key) {
                 // For scalar values (not objects), return directly
                 if !value.is_object() {
@@ -206,7 +205,7 @@ impl LuaUserData for ConfigSectionProxy {
                 let json_value = lua_value_to_json(lua, &value)?;
 
                 // Store in pending changes
-                let mut pending = this.pending.lock();
+                let mut pending = this.pending.lock().unwrap();
                 pending.set_scalar(&full_path, json_value);
 
                 // Check for auto-apply
@@ -243,8 +242,8 @@ impl LuaUserData for ConfigCollectionProxy {
 
         // list() - Return all items in the collection
         methods.add_method("list", |lua, this, ()| {
-            let current = this.current_items.lock();
-            let pending = this.pending.lock();
+            let current = this.current_items.lock().unwrap();
+            let pending = this.pending.lock().unwrap();
 
             // Combine current items with pending additions
             let mut items: Vec<serde_json::Value> = current.clone();
@@ -270,8 +269,8 @@ impl LuaUserData for ConfigCollectionProxy {
 
         // get(match_criteria) - Get items matching criteria
         methods.add_method("get", |lua, this, criteria: LuaTable| {
-            let current = this.current_items.lock();
-            let pending = this.pending.lock();
+            let current = this.current_items.lock().unwrap();
+            let pending = this.pending.lock().unwrap();
 
             // Convert match criteria to JSON
             let criteria_json = lua_table_to_json(lua, &criteria)?;
@@ -327,7 +326,7 @@ impl LuaUserData for ConfigCollectionProxy {
                 }
             };
 
-            let mut pending = this.pending.lock();
+            let mut pending = this.pending.lock().unwrap();
             pending.add_to_collection(&this.name, items_json);
 
             // Auto-apply check
@@ -343,7 +342,7 @@ impl LuaUserData for ConfigCollectionProxy {
         methods.add_method("set", |lua, this, items: LuaTable| {
             let items_json = lua_table_to_json_array(lua, &items)?;
 
-            let mut pending = this.pending.lock();
+            let mut pending = this.pending.lock().unwrap();
             pending.replace_collection(&this.name, items_json);
 
             if pending.auto_apply {
@@ -358,7 +357,7 @@ impl LuaUserData for ConfigCollectionProxy {
         methods.add_method("remove", |lua, this, criteria: LuaTable| {
             let criteria_json = lua_table_to_json(lua, &criteria)?;
 
-            let mut pending = this.pending.lock();
+            let mut pending = this.pending.lock().unwrap();
             pending.remove_from_collection(&this.name, criteria_json);
 
             if pending.auto_apply {
@@ -398,7 +397,7 @@ impl ConfigProxy {
     /// Initialize section proxies from the current config
     pub fn init_from_config(&self, config: &niri_config::Config) {
         // Populate section proxies with actual config values
-        let mut section_proxies = self.section_proxies.lock();
+        let mut section_proxies = self.section_proxies.lock().unwrap();
 
         // Layout section
         let layout_values = config_to_layout_json(&config.layout);
@@ -447,7 +446,7 @@ impl ConfigProxy {
         drop(section_proxies);
 
         // Populate collection proxies with actual config values
-        let mut collection_proxies = self.collection_proxies.lock();
+        let mut collection_proxies = self.collection_proxies.lock().unwrap();
 
         // Binds collection
         let binds_items = config_to_binds_json(&config.binds);
@@ -509,7 +508,7 @@ impl ConfigProxy {
         );
 
         // Initialize top-level scalars
-        let mut top_level = self.top_level_scalars.lock();
+        let mut top_level = self.top_level_scalars.lock().unwrap();
         top_level.insert(
             "prefer_no_csd".to_string(),
             serde_json::Value::Bool(config.prefer_no_csd),
@@ -544,7 +543,7 @@ impl LuaUserData for ConfigProxy {
         methods.add_meta_method(LuaMetaMethod::Index, |lua, this, key: String| {
             // First check pending changes for top-level scalars
             {
-                let pending = this.pending.lock();
+                let pending = this.pending.lock().unwrap();
                 if let Some(value) = pending.scalar_changes.get(&key) {
                     return lua_value_from_json(lua, value);
                 }
@@ -552,7 +551,7 @@ impl LuaUserData for ConfigProxy {
 
             // Check if it's a known top-level scalar
             if is_top_level_scalar(&key) {
-                let top_level = this.top_level_scalars.lock();
+                let top_level = this.top_level_scalars.lock().unwrap();
                 if let Some(value) = top_level.get(&key) {
                     return lua_value_from_json(lua, value);
                 }
@@ -567,7 +566,7 @@ impl LuaUserData for ConfigProxy {
                 ConfigSection::Scalar => {
                     // Return a section proxy for scalar sections (layout, input, etc.)
                     // First try to get from cached section proxies
-                    let section_proxies = this.section_proxies.lock();
+                    let section_proxies = this.section_proxies.lock().unwrap();
                     if let Some(proxy) = section_proxies.get(&key) {
                         return Ok(LuaValue::UserData(lua.create_userdata(proxy.clone())?));
                     }
@@ -584,7 +583,7 @@ impl LuaUserData for ConfigProxy {
                 ConfigSection::Collection => {
                     // Return a collection proxy for collection sections
                     // First try to get from cached collection proxies
-                    let collection_proxies = this.collection_proxies.lock();
+                    let collection_proxies = this.collection_proxies.lock().unwrap();
                     if let Some(proxy) = collection_proxies.get(&key) {
                         return Ok(LuaValue::UserData(lua.create_userdata(proxy.clone())?));
                     }
@@ -611,7 +610,7 @@ impl LuaUserData for ConfigProxy {
                 } else {
                     // Single value assignment
                     let json_value = lua_value_to_json(lua, &value)?;
-                    let mut pending = this.pending.lock();
+                    let mut pending = this.pending.lock().unwrap();
                     pending.set_scalar(&key, json_value);
                 }
 
@@ -621,7 +620,7 @@ impl LuaUserData for ConfigProxy {
 
         // apply() method - apply all pending changes
         methods.add_method("apply", |_lua, this, ()| {
-            let pending = this.pending.lock();
+            let pending = this.pending.lock().unwrap();
             if pending.has_changes() {
                 // In the real implementation, this would send a message through the event loop
                 // to apply the pending changes to the active config
@@ -640,7 +639,7 @@ impl LuaUserData for ConfigProxy {
 
         // auto_apply(bool) method - enable/disable auto-apply mode
         methods.add_method("auto_apply", |_lua, this, enabled: bool| {
-            let mut pending = this.pending.lock();
+            let mut pending = this.pending.lock().unwrap();
             pending.auto_apply = enabled;
             Ok(())
         });
@@ -811,7 +810,7 @@ fn flatten_table_to_changes(
                 if first != LuaValue::Nil {
                     // Array - store as JSON array
                     let json_value = lua_value_to_json(lua, &v)?;
-                    let mut p = pending.lock();
+                    let mut p = pending.lock().unwrap();
                     p.set_scalar(&path, json_value);
                 } else {
                     // Nested object - recurse
@@ -820,7 +819,7 @@ fn flatten_table_to_changes(
             }
             _ => {
                 let json_value = lua_value_to_json(lua, &v)?;
-                let mut p = pending.lock();
+                let mut p = pending.lock().unwrap();
                 p.set_scalar(&path, json_value);
             }
         }
@@ -1255,7 +1254,7 @@ mod tests {
         // Test auto_apply method
         lua.load("niri.config:auto_apply(true)").exec().unwrap();
 
-        let p = pending.lock();
+        let p = pending.lock().unwrap();
         assert!(p.auto_apply);
     }
 
@@ -1278,7 +1277,7 @@ mod tests {
             .exec()
             .unwrap();
 
-        let p = pending.lock();
+        let p = pending.lock().unwrap();
         assert_eq!(p.collection_additions.get("binds").unwrap().len(), 1);
     }
 
