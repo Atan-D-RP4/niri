@@ -16,12 +16,20 @@
 //! - Fires periodically (Luau guarantees this at function calls and loop iterations)
 //! - Returns `VmState::Yield` to cleanly terminate runaway scripts
 //!
+//! # Performance Optimization
+//!
+//! The runtime uses Luau's Compiler with optimization level 2 for:
+//! - Function inlining
+//! - Loop unrolling  
+//! - Constant folding
+//! - Dead code elimination
+//!
 //! # Async Primitives
 //!
 //! In addition to timeout protection, we provide:
 //! - `niri.schedule(fn)` - defer work to next event loop iteration
-//! - Worker threads (Phase 3) - offload heavy computation
-//! - `niri.loop` timers (Phase 4) - time-based scheduling
+//! - Worker threads (Phase 4) - offload heavy computation
+//! - `niri.loop` timers (Phase 5) - time-based scheduling
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -31,6 +39,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mlua::prelude::*;
+use mlua::Compiler;
 use niri_config::Config;
 
 use crate::action_proxy::{register_action_proxy, ActionCallback};
@@ -98,6 +107,11 @@ impl ExecutionLimits {
 /// This runtime implements wall-clock timeout protection using Luau's
 /// `set_interrupt` callback. Runaway scripts are automatically terminated
 /// after the configured timeout (default: 1 second).
+///
+/// # Performance Optimization
+///
+/// Uses Luau's Compiler with optimization level 2 for function inlining,
+/// loop unrolling, and constant folding.
 pub struct LuaRuntime {
     lua: Lua,
     /// Event system for emitting Lua events from the compositor
@@ -110,6 +124,8 @@ pub struct LuaRuntime {
     limits: ExecutionLimits,
     /// Shared deadline for interrupt callback (None = no active timeout)
     deadline: Rc<Cell<Option<Instant>>>,
+    /// Luau compiler with optimization enabled
+    compiler: Compiler,
 }
 
 impl LuaRuntime {
@@ -157,6 +173,12 @@ impl LuaRuntime {
             });
         }
 
+        // Create optimized compiler for Luau
+        // Level 2 enables function inlining, loop unrolling, constant folding
+        let compiler = Compiler::new()
+            .set_optimization_level(2)
+            .set_debug_level(1); // Keep line info for error messages
+
         Ok(Self {
             lua,
             event_system: None,
@@ -164,6 +186,7 @@ impl LuaRuntime {
             scheduled_callbacks,
             limits,
             deadline,
+            compiler,
         })
     }
 
@@ -213,6 +236,7 @@ impl LuaRuntime {
     /// Execute Lua code with timeout protection.
     ///
     /// Sets up the deadline before execution and clears it afterward.
+    /// Uses the optimized compiler for better performance.
     ///
     /// # Arguments
     ///
@@ -222,8 +246,11 @@ impl LuaRuntime {
     ///
     /// The result of evaluating the code, or an error if it times out.
     pub fn eval_with_timeout<R: mlua::FromLua>(&self, code: &str) -> LuaResult<R> {
+        // Compile with optimizations
+        let bytecode = self.compiler.compile(code)?;
+        
         self.set_deadline();
-        let result = self.lua.load(code).eval::<R>();
+        let result = self.lua.load(bytecode).eval::<R>();
         self.clear_deadline();
         result
     }
@@ -536,6 +563,8 @@ impl LuaRuntime {
 
     /// Load and execute a Lua script from a file.
     ///
+    /// Uses the optimized compiler for better performance.
+    ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, the script fails to execute,
@@ -544,21 +573,29 @@ impl LuaRuntime {
         let code = std::fs::read_to_string(path)
             .map_err(|e| LuaError::external(format!("Failed to read Lua file: {}", e)))?;
 
+        // Compile with optimizations
+        let bytecode = self.compiler.compile(&code)?;
+
         self.set_deadline();
-        let result = self.lua.load(&code).eval();
+        let result = self.lua.load(bytecode).eval();
         self.clear_deadline();
         result
     }
 
     /// Load and execute a Lua script from a string.
     ///
+    /// Uses the optimized compiler for better performance.
+    ///
     /// # Errors
     ///
     /// Returns an error if the script fails to parse, execute,
     /// or exceeds the execution timeout.
     pub fn load_string(&self, code: &str) -> LuaResult<LuaValue> {
+        // Compile with optimizations
+        let bytecode = self.compiler.compile(code)?;
+
         self.set_deadline();
-        let result = self.lua.load(code).eval();
+        let result = self.lua.load(bytecode).eval();
         self.clear_deadline();
         result
     }
@@ -603,8 +640,20 @@ impl LuaRuntime {
             let _ = self.lua.globals().set("print", pf);
         }
 
+        // Compile with optimizations
+        let bytecode = match self.compiler.compile(code) {
+            Ok(bc) => bc,
+            Err(e) => {
+                // Restore original print before returning
+                if let Ok(orig) = original_print {
+                    let _ = self.lua.globals().set("print", orig);
+                }
+                return (format!("Error: {}", e), false);
+            }
+        };
+
         self.set_deadline();
-        let result = self.lua.load(code).eval::<LuaValue>();
+        let result = self.lua.load(bytecode).eval::<LuaValue>();
         self.clear_deadline();
 
         // Restore original print
@@ -945,6 +994,138 @@ mod tests {
             errors[0].to_string().contains("timeout"),
             "Expected timeout error, got: {}",
             errors[0]
+        );
+    }
+
+    #[test]
+    fn with_timeout_constructor_works() {
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(250));
+        assert_eq!(limits.timeout, Duration::from_millis(250));
+
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+        assert_eq!(rt.limits().timeout, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn call_with_timeout_executes_function() {
+        let rt = LuaRuntime::new().unwrap();
+
+        // Create a Lua function
+        rt.load_string(
+            r#"
+            function add(a, b)
+                return a + b
+            end
+        "#,
+        )
+        .unwrap();
+
+        let func: LuaFunction = rt.inner().globals().get("add").unwrap();
+        let result: i64 = rt.call_with_timeout(&func, (10, 20)).unwrap();
+        assert_eq!(result, 30);
+    }
+
+    #[test]
+    fn call_with_timeout_times_out_infinite_function() {
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(50));
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+
+        // Create a function that loops forever
+        rt.load_string(
+            r#"
+            function infinite()
+                while true do end
+            end
+        "#,
+        )
+        .unwrap();
+
+        let func: LuaFunction = rt.inner().globals().get("infinite").unwrap();
+        let result = rt.call_with_timeout::<()>(&func, ());
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("timeout"));
+    }
+
+    #[test]
+    fn nested_lua_calls_respect_timeout() {
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(50));
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+
+        // Create nested functions where the inner one loops
+        let result = rt.eval_with_timeout::<LuaValue>(
+            r#"
+            local function inner()
+                while true do end
+            end
+            local function outer()
+                inner()
+            end
+            outer()
+        "#,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("timeout"));
+    }
+
+    #[test]
+    fn recursive_calls_respect_timeout() {
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(50));
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+
+        // Infinite recursion (will timeout before stack overflow)
+        let result = rt.eval_with_timeout::<LuaValue>(
+            r#"
+            local function recurse(n)
+                return recurse(n + 1)
+            end
+            recurse(0)
+        "#,
+        );
+
+        // Should timeout or error (stack overflow), either is acceptable
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn deadline_cleared_after_timeout_allows_next_call() {
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(50));
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+
+        // First call times out
+        let result1 = rt.eval_with_timeout::<LuaValue>("while true do end");
+        assert!(result1.is_err());
+
+        // Next call should work fine (deadline was cleared)
+        let result2 = rt.eval_with_timeout::<i64>("return 42");
+        assert!(result2.is_ok());
+        assert_eq!(result2.unwrap(), 42);
+    }
+
+    #[test]
+    fn very_short_timeout_still_works() {
+        // Even 1ms timeout should eventually fire
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(1));
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+
+        let result = rt.eval_with_timeout::<LuaValue>("while true do end");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn timeout_error_message_is_descriptive() {
+        let limits = ExecutionLimits::with_timeout(Duration::from_millis(50));
+        let rt = LuaRuntime::new_with_limits(limits).unwrap();
+
+        let result = rt.eval_with_timeout::<LuaValue>("while true do end");
+        let err_msg = result.unwrap_err().to_string();
+
+        // Error message should mention timeout
+        assert!(
+            err_msg.to_lowercase().contains("timeout"),
+            "Error message should mention timeout, got: {}",
+            err_msg
         );
     }
 
