@@ -305,11 +305,10 @@ print("Line 3")
         let (output, success) = runtime.execute_string("return {1, 2, 3}");
         assert!(success, "Should execute successfully");
         println!("Simple array table output: '{}'", output);
-        // Tables don't produce output - users should use niri.print() instead
-        assert!(
-            output.is_empty(),
-            "Array table should not produce output (use niri.print instead)"
-        );
+        // Tables are now pretty-printed like vim.print()
+        assert!(output.contains("1"), "Should contain 1");
+        assert!(output.contains("2"), "Should contain 2");
+        assert!(output.contains("3"), "Should contain 3");
     }
 
     #[test]
@@ -318,11 +317,11 @@ print("Line 3")
         let (output, success) = runtime.execute_string("return {name = 'test', value = 42}");
         assert!(success, "Should execute successfully");
         println!("Table with string keys output: '{}'", output);
-        // Tables don't produce output - users should use niri.print() instead
-        assert!(
-            output.is_empty(),
-            "Table should not produce output (use niri.print instead)"
-        );
+        // Tables are now pretty-printed like vim.print()
+        assert!(output.contains("name"), "Should contain key 'name'");
+        assert!(output.contains("test"), "Should contain value 'test'");
+        assert!(output.contains("value"), "Should contain key 'value'");
+        assert!(output.contains("42"), "Should contain value 42");
     }
 
     #[test]
@@ -332,11 +331,9 @@ print("Line 3")
             runtime.execute_string("return {{id = 1, name = 'a'}, {id = 2, name = 'b'}}");
         assert!(success, "Should execute successfully");
         println!("Nested table output: '{}'", output);
-        // Tables don't produce output - users should use niri.print() instead
-        assert!(
-            output.is_empty(),
-            "Nested table should not produce output (use niri.print instead)"
-        );
+        // Tables are now pretty-printed like vim.print()
+        assert!(output.contains("id"), "Should contain key 'id'");
+        assert!(output.contains("name"), "Should contain key 'name'");
     }
 
     #[test]
@@ -345,10 +342,10 @@ print("Line 3")
         let (output, success) = runtime.execute_string("return {}");
         assert!(success, "Should execute successfully");
         println!("Empty table output: '{}'", output);
-        // Tables don't produce output - users should use niri.print() instead
+        // Empty tables are formatted as {}
         assert!(
-            output.is_empty(),
-            "Empty table should not produce output (use niri.print instead)"
+            output.contains("{}"),
+            "Empty table should be formatted as {{}}"
         );
     }
 
@@ -359,11 +356,9 @@ print("Line 3")
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
         println!("Large array output length: {}", output.len());
-        // Tables don't produce output - users should use niri.print() instead
-        assert!(
-            output.is_empty(),
-            "Large array should not produce output (use niri.print instead)"
-        );
+        // Tables are now pretty-printed - large arrays should have content
+        assert!(!output.is_empty(), "Large array should produce output");
+        assert!(output.contains("1"), "Should contain first element");
     }
 
     #[test]
@@ -374,11 +369,24 @@ print("Line 3")
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
         println!("Large complex table output length: {}", output.len());
-        // Tables don't produce output - users should use niri.print() instead
+        // Tables are now pretty-printed
         assert!(
-            output.is_empty(),
-            "Large complex table should not produce output (use niri.print instead)"
+            !output.is_empty(),
+            "Large complex table should produce output"
         );
+        assert!(output.contains("id"), "Should contain 'id' key");
+    }
+
+    #[test]
+    fn test_table_representation_includes_structure() {
+        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
+        // Tables are now pretty-printed like vim.print()
+        let (output, success) = runtime.execute_string("return {a=1, b={c=2}}");
+        assert!(success, "Should execute successfully");
+        println!("Table structure output: '{}'", output);
+        assert!(output.contains("a"), "Should contain key 'a'");
+        assert!(output.contains("b"), "Should contain key 'b'");
+        assert!(output.contains("c"), "Should contain nested key 'c'");
     }
 
     #[test]
@@ -466,20 +474,6 @@ print("Line 3")
         assert!(!success, "Should fail on runtime type error");
         println!("Runtime error output: '{}'", output);
         assert!(output.contains("Error"), "Should contain error message");
-    }
-
-    #[test]
-    fn test_table_representation_includes_structure() {
-        let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        // Tables don't produce output - users should use niri.print() instead
-        let (output, success) = runtime.execute_string("return {a=1, b={c=2}}");
-        assert!(success, "Should execute successfully");
-        println!("Table structure output: '{}'", output);
-        // Tables return empty output since users should use niri.print() for pretty-printing
-        assert!(
-            output.is_empty(),
-            "Table should not produce output (use niri.print instead)"
-        );
     }
 
     #[test]
@@ -579,9 +573,11 @@ print("Line 3")
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let (output, success) = runtime.execute_string("return 0.000001");
         assert!(success, "Should execute successfully");
-        assert_eq!(
-            output, "0.000001",
-            "Very small float should format correctly"
+        // Lua may format as scientific notation or decimal
+        assert!(
+            output == "0.000001" || output == "1e-06",
+            "Very small float should format correctly, got: {}",
+            output
         );
     }
 
@@ -987,7 +983,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_on_method() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             _test_called = false
@@ -1004,7 +1002,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_once_method() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             _test_count = 0
@@ -1024,7 +1024,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_off_method() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             _test_count = 0
@@ -1044,7 +1046,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_emit_method() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             _test_value = nil
@@ -1062,7 +1066,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_list_method() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             niri.events:on("event1", function() end)
@@ -1079,7 +1085,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_clear_method() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             niri.events:on("event1", function() end)
@@ -1091,13 +1099,18 @@ print("Line 3")
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "events:clear should execute successfully");
-        assert_eq!(output, "1", "clear should remove handlers for specific event");
+        assert_eq!(
+            output, "1",
+            "clear should remove handlers for specific event"
+        );
     }
 
     #[test]
     fn test_events_proxy_multiple_handlers_same_event() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         let code = r#"
             _test_sum = 0
@@ -1115,7 +1128,9 @@ print("Line 3")
     #[test]
     fn test_events_proxy_emit_primitive_value() {
         let mut runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
-        runtime.init_event_system().expect("Failed to init event system");
+        runtime
+            .init_event_system()
+            .expect("Failed to init event system");
 
         // When emitting a primitive, it should be wrapped in { value = ... }
         let code = r#"
@@ -1154,8 +1169,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_spawn_method() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1184,8 +1200,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_focus_column_methods() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1219,8 +1236,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_workspace_methods() {
-        use niri_ipc::{Action, WorkspaceReferenceArg};
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::{Action, WorkspaceReferenceArg};
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1264,8 +1282,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_size_change_parsing() {
-        use niri_ipc::{Action, SizeChange};
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::{Action, SizeChange};
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1325,8 +1344,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_overview_methods() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1358,8 +1378,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_quit_with_confirmation() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1400,8 +1421,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_screenshot_methods() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1433,8 +1455,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_move_column_methods() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));
@@ -1468,8 +1491,9 @@ print("Line 3")
 
     #[test]
     fn test_action_proxy_floating_methods() {
-        use niri_ipc::Action;
         use std::sync::{Arc, Mutex as StdMutex};
+
+        use niri_ipc::Action;
 
         let runtime = LuaRuntime::new().expect("Failed to create Lua runtime");
         let captured_actions: Arc<StdMutex<Vec<Action>>> = Arc::new(StdMutex::new(vec![]));

@@ -140,7 +140,7 @@ impl PluginManager {
 
                                 // Check for .lua files
                                 if path.is_file()
-                                    && path.extension().map_or(false, |ext| ext == "lua")
+                                    && path.extension().is_some_and(|ext| ext == "lua")
                                 {
                                     if let Some(name) = path.file_stem() {
                                         let plugin_name = name.to_string_lossy().to_string();

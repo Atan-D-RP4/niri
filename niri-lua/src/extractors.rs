@@ -53,7 +53,7 @@ pub fn extract_float_opt(table: &LuaTable, field: &str) -> LuaResult<Option<f64>
 }
 
 /// Helper to extract an optional table field from a Lua table.
-pub fn extract_table_opt<'lua>(table: &'lua LuaTable, field: &str) -> LuaResult<Option<LuaTable>> {
+pub fn extract_table_opt(table: &LuaTable, field: &str) -> LuaResult<Option<LuaTable>> {
     match table.get::<LuaValue>(field) {
         Ok(LuaValue::Nil) => Ok(None),
         Ok(LuaValue::Table(t)) => Ok(Some(t)),
@@ -140,8 +140,10 @@ pub fn extract_animations(table: &LuaTable) -> LuaResult<Option<Animations>> {
     let slowdown = extract_float_opt(table, "slowdown")?;
 
     if off || on || slowdown.is_some() {
-        let mut animations = Animations::default();
-        animations.off = off && !on; // on overrides off
+        let mut animations = Animations {
+            off: off && !on, // on overrides off
+            ..Default::default()
+        };
         if let Some(s) = slowdown {
             animations.slowdown = s;
         }

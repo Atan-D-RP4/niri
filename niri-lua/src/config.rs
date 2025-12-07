@@ -69,7 +69,7 @@ impl LuaConfig {
         // 1. Call niri.apply_config({ ... }) to apply config (preferred)
         // 2. Return a config table (fallback for backward compatibility)
         let return_val = runtime
-            .load_file(&path_ref)
+            .load_file(path_ref)
             .map_err(|e| anyhow::anyhow!("Failed to load Lua config file: {}", e))?;
 
         // If the script returns a table, extract its fields and set them as globals
@@ -286,7 +286,12 @@ mod tests {
         .unwrap();
 
         // Verify it executed without error - the config proxy should have captured the change
-        assert!(config.runtime().inner().globals().get::<mlua::Value>("niri").is_ok());
+        assert!(config
+            .runtime()
+            .inner()
+            .globals()
+            .get::<mlua::Value>("niri")
+            .is_ok());
     }
 
     #[test]

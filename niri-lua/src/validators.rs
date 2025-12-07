@@ -222,7 +222,7 @@ impl ConfigValidator {
             }
             LuaValue::Integer(n) => {
                 let n = *n as f64;
-                if n < 0.0 || n > 10.0 {
+                if !(0.0..=10.0).contains(&n) {
                     return Err(mlua::Error::RuntimeError(
                         "Acceleration speed must be between 0.0 and 10.0".to_string(),
                     ));
@@ -269,7 +269,7 @@ impl ConfigValidator {
             }
             LuaValue::Integer(n) => {
                 let n = *n as f64;
-                if n < 0.5 || n > 4.0 {
+                if !(0.5..=4.0).contains(&n) {
                     return Err(mlua::Error::RuntimeError(format!(
                         "Scale must be between 0.5 and 4.0, got {}",
                         n

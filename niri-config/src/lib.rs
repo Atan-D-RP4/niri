@@ -505,7 +505,7 @@ impl ConfigPath {
 
     /// Check if a path is a Lua config file
     pub fn is_lua_config(path: &Path) -> bool {
-        path.extension().map_or(false, |ext| ext == "lua")
+        path.extension().is_some_and(|ext| ext == "lua")
     }
 
     fn load_inner<'a>(
@@ -827,7 +827,7 @@ mod tests {
                 window-open { off; }
 
                 window-close {
-                    curve "cubic-bezier" 0.05 0.7 0.1 1  
+                    curve "cubic-bezier" 0.05 0.7 0.1 1
                 }
 
                 recent-windows-close {

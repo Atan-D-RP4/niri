@@ -77,10 +77,10 @@ impl HotReloader {
     pub fn watch(&mut self, path: PathBuf) -> std::io::Result<()> {
         // Expand ~ in path
         let path = if let Some(path_str) = path.to_str() {
-            if path_str.starts_with("~") {
+            if let Some(stripped) = path_str.strip_prefix("~") {
                 let home = std::env::var("HOME").ok();
                 if let Some(home) = home {
-                    PathBuf::from(home).join(&path_str[1..])
+                    PathBuf::from(home).join(stripped)
                 } else {
                     path
                 }

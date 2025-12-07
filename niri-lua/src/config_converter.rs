@@ -5,7 +5,9 @@
 
 use log::{debug, info};
 use niri_config::binds::{Action, Bind, Key, WorkspaceReference};
-use niri_config::input::{AccelProfile, ClickMethod, FocusFollowsMouse, ScrollMethod, TapButtonMap, WarpMouseToFocus};
+use niri_config::input::{
+    AccelProfile, ClickMethod, FocusFollowsMouse, ScrollMethod, TapButtonMap, WarpMouseToFocus,
+};
 use niri_config::output::Position;
 use niri_config::utils::Percent;
 use niri_config::workspace::WorkspaceName;
@@ -17,15 +19,14 @@ use super::LuaRuntime;
 /// Parse a size change string like "+10%", "-5%", "50%", "+100", "-50", "800"
 fn parse_size_change(s: &str) -> Option<SizeChange> {
     let s = s.trim();
-    
-    if s.ends_with('%') {
+
+    if let Some(num_str) = s.strip_suffix('%') {
         // Percentage change
-        let num_str = &s[..s.len() - 1];
-        if num_str.starts_with('+') {
-            let val: f64 = num_str[1..].parse().ok()?;
+        if let Some(stripped) = num_str.strip_prefix('+') {
+            let val: f64 = stripped.parse().ok()?;
             Some(SizeChange::AdjustProportion(val / 100.0))
-        } else if num_str.starts_with('-') {
-            let val: f64 = num_str[1..].parse().ok()?;
+        } else if let Some(stripped) = num_str.strip_prefix('-') {
+            let val: f64 = stripped.parse().ok()?;
             Some(SizeChange::AdjustProportion(-val / 100.0))
         } else {
             let val: f64 = num_str.parse().ok()?;
@@ -33,8 +34,8 @@ fn parse_size_change(s: &str) -> Option<SizeChange> {
         }
     } else {
         // Fixed pixel change
-        if s.starts_with('+') {
-            let val: i32 = s[1..].parse().ok()?;
+        if let Some(stripped) = s.strip_prefix('+') {
+            let val: i32 = stripped.parse().ok()?;
             Some(SizeChange::AdjustFixed(val))
         } else if s.starts_with('-') {
             let val: i32 = s.parse().ok()?; // includes the minus sign
@@ -45,7 +46,6 @@ fn parse_size_change(s: &str) -> Option<SizeChange> {
         }
     }
 }
-
 
 /// Apply pending configuration changes from the reactive config proxy.
 ///
@@ -137,7 +137,11 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
                 }
             }
             "recent_windows" => {
-                if apply_recent_windows_scalar_change(&mut config.recent_windows, &parts[1..], value) {
+                if apply_recent_windows_scalar_change(
+                    &mut config.recent_windows,
+                    &parts[1..],
+                    value,
+                ) {
                     changes_applied += 1;
                 }
             }
@@ -147,12 +151,20 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
                 }
             }
             "hotkey_overlay" => {
-                if apply_hotkey_overlay_scalar_change(&mut config.hotkey_overlay, &parts[1..], value) {
+                if apply_hotkey_overlay_scalar_change(
+                    &mut config.hotkey_overlay,
+                    &parts[1..],
+                    value,
+                ) {
                     changes_applied += 1;
                 }
             }
             "config_notification" => {
-                if apply_config_notification_scalar_change(&mut config.config_notification, &parts[1..], value) {
+                if apply_config_notification_scalar_change(
+                    &mut config.config_notification,
+                    &parts[1..],
+                    value,
+                ) {
                     changes_applied += 1;
                 }
             }
@@ -162,7 +174,11 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
                 }
             }
             "xwayland_satellite" => {
-                if apply_xwayland_satellite_scalar_change(&mut config.xwayland_satellite, &parts[1..], value) {
+                if apply_xwayland_satellite_scalar_change(
+                    &mut config.xwayland_satellite,
+                    &parts[1..],
+                    value,
+                ) {
                     changes_applied += 1;
                 }
             }
@@ -192,7 +208,7 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
                     if let Some(bind) = json_to_bind(item) {
                         config.binds.0.push(bind);
                         changes_applied += 1;
-                        debug!("Added bind from pending Lua config");
+                        // debug!("Added bind from pending Lua config");
                     }
                 }
             }
@@ -253,7 +269,10 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
             "binds" => {
                 for criteria in criteria_list {
                     let before_len = config.binds.0.len();
-                    config.binds.0.retain(|bind| !bind_matches_criteria(bind, criteria));
+                    config
+                        .binds
+                        .0
+                        .retain(|bind| !bind_matches_criteria(bind, criteria));
                     let removed = before_len - config.binds.0.len();
                     if removed > 0 {
                         changes_applied += removed;
@@ -264,7 +283,9 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
             "window_rules" => {
                 for criteria in criteria_list {
                     let before_len = config.window_rules.len();
-                    config.window_rules.retain(|rule| !window_rule_matches_criteria(rule, criteria));
+                    config
+                        .window_rules
+                        .retain(|rule| !window_rule_matches_criteria(rule, criteria));
                     let removed = before_len - config.window_rules.len();
                     if removed > 0 {
                         changes_applied += removed;
@@ -549,10 +570,7 @@ fn apply_layout_scalar_change(
         }
         "preset_column_widths" => {
             if let Some(arr) = value.as_array() {
-                layout.preset_column_widths = arr
-                    .iter()
-                    .filter_map(json_to_preset_size)
-                    .collect();
+                layout.preset_column_widths = arr.iter().filter_map(json_to_preset_size).collect();
                 return true;
             }
         }
@@ -564,10 +582,7 @@ fn apply_layout_scalar_change(
         }
         "preset_window_heights" => {
             if let Some(arr) = value.as_array() {
-                layout.preset_window_heights = arr
-                    .iter()
-                    .filter_map(json_to_preset_size)
-                    .collect();
+                layout.preset_window_heights = arr.iter().filter_map(json_to_preset_size).collect();
                 return true;
             }
         }
@@ -878,12 +893,17 @@ fn apply_input_scalar_change(
         }
         "focus_follows_mouse" => {
             if let Some(obj) = value.as_object() {
-                let max_scroll_amount = obj.get("max_scroll_amount").and_then(|v| v.as_f64()).map(Percent);
+                let max_scroll_amount = obj
+                    .get("max_scroll_amount")
+                    .and_then(|v| v.as_f64())
+                    .map(Percent);
                 input.focus_follows_mouse = Some(FocusFollowsMouse { max_scroll_amount });
                 return true;
             } else if let Some(b) = value.as_bool() {
                 if b {
-                    input.focus_follows_mouse = Some(FocusFollowsMouse { max_scroll_amount: None });
+                    input.focus_follows_mouse = Some(FocusFollowsMouse {
+                        max_scroll_amount: None,
+                    });
                 } else {
                     input.focus_follows_mouse = None;
                 }
@@ -968,10 +988,8 @@ fn json_to_bind(json: &serde_json::Value) -> Option<Bind> {
                         Some(n.to_string())
                     } else if let Some(n) = v.as_u64() {
                         Some(n.to_string())
-                    } else if let Some(n) = v.as_f64() {
-                        Some(n.to_string())
                     } else {
-                        None
+                        v.as_f64().map(|n| n.to_string())
                     }
                 })
                 .collect()
@@ -1069,6 +1087,71 @@ fn parse_action_from_str(action_str: &str, args: &[String]) -> Option<Action> {
         "consume-or-expel-window-right" => Action::ConsumeOrExpelWindowRight,
         "show-hotkey-overlay" => Action::ShowHotkeyOverlay,
         "suspend" => Action::Suspend,
+        // Missing actions from roadmap TODO
+        "toggle-keyboard-shortcuts-inhibit" => Action::ToggleKeyboardShortcutsInhibit,
+        "expand-column-to-available-width" => Action::ExpandColumnToAvailableWidth,
+        "center-visible-columns" => Action::CenterVisibleColumns,
+        "switch-focus-between-floating-and-tiling" => Action::SwitchFocusBetweenFloatingAndTiling,
+        "toggle-column-tabbed-display" => Action::ToggleColumnTabbedDisplay,
+        // Additional focus actions
+        "focus-column-right-or-first" => Action::FocusColumnRightOrFirst,
+        "focus-column-left-or-last" => Action::FocusColumnLeftOrLast,
+        "focus-window-or-monitor-up" => Action::FocusWindowOrMonitorUp,
+        "focus-window-or-monitor-down" => Action::FocusWindowOrMonitorDown,
+        "focus-column-or-monitor-left" => Action::FocusColumnOrMonitorLeft,
+        "focus-column-or-monitor-right" => Action::FocusColumnOrMonitorRight,
+        "focus-window-down-or-column-left" => Action::FocusWindowDownOrColumnLeft,
+        "focus-window-down-or-column-right" => Action::FocusWindowDownOrColumnRight,
+        "focus-window-up-or-column-left" => Action::FocusWindowUpOrColumnLeft,
+        "focus-window-up-or-column-right" => Action::FocusWindowUpOrColumnRight,
+        "focus-window-or-workspace-down" => Action::FocusWindowOrWorkspaceDown,
+        "focus-window-or-workspace-up" => Action::FocusWindowOrWorkspaceUp,
+        "focus-window-top" => Action::FocusWindowTop,
+        "focus-window-bottom" => Action::FocusWindowBottom,
+        "focus-window-down-or-top" => Action::FocusWindowDownOrTop,
+        "focus-window-up-or-bottom" => Action::FocusWindowUpOrBottom,
+        "focus-window-previous" => Action::FocusWindowPrevious,
+        "focus-workspace-previous" => Action::FocusWorkspacePrevious,
+        // Additional move actions
+        "move-column-left-or-to-monitor-left" => Action::MoveColumnLeftOrToMonitorLeft,
+        "move-column-right-or-to-monitor-right" => Action::MoveColumnRightOrToMonitorRight,
+        "move-window-down-or-to-workspace-down" => Action::MoveWindowDownOrToWorkspaceDown,
+        "move-window-up-or-to-workspace-up" => Action::MoveWindowUpOrToWorkspaceUp,
+        // Additional monitor actions
+        "focus-monitor-previous" => Action::FocusMonitorPrevious,
+        "focus-monitor-next" => Action::FocusMonitorNext,
+        "move-column-to-monitor-previous" => Action::MoveColumnToMonitorPrevious,
+        "move-column-to-monitor-next" => Action::MoveColumnToMonitorNext,
+        "move-window-to-monitor-left" => Action::MoveWindowToMonitorLeft,
+        "move-window-to-monitor-right" => Action::MoveWindowToMonitorRight,
+        "move-window-to-monitor-down" => Action::MoveWindowToMonitorDown,
+        "move-window-to-monitor-up" => Action::MoveWindowToMonitorUp,
+        "move-window-to-monitor-previous" => Action::MoveWindowToMonitorPrevious,
+        "move-window-to-monitor-next" => Action::MoveWindowToMonitorNext,
+        "move-workspace-to-monitor-left" => Action::MoveWorkspaceToMonitorLeft,
+        "move-workspace-to-monitor-right" => Action::MoveWorkspaceToMonitorRight,
+        "move-workspace-to-monitor-down" => Action::MoveWorkspaceToMonitorDown,
+        "move-workspace-to-monitor-up" => Action::MoveWorkspaceToMonitorUp,
+        "move-workspace-to-monitor-previous" => Action::MoveWorkspaceToMonitorPrevious,
+        "move-workspace-to-monitor-next" => Action::MoveWorkspaceToMonitorNext,
+        // Column operations
+        "swap-window-left" => Action::SwapWindowLeft,
+        "swap-window-right" => Action::SwapWindowRight,
+        "center-window" => Action::CenterWindow,
+        // Size preset actions
+        "switch-preset-column-width-back" => Action::SwitchPresetColumnWidthBack,
+        "switch-preset-window-height-back" => Action::SwitchPresetWindowHeightBack,
+        "maximize-window-to-edges" => Action::MaximizeWindowToEdges,
+        // Floating actions
+        "move-window-to-floating" => Action::MoveWindowToFloating,
+        "move-window-to-tiling" => Action::MoveWindowToTiling,
+        "focus-floating" => Action::FocusFloating,
+        "focus-tiling" => Action::FocusTiling,
+        "toggle-window-rule-opacity" => Action::ToggleWindowRuleOpacity,
+        // Debug actions
+        "toggle-debug-tint" => Action::ToggleDebugTint,
+        "debug-toggle-opaque-regions" => Action::DebugToggleOpaqueRegions,
+        "debug-toggle-damage" => Action::DebugToggleDamage,
         // Handle workspace index actions
         "focus-workspace" => {
             if args.is_empty() {
@@ -1205,7 +1288,10 @@ fn bind_matches_criteria(bind: &Bind, criteria: &serde_json::Value) -> bool {
     // Match by action string
     if let Some(action_str) = obj.get("action").and_then(|v| v.as_str()) {
         let bind_action_str = format!("{:?}", bind.action);
-        if !bind_action_str.to_lowercase().contains(&action_str.to_lowercase()) {
+        if !bind_action_str
+            .to_lowercase()
+            .contains(&action_str.to_lowercase())
+        {
             return false;
         }
     }
@@ -1214,7 +1300,10 @@ fn bind_matches_criteria(bind: &Bind, criteria: &serde_json::Value) -> bool {
 }
 
 /// Check if a window rule matches the given criteria.
-fn window_rule_matches_criteria(rule: &niri_config::WindowRule, criteria: &serde_json::Value) -> bool {
+fn window_rule_matches_criteria(
+    rule: &niri_config::WindowRule,
+    criteria: &serde_json::Value,
+) -> bool {
     let obj = match criteria.as_object() {
         Some(o) => o,
         None => return false,
@@ -1311,15 +1400,10 @@ fn apply_gestures_scalar_change(
             }
         }
         "hot_corners" => {
-            if path.len() > 1 {
-                match path[1] {
-                    "off" => {
-                        if let Some(b) = value.as_bool() {
-                            gestures.hot_corners.off = b;
-                            return true;
-                        }
-                    }
-                    _ => {}
+            if path.len() > 1 && path[1] == "off" {
+                if let Some(b) = value.as_bool() {
+                    gestures.hot_corners.off = b;
+                    return true;
                 }
             }
         }
@@ -1484,14 +1568,11 @@ fn apply_clipboard_scalar_change(
         return false;
     }
 
-    match path[0] {
-        "disable_primary" => {
-            if let Some(b) = value.as_bool() {
-                clipboard.disable_primary = b;
-                return true;
-            }
+    if path[0] == "disable_primary" {
+        if let Some(b) = value.as_bool() {
+            clipboard.disable_primary = b;
+            return true;
         }
-        _ => {}
     }
     false
 }
@@ -1506,14 +1587,11 @@ fn apply_hotkey_overlay_scalar_change(
         return false;
     }
 
-    match path[0] {
-        "skip_at_startup" => {
-            if let Some(b) = value.as_bool() {
-                hotkey_overlay.skip_at_startup = b;
-                return true;
-            }
+    if path[0] == "skip_at_startup" {
+        if let Some(b) = value.as_bool() {
+            hotkey_overlay.skip_at_startup = b;
+            return true;
         }
-        _ => {}
     }
     false
 }
@@ -1528,14 +1606,11 @@ fn apply_config_notification_scalar_change(
         return false;
     }
 
-    match path[0] {
-        "disable_failed" => {
-            if let Some(b) = value.as_bool() {
-                config_notification.disable_failed = b;
-                return true;
-            }
+    if path[0] == "disable_failed" {
+        if let Some(b) = value.as_bool() {
+            config_notification.disable_failed = b;
+            return true;
         }
-        _ => {}
     }
     false
 }
@@ -1619,8 +1694,7 @@ fn json_to_color(value: &serde_json::Value) -> Option<niri_config::Color> {
     // Handle string format (e.g., "#ff0000" or "rgba(255, 0, 0, 1.0)")
     if let Some(s) = value.as_str() {
         // Try parsing as hex color
-        if s.starts_with('#') {
-            let s = &s[1..];
+        if let Some(s) = s.strip_prefix('#') {
             let len = s.len();
             if len == 6 || len == 8 {
                 let r = u8::from_str_radix(&s[0..2], 16).ok()?;
@@ -1722,7 +1796,11 @@ fn json_to_output(json: &serde_json::Value) -> Option<niri_config::Output> {
         let refresh = mode.get("refresh").and_then(|v| v.as_f64());
         output.mode = Some(niri_config::output::Mode {
             custom: false,
-            mode: ConfiguredMode { width, height, refresh },
+            mode: ConfiguredMode {
+                width,
+                height,
+                refresh,
+            },
         });
     }
 
@@ -1802,7 +1880,10 @@ fn json_to_workspace(json: &serde_json::Value) -> Option<niri_config::Workspace>
 
     // Name is required
     let name = obj.get("name").and_then(|v| v.as_str())?;
-    let open_on_output = obj.get("open_on_output").and_then(|v| v.as_str()).map(String::from);
+    let open_on_output = obj
+        .get("open_on_output")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     Some(niri_config::Workspace {
         name: WorkspaceName(name.to_string()),
@@ -1811,13 +1892,14 @@ fn json_to_workspace(json: &serde_json::Value) -> Option<niri_config::Workspace>
     })
 }
 
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+
     use super::*;
     use crate::config_proxy::PendingConfigChanges;
-    use parking_lot::Mutex;
-    use std::sync::Arc;
 
     /// Helper to create a runtime with config proxy initialized
     fn setup_runtime() -> (LuaRuntime, Arc<Mutex<PendingConfigChanges>>) {
@@ -1842,10 +1924,10 @@ mod tests {
     fn apply_pending_layout_gaps() {
         let (runtime, _shared) = setup_runtime();
         runtime.load_string("niri.config.layout.gaps = 24").unwrap();
-        
+
         let mut config = Config::default();
         let count = apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert!(count > 0);
         assert_eq!(config.layout.gaps, 24.0);
     }
@@ -1853,11 +1935,13 @@ mod tests {
     #[test]
     fn apply_pending_prefer_no_csd() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.prefer_no_csd = true").unwrap();
-        
+        runtime
+            .load_string("niri.config.prefer_no_csd = true")
+            .unwrap();
+
         let mut config = Config::default();
         let count = apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert!(count > 0);
         assert!(config.prefer_no_csd);
     }
@@ -1869,28 +1953,37 @@ mod tests {
     #[test]
     fn apply_pending_layout_center_focused_column() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.layout.center_focused_column = 'always'").unwrap();
-        
+        runtime
+            .load_string("niri.config.layout.center_focused_column = 'always'")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
-        assert_eq!(config.layout.center_focused_column, niri_config::layout::CenterFocusedColumn::Always);
+
+        assert_eq!(
+            config.layout.center_focused_column,
+            niri_config::layout::CenterFocusedColumn::Always
+        );
     }
 
     #[test]
     fn apply_pending_layout_preset_column_widths() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.layout.preset_column_widths = {
                 { proportion = 0.33 },
                 { proportion = 0.5 },
                 { proportion = 0.67 }
             }
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.layout.preset_column_widths.len(), 3);
     }
 
@@ -1898,14 +1991,18 @@ mod tests {
     fn apply_pending_layout_border_active_color() {
         let (runtime, _shared) = setup_runtime();
         // Set both border.off = false (to enable) and the color
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.layout.border.off = false
             niri.config.layout.border.active.color = '#ff5500'
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         // Border should be enabled (off = false)
         assert!(!config.layout.border.off);
     }
@@ -1913,14 +2010,18 @@ mod tests {
     #[test]
     fn apply_pending_layout_focus_ring() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.layout.focus_ring.active.color = '#00ff00'
             niri.config.layout.focus_ring.width = 4
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.layout.focus_ring.width, 4.0);
     }
 
@@ -1931,52 +2032,64 @@ mod tests {
     #[test]
     fn apply_pending_binds_spawn() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.binds:add({
                 key = "Mod+Return",
                 action = "spawn",
                 args = { "alacritty" }
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         let initial_binds = config.binds.0.len();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.binds.0.len(), initial_binds + 1);
     }
 
     #[test]
     fn apply_pending_binds_focus_workspace() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.binds:add({
                 key = "Mod+1",
                 action = "focus-workspace",
                 args = { 1 }
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         let initial_binds = config.binds.0.len();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.binds.0.len(), initial_binds + 1);
     }
 
     #[test]
     fn apply_pending_binds_multiple() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.binds:add({ key = "Mod+1", action = "focus-workspace", args = { 1 } })
             niri.config.binds:add({ key = "Mod+2", action = "focus-workspace", args = { 2 } })
             niri.config.binds:add({ key = "Mod+3", action = "focus-workspace", args = { 3 } })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         let initial_binds = config.binds.0.len();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.binds.0.len(), initial_binds + 3);
     }
 
@@ -1987,31 +2100,39 @@ mod tests {
     #[test]
     fn apply_pending_spawn_at_startup() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.spawn_at_startup:add({
                 command = { "waybar" }
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         let initial_spawns = config.spawn_at_startup.len();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.spawn_at_startup.len(), initial_spawns + 1);
     }
 
     #[test]
     fn apply_pending_spawn_at_startup_with_args() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.spawn_at_startup:add({
                 command = { "swaybg", "-i", "/path/to/image.png" }
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert!(!config.spawn_at_startup.is_empty());
     }
 
@@ -2022,32 +2143,40 @@ mod tests {
     #[test]
     fn apply_pending_workspaces() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.workspaces:add({
                 name = "main"
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         let initial_ws = config.workspaces.len();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.workspaces.len(), initial_ws + 1);
     }
 
     #[test]
     fn apply_pending_workspaces_with_output() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.workspaces:add({
                 name = "work",
                 open_on_output = "eDP-1"
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         let ws = config.workspaces.iter().find(|w| w.name.0 == "work");
         assert!(ws.is_some());
         assert_eq!(ws.unwrap().open_on_output, Some("eDP-1".to_string()));
@@ -2060,17 +2189,21 @@ mod tests {
     #[test]
     fn apply_pending_window_rules() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string(r#"
+        runtime
+            .load_string(
+                r#"
             niri.config.window_rules:add({
                 matches = { { app_id = "firefox" } },
                 default_column_width = { proportion = 0.5 }
             })
-        "#).unwrap();
-        
+        "#,
+            )
+            .unwrap();
+
         let mut config = Config::default();
         let initial_rules = config.window_rules.len();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.window_rules.len(), initial_rules + 1);
     }
 
@@ -2081,22 +2214,26 @@ mod tests {
     #[test]
     fn apply_pending_animations_off() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.animations.off = true").unwrap();
-        
+        runtime
+            .load_string("niri.config.animations.off = true")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert!(config.animations.off);
     }
 
     #[test]
     fn apply_pending_animations_slowdown() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.animations.slowdown = 2.5").unwrap();
-        
+        runtime
+            .load_string("niri.config.animations.slowdown = 2.5")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.animations.slowdown, 2.5);
     }
 
@@ -2107,55 +2244,65 @@ mod tests {
     #[test]
     fn apply_pending_input_keyboard_repeat_delay() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.input.keyboard.repeat_delay = 300").unwrap();
-        
+        runtime
+            .load_string("niri.config.input.keyboard.repeat_delay = 300")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.input.keyboard.repeat_delay, 300);
     }
 
     #[test]
     fn apply_pending_input_keyboard_repeat_rate() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.input.keyboard.repeat_rate = 50").unwrap();
-        
+        runtime
+            .load_string("niri.config.input.keyboard.repeat_rate = 50")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert_eq!(config.input.keyboard.repeat_rate, 50);
     }
 
     #[test]
     fn apply_pending_input_touchpad_tap() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.input.touchpad.tap = true").unwrap();
-        
+        runtime
+            .load_string("niri.config.input.touchpad.tap = true")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert!(config.input.touchpad.tap);
     }
 
     #[test]
     fn apply_pending_input_touchpad_natural_scroll() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.input.touchpad.natural_scroll = true").unwrap();
-        
+        runtime
+            .load_string("niri.config.input.touchpad.natural_scroll = true")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         assert!(config.input.touchpad.natural_scroll);
     }
 
     #[test]
     fn apply_pending_input_mouse_accel_speed() {
         let (runtime, _shared) = setup_runtime();
-        runtime.load_string("niri.config.input.mouse.accel_speed = 0.5").unwrap();
-        
+        runtime
+            .load_string("niri.config.input.mouse.accel_speed = 0.5")
+            .unwrap();
+
         let mut config = Config::default();
         apply_pending_lua_config(&runtime, &mut config);
-        
+
         // accel_speed is FloatOrInt, compare the float value
         assert_eq!(config.input.mouse.accel_speed.0, 0.5);
     }
@@ -2231,5 +2378,111 @@ mod tests {
         let result = json_to_workspace(&json);
         assert!(result.is_some());
         assert_eq!(result.unwrap().name.0, "main");
+    }
+
+    // ========================================================================
+    // parse_action_from_str - New Action Mappings Tests
+    // ========================================================================
+
+    #[test]
+    fn parse_action_toggle_keyboard_shortcuts_inhibit() {
+        let json = serde_json::json!({
+            "key": "Mod+Escape",
+            "action": "toggle-keyboard-shortcuts-inhibit"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(
+            bind.action,
+            Action::ToggleKeyboardShortcutsInhibit
+        ));
+    }
+
+    #[test]
+    fn parse_action_expand_column_to_available_width() {
+        let json = serde_json::json!({
+            "key": "Mod+E",
+            "action": "expand-column-to-available-width"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(bind.action, Action::ExpandColumnToAvailableWidth));
+    }
+
+    #[test]
+    fn parse_action_center_visible_columns() {
+        let json = serde_json::json!({
+            "key": "Mod+C",
+            "action": "center-visible-columns"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(bind.action, Action::CenterVisibleColumns));
+    }
+
+    #[test]
+    fn parse_action_switch_focus_floating_tiling() {
+        let json = serde_json::json!({
+            "key": "Mod+Space",
+            "action": "switch-focus-between-floating-and-tiling"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(
+            bind.action,
+            Action::SwitchFocusBetweenFloatingAndTiling
+        ));
+    }
+
+    #[test]
+    fn parse_action_toggle_column_tabbed_display() {
+        let json = serde_json::json!({
+            "key": "Mod+T",
+            "action": "toggle-column-tabbed-display"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(bind.action, Action::ToggleColumnTabbedDisplay));
+    }
+
+    #[test]
+    fn parse_action_focus_window_previous() {
+        let json = serde_json::json!({
+            "key": "Mod+Tab",
+            "action": "focus-window-previous"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(bind.action, Action::FocusWindowPrevious));
+    }
+
+    #[test]
+    fn parse_action_toggle_debug_tint() {
+        let json = serde_json::json!({
+            "key": "Mod+Shift+D",
+            "action": "toggle-debug-tint"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(bind.action, Action::ToggleDebugTint));
+    }
+
+    #[test]
+    fn parse_action_move_window_to_floating() {
+        let json = serde_json::json!({
+            "key": "Mod+V",
+            "action": "move-window-to-floating"
+        });
+        let result = json_to_bind(&json);
+        assert!(result.is_some());
+        let bind = result.unwrap();
+        assert!(matches!(bind.action, Action::MoveWindowToFloating));
     }
 }

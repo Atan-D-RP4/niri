@@ -468,6 +468,14 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                     let applied = state.apply_pending_lua_config();
                     if applied {
                         log::debug!("Applied pending Lua config changes");
+                        // Sync the updated config back to the Lua config proxy
+                        // so that subsequent reads reflect the new values
+                        if let Some(runtime) = &state.niri.lua_runtime {
+                            let config = state.niri.config.borrow();
+                            if let Err(e) = runtime.sync_config_from(&config) {
+                                log::warn!("Failed to sync config to Lua proxy: {}", e);
+                            }
+                        }
                     }
                 }
 

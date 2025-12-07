@@ -27,9 +27,8 @@ where
             set_event_context_state(snapshot);
 
             // Create event data and emit
-            let result = create_data(lua).and_then(|lua_value| {
-                event_system.emit(event_name, lua_value)
-            });
+            let result =
+                create_data(lua).and_then(|lua_value| event_system.emit(event_name, lua_value));
 
             // Always clear the context, even on error
             clear_event_context_state();
@@ -56,9 +55,8 @@ where
             set_event_context_state(snapshot);
 
             // Create event data and emit
-            let result = create_data(lua).and_then(|lua_value| {
-                event_system.emit(event_name, lua_value)
-            });
+            let result =
+                create_data(lua).and_then(|lua_value| event_system.emit(event_name, lua_value));
 
             // Always clear the context, even on error
             clear_event_context_state();
@@ -235,7 +233,12 @@ pub fn emit_window_app_id_changed(state: &State, window_id: u32, new_app_id: &st
 /// Emit a window:fullscreen event
 ///
 /// Call this when a window enters or exits fullscreen
-pub fn emit_window_fullscreen(state: &State, window_id: u32, window_title: &str, is_fullscreen: bool) {
+pub fn emit_window_fullscreen(
+    state: &State,
+    window_id: u32,
+    window_title: &str,
+    is_fullscreen: bool,
+) {
     emit_with_state_context(state, "window:fullscreen", |lua| {
         create_fullscreen_event_table(lua, window_id, window_title, is_fullscreen)
     });
@@ -269,7 +272,12 @@ pub fn emit_window_move(
 /// Emit a workspace:create event
 ///
 /// Call this when a new workspace is created
-pub fn emit_workspace_create(state: &State, workspace_name: &str, workspace_idx: u32, output: &str) {
+pub fn emit_workspace_create(
+    state: &State,
+    workspace_name: &str,
+    workspace_idx: u32,
+    output: &str,
+) {
     emit_with_state_context(state, "workspace:create", |lua| {
         create_workspace_lifecycle_table(lua, workspace_name, workspace_idx, output)
     });
@@ -278,7 +286,12 @@ pub fn emit_workspace_create(state: &State, workspace_name: &str, workspace_idx:
 /// Emit a workspace:destroy event
 ///
 /// Call this when a workspace is destroyed
-pub fn emit_workspace_destroy(state: &State, workspace_name: &str, workspace_idx: u32, output: &str) {
+pub fn emit_workspace_destroy(
+    state: &State,
+    workspace_name: &str,
+    workspace_idx: u32,
+    output: &str,
+) {
     emit_with_state_context(state, "workspace:destroy", |lua| {
         create_workspace_lifecycle_table(lua, workspace_name, workspace_idx, output)
     });
@@ -420,4 +433,150 @@ fn create_overview_event_table(lua: &Lua, is_open: bool) -> LuaResult<LuaValue> 
     let table = lua.create_table()?;
     table.set("is_open", is_open)?;
     Ok(LuaValue::Table(table))
+}
+
+// ===== Additional Events from Roadmap TODO =====
+
+/// Emit a window:resize event
+///
+/// Call this when a window's size changes
+pub fn emit_window_resize(
+    state: &State,
+    window_id: u32,
+    window_title: &str,
+    width: i32,
+    height: i32,
+) {
+    emit_with_state_context(state, "window:resize", |lua| {
+        let table = lua.create_table()?;
+        table.set("id", window_id)?;
+        table.set("title", window_title)?;
+        table.set("width", width)?;
+        table.set("height", height)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a window:maximize event
+///
+/// Call this when a window is maximized or unmaximized
+pub fn emit_window_maximize(state: &State, window_id: u32, window_title: &str, is_maximized: bool) {
+    emit_with_state_context(state, "window:maximize", |lua| {
+        let table = lua.create_table()?;
+        table.set("id", window_id)?;
+        table.set("title", window_title)?;
+        table.set("is_maximized", is_maximized)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit an output:mode_change event
+///
+/// Call this when an output's mode (resolution, refresh rate) changes
+pub fn emit_output_mode_change(
+    niri: &Niri,
+    output_name: &str,
+    width: i32,
+    height: i32,
+    refresh_rate: Option<f64>,
+) {
+    emit_with_niri_context(niri, "output:mode_change", |lua| {
+        let table = lua.create_table()?;
+        table.set("output", output_name)?;
+        table.set("width", width)?;
+        table.set("height", height)?;
+        if let Some(refresh) = refresh_rate {
+            table.set("refresh_rate", refresh)?;
+        }
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit an idle:start event
+///
+/// Call this when the system becomes idle
+pub fn emit_idle_start(state: &State) {
+    emit_with_state_context(state, "idle:start", |lua| {
+        let table = lua.create_table()?;
+        table.set("is_idle", true)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit an idle:end event
+///
+/// Call this when the system becomes active after idle
+pub fn emit_idle_end(state: &State) {
+    emit_with_state_context(state, "idle:end", |lua| {
+        let table = lua.create_table()?;
+        table.set("is_idle", false)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a lock:activate event
+///
+/// Call this when the screen is locked
+pub fn emit_lock_activate_niri(niri: &Niri) {
+    emit_with_niri_context(niri, "lock:activate", |lua| {
+        let table = lua.create_table()?;
+        table.set("is_locked", true)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a lock:deactivate event
+///
+/// Call this when the screen is unlocked
+pub fn emit_lock_deactivate_niri(niri: &Niri) {
+    emit_with_niri_context(niri, "lock:deactivate", |lua| {
+        let table = lua.create_table()?;
+        table.set("is_locked", false)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a startup event
+///
+/// Call this when the compositor finishes initializing
+pub fn emit_startup(state: &State) {
+    emit_with_state_context(state, "startup", |lua| {
+        let table = lua.create_table()?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a shutdown event
+///
+/// Call this when the compositor is about to shut down
+pub fn emit_shutdown(state: &State) {
+    emit_with_state_context(state, "shutdown", |lua| {
+        let table = lua.create_table()?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a key:press event
+///
+/// Call this when a key is pressed (for hotkey monitoring)
+pub fn emit_key_press(state: &State, key_name: &str, modifiers: &str, consumed: bool) {
+    emit_with_state_context(state, "key:press", |lua| {
+        let table = lua.create_table()?;
+        table.set("key", key_name)?;
+        table.set("modifiers", modifiers)?;
+        table.set("consumed", consumed)?;
+        Ok(LuaValue::Table(table))
+    });
+}
+
+/// Emit a key:release event
+///
+/// Call this when a key is released
+pub fn emit_key_release(state: &State, key_name: &str, modifiers: &str) {
+    emit_with_state_context(state, "key:release", |lua| {
+        let table = lua.create_table()?;
+        table.set("key", key_name)?;
+        table.set("modifiers", modifiers)?;
+        Ok(LuaValue::Table(table))
+    });
 }

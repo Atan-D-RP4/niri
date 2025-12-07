@@ -129,6 +129,18 @@ pub struct ConfigSectionProxy {
 
 impl LuaUserData for ConfigSectionProxy {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+        // __tostring for pretty printing
+        methods.add_meta_method(LuaMetaMethod::ToString, |_, this, ()| {
+            Ok(format!(
+                "<ConfigSection: {}>",
+                if this.path.is_empty() {
+                    "root"
+                } else {
+                    &this.path
+                }
+            ))
+        });
+
         // Enable table-like access via __index and __newindex
         methods.add_meta_method(LuaMetaMethod::Index, |lua, this, key: String| {
             // First check pending changes
@@ -140,18 +152,35 @@ impl LuaUserData for ConfigSectionProxy {
 
             let pending = this.pending.lock();
             if let Some(value) = pending.scalar_changes.get(&full_path) {
-                return lua_value_from_json(lua, value);
+                // For pending scalar values, return directly (not objects)
+                if !value.is_object() {
+                    return lua_value_from_json(lua, value);
+                }
             }
             drop(pending);
 
             // Check current values
             let current = this.current_values.lock();
             if let Some(value) = current.get(&key) {
-                return lua_value_from_json(lua, value);
+                // For scalar values (not objects), return directly
+                if !value.is_object() {
+                    return lua_value_from_json(lua, value);
+                }
+                // For objects, create a nested proxy with the object's contents
+                let nested_values: HashMap<String, serde_json::Value> = value
+                    .as_object()
+                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default();
+                let nested_proxy = ConfigSectionProxy {
+                    path: full_path,
+                    pending: this.pending.clone(),
+                    current_values: Arc::new(Mutex::new(nested_values)),
+                };
+                return Ok(LuaValue::UserData(lua.create_userdata(nested_proxy)?));
             }
             drop(current);
 
-            // For nested sections, return a new proxy
+            // For nested sections not in current_values, return a new empty proxy
             if get_section_type(&key) == ConfigSection::Scalar {
                 let nested_proxy = ConfigSectionProxy {
                     path: full_path,
@@ -164,29 +193,32 @@ impl LuaUserData for ConfigSectionProxy {
             Ok(LuaValue::Nil)
         });
 
-        methods.add_meta_method(LuaMetaMethod::NewIndex, |lua, this, (key, value): (String, LuaValue)| {
-            let full_path = if this.path.is_empty() {
-                key.clone()
-            } else {
-                format!("{}.{}", this.path, key)
-            };
+        methods.add_meta_method(
+            LuaMetaMethod::NewIndex,
+            |lua, this, (key, value): (String, LuaValue)| {
+                let full_path = if this.path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{}.{}", this.path, key)
+                };
 
-            // Convert Lua value to JSON
-            let json_value = lua_value_to_json(lua, &value)?;
+                // Convert Lua value to JSON
+                let json_value = lua_value_to_json(lua, &value)?;
 
-            // Store in pending changes
-            let mut pending = this.pending.lock();
-            pending.set_scalar(&full_path, json_value);
+                // Store in pending changes
+                let mut pending = this.pending.lock();
+                pending.set_scalar(&full_path, json_value);
 
-            // Check for auto-apply
-            if pending.auto_apply {
-                drop(pending);
-                // In a real implementation, this would trigger apply through the event loop
-                // For now, we just mark it as needing apply
-            }
+                // Check for auto-apply
+                if pending.auto_apply {
+                    drop(pending);
+                    // In a real implementation, this would trigger apply through the event loop
+                    // For now, we just mark it as needing apply
+                }
 
-            Ok(())
-        });
+                Ok(())
+            },
+        );
     }
 }
 
@@ -204,6 +236,11 @@ pub struct ConfigCollectionProxy {
 
 impl LuaUserData for ConfigCollectionProxy {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+        // __tostring for pretty printing
+        methods.add_meta_method(LuaMetaMethod::ToString, |_, this, ()| {
+            Ok(format!("<ConfigCollection: {}>", this.name))
+        });
+
         // list() - Return all items in the collection
         methods.add_method("list", |lua, this, ()| {
             let current = this.current_items.lock();
@@ -343,6 +380,8 @@ pub struct ConfigProxy {
     pub section_proxies: Arc<Mutex<HashMap<String, ConfigSectionProxy>>>,
     /// Collection proxies for collection sections
     pub collection_proxies: Arc<Mutex<HashMap<String, ConfigCollectionProxy>>>,
+    /// Top-level scalar values (prefer_no_csd, screenshot_path, etc.)
+    pub top_level_scalars: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
 impl ConfigProxy {
@@ -352,6 +391,7 @@ impl ConfigProxy {
             pending,
             section_proxies: Arc::new(Mutex::new(HashMap::new())),
             collection_proxies: Arc::new(Mutex::new(HashMap::new())),
+            top_level_scalars: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -467,18 +507,73 @@ impl ConfigProxy {
                 current_items: Arc::new(Mutex::new(spawn_items)),
             },
         );
+
+        // Initialize top-level scalars
+        let mut top_level = self.top_level_scalars.lock();
+        top_level.insert(
+            "prefer_no_csd".to_string(),
+            serde_json::Value::Bool(config.prefer_no_csd),
+        );
+        if let Some(ref path) = config.screenshot_path.0 {
+            top_level.insert(
+                "screenshot_path".to_string(),
+                serde_json::Value::String(path.clone()),
+            );
+        }
+        // hotkey_overlay is a struct with skip_at_startup field
+        top_level.insert(
+            "hotkey_overlay.skip_at_startup".to_string(),
+            serde_json::Value::Bool(config.hotkey_overlay.skip_at_startup),
+        );
     }
+}
+
+/// Check if a key is a top-level scalar (not a section)
+fn is_top_level_scalar(key: &str) -> bool {
+    matches!(key, "prefer_no_csd" | "screenshot_path")
 }
 
 impl LuaUserData for ConfigProxy {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        // __index for accessing config sections
+        // __tostring for pretty printing
+        methods.add_meta_method(LuaMetaMethod::ToString, |_, _, ()| {
+            Ok("<ConfigProxy: niri.config>".to_string())
+        });
+
+        // __index for accessing config sections and top-level scalars
         methods.add_meta_method(LuaMetaMethod::Index, |lua, this, key: String| {
+            // First check pending changes for top-level scalars
+            {
+                let pending = this.pending.lock();
+                if let Some(value) = pending.scalar_changes.get(&key) {
+                    return lua_value_from_json(lua, value);
+                }
+            }
+
+            // Check if it's a known top-level scalar
+            if is_top_level_scalar(&key) {
+                let top_level = this.top_level_scalars.lock();
+                if let Some(value) = top_level.get(&key) {
+                    return lua_value_from_json(lua, value);
+                }
+                // Top-level scalar not set, return nil
+                return Ok(LuaValue::Nil);
+            }
+
+            // Otherwise, check section type
             let section_type = get_section_type(&key);
 
             match section_type {
                 ConfigSection::Scalar => {
-                    // Return a section proxy for scalar sections
+                    // Return a section proxy for scalar sections (layout, input, etc.)
+                    // First try to get from cached section proxies
+                    let section_proxies = this.section_proxies.lock();
+                    if let Some(proxy) = section_proxies.get(&key) {
+                        return Ok(LuaValue::UserData(lua.create_userdata(proxy.clone())?));
+                    }
+                    drop(section_proxies);
+
+                    // Create a new section proxy
                     let proxy = ConfigSectionProxy {
                         path: key.clone(),
                         pending: this.pending.clone(),
@@ -488,6 +583,13 @@ impl LuaUserData for ConfigProxy {
                 }
                 ConfigSection::Collection => {
                     // Return a collection proxy for collection sections
+                    // First try to get from cached collection proxies
+                    let collection_proxies = this.collection_proxies.lock();
+                    if let Some(proxy) = collection_proxies.get(&key) {
+                        return Ok(LuaValue::UserData(lua.create_userdata(proxy.clone())?));
+                    }
+                    drop(collection_proxies);
+
                     let proxy = ConfigCollectionProxy {
                         name: key.clone(),
                         pending: this.pending.clone(),
@@ -499,20 +601,23 @@ impl LuaUserData for ConfigProxy {
         });
 
         // __newindex for setting entire sections
-        methods.add_meta_method(LuaMetaMethod::NewIndex, |lua, this, (key, value): (String, LuaValue)| {
-            // When setting an entire section like `niri.config.layout = { ... }`
-            // We need to flatten it into individual scalar changes
-            if let LuaValue::Table(t) = value {
-                flatten_table_to_changes(lua, &this.pending, &key, &t)?;
-            } else {
-                // Single value assignment
-                let json_value = lua_value_to_json(lua, &value)?;
-                let mut pending = this.pending.lock();
-                pending.set_scalar(&key, json_value);
-            }
+        methods.add_meta_method(
+            LuaMetaMethod::NewIndex,
+            |lua, this, (key, value): (String, LuaValue)| {
+                // When setting an entire section like `niri.config.layout = { ... }`
+                // We need to flatten it into individual scalar changes
+                if let LuaValue::Table(t) = value {
+                    flatten_table_to_changes(lua, &this.pending, &key, &t)?;
+                } else {
+                    // Single value assignment
+                    let json_value = lua_value_to_json(lua, &value)?;
+                    let mut pending = this.pending.lock();
+                    pending.set_scalar(&key, json_value);
+                }
 
-            Ok(())
-        });
+                Ok(())
+            },
+        );
 
         // apply() method - apply all pending changes
         methods.add_method("apply", |_lua, this, ()| {
@@ -520,9 +625,15 @@ impl LuaUserData for ConfigProxy {
             if pending.has_changes() {
                 // In the real implementation, this would send a message through the event loop
                 // to apply the pending changes to the active config
-                log::debug!("ConfigProxy::apply() called with {} scalar changes, {} collection additions",
+                log::debug!(
+                    "ConfigProxy::apply() called with {} scalar changes, {} collection additions",
                     pending.scalar_changes.len(),
-                    pending.collection_additions.values().map(|v| v.len()).sum::<usize>());
+                    pending
+                        .collection_additions
+                        .values()
+                        .map(|v| v.len())
+                        .sum::<usize>()
+                );
             }
             Ok(())
         });
@@ -850,10 +961,7 @@ fn config_to_cursor_json(cursor: &niri_config::Cursor) -> HashMap<String, serde_
         serde_json::json!(cursor.hide_when_typing),
     );
     if let Some(ms) = cursor.hide_after_inactive_ms {
-        map.insert(
-            "hide_after_inactive_ms".to_string(),
-            serde_json::json!(ms),
-        );
+        map.insert("hide_after_inactive_ms".to_string(), serde_json::json!(ms));
     }
     map
 }
@@ -1004,6 +1112,20 @@ pub fn register_config_proxy_to_lua(
     niri_table.set("config", proxy)?;
     globals.set("niri", niri_table)?;
 
+    Ok(())
+}
+
+/// Update the existing config proxy's current values from the config.
+///
+/// This is used when the config proxy was already initialized (e.g., from
+/// `init_empty_config_proxy` during config loading) and we need to update
+/// the cached current values without replacing the proxy or its pending changes.
+pub fn update_config_proxy_values(lua: &Lua, config: &niri_config::Config) -> LuaResult<()> {
+    let globals = lua.globals();
+    let niri_table: LuaTable = globals.get("niri")?;
+    let proxy_ud: LuaAnyUserData = niri_table.get("config")?;
+    let proxy = proxy_ud.borrow::<ConfigProxy>()?;
+    proxy.init_from_config(config);
     Ok(())
 }
 

@@ -320,8 +320,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use niri_ipc::{LogicalOutput, Mode, Timestamp, Transform, WindowLayout};
+
+    use super::*;
 
     // ========================================================================
     // Test Fixtures
@@ -365,7 +366,10 @@ mod tests {
             is_floating: false,
             is_urgent: false,
             focus_timestamp: if is_focused {
-                Some(Timestamp { secs: 1234, nanos: 0 })
+                Some(Timestamp {
+                    secs: 1234,
+                    nanos: 0,
+                })
             } else {
                 None
             },

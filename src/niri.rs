@@ -1743,8 +1743,7 @@ impl State {
             }
 
             // Take the changes and clear the pending state
-            let changes = std::mem::take(&mut *pending);
-            changes
+            std::mem::take(&mut *pending)
         };
 
         log::debug!(
@@ -1754,9 +1753,38 @@ impl State {
 
         let mut layout_changed = false;
         let mut animation_changed = false;
+        let mut cursor_changed = false;
+        let mut keyboard_xkb_changed = false;
+        let mut keyboard_repeat_changed = false;
+        let mut libinput_config_changed = false;
 
         // Apply scalar changes
         let mut config = self.niri.config.borrow_mut();
+
+        // Store old values for comparison (only the fields we need to compare)
+        let old_xcursor_theme = config.cursor.xcursor_theme.clone();
+        let old_xcursor_size = config.cursor.xcursor_size;
+        let old_xkb = config.input.keyboard.xkb.clone();
+        let old_repeat_rate = config.input.keyboard.repeat_rate;
+        let old_repeat_delay = config.input.keyboard.repeat_delay;
+        // Capture input device configs for libinput comparison
+        let old_touchpad_tap = config.input.touchpad.tap;
+        let old_touchpad_dwt = config.input.touchpad.dwt;
+        let old_touchpad_dwtp = config.input.touchpad.dwtp;
+        let old_touchpad_natural_scroll = config.input.touchpad.natural_scroll;
+        let old_touchpad_accel_speed = config.input.touchpad.accel_speed;
+        let old_touchpad_accel_profile = config.input.touchpad.accel_profile;
+        let old_touchpad_tap_button_map = config.input.touchpad.tap_button_map;
+        let old_touchpad_scroll_method = config.input.touchpad.scroll_method;
+        let old_touchpad_click_method = config.input.touchpad.click_method;
+        let old_touchpad_disabled_on_external_mouse =
+            config.input.touchpad.disabled_on_external_mouse;
+        let old_touchpad_middle_emulation = config.input.touchpad.middle_emulation;
+        let old_mouse_natural_scroll = config.input.mouse.natural_scroll;
+        let old_mouse_accel_speed = config.input.mouse.accel_speed;
+        let old_mouse_accel_profile = config.input.mouse.accel_profile;
+        let old_mouse_scroll_method = config.input.mouse.scroll_method;
+        let old_mouse_middle_emulation = config.input.mouse.middle_emulation;
 
         for (path, value) in &pending.scalar_changes {
             log::debug!("Applying config change: {} = {:?}", path, value);
@@ -1807,6 +1835,42 @@ impl State {
             }
         }
 
+        // Detect changes after applying
+        if config.cursor.xcursor_theme != old_xcursor_theme
+            || config.cursor.xcursor_size != old_xcursor_size
+        {
+            cursor_changed = true;
+        }
+        if config.input.keyboard.xkb != old_xkb {
+            keyboard_xkb_changed = true;
+        }
+        if config.input.keyboard.repeat_rate != old_repeat_rate
+            || config.input.keyboard.repeat_delay != old_repeat_delay
+        {
+            keyboard_repeat_changed = true;
+        }
+        // Check for libinput changes
+        if config.input.touchpad.tap != old_touchpad_tap
+            || config.input.touchpad.dwt != old_touchpad_dwt
+            || config.input.touchpad.dwtp != old_touchpad_dwtp
+            || config.input.touchpad.natural_scroll != old_touchpad_natural_scroll
+            || config.input.touchpad.accel_speed != old_touchpad_accel_speed
+            || config.input.touchpad.accel_profile != old_touchpad_accel_profile
+            || config.input.touchpad.tap_button_map != old_touchpad_tap_button_map
+            || config.input.touchpad.scroll_method != old_touchpad_scroll_method
+            || config.input.touchpad.click_method != old_touchpad_click_method
+            || config.input.touchpad.disabled_on_external_mouse
+                != old_touchpad_disabled_on_external_mouse
+            || config.input.touchpad.middle_emulation != old_touchpad_middle_emulation
+            || config.input.mouse.natural_scroll != old_mouse_natural_scroll
+            || config.input.mouse.accel_speed != old_mouse_accel_speed
+            || config.input.mouse.accel_profile != old_mouse_accel_profile
+            || config.input.mouse.scroll_method != old_mouse_scroll_method
+            || config.input.mouse.middle_emulation != old_mouse_middle_emulation
+        {
+            libinput_config_changed = true;
+        }
+
         // Apply collection additions
         let mut binds_changed = false;
         for (collection_name, items) in &pending.collection_additions {
@@ -1840,7 +1904,10 @@ impl State {
                 "binds" => {
                     for criteria in criteria_list {
                         let before_len = config.binds.0.len();
-                        config.binds.0.retain(|bind| !self.bind_matches_criteria(bind, criteria));
+                        config
+                            .binds
+                            .0
+                            .retain(|bind| !self.bind_matches_criteria(bind, criteria));
                         if config.binds.0.len() < before_len {
                             binds_changed = true;
                             log::debug!("Removed bind(s) matching criteria from Lua config");
@@ -1850,7 +1917,9 @@ impl State {
                 "window_rules" => {
                     for criteria in criteria_list {
                         let before_len = config.window_rules.len();
-                        config.window_rules.retain(|rule| !self.window_rule_matches_criteria(rule, criteria));
+                        config
+                            .window_rules
+                            .retain(|rule| !self.window_rule_matches_criteria(rule, criteria));
                         if config.window_rules.len() < before_len {
                             log::debug!("Removed window rule(s) matching criteria from Lua config");
                         }
@@ -1898,6 +1967,43 @@ impl State {
             log::debug!("Binds updated, changes will take effect on next key event");
         }
 
+        // Apply cursor side effects
+        if cursor_changed {
+            let config = self.niri.config.borrow();
+            self.niri
+                .cursor_manager
+                .reload(&config.cursor.xcursor_theme, config.cursor.xcursor_size);
+            self.niri.cursor_texture_cache.clear();
+            log::debug!("Cursor settings reloaded from Lua config");
+        }
+
+        // Apply keyboard repeat info side effects
+        if keyboard_repeat_changed {
+            let config = self.niri.config.borrow();
+            let keyboard = self.niri.seat.get_keyboard().unwrap();
+            keyboard.change_repeat_info(
+                config.input.keyboard.repeat_rate.into(),
+                config.input.keyboard.repeat_delay.into(),
+            );
+            log::debug!("Keyboard repeat info updated from Lua config");
+        }
+
+        // Apply XKB config side effects
+        if keyboard_xkb_changed {
+            let xkb = self.niri.config.borrow().input.keyboard.xkb.clone();
+            self.set_xkb_config(xkb.to_xkb_config());
+            log::debug!("XKB config updated from Lua config");
+        }
+
+        // Apply libinput settings side effects
+        if libinput_config_changed {
+            let config = self.niri.config.borrow();
+            for mut device in self.niri.devices.iter().cloned() {
+                apply_libinput_settings(&config.input, &mut device);
+            }
+            log::debug!("Libinput settings applied from Lua config");
+        }
+
         // Trigger necessary refreshes based on what changed
         if layout_changed {
             let config = self.niri.config.borrow();
@@ -1908,7 +2014,9 @@ impl State {
             let config = self.niri.config.borrow();
             let rate = 1.0 / config.animations.slowdown.max(0.001);
             self.niri.clock.set_rate(rate);
-            self.niri.clock.set_complete_instantly(config.animations.off);
+            self.niri
+                .clock
+                .set_complete_instantly(config.animations.off);
         }
 
         self.niri.queue_redraw_all();
@@ -2028,13 +2136,11 @@ impl State {
                 if let Some(s) = value.as_str() {
                     match s {
                         "never" => {
-                            layout.center_focused_column =
-                                niri_config::CenterFocusedColumn::Never;
+                            layout.center_focused_column = niri_config::CenterFocusedColumn::Never;
                             return true;
                         }
                         "always" => {
-                            layout.center_focused_column =
-                                niri_config::CenterFocusedColumn::Always;
+                            layout.center_focused_column = niri_config::CenterFocusedColumn::Always;
                             return true;
                         }
                         "on-overflow" => {
@@ -2162,11 +2268,12 @@ impl State {
                         }
                         "scroll_factor" => {
                             if let Some(n) = value.as_f64() {
-                                input.touchpad.scroll_factor = Some(niri_config::input::ScrollFactor {
-                                    base: Some(FloatOrInt(n)),
-                                    horizontal: None,
-                                    vertical: None,
-                                });
+                                input.touchpad.scroll_factor =
+                                    Some(niri_config::input::ScrollFactor {
+                                        base: Some(FloatOrInt(n)),
+                                        horizontal: None,
+                                        vertical: None,
+                                    });
                             }
                         }
                         _ => {}
@@ -2197,11 +2304,12 @@ impl State {
                         }
                         "scroll_factor" => {
                             if let Some(n) = value.as_f64() {
-                                input.mouse.scroll_factor = Some(niri_config::input::ScrollFactor {
-                                    base: Some(FloatOrInt(n)),
-                                    horizontal: None,
-                                    vertical: None,
-                                });
+                                input.mouse.scroll_factor =
+                                    Some(niri_config::input::ScrollFactor {
+                                        base: Some(FloatOrInt(n)),
+                                        horizontal: None,
+                                        vertical: None,
+                                    });
                             }
                         }
                         _ => {}
@@ -2252,13 +2360,16 @@ impl State {
                     if let Some(s) = value.as_str() {
                         let mode = match s {
                             "center-xy" => Some(niri_config::input::WarpMouseToFocusMode::CenterXy),
-                            "center-xy-always" => Some(niri_config::input::WarpMouseToFocusMode::CenterXyAlways),
+                            "center-xy-always" => {
+                                Some(niri_config::input::WarpMouseToFocusMode::CenterXyAlways)
+                            }
                             _ => None,
                         };
                         if let Some(ref mut wmtf) = input.warp_mouse_to_focus {
                             wmtf.mode = mode;
                         } else {
-                            input.warp_mouse_to_focus = Some(niri_config::input::WarpMouseToFocus { mode });
+                            input.warp_mouse_to_focus =
+                                Some(niri_config::input::WarpMouseToFocus { mode });
                         }
                     }
                 }
@@ -2311,11 +2422,11 @@ impl State {
     /// Convert a JSON value to a Bind struct.
     fn json_to_bind(&self, json: &serde_json::Value) -> Option<niri_config::Bind> {
         let obj = json.as_object()?;
-        
+
         // Parse the key string (e.g., "Mod+T")
         let key_str = obj.get("key")?.as_str()?;
         let key: niri_config::Key = key_str.parse().ok()?;
-        
+
         // Parse the action
         let action_str = obj.get("action")?.as_str()?;
         let args: Vec<String> = obj
@@ -2327,14 +2438,20 @@ impl State {
                     .collect()
             })
             .unwrap_or_default();
-        
+
         let action = self.parse_action(action_str, &args)?;
-        
+
         // Parse optional fields
         let repeat = obj.get("repeat").and_then(|v| v.as_bool()).unwrap_or(true);
-        let allow_when_locked = obj.get("allow_when_locked").and_then(|v| v.as_bool()).unwrap_or(false);
-        let allow_inhibiting = obj.get("allow_inhibiting").and_then(|v| v.as_bool()).unwrap_or(true);
-        
+        let allow_when_locked = obj
+            .get("allow_when_locked")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let allow_inhibiting = obj
+            .get("allow_inhibiting")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
         Some(niri_config::Bind {
             key,
             action,
@@ -2349,7 +2466,7 @@ impl State {
     /// Parse an action string and arguments into an Action enum.
     fn parse_action(&self, action_str: &str, args: &[String]) -> Option<niri_config::Action> {
         use niri_config::Action;
-        
+
         Some(match action_str {
             "spawn" => {
                 if args.is_empty() {
@@ -2398,20 +2515,22 @@ impl State {
     /// Convert a JSON value to a WindowRule struct.
     fn json_to_window_rule(&self, json: &serde_json::Value) -> Option<niri_config::WindowRule> {
         let obj = json.as_object()?;
-        
+
         let mut rule = niri_config::WindowRule::default();
-        
+
         // Parse matches
         if let Some(matches_arr) = obj.get("matches").and_then(|v| v.as_array()) {
             for match_json in matches_arr {
                 if let Some(match_obj) = match_json.as_object() {
-                    let app_id = match_obj.get("app_id").and_then(|v| v.as_str()).and_then(|s| {
-                        regex::Regex::new(s).ok().map(niri_config::utils::RegexEq)
-                    });
-                    let title = match_obj.get("title").and_then(|v| v.as_str()).and_then(|s| {
-                        regex::Regex::new(s).ok().map(niri_config::utils::RegexEq)
-                    });
-                    
+                    let app_id = match_obj
+                        .get("app_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| regex::Regex::new(s).ok().map(niri_config::utils::RegexEq));
+                    let title = match_obj
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| regex::Regex::new(s).ok().map(niri_config::utils::RegexEq));
+
                     let wm = niri_config::window_rule::Match {
                         app_id,
                         title,
@@ -2423,12 +2542,12 @@ impl State {
                         is_urgent: None,
                         at_startup: None,
                     };
-                    
+
                     rule.matches.push(wm);
                 }
             }
         }
-        
+
         // Parse rule properties
         if let Some(output) = obj.get("open_on_output").and_then(|v| v.as_str()) {
             rule.open_on_output = Some(output.to_string());
@@ -2442,17 +2561,21 @@ impl State {
         if let Some(floating) = obj.get("open_floating").and_then(|v| v.as_bool()) {
             rule.open_floating = Some(floating);
         }
-        
+
         Some(rule)
     }
 
     /// Check if a bind matches the given criteria.
-    fn bind_matches_criteria(&self, bind: &niri_config::Bind, criteria: &serde_json::Value) -> bool {
+    fn bind_matches_criteria(
+        &self,
+        bind: &niri_config::Bind,
+        criteria: &serde_json::Value,
+    ) -> bool {
         let obj = match criteria.as_object() {
             Some(o) => o,
             None => return false,
         };
-        
+
         // Match by key string
         if let Some(key_str) = obj.get("key").and_then(|v| v.as_str()) {
             let bind_key_str = format!("{:?}", bind.key);
@@ -2467,45 +2590,58 @@ impl State {
                 }
             }
         }
-        
+
         // Match by action name
         if let Some(action_str) = obj.get("action").and_then(|v| v.as_str()) {
             let bind_action_str = format!("{:?}", bind.action);
-            if !bind_action_str.to_lowercase().contains(&action_str.to_lowercase()) {
+            if !bind_action_str
+                .to_lowercase()
+                .contains(&action_str.to_lowercase())
+            {
                 return false;
             }
         }
-        
+
         true
     }
 
     /// Check if a window rule matches the given criteria.
-    fn window_rule_matches_criteria(&self, rule: &niri_config::WindowRule, criteria: &serde_json::Value) -> bool {
+    fn window_rule_matches_criteria(
+        &self,
+        rule: &niri_config::WindowRule,
+        criteria: &serde_json::Value,
+    ) -> bool {
         let obj = match criteria.as_object() {
             Some(o) => o,
             None => return false,
         };
-        
+
         // Match by app_id in any match
         if let Some(app_id) = obj.get("app_id").and_then(|v| v.as_str()) {
             let has_matching_app_id = rule.matches.iter().any(|m| {
-                m.app_id.as_ref().map(|r| r.0.as_str() == app_id).unwrap_or(false)
+                m.app_id
+                    .as_ref()
+                    .map(|r| r.0.as_str() == app_id)
+                    .unwrap_or(false)
             });
             if !has_matching_app_id {
                 return false;
             }
         }
-        
+
         // Match by title in any match
         if let Some(title) = obj.get("title").and_then(|v| v.as_str()) {
             let has_matching_title = rule.matches.iter().any(|m| {
-                m.title.as_ref().map(|r| r.0.as_str() == title).unwrap_or(false)
+                m.title
+                    .as_ref()
+                    .map(|r| r.0.as_str() == title)
+                    .unwrap_or(false)
             });
             if !has_matching_title {
                 return false;
             }
         }
-        
+
         true
     }
 
@@ -3978,9 +4114,7 @@ impl Niri {
                     .all(|state| state.lock_render_state == LockRenderState::Locked);
 
                 if all_locked {
-                    let lock = confirmation.ext_session_lock().clone();
-                    confirmation.lock();
-                    self.lock_state = LockState::Locked(lock);
+                    self.complete_lock(confirmation);
                 } else {
                     // Still waiting.
                     self.lock_state = LockState::Locking(confirmation);
@@ -5512,9 +5646,7 @@ impl Niri {
 
                     if all_locked {
                         // All outputs are locked, report success.
-                        let lock = confirmation.ext_session_lock().clone();
-                        confirmation.lock();
-                        self.lock_state = LockState::Locked(lock);
+                        self.complete_lock(confirmation);
                     } else {
                         // Still waiting for other outputs.
                         self.lock_state = LockState::Locking(confirmation);
@@ -6742,6 +6874,14 @@ impl Niri {
         }
     }
 
+    /// Complete the lock and emit the lock:activate event
+    fn complete_lock(&mut self, confirmation: SessionLocker) {
+        let lock = confirmation.ext_session_lock().clone();
+        confirmation.lock();
+        self.lock_state = LockState::Locked(lock);
+        crate::lua_event_hooks::emit_lock_activate_niri(self);
+    }
+
     pub fn lock(&mut self, confirmation: SessionLocker) {
         // Check if another client is in the process of locking.
         if matches!(
@@ -6764,9 +6904,7 @@ impl Niri {
 
             // Since the session was already locked, we know that the outputs are blanked, and
             // can lock right away.
-            let lock = confirmation.ext_session_lock().clone();
-            confirmation.lock();
-            self.lock_state = LockState::Locked(lock);
+            self.complete_lock(confirmation);
 
             return;
         }
@@ -6779,13 +6917,11 @@ impl Niri {
             self.cursor_manager
                 .set_cursor_image(CursorImageStatus::default_named());
 
-            let lock = confirmation.ext_session_lock().clone();
-            confirmation.lock();
-            self.lock_state = LockState::Locked(lock);
+            self.complete_lock(confirmation);
         } else {
             // There are outputs which we need to redraw before locking. But before we do that,
             // let's wait for the lock surfaces.
-            //
+
             // Give them a second; swaylock can take its time to paint a big enough image.
             let timer = Timer::from_duration(Duration::from_millis(1000));
             let deadline_token = self
@@ -6842,9 +6978,7 @@ impl Niri {
 
                 if self.output_state.is_empty() {
                     // There are no outputs, lock the session right away.
-                    let lock = confirmation.ext_session_lock().clone();
-                    confirmation.lock();
-                    self.lock_state = LockState::Locked(lock);
+                    self.complete_lock(confirmation);
                 } else {
                     // There are outputs which we need to redraw before locking.
                     self.lock_state = LockState::Locking(confirmation);
@@ -6870,6 +7004,9 @@ impl Niri {
             output_state.lock_surface = None;
         }
         self.queue_redraw_all();
+
+        // Emit lock:deactivate event
+        crate::lua_event_hooks::emit_lock_deactivate_niri(self);
     }
 
     #[cfg(feature = "dbus")]

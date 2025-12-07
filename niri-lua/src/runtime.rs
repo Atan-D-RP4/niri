@@ -9,12 +9,15 @@ use std::sync::Arc;
 use mlua::prelude::*;
 use niri_config::Config;
 
+use crate::action_proxy::{register_action_proxy, ActionCallback};
 use crate::config_api::ConfigApi;
-use crate::config_proxy::{create_shared_pending_changes, register_config_proxy_to_lua, SharedPendingChanges};
+use crate::config_proxy::{
+    create_shared_pending_changes, register_config_proxy_to_lua, update_config_proxy_values,
+    SharedPendingChanges,
+};
 use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
-use crate::action_proxy::{register_action_proxy, ActionCallback};
 use crate::{LuaComponent, NiriApi};
 
 /// Manages a Lua runtime for Niri.
@@ -91,10 +94,25 @@ impl LuaRuntime {
     /// Returns a shared handle to the pending changes that can be used by the compositor
     /// to apply configuration updates.
     ///
+    /// If the config proxy is already initialized (from `init_empty_config_proxy` during
+    /// config loading), this updates the existing proxy's current values from the config
+    /// while keeping the same pending changes handle. This ensures the Lua-side proxy
+    /// remains connected to the same pending changes object that IPC commands will read from.
+    ///
     /// # Errors
     ///
     /// Returns an error if configuration proxy API registration fails.
-    pub fn register_config_proxy_api(&mut self, config: &Config) -> LuaResult<SharedPendingChanges> {
+    pub fn register_config_proxy_api(
+        &mut self,
+        config: &Config,
+    ) -> LuaResult<SharedPendingChanges> {
+        // If already initialized, update the existing proxy's current values
+        // while keeping the same pending changes handle
+        if let Some(ref pending) = self.pending_config {
+            update_config_proxy_values(&self.lua, config)?;
+            return Ok(pending.clone());
+        }
+
         let pending = create_shared_pending_changes();
         register_config_proxy_to_lua(&self.lua, pending.clone(), config)?;
         self.pending_config = Some(pending.clone());
@@ -126,11 +144,15 @@ impl LuaRuntime {
         let capture_callback: ActionCallback = std::sync::Arc::new(move |action| {
             match &action {
                 niri_ipc::Action::Spawn { command } => {
-                    log::debug!("Config load: capturing spawn {:?} as spawn_at_startup", command);
+                    log::debug!(
+                        "Config load: capturing spawn {:?} as spawn_at_startup",
+                        command
+                    );
                     // Add to pending config changes as spawn_at_startup
                     let spawn_json = serde_json::json!(command);
                     let mut pending = pending_clone.lock();
-                    pending.collection_additions
+                    pending
+                        .collection_additions
                         .entry("spawn_at_startup".to_string())
                         .or_default()
                         .push(spawn_json);
@@ -180,10 +202,10 @@ impl LuaRuntime {
     /// Returns an error if event system initialization fails.
     pub fn init_event_system(&mut self) -> LuaResult<()> {
         let handlers = Arc::new(parking_lot::Mutex::new(EventHandlers::new()));
-        
+
         // Register events proxy API (niri.events:on, niri.events:once, etc.)
         register_events_proxy(&self.lua, handlers.clone())?;
-        
+
         self.event_system = Some(EventSystem::new(handlers));
         Ok(())
     }
@@ -215,6 +237,24 @@ impl LuaRuntime {
         register_action_proxy(&self.lua, callback)
     }
 
+    /// Update the config proxy's cached values from the current config.
+    ///
+    /// This should be called after applying config changes (e.g., via IPC) to ensure
+    /// the Lua-side config proxy reflects the current state of the Rust config.
+    /// Without this, reading `niri.config.prefer_no_csd` after an IPC change would
+    /// return the old cached value instead of the new value.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The current config to sync from
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config proxy cannot be updated.
+    pub fn sync_config_from(&self, config: &Config) -> LuaResult<()> {
+        update_config_proxy_values(&self.lua, config)
+    }
+
     /// Load and execute a Lua script from a file.
     ///
     /// # Errors
@@ -241,45 +281,35 @@ impl LuaRuntime {
     /// Captures print() output and returns the result.
     /// Returns a tuple of (output, success).
     pub fn execute_string(&self, code: &str) -> (String, bool) {
-        // Capture print output
+        // Get or create the format_value function for pretty-printing
+        let format_value: LuaFunction = self
+            .lua
+            .globals()
+            .get::<LuaFunction>("__niri_format_value")
+            .unwrap_or_else(|_| {
+                // Fallback: create inline if not registered
+                self.lua
+                    .load(include_str!("format_value.lua"))
+                    .eval()
+                    .unwrap()
+            });
+
+        // Capture print output using format_value for inspection
         let original_print = self.lua.globals().get::<LuaFunction>("print");
         let mut output = Vec::new();
         let output_ptr = &mut output as *mut Vec<String>;
+        let format_value_clone = format_value.clone();
 
         let print_fn =
             self.lua
                 .create_function(move |_, args: mlua::MultiValue| -> LuaResult<()> {
                     let output_vec = unsafe { &mut *output_ptr };
+                    let mut parts = Vec::new();
                     for v in args.iter() {
-                        let s = match v {
-                            LuaValue::String(s) => s.to_string_lossy().to_string(),
-                            LuaValue::Integer(i) => i.to_string(),
-                            LuaValue::Number(n) => {
-                                // Format numbers cleanly without debug info
-                                if n.is_finite() {
-                                    if n.fract() == 0.0 && n.abs() < 1e15 {
-                                        format!("{:.0}", n)
-                                    } else {
-                                        n.to_string()
-                                    }
-                                } else if n.is_nan() {
-                                    "nan".to_string()
-                                } else if n.is_infinite() {
-                                    if n.is_sign_positive() {
-                                        "inf".to_string()
-                                    } else {
-                                        "-inf".to_string()
-                                    }
-                                } else {
-                                    n.to_string()
-                                }
-                            }
-                            LuaValue::Boolean(b) => b.to_string(),
-                            LuaValue::Nil => "nil".to_string(),
-                            _ => format!("{:?}", v),
-                        };
-                        output_vec.push(s);
+                        let formatted: String = format_value_clone.call(v.clone())?;
+                        parts.push(formatted);
                     }
+                    output_vec.push(parts.join("\t"));
                     Ok(())
                 });
 
@@ -296,32 +326,10 @@ impl LuaRuntime {
 
         let (success, message) = match result {
             Ok(val) => {
-                // Format simple return values; tables and complex types are nil
-                let val_str = match val {
+                // Use format_value for all return values (like vim.print)
+                let val_str = match &val {
                     LuaValue::Nil => String::new(),
-                    LuaValue::String(s) => s.to_string_lossy().to_string(),
-                    LuaValue::Integer(i) => i.to_string(),
-                    LuaValue::Number(n) => {
-                        if n.is_finite() {
-                            if n.fract() == 0.0 && n.abs() < 1e15 {
-                                format!("{:.0}", n)
-                            } else {
-                                n.to_string()
-                            }
-                        } else if n.is_nan() {
-                            "nan".to_string()
-                        } else if n.is_infinite() {
-                            if n.is_sign_positive() {
-                                "inf".to_string()
-                            } else {
-                                "-inf".to_string()
-                            }
-                        } else {
-                            n.to_string()
-                        }
-                    }
-                    LuaValue::Boolean(b) => b.to_string(),
-                    _ => String::new(),
+                    _ => format_value.call::<String>(val).unwrap_or_default(),
                 };
                 (true, val_str)
             }
@@ -460,10 +468,10 @@ mod tests {
     fn config_proxy_captures_layout_changes() {
         let mut rt = LuaRuntime::new().unwrap();
         let shared = rt.init_empty_config_proxy().unwrap();
-        
+
         // Set a layout value through the proxy
         rt.load_string("niri.config.layout.gaps = 20").unwrap();
-        
+
         // Check that the change was captured in scalar_changes
         let changes = shared.lock();
         let layout_gaps = changes.scalar_changes.get("layout.gaps");
@@ -474,10 +482,11 @@ mod tests {
     fn config_proxy_captures_nested_values() {
         let mut rt = LuaRuntime::new().unwrap();
         let shared = rt.init_empty_config_proxy().unwrap();
-        
+
         // Set a deeply nested value
-        rt.load_string("niri.config.layout.border.active.color = '#ff0000'").unwrap();
-        
+        rt.load_string("niri.config.layout.border.active.color = '#ff0000'")
+            .unwrap();
+
         let changes = shared.lock();
         let border_color = changes.scalar_changes.get("layout.border.active.color");
         assert!(border_color.is_some());
@@ -487,16 +496,19 @@ mod tests {
     fn config_proxy_captures_bind_additions() {
         let mut rt = LuaRuntime::new().unwrap();
         let shared = rt.init_empty_config_proxy().unwrap();
-        
+
         // Add a keybind through the collection API
-        rt.load_string(r#"
+        rt.load_string(
+            r#"
             niri.config.binds:add({
                 key = 'Mod+Return',
                 action = 'spawn',
                 args = { 'alacritty' }
             })
-        "#).unwrap();
-        
+        "#,
+        )
+        .unwrap();
+
         let changes = shared.lock();
         // Collection additions are keyed by collection name
         let binds = changes.collection_additions.get("binds");
@@ -508,14 +520,17 @@ mod tests {
     fn config_proxy_captures_spawn_at_startup() {
         let mut rt = LuaRuntime::new().unwrap();
         let shared = rt.init_empty_config_proxy().unwrap();
-        
+
         // Add a spawn-at-startup command
-        rt.load_string(r#"
+        rt.load_string(
+            r#"
             niri.config.spawn_at_startup:add({
                 command = { 'waybar' }
             })
-        "#).unwrap();
-        
+        "#,
+        )
+        .unwrap();
+
         let changes = shared.lock();
         // Collection additions are keyed by collection name
         let spawns = changes.collection_additions.get("spawn_at_startup");

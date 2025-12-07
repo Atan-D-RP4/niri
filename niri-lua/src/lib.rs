@@ -25,12 +25,12 @@ pub mod module_loader;
 pub mod plugin_system;
 
 // Tier 2: Configuration API
+pub mod action_proxy;
 pub mod config_api;
 pub mod config_proxy;
 pub mod extractors;
 pub mod lua_types;
 pub mod validators;
-pub mod action_proxy;
 
 // Tier 3: Runtime State Access
 pub mod event_data;
@@ -42,8 +42,14 @@ pub mod runtime_api;
 #[cfg(test)]
 pub mod test_utils;
 
+// Tier 2 exports
+pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
 pub use config::LuaConfig;
 pub use config_converter::apply_pending_lua_config;
+pub use config_proxy::{
+    create_shared_pending_changes, register_config_proxy_to_lua, ConfigCollectionProxy,
+    ConfigProxy, ConfigSectionProxy, PendingConfigChanges, SharedPendingChanges,
+};
 // Tier 3 exports
 pub use event_data::{
     EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData,
@@ -55,19 +61,16 @@ pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};
 pub use hot_reload::HotReloader;
 pub use ipc_repl::IpcLuaExecutor;
-// Tier 2 exports
-pub use config_proxy::{
-    create_shared_pending_changes, register_config_proxy_to_lua, ConfigCollectionProxy,
-    ConfigProxy, ConfigSectionProxy, PendingConfigChanges, SharedPendingChanges,
-};
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
-pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
 use mlua::prelude::*;
 pub use module_loader::ModuleLoader;
 pub use niri_api::NiriApi;
 pub use plugin_system::PluginManager;
 pub use runtime::LuaRuntime;
-pub use runtime_api::{register_runtime_api, clear_event_context_state, set_event_context_state, CompositorState, RuntimeApi, StateSnapshot};
+pub use runtime_api::{
+    clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,
+    RuntimeApi, StateSnapshot,
+};
 
 /// Trait for registering Lua components to the global context.
 ///

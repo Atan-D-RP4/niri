@@ -453,6 +453,8 @@ niri.config:apply()
 
 niri.action:spawn({ "waybar" })
 niri.action:spawn({ "swaync" })
+niri.action:spawn({ "kitty" })
+niri.action:spawn({ "kitty", "nvim" })
 
 -- Shell commands with pipes/variables:
 -- niri.action:spawn_sh("dbus-update-activation-environment --systemd WAYLAND_DISPLAY")
@@ -479,9 +481,9 @@ niri.events:on("workspace:activate", function(ev)
 end)
 
 -- Log window title changes (new in Phase R6)
-niri.events:on("window:title_changed", function(ev)
-	niri.utils.log("Window title changed: " .. (ev.title or ""))
-end)
+-- niri.events:on("window:title_changed", function(ev)
+-- 	niri.utils.log("Window title changed: " .. (ev.title or ""))
+-- end)
 
 -- Log config reloads (new in Phase R6)
 niri.events:on("config:reload", function(ev)
@@ -507,12 +509,12 @@ end)
 -- Query runtime state using niri.state
 
 -- Example: Log current window count
-niri.events:on("window:title_changed", function(ev)
-	niri.utils.log("Current windows:")
-	for _, win in ipairs(niri.state.windows()) do
-		niri.utils.log(" - " .. (win.title or "untitled") .. " [" .. (win.app_id or "unknown") .. "]")
-	end
-end)
+-- niri.events:on("window:title_changed", function(ev)
+-- 	niri.utils.log("Current windows:")
+-- 	for _, win in ipairs(niri.state.windows()) do
+-- 		niri.utils.log(" - " .. (win.title or "untitled") .. " [" .. (win.app_id or "unknown") .. "]")
+-- 	end
+-- end)
 
 -- Example: Check for multiple monitors
 -- local outputs = niri.state.outputs()
@@ -537,6 +539,7 @@ end)
 -- ============================================================================
 -- LOG SUCCESS
 -- ============================================================================
+niri.config.prefer_no_csd = false
 
 local binds_count = #niri.config.binds:list()
 niri.utils.log("Niri v2 configuration loaded!")

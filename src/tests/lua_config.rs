@@ -162,7 +162,7 @@ mod lua_config_tests {
 
         // Should have added 2 startup commands
         assert_eq!(config.spawn_at_startup.len(), original_cmds + 2);
-        
+
         // First command should have 3 parts
         if let Some(first_cmd) = config.spawn_at_startup.get(original_cmds) {
             assert_eq!(first_cmd.command.len(), 3);

@@ -24,6 +24,7 @@ pub mod ui;
 pub mod utils;
 pub mod window;
 
+// TODO: Find out if this neccessary anymore and if it can be removed
 // Re-export niri-lua as lua_extensions for backward compatibility
 pub use niri_lua as lua_extensions;
 

@@ -76,6 +76,53 @@ end)
 niri.events:off("window:focus", id)
 ```
 
+### niri.events:emit(event_type, data)
+
+Emit a custom event. This allows Lua scripts to create their own events for inter-plugin communication.
+
+**Parameters:**
+- `event_type` (string): The event type to emit
+- `data` (table): Data to pass to handlers
+
+**Example:**
+```lua
+-- Emit a custom event
+niri.events:emit("custom:my-event", { message = "Hello!", count = 42 })
+
+-- Another script can listen for it
+niri.events:on("custom:my-event", function(data)
+    niri.utils.log("Received: " .. data.message)
+end)
+```
+
+### niri.events:list()
+
+Query all registered event handlers.
+
+**Returns:** A table with `total` (number of handlers) and `events` (table of event types with handler counts)
+
+**Example:**
+```lua
+local info = niri.events:list()
+niri.utils.log("Total handlers: " .. info.total)
+for event, count in pairs(info.events) do
+    niri.utils.log("  " .. event .. ": " .. count .. " handlers")
+end
+```
+
+### niri.events:clear(event_type)
+
+Remove all handlers for a specific event type.
+
+**Parameters:**
+- `event_type` (string): The event type to clear
+
+**Example:**
+```lua
+-- Remove all window:focus handlers
+niri.events:clear("window:focus")
+```
+
 ## Event Types
 
 ### Window Events
@@ -121,6 +168,40 @@ Emitted when a window loses keyboard focus.
 {
     id = 12345,
     title = "App Name"
+}
+```
+
+#### window:title_changed
+Emitted when a window's title changes.
+
+**Event data:**
+```lua
+{
+    id = 12345,
+    title = "New Title"
+}
+```
+
+#### window:app_id_changed
+Emitted when a window's app_id changes.
+
+**Event data:**
+```lua
+{
+    id = 12345,
+    app_id = "org.example.app"
+}
+```
+
+#### window:fullscreen
+Emitted when a window enters or exits fullscreen mode.
+
+**Event data:**
+```lua
+{
+    id = 12345,
+    title = "App Name",
+    is_fullscreen = true  -- or false
 }
 ```
 
@@ -201,6 +282,38 @@ Emitted when a window is removed from the tiling layout.
 ```lua
 {
     id = 12345   -- Window ID (number)
+}
+```
+
+### System Events
+
+#### config:reload
+Emitted when the configuration is reloaded.
+
+**Event data:**
+```lua
+{
+    success = true  -- Whether reload succeeded (boolean)
+}
+```
+
+#### overview:open
+Emitted when the overview mode is opened.
+
+**Event data:**
+```lua
+{
+    is_open = true
+}
+```
+
+#### overview:close
+Emitted when the overview mode is closed.
+
+**Event data:**
+```lua
+{
+    is_open = false
 }
 ```
 

@@ -27,32 +27,64 @@ impl LuaComponent for NiriApi {
         // Create the niri table
         let niri = lua.create_table()?;
 
+        // Register the format_value function globally for pretty-printing
+        let format_value_fn: LuaFunction = lua.load(include_str!("format_value.lua")).eval()?;
+        lua.globals().set("__niri_format_value", format_value_fn)?;
+
         // Create the utils table for logging and utility functions
         let utils = lua.create_table()?;
 
-        // Register logging function under niri.utils
-        let log_fn = lua.create_function(|_, message: String| {
+        // Register logging function under niri.utils (like vim.print - inspects any value)
+        let log_fn = lua.create_function(|lua, args: LuaMultiValue| {
+            let format_value: LuaFunction = lua.globals().get("__niri_format_value")?;
+            let mut parts = Vec::new();
+            for val in args.into_iter() {
+                let formatted: String = format_value.call(val)?;
+                parts.push(formatted);
+            }
+            let message = parts.join("\t");
             info!("Lua: {}", message);
             Ok(())
         })?;
         utils.set("log", log_fn)?;
 
-        // Register debug print function under niri.utils
-        let debug_fn = lua.create_function(|_, message: String| {
+        // Register debug print function under niri.utils (like vim.print - inspects any value)
+        let debug_fn = lua.create_function(|lua, args: LuaMultiValue| {
+            let format_value: LuaFunction = lua.globals().get("__niri_format_value")?;
+            let mut parts = Vec::new();
+            for val in args.into_iter() {
+                let formatted: String = format_value.call(val)?;
+                parts.push(formatted);
+            }
+            let message = parts.join("\t");
             debug!("Lua Debug: {}", message);
             Ok(())
         })?;
         utils.set("debug", debug_fn)?;
 
-        // Register warning function under niri.utils
-        let warn_fn = lua.create_function(|_, message: String| {
+        // Register warning function under niri.utils (like vim.print - inspects any value)
+        let warn_fn = lua.create_function(|lua, args: LuaMultiValue| {
+            let format_value: LuaFunction = lua.globals().get("__niri_format_value")?;
+            let mut parts = Vec::new();
+            for val in args.into_iter() {
+                let formatted: String = format_value.call(val)?;
+                parts.push(formatted);
+            }
+            let message = parts.join("\t");
             warn!("Lua Warning: {}", message);
             Ok(())
         })?;
         utils.set("warn", warn_fn)?;
 
-        // Register error function under niri.utils
-        let error_fn = lua.create_function(|_, message: String| {
+        // Register error function under niri.utils (like vim.print - inspects any value)
+        let error_fn = lua.create_function(|lua, args: LuaMultiValue| {
+            let format_value: LuaFunction = lua.globals().get("__niri_format_value")?;
+            let mut parts = Vec::new();
+            for val in args.into_iter() {
+                let formatted: String = format_value.call(val)?;
+                parts.push(formatted);
+            }
+            let message = parts.join("\t");
             error!("Lua Error: {}", message);
             Ok(())
         })?;
@@ -392,6 +424,10 @@ mod tests {
             )
             .exec();
 
-        assert!(result.is_ok(), "State stub calls should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "State stub calls should succeed: {:?}",
+            result
+        );
     }
 }

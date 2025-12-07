@@ -17,9 +17,12 @@ rust-version = "1.80.1"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
+async-channel = "2.5.0"
 bitflags = "2.9.4"
+calloop = { version = "0.14.3", features = ["executor", "futures-io", "signals"] }
 clap = { version = "4.5.48", features = ["derive"] }
 insta = "1.43.2"
+log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_debug"] }
 mlua = { version = "0.11.4", features = ["luajit", "vendored"] }
 regex = "1.10"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -60,12 +63,14 @@ accesskit = { version = "0.21.0", optional = true }
 accesskit_unix = { version = "0.17.0", optional = true }
 anyhow.workspace = true
 arrayvec = "0.7.6"
-async-channel = "2.5.0"
+# async-channel = "2.5.0"
+async-channel.workspace = true
 async-io = { version = "2.6.0", optional = true }
 atomic = "0.6.1"
 bitflags.workspace = true
 bytemuck = { version = "1.23.2", features = ["derive"] }
-calloop = { version = "0.14.3", features = ["executor", "futures-io", "signals"] }
+# calloop = { version = "0.14.3", features = ["executor", "futures-io", "signals"] }
+calloop.workspace = true
 clap = { workspace = true, features = ["string"] }
 clap_complete = "4.5.58"
 clap_complete_nushell = "4.5.8"
@@ -79,7 +84,8 @@ input = { version = "0.9.1", features = ["libinput_1_21"] }
 keyframe = { version = "1.1.1", default-features = false }
 libc = "0.2.176"
 libdisplay-info = "0.3.0"
-log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_debug"] }
+# log = { version = "0.4.28", features = ["max_level_trace", "release_max_level_debug"] }
+log.workspace = true
 mlua.workspace = true
 niri-config = { version = "25.11.0", path = "niri-config" }
 niri-ipc = { version = "25.11.0", path = "niri-ipc", features = ["clap"] }

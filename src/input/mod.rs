@@ -4273,9 +4273,11 @@ impl State {
                                 if let Some((output, ws)) = output_ws {
                                     let ws_idx =
                                         self.niri.layout.find_workspace_by_id(ws.id()).unwrap().0;
-                                    self.niri
-                                        .layout
-                                        .view_offset_gesture_begin(&output, Some(ws_idx), true);
+                                    self.niri.layout.view_offset_gesture_begin(
+                                        &output,
+                                        Some(ws_idx),
+                                        true,
+                                    );
                                 }
                             } else {
                                 // Vertical gesture: workspace switch.
@@ -4318,10 +4320,10 @@ impl State {
 
                 // Update overview gesture (uses vertical delta like touchpad).
                 // Overview always uses uninverted delta, matching touchpad behavior.
-                if let Some(redraw) =
-                    self.niri
-                        .layout
-                        .overview_gesture_update(-delta_y, timestamp)
+                if let Some(redraw) = self
+                    .niri
+                    .layout
+                    .overview_gesture_update(-delta_y, timestamp)
                 {
                     if redraw {
                         self.niri.queue_redraw_all();

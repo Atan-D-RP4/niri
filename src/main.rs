@@ -195,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // (niri.config.binds:add(), niri.config.layout.gaps = 16, etc.)
                     let runtime = lua_config.runtime();
                     let pending_changes = niri_lua::apply_pending_lua_config(runtime, &mut config);
-                    
+
                     let binds_after = config.binds.0.len();
                     let startup_after = config.spawn_at_startup.len();
                     info!(
@@ -351,10 +351,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.niri.config_error_notification.show_created(path);
     }
 
+    // Emit startup event now that the compositor is fully initialized
+    niri::lua_event_hooks::emit_startup(&state);
+
     // Run the compositor.
     event_loop
         .run(None, &mut state, |state| state.refresh_and_flush_clients())
         .unwrap();
+
+    // Emit shutdown event before cleanup
+    niri::lua_event_hooks::emit_shutdown(&state);
 
     Ok(())
 }

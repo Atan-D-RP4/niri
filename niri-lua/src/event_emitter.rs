@@ -72,7 +72,7 @@ impl EventEmitter {
 
         self.handlers
             .entry(event_name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(entry);
 
         debug!(
@@ -95,7 +95,7 @@ impl EventEmitter {
 
         self.handlers
             .entry(event_name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(entry);
 
         debug!(

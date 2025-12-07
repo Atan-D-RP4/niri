@@ -11,10 +11,11 @@
 //! niri.action.focus_workspace(2)
 //! ```
 
+use std::sync::Arc;
+
 use log::debug;
 use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
-use std::sync::Arc;
 
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.
@@ -300,9 +301,7 @@ impl LuaUserData for ActionProxy {
         // screenshot_window(id?, write_to_disk?, path?)
         methods.add_method(
             "screenshot_window",
-            |_lua,
-             this,
-             (id, write_to_disk, path): (Option<u64>, Option<bool>, Option<String>)| {
+            |_lua, this, (id, write_to_disk, path): (Option<u64>, Option<bool>, Option<String>)| {
                 this.execute(Action::ScreenshotWindow {
                     id,
                     write_to_disk: write_to_disk.unwrap_or(true),
@@ -328,9 +327,7 @@ impl LuaUserData for ActionProxy {
         // toggle_windowed_fullscreen(id?)
         methods.add_method(
             "toggle_windowed_fullscreen",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::ToggleWindowedFullscreen { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::ToggleWindowedFullscreen { id }),
         );
 
         // focus_window(id)
@@ -546,17 +543,13 @@ impl LuaUserData for ActionProxy {
         // consume_or_expel_window_left(id?)
         methods.add_method(
             "consume_or_expel_window_left",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::ConsumeOrExpelWindowLeft { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::ConsumeOrExpelWindowLeft { id }),
         );
 
         // consume_or_expel_window_right(id?)
         methods.add_method(
             "consume_or_expel_window_right",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::ConsumeOrExpelWindowRight { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::ConsumeOrExpelWindowRight { id }),
         );
 
         // consume_window_into_column()
@@ -666,9 +659,7 @@ impl LuaUserData for ActionProxy {
         // move_window_to_workspace(reference, window_id?, focus?)
         methods.add_method(
             "move_window_to_workspace",
-            |_lua,
-             this,
-             (reference, window_id, focus): (LuaValue, Option<u64>, Option<bool>)| {
+            |_lua, this, (reference, window_id, focus): (LuaValue, Option<u64>, Option<bool>)| {
                 let reference = parse_workspace_reference(reference)?;
                 this.execute(Action::MoveWindowToWorkspace {
                     window_id,
@@ -907,33 +898,25 @@ impl LuaUserData for ActionProxy {
         // switch_preset_window_width(id?)
         methods.add_method(
             "switch_preset_window_width",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::SwitchPresetWindowWidth { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::SwitchPresetWindowWidth { id }),
         );
 
         // switch_preset_window_width_back(id?)
         methods.add_method(
             "switch_preset_window_width_back",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::SwitchPresetWindowWidthBack { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::SwitchPresetWindowWidthBack { id }),
         );
 
         // switch_preset_window_height(id?)
         methods.add_method(
             "switch_preset_window_height",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::SwitchPresetWindowHeight { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::SwitchPresetWindowHeight { id }),
         );
 
         // switch_preset_window_height_back(id?)
         methods.add_method(
             "switch_preset_window_height_back",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::SwitchPresetWindowHeightBack { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::SwitchPresetWindowHeightBack { id }),
         );
 
         // maximize_column()
@@ -942,12 +925,9 @@ impl LuaUserData for ActionProxy {
         });
 
         // maximize_window_to_edges(id?)
-        methods.add_method(
-            "maximize_window_to_edges",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::MaximizeWindowToEdges { id })
-            },
-        );
+        methods.add_method("maximize_window_to_edges", |_lua, this, id: Option<u64>| {
+            this.execute(Action::MaximizeWindowToEdges { id })
+        });
 
         // set_column_width(change)
         methods.add_method("set_column_width", |_lua, this, change: LuaValue| {
@@ -1069,9 +1049,7 @@ impl LuaUserData for ActionProxy {
         // switch_focus_between_floating_and_tiling()
         methods.add_method(
             "switch_focus_between_floating_and_tiling",
-            |_lua, this, ()| {
-                this.execute(Action::SwitchFocusBetweenFloatingAndTiling {})
-            },
+            |_lua, this, ()| this.execute(Action::SwitchFocusBetweenFloatingAndTiling {}),
         );
 
         // move_floating_window(x, y, id?)
@@ -1087,9 +1065,7 @@ impl LuaUserData for ActionProxy {
         // toggle_window_rule_opacity(id?)
         methods.add_method(
             "toggle_window_rule_opacity",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::ToggleWindowRuleOpacity { id })
-            },
+            |_lua, this, id: Option<u64>| this.execute(Action::ToggleWindowRuleOpacity { id }),
         );
 
         // ============================================================
@@ -1097,12 +1073,9 @@ impl LuaUserData for ActionProxy {
         // ============================================================
 
         // set_dynamic_cast_window(id?)
-        methods.add_method(
-            "set_dynamic_cast_window",
-            |_lua, this, id: Option<u64>| {
-                this.execute(Action::SetDynamicCastWindow { id })
-            },
-        );
+        methods.add_method("set_dynamic_cast_window", |_lua, this, id: Option<u64>| {
+            this.execute(Action::SetDynamicCastWindow { id })
+        });
 
         // set_dynamic_cast_monitor(output?)
         methods.add_method(
@@ -1292,12 +1265,8 @@ mod tests {
         let (lua, actions) = create_test_env();
 
         lua.load("niri.action:focus_column_left()").exec().unwrap();
-        lua.load("niri.action:focus_column_right()")
-            .exec()
-            .unwrap();
-        lua.load("niri.action:focus_column_first()")
-            .exec()
-            .unwrap();
+        lua.load("niri.action:focus_column_right()").exec().unwrap();
+        lua.load("niri.action:focus_column_first()").exec().unwrap();
         lua.load("niri.action:focus_column_last()").exec().unwrap();
 
         let actions = actions.lock().unwrap();
@@ -1348,7 +1317,9 @@ mod tests {
     fn test_set_window_width_fixed() {
         let (lua, actions) = create_test_env();
 
-        lua.load("niri.action:set_window_width(500)").exec().unwrap();
+        lua.load("niri.action:set_window_width(500)")
+            .exec()
+            .unwrap();
 
         let actions = actions.lock().unwrap();
         assert_eq!(actions.len(), 1);
