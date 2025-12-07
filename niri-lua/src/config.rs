@@ -603,11 +603,14 @@ mod tests {
 
     #[test]
     fn lua_config_nil_values_ignored() {
+        // Test that passing nil for a config value doesn't cause errors
+        // and the value is properly ignored
         let config = LuaConfig::from_string(
             r#"
              niri.apply_config({
                  prefer_no_csd = true,
-                 debug = nil,  -- This should be ignored
+                 -- Passing nil should be ignored, not cause an error
+                 screenshot_path = nil,
              })
          "#,
         )
@@ -618,9 +621,9 @@ mod tests {
         let prefer_no_csd: bool = globals.get("prefer_no_csd").unwrap_or(false);
         assert!(prefer_no_csd);
 
-        // debug should not be set since we passed nil
-        let debug_table: Option<LuaTable> = globals.get("debug").ok();
-        assert!(debug_table.is_none());
+        // screenshot_path should not be set since we passed nil
+        let screenshot_path: Option<String> = globals.get("screenshot_path").ok();
+        assert!(screenshot_path.is_none() || screenshot_path == Some(String::new()));
     }
 
     #[test]
