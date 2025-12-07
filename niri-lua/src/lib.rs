@@ -38,6 +38,10 @@ pub mod ipc_bridge;
 pub mod ipc_repl;
 pub mod runtime_api;
 
+// Tier 4: Async Primitives
+pub mod loop_api;
+pub mod worker;
+
 // Testing utilities (only available in tests)
 #[cfg(test)]
 pub mod test_utils;
@@ -55,12 +59,17 @@ pub use event_data::{
     EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData,
 };
 // Tier 1 exports
-pub use event_emitter::EventEmitter;
+pub use event_emitter::register_to_lua as register_event_emitter;
 pub use event_handlers::EventHandlers;
 pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};
 pub use hot_reload::HotReloader;
 pub use ipc_repl::IpcLuaExecutor;
+// Tier 4 exports
+pub use loop_api::{
+    create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager, TimerManager,
+    TimerState,
+};
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
 use mlua::prelude::*;
 pub use module_loader::ModuleLoader;
@@ -70,6 +79,10 @@ pub use runtime::LuaRuntime;
 pub use runtime_api::{
     clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,
     RuntimeApi, StateSnapshot,
+};
+pub use worker::{
+    create_worker_callbacks, deliver_worker_result, register_worker_api, WorkerCallbacks,
+    WorkerResult,
 };
 
 /// Trait for registering Lua components to the global context.

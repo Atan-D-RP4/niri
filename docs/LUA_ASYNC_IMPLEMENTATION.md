@@ -310,6 +310,8 @@ impl LuaRuntime {
 
 ## Phase 4: Worker Threads
 
+**Status: ✅ Complete**
+
 ### Rationale
 
 For truly heavy computation (large data processing, complex algorithms), even `niri.schedule()` isn't enough - the work still runs on the main thread. Worker threads allow offloading to a separate OS thread.
@@ -367,11 +369,32 @@ worker:cancel()
 
 ### Implementation
 
-Workers deliver results via a calloop channel. The callback is stored in a registry on the main thread and executed when the result arrives.
+Workers deliver results via an `async_channel`. The callback is stored in a Lua registry on the main thread and executed when the result arrives.
+
+Key components in `niri-lua/src/worker.rs`:
+- `Worker` userdata with `run()`, `cancel()` methods
+- `WorkerResult` for returning JSON-serialized results
+- `WorkerCallbacks` for storing pending callbacks by worker ID
+- `execute_worker_script()` runs in isolated Lua state with timeout
+- `deliver_worker_result()` executes callback on main thread
+
+```rust
+// Register the worker API
+let worker_callbacks = create_worker_callbacks();
+let (worker_tx, worker_rx) = async_channel::unbounded();
+register_worker_api(&lua, worker_tx, worker_callbacks.clone())?;
+
+// In event loop: deliver results when received
+for result in worker_rx.try_iter() {
+    deliver_worker_result(&lua, &worker_callbacks, result)?;
+}
+```
 
 ---
 
 ## Phase 5: niri.loop API
+
+**Status: ✅ Complete**
 
 ### Rationale
 
@@ -454,6 +477,23 @@ pub struct LuaContext {
     /// Active timer registrations (for cleanup)
     pub active_timers: Rc<RefCell<HashMap<u64, RegistrationToken>>>,
 }
+```
+
+### Implementation
+
+Key components in `niri-lua/src/loop_api.rs`:
+- `Timer` userdata with `start()`, `stop()`, `close()`, `is_active()` methods
+- `TimerManager` tracks all timer state and firing schedules
+- `fire_due_timers()` executes callbacks for timers that are due
+- `niri.loop.now()` provides monotonic time in milliseconds
+
+```rust
+// Register the loop API
+let timer_manager = create_timer_manager();
+register_loop_api(&lua, timer_manager.clone())?;
+
+// In event loop: fire due timers
+let (count, errors) = fire_due_timers(&lua, &timer_manager);
 ```
 
 ---
@@ -609,10 +649,14 @@ end)
 1. **Phase 1**: Remove `parking_lot` → `std::sync::Mutex` ✅ Complete
 2. **Phase 2**: Execution timeouts with Luau `set_interrupt` ✅ Complete
 3. **Phase 3**: Implement `niri.schedule()` ✅ Complete
-4. **Phase 4**: Add worker threads (for heavy computation)
-5. **Phase 5**: Implement `niri.loop` timers
+4. **Phase 4**: Add worker threads (for heavy computation) ✅ Complete
+5. **Phase 5**: Implement `niri.loop` timers ✅ Complete
 
-Phases 1-3 are complete. Phase 4 builds on Phase 3's infrastructure. Phase 5 uses similar patterns.
+All phases are complete. The implementation provides:
+- Timeout protection via Luau's `set_interrupt`
+- Deferred execution via `niri.schedule(fn)`
+- Background computation via `niri.worker`
+- Timer functionality via `niri.loop`
 
 ### Dependencies
 
@@ -623,11 +667,11 @@ Phase 2 (Luau timeouts) ✅
     ↓
 Phase 3 (niri.schedule) ✅
     ↓
-Phase 4 (workers) ←── uses calloop channel,
-    │                 registry pattern,
-    │                 JSON serialization
+Phase 4 (workers) ✅ ←── uses calloop channel,
+    │                   registry pattern,
+    │                   JSON serialization
     ↓
-Phase 5 (timers) ←── similar registry pattern
+Phase 5 (timers) ✅ ←── similar registry pattern
 ```
 
 ---
