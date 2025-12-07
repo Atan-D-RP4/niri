@@ -119,6 +119,7 @@ Key architectural decisions:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Lua runtime | **Luau** (not LuaJIT) | `set_interrupt` for reliable timeouts |
+| Compiler optimization | **Level 2** | Function inlining, loop unrolling, constant folding |
 | Shared state primitive | `std::sync::Mutex` (not `RefCell`) | Re-entrancy safety for nested event emission |
 | mlua `send` feature | **Not used** | Performance overhead unacceptable |
 | Timeout mechanism | `set_interrupt` with wall-clock | Clean, no unsafe code, reliable |
@@ -223,6 +224,30 @@ let result = rt.call_with_timeout::<()>(&callback, args)?;
 - **Clean termination**: Returns `LuaError`, no undefined behavior
 - **No performance impact**: Interrupt callback is lightweight
 - **Automatic**: `load_file()`, `load_string()`, `flush_scheduled()` all use timeouts
+
+### Compiler Optimization
+
+In addition to timeout protection, we use Luau's `Compiler` with optimization level 2:
+
+```rust
+let compiler = Compiler::new()
+    .set_optimization_level(2)  // Aggressive optimizations
+    .set_debug_level(1);        // Keep line info for errors
+
+// All code loading uses compiled bytecode
+let bytecode = self.compiler.compile(code)?;
+let result = self.lua.load(bytecode).eval();
+```
+
+**Optimization level 2 enables:**
+- Function inlining
+- Loop unrolling
+- Constant folding
+- Dead code elimination
+
+**Debug level 1 preserves:**
+- Line numbers in error messages
+- Function names for stack traces
 
 ---
 
