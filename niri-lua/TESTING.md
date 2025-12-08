@@ -552,9 +552,169 @@ The test suite achieves the following coverage:
 - **plugin_system.rs**: All 10+ methods covered
 
 ### Coverage Gaps
+
+#### Critical Gaps (High Priority)
+
+| File | Lines | Issue | Action Required |
+|------|-------|-------|-----------------|
+| `api_registry.rs` | ~1533 | **NO TESTS** | Add schema validation tests, field completeness tests |
+| `state_api.rs` | ~6 | Placeholder only | Implement when API is built out |
+
+#### Moderate Gaps (Medium Priority)
+
+| Module | Current State | Improvement Needed |
+|--------|---------------|-------------------|
+| `runtime_api.rs` | 15 tests | Add tests for snapshot staleness edge cases |
+| `event_system.rs` | 3 tests | Add concurrent handler tests |
+| `lib.rs` | 1 test | Add initialization edge case tests |
+
+#### Known Limitations
+
 - **Hot reload**: File system integration (limited by test environment)
 - **Event emitter**: Limited integration testing
 - **Module loader**: Filesystem-dependent tests limited
+- **Event handler snapshots**: Staleness not tested (see Architecture Notes below)
+
+## Integration Testing Plan
+
+The niri-lua crate requires integration tests that exercise the full stack from Lua script execution through to compositor state changes. This section outlines the planned integration testing strategy.
+
+### Current Integration Test Coverage
+
+| Test File | Coverage | Status |
+|-----------|----------|--------|
+| `tests/repl_integration.rs` | REPL execution, Lua stdlib, events proxy, action proxy | ✅ Comprehensive (1530 lines) |
+
+### Planned Integration Tests
+
+#### 1. Runtime State API Integration (`tests/runtime_state_integration.rs`)
+
+Tests the `niri.state.*` API with realistic compositor state:
+
+```rust
+// TODO: Implement these tests
+#[test]
+fn test_state_windows_returns_all_windows() {
+    // Setup mock compositor with multiple windows
+    // Query via niri.state.windows()
+    // Verify all windows returned with correct properties
+}
+
+#[test]
+fn test_state_focused_window_tracks_focus_changes() {
+    // Setup mock compositor
+    // Change focus between windows
+    // Verify niri.state.focused_window() reflects changes
+}
+
+#[test]
+fn test_event_handler_snapshot_staleness() {
+    // Register event handler that modifies state
+    // Emit event that triggers handler
+    // Verify handler sees pre-modification snapshot (not live state)
+}
+```
+
+#### 2. Configuration Application Integration (`tests/config_integration.rs`)
+
+Tests end-to-end configuration flow:
+
+```rust
+// TODO: Implement these tests
+#[test]
+fn test_lua_config_applies_to_niri_config() {
+    // Load Lua config with layout changes
+    // Apply pending changes
+    // Verify niri-config struct updated correctly
+}
+
+#[test]
+fn test_config_reload_preserves_runtime_state() {
+    // Set up runtime with state
+    // Reload configuration
+    // Verify state preserved, config updated
+}
+```
+
+#### 3. Event System Integration (`tests/event_system_integration.rs`)
+
+Tests event emission and handler execution:
+
+```rust
+// TODO: Implement these tests
+#[test]
+fn test_window_events_propagate_to_lua() {
+    // Register Lua handler for window:open
+    // Simulate window open from compositor
+    // Verify handler called with correct data
+}
+
+#[test]
+fn test_concurrent_event_handlers() {
+    // Register multiple handlers for same event
+    // Emit event
+    // Verify all handlers called in order
+}
+```
+
+### Integration Test Infrastructure Needs
+
+1. **Mock Compositor State**: Need `MockCompositorState` implementing `CompositorState` trait
+2. **Event Simulation**: Helpers to simulate compositor events
+3. **Async Test Support**: For testing timer-based callbacks
+4. **Snapshot Assertions**: For complex state comparisons
+
+### Running Integration Tests
+
+```bash
+# Run all integration tests
+cargo test --package niri-lua --test '*'
+
+# Run specific integration test file
+cargo test --package niri-lua --test repl_integration
+
+# Run with output for debugging
+cargo test --package niri-lua --test repl_integration -- --nocapture
+```
+
+## Architecture Notes for Testing
+
+### Event Handler Snapshot Staleness
+
+The `niri.state.*` API uses a **dual-mode query pattern**:
+
+1. **Event Handler Mode**: Uses a pre-captured `StateSnapshot` (thread-local)
+2. **Normal Mode (REPL/Timers)**: Uses idle callback + channel for live queries
+
+**Staleness Limitation**: When Lua code runs inside an event handler, the state snapshot
+is captured *before* the handler executes. If the handler triggers actions that modify
+compositor state, those changes will NOT be visible to subsequent `niri.state.*` calls
+within the same handler.
+
+**Example of staleness:**
+```lua
+niri.on("window:open", function(event)
+    -- This sees the snapshot from BEFORE the handler started
+    local windows = niri.state.windows()
+    
+    -- This action modifies compositor state
+    niri.action:focus_window(event.id)
+    
+    -- This STILL sees the old snapshot, NOT the updated state
+    local focused = niri.state.focused_window()
+    -- focused may not reflect the focus change!
+end)
+```
+
+**Mitigation Strategies:**
+1. Use event data passed to the handler (already contains relevant info)
+2. Use timers to defer state queries: `niri.loop.new_timer():start(0, 0, function() ... end)`
+3. For critical state checks, query outside event handlers
+
+**Testing Implications:**
+- Tests should verify handlers receive correct event data
+- Tests should verify snapshot isolation (handlers don't see their own changes)
+- Tests should verify deferred queries see updated state
 
 ## Debugging Tests
 

@@ -227,7 +227,7 @@ Registers the `niri.state` table for querying live compositor state
 
 ```text
 pub struct RuntimeApi<S> {
-    // Reference to compositor state
+    event_loop: LoopHandle<'static, S>,
 }
 
 pub fn register_runtime_api<S>(lua: &Lua, api: RuntimeApi<S>) -> LuaResult<()>
@@ -239,6 +239,62 @@ where
 ```
 
 **Purpose**: Provides Lua with read-only access to dynamic compositor state (windows, workspaces, outputs, etc.).
+
+#### Dual-Mode Query Architecture
+
+The runtime API uses two different execution modes to avoid deadlocks:
+
+**1. Event Handler Mode (synchronous)**
+When called from within an event handler (e.g., `niri.events:on("window:open", ...)`):
+- Uses pre-captured `StateSnapshot` stored in thread-local `EVENT_CONTEXT_STATE`
+- Avoids deadlock that would occur if we used idle callbacks while the event loop waits for Lua
+- Fast: No cross-thread communication needed
+
+```text
+thread_local! {
+    static EVENT_CONTEXT_STATE: RefCell<Option<StateSnapshot>> = RefCell::new(None);
+}
+```
+
+**2. Normal Mode (async via idle callback)**
+When called from REPL, timers, or other non-event contexts:
+- Creates a channel and sends query via `insert_idle()` to event loop
+- Main thread handler runs with State access, sends result back
+- Lua blocks waiting for response (from Lua's perspective)
+
+```text
+fn query<F, T>(&self, f: F) -> Result<T, String>
+where F: FnOnce(&mut S, Sender<T>) + 'static
+{
+    let (tx, rx) = bounded(1);
+    self.event_loop.insert_idle(move |state| { f(state, tx); });
+    rx.recv_blocking()
+}
+```
+
+#### Snapshot Staleness Limitation
+
+**Important**: Event handlers see pre-captured snapshots, NOT live state after their own actions.
+
+Example problem:
+```lua
+niri.events:on("window:open", function(data)
+    niri.action:move_window_to_workspace({ id = 2 })
+    -- BUG: niri.state.windows() still shows window on original workspace!
+    local windows = niri.state.windows()
+end)
+```
+
+**Mitigation strategies**:
+1. Use event data directly (e.g., `data.window_id`) rather than re-querying
+2. Schedule follow-up queries via timers: `niri.utils.defer(function() ... end)`
+3. For multi-action scenarios, chain through separate event handlers
+
+#### Planned Improvements
+- `get_window(id)` - Targeted window query by ID
+- `get_workspace(ref)` - Query by ID, index, or name  
+- `get_output(name)` - Output-specific query
+- `subscribe(event, callback)` - Reactive state subscriptions
 
 ### 3b. Event Data Structures (`event_data.rs`)
 

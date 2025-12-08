@@ -15,7 +15,7 @@ This crate provides Lua scripting capabilities to Niri, allowing users to config
 | Plugin System | 🚧 Stub | Discovery works, sandbox/lifecycle not implemented |
 | Hot Reload | ✅ Complete | Uses polling (not inotify) |
 | Async/Safety | 🚧 Planned | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
-| LSP Support | 🚧 Planned | EmmyLua type definitions not yet generated |
+| LSP Support | ✅ Available | EmmyLua type definitions generated in `types/api.lua` |
 
 > **TODO: Simplify config_proxy.rs** - The config proxy uses `serde_json::Value` as an intermediary
 > format. Consider whether direct Lua-to-Config conversion would be more efficient.
@@ -113,6 +113,24 @@ end)
 - `niri-ipc`: Niri IPC types
 - `anyhow`: Error handling
 - `serde_json`: JSON serialization for config changes
+
+## Future API Improvements
+
+The following features are planned for future development:
+
+### Targeted State Queries
+Currently `niri.state.*` returns full collections. Planned improvements:
+- `niri.state.get_window(id)` - Query a specific window by ID
+- `niri.state.get_workspace(reference)` - Query workspace by ID, index, or name
+- `niri.state.get_output(name)` - Query a specific output by name
+
+### Reactive State Subscriptions
+- `niri.state.subscribe(event, callback)` - Subscribe to state changes reactively
+- This would enable patterns like watching for specific window property changes
+
+### Event Handler State Freshness
+Currently, event handlers see a pre-captured state snapshot (for deadlock avoidance).
+Planned: Option to request fresh state within handlers for multi-action scenarios.
 
 ## Testing
 
