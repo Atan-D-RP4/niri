@@ -38,6 +38,10 @@ pub mod ipc_bridge;
 pub mod ipc_repl;
 pub mod runtime_api;
 
+// API Schema (for LSP type generation and testing)
+pub mod api_registry;
+pub mod lua_api_schema;
+
 // Tier 4: Async Primitives
 pub mod loop_api;
 

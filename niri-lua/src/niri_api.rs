@@ -430,4 +430,77 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn spawn_triggers_callback() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let lua = Lua::new();
+        lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
+
+        let spawned = Rc::new(RefCell::new(None));
+        let spawned_clone = spawned.clone();
+
+        NiriApi::register_to_lua(&lua, move |action, args| {
+            *spawned_clone.borrow_mut() = Some((action, args));
+            Ok(())
+        })
+        .unwrap();
+
+        lua.load(r#"niri.utils.spawn("alacritty")"#).exec().unwrap();
+
+        let result = spawned.borrow();
+        assert!(result.is_some());
+        let (action, args) = result.as_ref().unwrap();
+        assert_eq!(action, "spawn");
+        assert_eq!(args, &vec!["alacritty".to_string()]);
+    }
+
+    #[test]
+    fn logging_multiple_args() {
+        let lua = Lua::new();
+        lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
+        NiriApi::register_to_lua(&lua, |_, _| Ok(())).unwrap();
+
+        // Test that log functions accept multiple arguments
+        let result = lua
+            .load(
+                r#"
+            niri.utils.log("arg1", 42, {key = "value"}, nil, true)
+            niri.utils.debug(1, 2, 3)
+            niri.utils.warn("warning", "with", "multiple", "parts")
+        "#,
+            )
+            .exec();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn logging_complex_values() {
+        let lua = Lua::new();
+        lua.load_std_libs(LuaStdLib::ALL_SAFE).unwrap();
+        NiriApi::register_to_lua(&lua, |_, _| Ok(())).unwrap();
+
+        // Test logging of complex nested structures
+        let result = lua
+            .load(
+                r#"
+            local nested = {
+                level1 = {
+                    level2 = {
+                        value = "deep"
+                    }
+                },
+                array = {1, 2, 3}
+            }
+            niri.utils.log(nested)
+            niri.utils.debug(function() end)  -- functions should be handled
+        "#,
+            )
+            .exec();
+
+        assert!(result.is_ok());
+    }
 }

@@ -1305,4 +1305,314 @@ mod tests {
         let result: i64 = lua.load("return #binds:list()").eval().unwrap();
         assert_eq!(result, 2);
     }
+
+    // ========================================================================
+    // PendingConfigChanges Collection Operations Tests
+    // ========================================================================
+
+    #[test]
+    fn add_to_collection_single_item() {
+        let mut changes = PendingConfigChanges::new();
+        let item = serde_json::json!({"key": "Mod+A", "action": "spawn"});
+
+        changes.add_to_collection("binds", vec![item.clone()]);
+
+        assert!(changes.has_changes());
+        let additions = changes.collection_additions.get("binds").unwrap();
+        assert_eq!(additions.len(), 1);
+        assert_eq!(additions[0], item);
+    }
+
+    #[test]
+    fn add_to_collection_multiple_items() {
+        let mut changes = PendingConfigChanges::new();
+        let items = vec![
+            serde_json::json!({"key": "Mod+A"}),
+            serde_json::json!({"key": "Mod+B"}),
+            serde_json::json!({"key": "Mod+C"}),
+        ];
+
+        changes.add_to_collection("binds", items.clone());
+
+        let additions = changes.collection_additions.get("binds").unwrap();
+        assert_eq!(additions.len(), 3);
+        assert_eq!(additions, &items);
+    }
+
+    #[test]
+    fn add_to_collection_multiple_calls() {
+        let mut changes = PendingConfigChanges::new();
+
+        changes.add_to_collection("binds", vec![serde_json::json!({"key": "Mod+A"})]);
+        changes.add_to_collection("binds", vec![serde_json::json!({"key": "Mod+B"})]);
+
+        let additions = changes.collection_additions.get("binds").unwrap();
+        assert_eq!(additions.len(), 2);
+    }
+
+    #[test]
+    fn add_to_collection_multiple_collections() {
+        let mut changes = PendingConfigChanges::new();
+        let bind = serde_json::json!({"key": "Mod+A"});
+        let rule = serde_json::json!({"match": {"app_id": "firefox"}});
+
+        changes.add_to_collection("binds", vec![bind]);
+        changes.add_to_collection("window_rules", vec![rule]);
+
+        assert_eq!(changes.collection_additions.get("binds").unwrap().len(), 1);
+        assert_eq!(
+            changes
+                .collection_additions
+                .get("window_rules")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn remove_from_collection_single_criteria() {
+        let mut changes = PendingConfigChanges::new();
+        let criteria = serde_json::json!({"key": "Mod+Q"});
+
+        changes.remove_from_collection("binds", criteria.clone());
+
+        assert!(changes.has_changes());
+        let removals = changes.collection_removals.get("binds").unwrap();
+        assert_eq!(removals.len(), 1);
+        assert_eq!(removals[0], criteria);
+    }
+
+    #[test]
+    fn remove_from_collection_multiple_criteria() {
+        let mut changes = PendingConfigChanges::new();
+
+        changes.remove_from_collection("binds", serde_json::json!({"key": "Mod+Q"}));
+        changes.remove_from_collection("binds", serde_json::json!({"key": "Mod+W"}));
+
+        let removals = changes.collection_removals.get("binds").unwrap();
+        assert_eq!(removals.len(), 2);
+    }
+
+    #[test]
+    fn replace_collection_empty() {
+        let mut changes = PendingConfigChanges::new();
+        let items: Vec<serde_json::Value> = vec![];
+
+        changes.replace_collection("binds", items);
+
+        assert!(changes.has_changes());
+        let replacement = changes.collection_replacements.get("binds").unwrap();
+        assert!(replacement.is_empty());
+    }
+
+    #[test]
+    fn replace_collection_with_items() {
+        let mut changes = PendingConfigChanges::new();
+        let items = vec![
+            serde_json::json!({"key": "Mod+1"}),
+            serde_json::json!({"key": "Mod+2"}),
+            serde_json::json!({"key": "Mod+3"}),
+        ];
+
+        changes.replace_collection("binds", items.clone());
+
+        let replacement = changes.collection_replacements.get("binds").unwrap();
+        assert_eq!(replacement.len(), 3);
+        assert_eq!(replacement, &items);
+    }
+
+    #[test]
+    fn replace_collection_overwrites_previous() {
+        let mut changes = PendingConfigChanges::new();
+        let items1 = vec![serde_json::json!({"key": "Mod+A"})];
+        let items2 = vec![
+            serde_json::json!({"key": "Mod+X"}),
+            serde_json::json!({"key": "Mod+Y"}),
+        ];
+
+        changes.replace_collection("binds", items1);
+        changes.replace_collection("binds", items2.clone());
+
+        let replacement = changes.collection_replacements.get("binds").unwrap();
+        assert_eq!(replacement.len(), 2);
+        assert_eq!(replacement, &items2);
+    }
+
+    #[test]
+    fn mixed_collection_operations() {
+        let mut changes = PendingConfigChanges::new();
+
+        // Add to one collection
+        changes.add_to_collection("binds", vec![serde_json::json!({"key": "Mod+A"})]);
+
+        // Remove from another
+        changes.remove_from_collection("window_rules", serde_json::json!({"app_id": "old"}));
+
+        // Replace a third
+        changes.replace_collection("outputs", vec![serde_json::json!({"name": "DP-1"})]);
+
+        assert!(changes.has_changes());
+        assert!(changes.collection_additions.contains_key("binds"));
+        assert!(changes.collection_removals.contains_key("window_rules"));
+        assert!(changes.collection_replacements.contains_key("outputs"));
+    }
+
+    #[test]
+    fn clear_removes_all_collection_operations() {
+        let mut changes = PendingConfigChanges::new();
+
+        changes.add_to_collection("binds", vec![serde_json::json!({"key": "Mod+A"})]);
+        changes.remove_from_collection("binds", serde_json::json!({"key": "Mod+Q"}));
+        changes.replace_collection("outputs", vec![serde_json::json!({"name": "DP-1"})]);
+        changes.set_scalar("layout.gaps", serde_json::json!(16));
+
+        assert!(changes.has_changes());
+
+        changes.clear();
+
+        assert!(!changes.has_changes());
+        assert!(changes.collection_additions.is_empty());
+        assert!(changes.collection_removals.is_empty());
+        assert!(changes.collection_replacements.is_empty());
+        assert!(changes.scalar_changes.is_empty());
+    }
+
+    #[test]
+    fn has_changes_detects_all_operation_types() {
+        // Test each operation type individually
+        let mut changes = PendingConfigChanges::new();
+        assert!(!changes.has_changes());
+
+        // Scalar change
+        changes.set_scalar("test", serde_json::json!(1));
+        assert!(changes.has_changes());
+        changes.clear();
+
+        // Collection addition
+        changes.add_to_collection("test", vec![serde_json::json!(1)]);
+        assert!(changes.has_changes());
+        changes.clear();
+
+        // Collection removal
+        changes.remove_from_collection("test", serde_json::json!(1));
+        assert!(changes.has_changes());
+        changes.clear();
+
+        // Collection replacement
+        changes.replace_collection("test", vec![]);
+        assert!(changes.has_changes());
+    }
+
+    // ========================================================================
+    // ConfigSectionProxy Tests
+    // ========================================================================
+
+    #[test]
+    fn section_proxy_set_scalar_value() {
+        let lua = Lua::new();
+        let pending = create_shared_pending_changes();
+
+        let proxy = ConfigSectionProxy {
+            path: "layout".to_string(),
+            pending: pending.clone(),
+            current_values: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let ud = lua.create_userdata(proxy).unwrap();
+        lua.globals().set("layout", ud).unwrap();
+
+        // Set a scalar value using __newindex
+        lua.load("layout.gaps = 16").exec().unwrap();
+
+        let p = pending.lock().unwrap();
+        let value = p.scalar_changes.get("layout.gaps").unwrap();
+        assert_eq!(*value, serde_json::json!(16));
+    }
+
+    #[test]
+    fn section_proxy_nested_path() {
+        let lua = Lua::new();
+        let pending = create_shared_pending_changes();
+
+        let proxy = ConfigSectionProxy {
+            path: "layout.border".to_string(),
+            pending: pending.clone(),
+            current_values: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let ud = lua.create_userdata(proxy).unwrap();
+        lua.globals().set("border", ud).unwrap();
+
+        lua.load("border.width = 2").exec().unwrap();
+
+        let p = pending.lock().unwrap();
+        let value = p.scalar_changes.get("layout.border.width").unwrap();
+        assert_eq!(*value, serde_json::json!(2));
+    }
+
+    #[test]
+    fn section_proxy_set_table_value() {
+        let lua = Lua::new();
+        let pending = create_shared_pending_changes();
+
+        let proxy = ConfigSectionProxy {
+            path: "layout".to_string(),
+            pending: pending.clone(),
+            current_values: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let ud = lua.create_userdata(proxy).unwrap();
+        lua.globals().set("layout", ud).unwrap();
+
+        // Set a table value
+        lua.load("layout.struts = {left = 10, right = 20}")
+            .exec()
+            .unwrap();
+
+        let p = pending.lock().unwrap();
+        let value = p.scalar_changes.get("layout.struts").unwrap();
+        assert_eq!(value["left"], 10);
+        assert_eq!(value["right"], 20);
+    }
+
+    #[test]
+    fn section_proxy_multiple_values() {
+        let lua = Lua::new();
+        let pending = create_shared_pending_changes();
+
+        let proxy = ConfigSectionProxy {
+            path: "cursor".to_string(),
+            pending: pending.clone(),
+            current_values: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let ud = lua.create_userdata(proxy).unwrap();
+        lua.globals().set("cursor", ud).unwrap();
+
+        lua.load(
+            r#"
+            cursor.theme = "Adwaita"
+            cursor.size = 24
+            cursor.hide_after_inactive_ms = 5000
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        let p = pending.lock().unwrap();
+        assert_eq!(p.scalar_changes.len(), 3);
+        assert_eq!(
+            p.scalar_changes.get("cursor.theme").unwrap(),
+            &serde_json::json!("Adwaita")
+        );
+        assert_eq!(
+            p.scalar_changes.get("cursor.size").unwrap(),
+            &serde_json::json!(24)
+        );
+        assert_eq!(
+            p.scalar_changes.get("cursor.hide_after_inactive_ms").unwrap(),
+            &serde_json::json!(5000)
+        );
+    }
 }

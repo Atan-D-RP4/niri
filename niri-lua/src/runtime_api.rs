@@ -654,4 +654,256 @@ mod tests {
         assert_eq!(state1.get_focused_window().unwrap().id, 1);
         assert_eq!(state2.get_focused_window().unwrap().id, 3);
     }
+
+    // ========================================================================
+    // Event Context State Tests
+    // ========================================================================
+
+    #[test]
+    fn event_context_initially_none() {
+        // Ensure clean state before test
+        clear_event_context_state();
+        assert!(get_event_context_state().is_none());
+    }
+
+    #[test]
+    fn set_event_context_makes_snapshot_available() {
+        // Clean up first
+        clear_event_context_state();
+
+        let snapshot = StateSnapshot {
+            windows: vec![make_window(1, "Test Window", "test-app", true)],
+            workspaces: vec![make_workspace(1, 1, Some("main"), true)],
+            outputs: vec![make_output("DP-1", true)],
+        };
+
+        set_event_context_state(snapshot);
+
+        let retrieved = get_event_context_state();
+        assert!(retrieved.is_some());
+
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.windows.len(), 1);
+        assert_eq!(retrieved.windows[0].id, 1);
+        assert_eq!(retrieved.windows[0].title.as_deref(), Some("Test Window"));
+
+        // Clean up
+        clear_event_context_state();
+    }
+
+    #[test]
+    fn clear_event_context_removes_snapshot() {
+        // Set up a snapshot
+        let snapshot = StateSnapshot {
+            windows: vec![make_window(1, "Window", "app", false)],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        set_event_context_state(snapshot);
+
+        // Verify it's set
+        assert!(get_event_context_state().is_some());
+
+        // Clear it
+        clear_event_context_state();
+
+        // Verify it's gone
+        assert!(get_event_context_state().is_none());
+    }
+
+    #[test]
+    fn event_context_snapshot_is_cloned() {
+        clear_event_context_state();
+
+        let snapshot = StateSnapshot {
+            windows: vec![make_window(42, "Original", "app", true)],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        set_event_context_state(snapshot);
+
+        // Get multiple clones
+        let clone1 = get_event_context_state().unwrap();
+        let clone2 = get_event_context_state().unwrap();
+
+        // Both should have the same data
+        assert_eq!(clone1.windows[0].id, 42);
+        assert_eq!(clone2.windows[0].id, 42);
+
+        // They should be independent clones
+        assert_eq!(clone1.windows.len(), clone2.windows.len());
+
+        clear_event_context_state();
+    }
+
+    #[test]
+    fn event_context_overwrite_replaces_snapshot() {
+        clear_event_context_state();
+
+        // Set first snapshot
+        let snapshot1 = StateSnapshot {
+            windows: vec![make_window(1, "First", "app1", true)],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+        set_event_context_state(snapshot1);
+
+        // Verify first snapshot
+        let retrieved = get_event_context_state().unwrap();
+        assert_eq!(retrieved.windows[0].id, 1);
+        assert_eq!(retrieved.windows[0].title.as_deref(), Some("First"));
+
+        // Set second snapshot (overwrites)
+        let snapshot2 = StateSnapshot {
+            windows: vec![make_window(2, "Second", "app2", false)],
+            workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
+            outputs: vec![],
+        };
+        set_event_context_state(snapshot2);
+
+        // Verify second snapshot is now active
+        let retrieved = get_event_context_state().unwrap();
+        assert_eq!(retrieved.windows[0].id, 2);
+        assert_eq!(retrieved.windows[0].title.as_deref(), Some("Second"));
+        assert_eq!(retrieved.workspaces.len(), 1);
+
+        clear_event_context_state();
+    }
+
+    #[test]
+    fn snapshot_get_focused_window_returns_focused() {
+        let snapshot = StateSnapshot {
+            windows: vec![
+                make_window(1, "Unfocused1", "app1", false),
+                make_window(2, "Focused", "app2", true),
+                make_window(3, "Unfocused2", "app3", false),
+            ],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        let focused = snapshot.get_focused_window();
+        assert!(focused.is_some());
+        let focused = focused.unwrap();
+        assert_eq!(focused.id, 2);
+        assert_eq!(focused.title.as_deref(), Some("Focused"));
+        assert!(focused.is_focused);
+    }
+
+    #[test]
+    fn snapshot_get_focused_window_returns_none_when_no_focus() {
+        let snapshot = StateSnapshot {
+            windows: vec![
+                make_window(1, "Win1", "app1", false),
+                make_window(2, "Win2", "app2", false),
+            ],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        assert!(snapshot.get_focused_window().is_none());
+    }
+
+    #[test]
+    fn snapshot_get_focused_window_empty_windows() {
+        let snapshot = StateSnapshot {
+            windows: vec![],
+            workspaces: vec![],
+            outputs: vec![],
+        };
+
+        assert!(snapshot.get_focused_window().is_none());
+    }
+
+    #[test]
+    fn snapshot_from_compositor_state_copies_all_data() {
+        let state = MockState {
+            windows: vec![
+                make_window(1, "Win1", "app1", false),
+                make_window(2, "Win2", "app2", true),
+            ],
+            workspaces: vec![
+                make_workspace(1, 1, Some("ws1"), true),
+                make_workspace(2, 2, Some("ws2"), false),
+            ],
+            outputs: vec![make_output("DP-1", true), make_output("HDMI-1", false)],
+        };
+
+        let snapshot = StateSnapshot::from_compositor_state(&state);
+
+        // Verify all data was copied
+        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.workspaces.len(), 2);
+        assert_eq!(snapshot.outputs.len(), 2);
+
+        // Verify focused window works on snapshot
+        let focused = snapshot.get_focused_window();
+        assert!(focused.is_some());
+        assert_eq!(focused.unwrap().id, 2);
+    }
+
+    #[test]
+    fn event_context_lifecycle_simulation() {
+        // Simulate the lifecycle of event context during event handling
+        clear_event_context_state();
+
+        // 1. Before event: no context
+        assert!(get_event_context_state().is_none());
+
+        // 2. Event starts: capture snapshot
+        let state = MockState {
+            windows: vec![make_window(1, "Before Action", "app", true)],
+            workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
+            outputs: vec![make_output("DP-1", true)],
+        };
+        let snapshot = StateSnapshot::from_compositor_state(&state);
+        set_event_context_state(snapshot);
+
+        // 3. During event: snapshot available
+        let ctx = get_event_context_state();
+        assert!(ctx.is_some());
+        let ctx = ctx.unwrap();
+        assert_eq!(ctx.windows[0].title.as_deref(), Some("Before Action"));
+
+        // 4. Event ends: clear context
+        clear_event_context_state();
+
+        // 5. After event: no context
+        assert!(get_event_context_state().is_none());
+    }
+
+    #[test]
+    fn snapshot_staleness_demonstration() {
+        // This test demonstrates the staleness limitation:
+        // The snapshot is captured at event start and doesn't update
+        // even if the underlying state changes.
+
+        clear_event_context_state();
+
+        // Initial state
+        let initial_state = MockState {
+            windows: vec![make_window(1, "Initial Title", "app", true)],
+            ..Default::default()
+        };
+
+        // Capture snapshot (as done at event start)
+        let snapshot = StateSnapshot::from_compositor_state(&initial_state);
+        set_event_context_state(snapshot);
+
+        // "State changes" (simulated - in reality this would be compositor state changing)
+        let _updated_state = MockState {
+            windows: vec![make_window(1, "Updated Title", "app", true)],
+            ..Default::default()
+        };
+
+        // Query within event context still returns OLD data
+        let ctx = get_event_context_state().unwrap();
+        assert_eq!(
+            ctx.windows[0].title.as_deref(),
+            Some("Initial Title"),
+            "Snapshot should show pre-captured state, not updated state"
+        );
+
+        clear_event_context_state();
+    }
 }
