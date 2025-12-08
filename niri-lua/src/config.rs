@@ -63,6 +63,13 @@ impl LuaConfig {
 
         debug!("Scheduler initialized");
 
+        // Initialize the loop API for niri.loop.new_timer() and niri.loop.now()
+        runtime
+            .init_loop_api()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize loop API: {}", e))?;
+
+        debug!("Loop API initialized");
+
         // Initialize the config proxy with empty collections BEFORE loading the script
         // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
         runtime
@@ -186,6 +193,13 @@ impl LuaConfig {
             .map_err(|e| anyhow::anyhow!("Failed to initialize scheduler: {}", e))?;
 
         debug!("Scheduler initialized");
+
+        // Initialize the loop API for niri.loop.new_timer() and niri.loop.now()
+        runtime
+            .init_loop_api()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize loop API: {}", e))?;
+
+        debug!("Loop API initialized");
 
         // Initialize the config proxy with empty collections BEFORE loading the script
         // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.

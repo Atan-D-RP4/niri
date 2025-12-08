@@ -51,6 +51,7 @@ use crate::config_proxy::{
 use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
+use crate::loop_api::{create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager};
 use crate::{LuaComponent, NiriApi};
 
 /// Maximum callbacks to execute per flush cycle.
@@ -118,6 +119,8 @@ pub struct LuaRuntime {
     pub event_system: Option<EventSystem>,
     /// Pending configuration changes (for the new v2 API)
     pub pending_config: Option<SharedPendingChanges>,
+    /// Timer manager for niri.loop timers
+    pub timer_manager: Option<SharedTimerManager>,
     /// Queue of scheduled callbacks (stored as registry keys)
     scheduled_callbacks: Rc<RefCell<VecDeque<LuaRegistryKey>>>,
     /// Configured execution limits
@@ -181,6 +184,7 @@ impl LuaRuntime {
             lua,
             event_system: None,
             pending_config: None,
+            timer_manager: None,
             scheduled_callbacks,
             limits,
             deadline,
@@ -300,6 +304,35 @@ impl LuaRuntime {
         Ok(())
     }
 
+    /// Initialize the loop API, registering `niri.loop` with timer functions.
+    ///
+    /// This allows Lua scripts to create timers for delayed or repeated execution,
+    /// and to query monotonic time for timing operations.
+    ///
+    /// # Example
+    ///
+    /// ```lua
+    /// -- Create a one-shot timer
+    /// local timer = niri.loop.new_timer()
+    /// timer:start(1000, 0, function()
+    ///     print("Timer fired!")
+    ///     timer:close()
+    /// end)
+    ///
+    /// -- Get current time in milliseconds
+    /// local now = niri.loop.now()
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the loop API cannot be initialized.
+    pub fn init_loop_api(&mut self) -> LuaResult<()> {
+        let manager = create_timer_manager();
+        register_loop_api(&self.lua, manager.clone())?;
+        self.timer_manager = Some(manager);
+        Ok(())
+    }
+
     /// Execute scheduled callbacks with a limit per cycle.
     ///
     /// Returns the number of callbacks executed and any errors encountered.
@@ -346,6 +379,38 @@ impl LuaRuntime {
         }
 
         (executed, errors)
+    }
+
+    /// Fire all due timers, executing their callbacks.
+    ///
+    /// Returns the number of timers fired and any errors encountered.
+    /// This should be called from the compositor's refresh cycle.
+    pub fn fire_timers(&self) -> (usize, Vec<LuaError>) {
+        if let Some(ref manager) = self.timer_manager {
+            fire_due_timers(&self.lua, manager)
+        } else {
+            (0, Vec::new())
+        }
+    }
+
+    /// Process all pending Lua async work: fire due timers and flush scheduled callbacks.
+    ///
+    /// This is the main entry point for the compositor to drive Lua async execution.
+    /// Should be called once per frame/refresh cycle.
+    ///
+    /// Returns (timers_fired, scheduled_executed, errors).
+    pub fn process_async(&self) -> (usize, usize, Vec<LuaError>) {
+        let mut all_errors = Vec::new();
+
+        // Fire due timers first (they may schedule callbacks)
+        let (timers_fired, timer_errors) = self.fire_timers();
+        all_errors.extend(timer_errors);
+
+        // Then flush scheduled callbacks
+        let (scheduled_executed, scheduled_errors) = self.flush_scheduled();
+        all_errors.extend(scheduled_errors);
+
+        (timers_fired, scheduled_executed, all_errors)
     }
 
     /// Check if there are pending scheduled callbacks.
@@ -1298,5 +1363,110 @@ mod tests {
 
         let second_ran: bool = rt.inner().globals().get("__second_ran").unwrap();
         assert!(second_ran);
+    }
+
+    #[test]
+    fn fire_timers_executes_due_and_handles_errors() {
+        let mut rt = LuaRuntime::new().unwrap();
+        rt.load_string("niri = {}").unwrap();
+
+        // Without init_loop_api, should return gracefully
+        let (count, errors) = rt.fire_timers();
+        assert_eq!(count, 0);
+        assert!(errors.is_empty());
+
+        // Initialize loop API
+        rt.init_loop_api().unwrap();
+
+        // Create immediate timer (0ms), long-delay timer (10s), and error timer
+        rt.load_string(
+            r#"
+            __immediate_ran = false
+            __delayed_ran = false
+
+            local t1 = niri.loop.new_timer()
+            t1:start(0, 0, function() __immediate_ran = true end)
+
+            local t2 = niri.loop.new_timer()
+            t2:start(10000, 0, function() __delayed_ran = true end)
+
+            local t3 = niri.loop.new_timer()
+            t3:start(0, 0, function() error("timer error") end)
+        "#,
+        )
+        .unwrap();
+
+        let (count, errors) = rt.fire_timers();
+        assert_eq!(count, 2); // immediate + error timer fired
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].to_string().contains("timer error"));
+
+        // Immediate ran, delayed did not
+        let immediate: bool = rt.inner().globals().get("__immediate_ran").unwrap();
+        let delayed: bool = rt.inner().globals().get("__delayed_ran").unwrap();
+        assert!(immediate);
+        assert!(!delayed);
+    }
+
+    #[test]
+    fn process_async_combines_timers_and_scheduled_with_chaining() {
+        let mut rt = LuaRuntime::new().unwrap();
+        rt.load_string("niri = {}").unwrap();
+        rt.init_scheduler().unwrap();
+        rt.init_loop_api().unwrap();
+
+        // Timer schedules a callback, both should run in same process_async call
+        rt.load_string(
+            r#"
+            __timer_ran = false
+            __scheduled_ran = false
+            __chained_ran = false
+
+            niri.schedule(function() __scheduled_ran = true end)
+
+            local timer = niri.loop.new_timer()
+            timer:start(0, 0, function()
+                __timer_ran = true
+                niri.schedule(function() __chained_ran = true end)
+            end)
+        "#,
+        )
+        .unwrap();
+
+        let (timers, scheduled, errors) = rt.process_async();
+        assert_eq!(timers, 1);
+        assert_eq!(scheduled, 2); // original + chained from timer
+        assert!(errors.is_empty());
+
+        let timer: bool = rt.inner().globals().get("__timer_ran").unwrap();
+        let scheduled: bool = rt.inner().globals().get("__scheduled_ran").unwrap();
+        let chained: bool = rt.inner().globals().get("__chained_ran").unwrap();
+        assert!(timer && scheduled && chained);
+    }
+
+    #[test]
+    fn process_async_collects_all_errors() {
+        let mut rt = LuaRuntime::new().unwrap();
+        rt.load_string("niri = {}").unwrap();
+        rt.init_scheduler().unwrap();
+        rt.init_loop_api().unwrap();
+
+        rt.load_string(
+            r#"
+            niri.schedule(function() error("scheduled error") end)
+            local t = niri.loop.new_timer()
+            t:start(0, 0, function() error("timer error") end)
+        "#,
+        )
+        .unwrap();
+
+        let (timers, scheduled, errors) = rt.process_async();
+        assert_eq!(timers, 1);
+        assert_eq!(scheduled, 1);
+        assert_eq!(errors.len(), 2);
+
+        let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        assert!(msgs.iter().any(|e| e.contains("timer error")));
+        assert!(msgs.iter().any(|e| e.contains("scheduled error")));
     }
 }

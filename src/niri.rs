@@ -745,6 +745,17 @@ impl State {
         // build up (the 1 second frame callback timer will call this line).
         self.niri.advance_animations();
 
+        // Process Lua async work: fire due timers and flush scheduled callbacks
+        if let Some(ref runtime) = self.niri.lua_runtime {
+            let (timers, scheduled, errors) = runtime.process_async();
+            for error in errors {
+                warn!("Lua async error: {}", error);
+            }
+            if timers > 0 || scheduled > 0 {
+                trace!("Lua async: {} timers fired, {} scheduled executed", timers, scheduled);
+            }
+        }
+
         self.niri.redraw_queued_outputs(&mut self.backend);
 
         {
