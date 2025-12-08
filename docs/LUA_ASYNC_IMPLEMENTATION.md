@@ -567,6 +567,48 @@ All phases are complete. The implementation provides:
 - Deferred execution via `niri.schedule(fn)`
 - Timer functionality via `niri.loop`
 
+---
+
+## Known Issues and Testing Gaps
+
+### Bug: Mutex Lock Result Not Unwrapped
+
+**Location:** `src/niri.rs:1766-1771`
+
+**Issue:** The `apply_pending_lua_config()` method calls `.has_changes()` on a `Result` instead of the unwrapped `MutexGuard`:
+
+```rust
+// Current (broken):
+let mut pending = pending_ref.lock();  // Returns Result<MutexGuard, PoisonError>
+if !pending.has_changes() {            // ERROR: Result has no has_changes()
+
+// Should be:
+let mut pending = pending_ref.lock().unwrap();
+if !pending.has_changes() {
+```
+
+**Impact:** Compile error prevents building the main binary.
+
+**Fix:** Change `pending_ref.lock()` to `pending_ref.lock().unwrap()` at line 1766.
+
+### Testing Gaps
+
+The async/timer implementation has unit tests in `niri-lua/src/loop_api.rs`, but the following integration scenarios are not covered:
+
+| Scenario | Status | Notes |
+|----------|--------|-------|
+| Timer callback timeout protection | ⚠️ Untested | Does `set_interrupt` work within timer callbacks? |
+| Nested timer creation | ⚠️ Untested | Creating timers inside timer callbacks |
+| Timer + schedule interaction | ⚠️ Untested | Using `niri.schedule()` from timer callbacks |
+| High timer count stress test | ⚠️ Untested | 100+ concurrent timers |
+| Timer cleanup on Lua runtime drop | ⚠️ Untested | Memory leak prevention |
+
+### Recommendations
+
+1. **Fix the mutex unwrap bug** before merging any Tier 6 changes
+2. **Add integration tests** in `niri-lua/tests/` for timer edge cases
+3. **Add fuzzing** for timer callbacks with malicious Lua code
+
 ### Dependencies
 
 ```

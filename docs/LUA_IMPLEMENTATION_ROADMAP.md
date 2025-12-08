@@ -10,9 +10,9 @@
 | Tier 4: Event System | ✅ MOSTLY COMPLETE | Core events wired (window, workspace, monitor, overview, config) |
 | API Refactor R1-R13 | ✅ COMPLETE | Reactive config proxy, `niri.state/action/events/utils` namespaces |
 | Config Side Effects | ✅ COMPLETE | Cursor, keyboard, libinput settings properly applied |
-| Async/Safety | 🚧 PLANNED | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
+| Async/Safety | ✅ COMPLETE | Timeouts, scheduling, timer API (see LUA_ASYNC_IMPLEMENTATION.md) |
 | Tier 5: Plugin Ecosystem | 🚧 NOT IMPLEMENTED | Basic discovery only; lifecycle/sandbox/IPC pending |
-| Tier 6: Developer Experience | ⚙️ PARTIAL | REPL/docs done; type definitions/LSP pending |
+| Tier 6: Developer Experience | ⚙️ IN PROGRESS | REPL/docs done; type gen infrastructure complete |
 
 ---
 
@@ -25,6 +25,11 @@
 > kept Lua-based implementation via global tables. File reduced from ~270 to ~240 lines.
 
 ## Code Quality Issues
+
+> **BUG: Mutex lock not unwrapped in apply_pending_lua_config()** - `src/niri.rs:1766`
+> calls `.has_changes()` on `Result<MutexGuard, PoisonError>` instead of the unwrapped guard.
+> Fix: Change `pending_ref.lock()` to `pending_ref.lock().unwrap()`.
+> See [LUA_ASYNC_IMPLEMENTATION.md](LUA_ASYNC_IMPLEMENTATION.md#known-issues-and-testing-gaps) for details.
 
 > ~~**TODO: Replace unsafe code in runtime.rs:300-306**~~ - ✅ COMPLETED: Replaced raw pointer
 > with `Rc<RefCell<Vec<String>>>` for safe interior mutability.
@@ -144,11 +149,25 @@ See [LUA_TIER5_SPEC.md](LUA_TIER5_SPEC.md) for details.
 
 See [LUA_TIER6_SPEC.md](LUA_TIER6_SPEC.md) for details.
 
+**Status:** ⚙️ IN PROGRESS
+
+**Completed:**
+- ✅ Interactive REPL (`niri msg lua`)
+- ✅ Documentation (LUA_GUIDE.md, LUA_QUICKSTART.md, etc.)
+- ✅ Example scripts (10 in `examples/`)
+- ✅ Type generation infrastructure (Option C: Custom Registry)
+  - `lua_api_schema.rs` - Schema type definitions
+  - `api_registry.rs` - Full API registry (~100 actions, 5 UserData types)
+  - `build.rs` - EmmyLua generator
+
 **TODO:**
-- EmmyLua type definitions for lua_ls autocomplete
-- LSP configuration for Neovim/VS Code
-- Plugin testing framework
-- Additional example plugins
+- [ ] Add new modules to `lib.rs`
+- [ ] Build and verify `types/api.lua` generation
+- [ ] LSP configuration for Neovim/VS Code
+- [ ] Plugin testing framework
+- [ ] Additional example plugins
+
+**Design Decision:** Using EmmyLua annotations (`---@class`, `---@param`) for compatibility with emmylua-analyzer-rust, lua_ls, and other common LSPs. Not using Luau native types since user's LSP doesn't support them.
 
 ---
 

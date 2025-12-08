@@ -43,19 +43,20 @@ Niri embeds Lua to provide:
 
 ### Lua Runtime
 
-**Lua 5.2 via LuaJIT**
+**Luau (Roblox's Lua)**
 
 ```toml
 # Cargo.toml
 [dependencies]
-mlua = { version = "0.11.4", features = ["lua52", "luajit", "vendored"] }
+mlua = { version = "0.11.4", features = ["luau", "vendored"] }
 ```
 
-**Why LuaJIT?**
-- 15-40x faster than standard Lua 5.2
-- Near-native performance for JIT-able code
+**Why Luau?**
+- Native type annotations for better IDE support
+- Reliable timeout protection via `set_interrupt` (JIT doesn't interfere with debug hooks)
 - No external Lua installation required (vendored)
-- Stable and production-tested (used by ROBLOX, Neovim, etc.)
+- Production-tested (used by Roblox at scale)
+- Based on Lua 5.1 semantics (compatible with most Lua code)
 
 ### Integration Library
 
@@ -111,7 +112,7 @@ niri-lua/src/
 └─────────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────┐
-│  1. Initialize Lua VM (mlua + LuaJIT)                   │
+│  1. Initialize Lua VM (mlua + Luau)                      │
 │  2. Load Niri API modules                               │
 │  3. Load configuration (KDL or Lua)                     │
 │  4. Execute user config file                            │
@@ -513,12 +514,12 @@ cargo build --release
 cargo build --features lua
 ```
 
-### Vendored LuaJIT
+### Vendored Luau
 
-By default, LuaJIT is vendored (compiled as part of build):
+By default, Luau is vendored (compiled as part of build):
 
 ```toml
-mlua = { version = "0.11.4", features = ["luajit", "vendored"] }
+mlua = { version = "0.11.4", features = ["luau", "vendored"] }
 ```
 
 This ensures:
@@ -536,10 +537,10 @@ Build time impact: ~10-30 seconds additional compile time
 
 ```rust
 // Check mlua feature flags
-let lua = Lua::new();  // Panics if LuaJIT not available
+let lua = Lua::new();  // Panics if Luau not available
 
-// Fallback to standard Lua
-mlua = { version = "0.11.4", features = ["lua52"] }
+// Feature flag should be:
+mlua = { version = "0.11.4", features = ["luau"] }
 ```
 
 ### Event Not Dispatching
@@ -572,9 +573,9 @@ Look for:
 
 ### External Documentation
 
-- **Lua 5.2 Manual:** https://www.lua.org/manual/5.2/
+- **Luau Documentation:** https://luau-lang.org/
 - **mlua:** https://github.com/mlua-rs/mlua
-- **LuaJIT:** https://luajit.org/
+- **Lua 5.1 Manual:** https://www.lua.org/manual/5.1/ (Luau is based on Lua 5.1)
 
 ### Niri Documentation
 
@@ -606,7 +607,7 @@ Look for:
 
 ### Breaking Changes
 
-None expected in Lua 5.2 core, but:
+None expected in Luau core, but:
 
 - Config format may evolve (will provide migration tools)
 - Event names may expand (backward compatible)

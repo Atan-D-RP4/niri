@@ -1,7 +1,7 @@
 # Niri Lua API - Implementation Status
 
 **Last Updated:** December 7, 2025  
-**Lua Runtime:** mlua with LuaJIT (Lua 5.2 compatible)
+**Lua Runtime:** mlua with Luau (Roblox's Lua with native type annotations)
 
 ## Executive Summary
 
@@ -872,5 +872,5 @@ This is the cost of 100% parity!
 
 - **Inspiration**: Astra project (Smithay compositor with Lua)
 - **mlua**: Excellent Rust-Lua bindings
-- **LuaJIT**: High-performance Lua implementation
+- **Luau**: Roblox's Lua implementation with native type annotations
 - **Niri**: Amazing Wayland compositor by YaLTeR
