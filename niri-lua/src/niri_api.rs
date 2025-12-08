@@ -179,32 +179,25 @@ impl LuaComponent for NiriApi {
 
         // Register a stub niri.state table for config load time
         // The real runtime API is registered later after the compositor is initialized.
-        // This stub provides helpful error messages when accessed during config loading.
+        // These stubs return truthful empty data - during config load, there genuinely
+        // are no windows, workspaces, or outputs yet. This follows Neovim's design where
+        // vim.api always returns valid (if minimal) data rather than warnings.
         let state_stub = lua.create_table()?;
 
-        // Create a function that returns an empty table with a warning
-        let windows_stub = lua.create_function(|lua, ()| {
-            warn!("niri.state.windows() called during config load - runtime state not yet available, returning empty");
-            lua.create_table()
-        })?;
+        // Returns empty array - truthful, as no windows exist during config load
+        let windows_stub = lua.create_function(|lua, ()| lua.create_table())?;
         state_stub.set("windows", windows_stub)?;
 
-        let focused_window_stub = lua.create_function(|_, ()| {
-            warn!("niri.state.focused_window() called during config load - runtime state not yet available, returning nil");
-            Ok(mlua::Value::Nil)
-        })?;
+        // Returns nil - truthful, as no window is focused during config load
+        let focused_window_stub = lua.create_function(|_, ()| Ok(mlua::Value::Nil))?;
         state_stub.set("focused_window", focused_window_stub)?;
 
-        let workspaces_stub = lua.create_function(|lua, ()| {
-            warn!("niri.state.workspaces() called during config load - runtime state not yet available, returning empty");
-            lua.create_table()
-        })?;
+        // Returns empty array - truthful, as no workspaces exist during config load
+        let workspaces_stub = lua.create_function(|lua, ()| lua.create_table())?;
         state_stub.set("workspaces", workspaces_stub)?;
 
-        let outputs_stub = lua.create_function(|lua, ()| {
-            warn!("niri.state.outputs() called during config load - runtime state not yet available, returning empty");
-            lua.create_table()
-        })?;
+        // Returns empty array - truthful, as no outputs are configured during config load
+        let outputs_stub = lua.create_function(|lua, ()| lua.create_table())?;
         state_stub.set("outputs", outputs_stub)?;
 
         niri.set("state", state_stub)?;
@@ -391,7 +384,9 @@ mod tests {
         })
         .unwrap();
 
-        // Verify niri.state stub exists and returns empty/nil values during config load
+        // Verify niri.state stub exists and returns truthful empty data during config load.
+        // This follows Neovim's design: vim.api always returns valid data, even if minimal.
+        // During config load, there genuinely are no windows/workspaces yet, so empty is correct.
         let niri: LuaTable = lua.globals().get("niri").unwrap();
         let state: LuaTable = niri.get("state").unwrap();
 
