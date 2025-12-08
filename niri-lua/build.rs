@@ -60,6 +60,18 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("---Workspace reference: index, name, or table with id/name/index\n");
     output.push_str("---@alias WorkspaceReference integer|string|{ id: integer }|{ name: string }|{ index: integer }\n\n");
 
+    output.push_str("---Event handler identifier returned by niri.events:on() or :once()\n");
+    output.push_str("---@alias EventHandlerId integer\n\n");
+
+    output.push_str("---Keybinding entry with key combination, action, and optional parameters\n");
+    output.push_str("---@alias BindEntry { key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }\n\n");
+
+    output.push_str("---Output/monitor configuration\n");
+    output.push_str("---@alias OutputConfig { name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }\n\n");
+
+    output.push_str("---Window rule configuration with match criteria and properties\n");
+    output.push_str("---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number? }\n\n");
+
     // UserData types
     output.push_str("-- ============================================================================\n");
     output.push_str("-- UserData Types\n");
@@ -167,6 +179,41 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("---@return WindowRule # New rule with updated setting\n");
     output.push_str("function WindowRule:with_fullscreen(fullscreen) end\n\n");
 
+    // ConfigCollection
+    output.push_str("---Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)\n");
+    output.push_str("---@class ConfigCollection\n");
+    output.push_str("local ConfigCollection = {}\n\n");
+
+    output.push_str("---Get all items in the collection\n");
+    output.push_str("---@return table[] # Array of all items\n");
+    output.push_str("function ConfigCollection:list() end\n\n");
+
+    output.push_str("---Get items matching criteria\n");
+    output.push_str("---@param criteria table Match criteria (e.g., { key = 'Mod+T' })\n");
+    output.push_str("---@return table[] # Matching items\n");
+    output.push_str("function ConfigCollection:get(criteria) end\n\n");
+
+    output.push_str("---Add one or more items to the collection\n");
+    output.push_str("---@param items table|table[] Item or array of items to add\n");
+    output.push_str("function ConfigCollection:add(items) end\n\n");
+
+    output.push_str("---Replace the entire collection with new items\n");
+    output.push_str("---@param items table[] New items to replace collection\n");
+    output.push_str("function ConfigCollection:set(items) end\n\n");
+
+    output.push_str("---Remove items matching criteria\n");
+    output.push_str("---@param criteria table Match criteria for removal\n");
+    output.push_str("---@return integer # Number of items removed\n");
+    output.push_str("function ConfigCollection:remove(criteria) end\n\n");
+
+    output.push_str("---Remove all items from the collection\n");
+    output.push_str("function ConfigCollection:clear() end\n\n");
+
+    // ConfigSectionProxy
+    output.push_str("---Proxy for config sections supporting direct table assignment and nested property access\n");
+    output.push_str("---@class ConfigSectionProxy\n");
+    output.push_str("local ConfigSectionProxy = {}\n\n");
+
     // Modules
     output.push_str("-- ============================================================================\n");
     output.push_str("-- Modules\n");
@@ -177,6 +224,7 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("---@class niri\n");
     output.push_str("---@field utils niri_utils Utility functions\n");
     output.push_str("---@field config niri_config Configuration API\n");
+    output.push_str("---@field events niri_events Event system for subscribing to compositor events\n");
     output.push_str("---@field action niri_action Compositor actions\n");
     output.push_str("---@field state niri_state Runtime state queries\n");
     output.push_str("---@field loop niri_loop Event loop and timers\n");
@@ -194,6 +242,10 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("---Apply configuration from a Lua table\n");
     output.push_str("---@param config table Configuration table\n");
     output.push_str("function niri.apply_config(config) end\n\n");
+
+    output.push_str("---Schedule a callback to run on the next event loop iteration\n");
+    output.push_str("---@param callback fun() Function to execute on next iteration\n");
+    output.push_str("function niri.schedule(callback) end\n\n");
 
     // niri.utils
     output.push_str("---Utility functions for logging and process spawning\n");
@@ -221,13 +273,68 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("function niri_utils.spawn(command) end\n\n");
 
     // niri.config
-    output.push_str("---Configuration version and metadata\n");
+    output.push_str("---Configuration proxy for reading and modifying compositor settings\n");
     output.push_str("---@class niri_config\n");
+    output.push_str("---@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)\n");
+    output.push_str("---@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)\n");
+    output.push_str("---@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)\n");
+    output.push_str("---@field gestures ConfigSectionProxy Gesture configuration (hot corners, touchpad gestures)\n");
+    output.push_str("---@field recent_windows ConfigSectionProxy Recent windows (MRU) configuration\n");
+    output.push_str("---@field overview ConfigSectionProxy Overview mode configuration (zoom, backdrop, shadows)\n");
+    output.push_str("---@field animations ConfigSectionProxy Animation configuration (off, slowdown)\n");
+    output.push_str("---@field clipboard ConfigSectionProxy Clipboard configuration\n");
+    output.push_str("---@field hotkey_overlay ConfigSectionProxy Hotkey overlay configuration\n");
+    output.push_str("---@field config_notification ConfigSectionProxy Config reload notification settings\n");
+    output.push_str("---@field debug ConfigSectionProxy Debug configuration options\n");
+    output.push_str("---@field xwayland_satellite ConfigSectionProxy Xwayland satellite configuration\n");
+    output.push_str("---@field screenshot_path string Screenshot save path pattern\n");
+    output.push_str("---@field prefer_no_csd boolean Prefer server-side decorations\n");
+    output.push_str("---@field binds ConfigCollection Keybindings collection\n");
+    output.push_str("---@field outputs ConfigCollection Output/monitor configurations\n");
+    output.push_str("---@field workspaces ConfigCollection Named workspaces\n");
+    output.push_str("---@field window_rules ConfigCollection Window rules\n");
+    output.push_str("---@field layer_rules ConfigCollection Layer shell rules\n");
+    output.push_str("---@field environment ConfigCollection Environment variables\n");
     output.push_str("local niri_config = {}\n\n");
 
     output.push_str("---Returns the config API version\n");
     output.push_str("---@return string # Config API version\n");
     output.push_str("function niri_config.version() end\n\n");
+
+    output.push_str("---Apply all staged configuration changes to the compositor\n");
+    output.push_str("function niri_config:apply() end\n\n");
+
+    output.push_str("---Enable or disable automatic application of config changes\n");
+    output.push_str("---@param enable boolean Whether to auto-apply changes\n");
+    output.push_str("function niri_config:auto_apply(enable) end\n\n");
+
+    // niri.events
+    output.push_str("---Event system for subscribing to compositor events\n");
+    output.push_str("---@class niri_events\n");
+    output.push_str("local niri_events = {}\n\n");
+
+    output.push_str("---Subscribe to an event with a callback. Returns a handler ID for later removal.\n");
+    output.push_str("---@param event_name string Event name (e.g., 'window:open', 'workspace:activate', 'config:reload')\n");
+    output.push_str("---@param callback fun(event: table) Callback function receiving event data\n");
+    output.push_str("---@return integer # Handler ID for removal\n");
+    output.push_str("function niri_events:on(event_name, callback) end\n\n");
+
+    output.push_str("---Subscribe to an event for a single occurrence. Handler is automatically removed after firing.\n");
+    output.push_str("---@param event_name string Event name\n");
+    output.push_str("---@param callback fun(event: table) Callback function\n");
+    output.push_str("---@return integer # Handler ID for early removal\n");
+    output.push_str("function niri_events:once(event_name, callback) end\n\n");
+
+    output.push_str("---Unsubscribe from an event using the handler ID\n");
+    output.push_str("---@param event_name string Event name\n");
+    output.push_str("---@param handler_id integer Handler ID from on() or once()\n");
+    output.push_str("---@return boolean # True if handler was found and removed\n");
+    output.push_str("function niri_events:off(event_name, handler_id) end\n\n");
+
+    output.push_str("---Emit a custom event (for testing or custom integrations)\n");
+    output.push_str("---@param event_name string Event name\n");
+    output.push_str("---@param data? table Event data\n");
+    output.push_str("function niri_events:emit(event_name, data) end\n\n");
 
     // niri.keymap
     output.push_str("---Keybinding configuration\n");

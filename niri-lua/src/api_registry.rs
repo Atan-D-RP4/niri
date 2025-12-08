@@ -11,6 +11,7 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         NIRI_MODULE,
         NIRI_UTILS_MODULE,
         NIRI_CONFIG_MODULE,
+        NIRI_EVENTS_MODULE,
         NIRI_ACTION_MODULE,
         NIRI_STATE_MODULE,
         NIRI_LOOP_MODULE,
@@ -25,6 +26,8 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         FILTER_TYPE,
         WINDOW_RULE_TYPE,
         GESTURE_TYPE,
+        CONFIG_COLLECTION_TYPE,
+        CONFIG_SECTION_PROXY_TYPE,
     ],
     aliases: &[
         WINDOW_ALIAS,
@@ -34,6 +37,10 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         POSITION_CHANGE_ALIAS,
         LAYOUT_SWITCH_TARGET_ALIAS,
         WORKSPACE_REFERENCE_ALIAS,
+        EVENT_HANDLER_ID_ALIAS,
+        BIND_ENTRY_ALIAS,
+        OUTPUT_CONFIG_ALIAS,
+        WINDOW_RULE_CONFIG_ALIAS,
     ],
 };
 
@@ -83,6 +90,30 @@ const WORKSPACE_REFERENCE_ALIAS: AliasSchema = AliasSchema {
     description: "Workspace reference: index, name, or table with id/name/index",
 };
 
+const EVENT_HANDLER_ID_ALIAS: AliasSchema = AliasSchema {
+    name: "EventHandlerId",
+    ty: "integer",
+    description: "Event handler identifier returned by niri.events:on() or :once()",
+};
+
+const BIND_ENTRY_ALIAS: AliasSchema = AliasSchema {
+    name: "BindEntry",
+    ty: "{ key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }",
+    description: "Keybinding entry with key combination, action, and optional parameters",
+};
+
+const OUTPUT_CONFIG_ALIAS: AliasSchema = AliasSchema {
+    name: "OutputConfig",
+    ty: "{ name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }",
+    description: "Output/monitor configuration",
+};
+
+const WINDOW_RULE_CONFIG_ALIAS: AliasSchema = AliasSchema {
+    name: "WindowRuleConfig",
+    ty: "{ match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number?, draw_border_with_background: boolean?, geometry_corner_radius: table?, clip_to_geometry: boolean?, focus_ring: table?, border: table? }",
+    description: "Window rule configuration with match criteria and properties",
+};
+
 // ============================================================================
 // niri (root module)
 // ============================================================================
@@ -123,6 +154,7 @@ const NIRI_MODULE: ModuleSchema = ModuleSchema {
     fields: &[
         FieldSchema { name: "utils", ty: "niri_utils", description: "Utility functions" },
         FieldSchema { name: "config", ty: "niri_config", description: "Configuration API" },
+        FieldSchema { name: "events", ty: "niri_events", description: "Event system for subscribing to compositor events" },
         FieldSchema { name: "action", ty: "niri_action", description: "Compositor actions" },
         FieldSchema { name: "state", ty: "niri_state", description: "Runtime state queries" },
         FieldSchema { name: "loop", ty: "niri_loop", description: "Event loop and timers" },
@@ -186,14 +218,103 @@ const NIRI_UTILS_MODULE: ModuleSchema = ModuleSchema {
 
 const NIRI_CONFIG_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.config",
-    description: "Configuration version and metadata",
+    description: "Configuration proxy for reading and modifying compositor settings",
     functions: &[
+        FunctionSchema {
+            name: "apply",
+            description: "Apply all staged configuration changes to the compositor",
+            is_method: true,
+            params: &[],
+            returns: &[],
+        },
+        FunctionSchema {
+            name: "auto_apply",
+            description: "Enable or disable automatic application of config changes",
+            is_method: true,
+            params: &[ParamSchema { name: "enable", ty: "boolean", description: "Whether to auto-apply changes", optional: false }],
+            returns: &[],
+        },
         FunctionSchema {
             name: "version",
             description: "Returns the config API version",
             is_method: false,
             params: &[],
             returns: &[ReturnSchema { ty: "string", description: "Config API version" }],
+        },
+    ],
+    fields: &[
+        // Scalar config sections (assignable as tables)
+        FieldSchema { name: "input", ty: "ConfigSectionProxy", description: "Input device configuration (keyboard, mouse, touchpad, etc.)" },
+        FieldSchema { name: "layout", ty: "ConfigSectionProxy", description: "Layout configuration (gaps, focus ring, border, shadow, etc.)" },
+        FieldSchema { name: "cursor", ty: "ConfigSectionProxy", description: "Cursor configuration (size, theme, hide when typing)" },
+        FieldSchema { name: "gestures", ty: "ConfigSectionProxy", description: "Gesture configuration (hot corners, touchpad gestures)" },
+        FieldSchema { name: "recent_windows", ty: "ConfigSectionProxy", description: "Recent windows (MRU) configuration" },
+        FieldSchema { name: "overview", ty: "ConfigSectionProxy", description: "Overview mode configuration (zoom, backdrop, shadows)" },
+        FieldSchema { name: "animations", ty: "ConfigSectionProxy", description: "Animation configuration (off, slowdown)" },
+        FieldSchema { name: "clipboard", ty: "ConfigSectionProxy", description: "Clipboard configuration" },
+        FieldSchema { name: "hotkey_overlay", ty: "ConfigSectionProxy", description: "Hotkey overlay configuration" },
+        FieldSchema { name: "config_notification", ty: "ConfigSectionProxy", description: "Config reload notification settings" },
+        FieldSchema { name: "debug", ty: "ConfigSectionProxy", description: "Debug configuration options" },
+        FieldSchema { name: "xwayland_satellite", ty: "ConfigSectionProxy", description: "Xwayland satellite configuration" },
+        FieldSchema { name: "screenshot_path", ty: "string", description: "Screenshot save path pattern" },
+        FieldSchema { name: "prefer_no_csd", ty: "boolean", description: "Prefer server-side decorations" },
+        // Collection config sections (CRUD operations)
+        FieldSchema { name: "binds", ty: "ConfigCollection", description: "Keybindings collection" },
+        FieldSchema { name: "outputs", ty: "ConfigCollection", description: "Output/monitor configurations" },
+        FieldSchema { name: "workspaces", ty: "ConfigCollection", description: "Named workspaces" },
+        FieldSchema { name: "window_rules", ty: "ConfigCollection", description: "Window rules" },
+        FieldSchema { name: "layer_rules", ty: "ConfigCollection", description: "Layer shell rules" },
+        FieldSchema { name: "environment", ty: "ConfigCollection", description: "Environment variables" },
+    ],
+};
+
+// ============================================================================
+// niri.events
+// ============================================================================
+
+const NIRI_EVENTS_MODULE: ModuleSchema = ModuleSchema {
+    path: "niri.events",
+    description: "Event system for subscribing to compositor events",
+    functions: &[
+        FunctionSchema {
+            name: "on",
+            description: "Subscribe to an event with a callback. Returns a handler ID for later removal.",
+            is_method: true,
+            params: &[
+                ParamSchema { name: "event_name", ty: "string", description: "Event name (e.g., 'window:open', 'workspace:activate')", optional: false },
+                ParamSchema { name: "callback", ty: "fun(event: table)", description: "Callback function receiving event data", optional: false },
+            ],
+            returns: &[ReturnSchema { ty: "EventHandlerId", description: "Handler ID for removal" }],
+        },
+        FunctionSchema {
+            name: "once",
+            description: "Subscribe to an event for a single occurrence. Handler is automatically removed after firing.",
+            is_method: true,
+            params: &[
+                ParamSchema { name: "event_name", ty: "string", description: "Event name", optional: false },
+                ParamSchema { name: "callback", ty: "fun(event: table)", description: "Callback function", optional: false },
+            ],
+            returns: &[ReturnSchema { ty: "EventHandlerId", description: "Handler ID for early removal" }],
+        },
+        FunctionSchema {
+            name: "off",
+            description: "Unsubscribe from an event using the handler ID",
+            is_method: true,
+            params: &[
+                ParamSchema { name: "event_name", ty: "string", description: "Event name", optional: false },
+                ParamSchema { name: "handler_id", ty: "EventHandlerId", description: "Handler ID from on() or once()", optional: false },
+            ],
+            returns: &[ReturnSchema { ty: "boolean", description: "True if handler was found and removed" }],
+        },
+        FunctionSchema {
+            name: "emit",
+            description: "Emit a custom event (for testing or custom integrations)",
+            is_method: true,
+            params: &[
+                ParamSchema { name: "event_name", ty: "string", description: "Event name", optional: false },
+                ParamSchema { name: "data", ty: "table?", description: "Event data", optional: true },
+            ],
+            returns: &[],
         },
     ],
     fields: &[],
@@ -1533,6 +1654,63 @@ const GESTURE_TYPE: TypeSchema = TypeSchema {
             returns: &[ReturnSchema { ty: "Gesture", description: "New gesture with updated action" }],
         },
     ],
+};
+
+const CONFIG_COLLECTION_TYPE: TypeSchema = TypeSchema {
+    name: "ConfigCollection",
+    description: "Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)",
+    fields: &[],
+    methods: &[
+        FunctionSchema {
+            name: "list",
+            description: "Get all items in the collection",
+            is_method: true,
+            params: &[],
+            returns: &[ReturnSchema { ty: "table[]", description: "Array of all items" }],
+        },
+        FunctionSchema {
+            name: "get",
+            description: "Get items matching criteria",
+            is_method: true,
+            params: &[ParamSchema { name: "criteria", ty: "table", description: "Match criteria (e.g., { key = 'Mod+T' })", optional: false }],
+            returns: &[ReturnSchema { ty: "table[]", description: "Matching items" }],
+        },
+        FunctionSchema {
+            name: "add",
+            description: "Add one or more items to the collection",
+            is_method: true,
+            params: &[ParamSchema { name: "items", ty: "table|table[]", description: "Item or array of items to add", optional: false }],
+            returns: &[],
+        },
+        FunctionSchema {
+            name: "set",
+            description: "Replace the entire collection with new items",
+            is_method: true,
+            params: &[ParamSchema { name: "items", ty: "table[]", description: "New items to replace collection", optional: false }],
+            returns: &[],
+        },
+        FunctionSchema {
+            name: "remove",
+            description: "Remove items matching criteria",
+            is_method: true,
+            params: &[ParamSchema { name: "criteria", ty: "table", description: "Match criteria for removal", optional: false }],
+            returns: &[ReturnSchema { ty: "integer", description: "Number of items removed" }],
+        },
+        FunctionSchema {
+            name: "clear",
+            description: "Remove all items from the collection",
+            is_method: true,
+            params: &[],
+            returns: &[],
+        },
+    ],
+};
+
+const CONFIG_SECTION_PROXY_TYPE: TypeSchema = TypeSchema {
+    name: "ConfigSectionProxy",
+    description: "Proxy for config sections supporting direct table assignment and nested property access",
+    fields: &[],
+    methods: &[],
 };
 
 #[cfg(test)]

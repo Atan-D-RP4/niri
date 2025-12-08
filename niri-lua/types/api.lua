@@ -30,6 +30,18 @@
 ---Workspace reference: index, name, or table with id/name/index
 ---@alias WorkspaceReference integer|string|{ id: integer }|{ name: string }|{ index: integer }
 
+---Event handler identifier returned by niri.events:on() or :once()
+---@alias EventHandlerId integer
+
+---Keybinding entry with key combination, action, and optional parameters
+---@alias BindEntry { key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }
+
+---Output/monitor configuration
+---@alias OutputConfig { name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }
+
+---Window rule configuration with match criteria and properties
+---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number? }
+
 -- ============================================================================
 -- UserData Types
 -- ============================================================================
@@ -132,6 +144,39 @@ function WindowRule:with_floating(floating) end
 ---@return WindowRule # New rule with updated setting
 function WindowRule:with_fullscreen(fullscreen) end
 
+---Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)
+---@class ConfigCollection
+local ConfigCollection = {}
+
+---Get all items in the collection
+---@return table[] # Array of all items
+function ConfigCollection:list() end
+
+---Get items matching criteria
+---@param criteria table Match criteria (e.g., { key = 'Mod+T' })
+---@return table[] # Matching items
+function ConfigCollection:get(criteria) end
+
+---Add one or more items to the collection
+---@param items table|table[] Item or array of items to add
+function ConfigCollection:add(items) end
+
+---Replace the entire collection with new items
+---@param items table[] New items to replace collection
+function ConfigCollection:set(items) end
+
+---Remove items matching criteria
+---@param criteria table Match criteria for removal
+---@return integer # Number of items removed
+function ConfigCollection:remove(criteria) end
+
+---Remove all items from the collection
+function ConfigCollection:clear() end
+
+---Proxy for config sections supporting direct table assignment and nested property access
+---@class ConfigSectionProxy
+local ConfigSectionProxy = {}
+
 -- ============================================================================
 -- Modules
 -- ============================================================================
@@ -140,6 +185,7 @@ function WindowRule:with_fullscreen(fullscreen) end
 ---@class niri
 ---@field utils niri_utils Utility functions
 ---@field config niri_config Configuration API
+---@field events niri_events Event system for subscribing to compositor events
 ---@field action niri_action Compositor actions
 ---@field state niri_state Runtime state queries
 ---@field loop niri_loop Event loop and timers
@@ -157,6 +203,10 @@ function niri.print(...) end
 ---Apply configuration from a Lua table
 ---@param config table Configuration table
 function niri.apply_config(config) end
+
+---Schedule a callback to run on the next event loop iteration
+---@param callback fun() Function to execute on next iteration
+function niri.schedule(callback) end
 
 ---Utility functions for logging and process spawning
 ---@class niri_utils
@@ -182,13 +232,67 @@ function niri_utils.error(...) end
 ---@param command string[] Command and arguments
 function niri_utils.spawn(command) end
 
----Configuration version and metadata
+---Configuration proxy for reading and modifying compositor settings
 ---@class niri_config
+---@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)
+---@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)
+---@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)
+---@field gestures ConfigSectionProxy Gesture configuration (hot corners, touchpad gestures)
+---@field recent_windows ConfigSectionProxy Recent windows (MRU) configuration
+---@field overview ConfigSectionProxy Overview mode configuration (zoom, backdrop, shadows)
+---@field animations ConfigSectionProxy Animation configuration (off, slowdown)
+---@field clipboard ConfigSectionProxy Clipboard configuration
+---@field hotkey_overlay ConfigSectionProxy Hotkey overlay configuration
+---@field config_notification ConfigSectionProxy Config reload notification settings
+---@field debug ConfigSectionProxy Debug configuration options
+---@field xwayland_satellite ConfigSectionProxy Xwayland satellite configuration
+---@field screenshot_path string Screenshot save path pattern
+---@field prefer_no_csd boolean Prefer server-side decorations
+---@field binds ConfigCollection Keybindings collection
+---@field outputs ConfigCollection Output/monitor configurations
+---@field workspaces ConfigCollection Named workspaces
+---@field window_rules ConfigCollection Window rules
+---@field layer_rules ConfigCollection Layer shell rules
+---@field environment ConfigCollection Environment variables
 local niri_config = {}
 
 ---Returns the config API version
 ---@return string # Config API version
 function niri_config.version() end
+
+---Apply all staged configuration changes to the compositor
+function niri_config:apply() end
+
+---Enable or disable automatic application of config changes
+---@param enable boolean Whether to auto-apply changes
+function niri_config:auto_apply(enable) end
+
+---Event system for subscribing to compositor events
+---@class niri_events
+local niri_events = {}
+
+---Subscribe to an event with a callback. Returns a handler ID for later removal.
+---@param event_name string Event name (e.g., 'window:open', 'workspace:activate', 'config:reload')
+---@param callback fun(event: table) Callback function receiving event data
+---@return integer # Handler ID for removal
+function niri_events:on(event_name, callback) end
+
+---Subscribe to an event for a single occurrence. Handler is automatically removed after firing.
+---@param event_name string Event name
+---@param callback fun(event: table) Callback function
+---@return integer # Handler ID for early removal
+function niri_events:once(event_name, callback) end
+
+---Unsubscribe from an event using the handler ID
+---@param event_name string Event name
+---@param handler_id integer Handler ID from on() or once()
+---@return boolean # True if handler was found and removed
+function niri_events:off(event_name, handler_id) end
+
+---Emit a custom event (for testing or custom integrations)
+---@param event_name string Event name
+---@param data? table Event data
+function niri_events:emit(event_name, data) end
 
 ---Keybinding configuration
 ---@class niri_keymap
