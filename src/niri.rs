@@ -1762,7 +1762,7 @@ impl State {
                 None => return false,
             };
 
-            let mut pending = pending_ref.lock();
+            let mut pending = pending_ref.lock().unwrap();
             if !pending.has_changes() {
                 return false;
             }

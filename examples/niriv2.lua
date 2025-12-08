@@ -561,97 +561,97 @@ niri.schedule(function()
 	niri.utils.log("Deferred: Config fully loaded at " .. niri.loop.now() .. "ms")
 end)
 
--- Example: Break up heavy work in event handlers
--- niri.events:on("window:open", function(ev)
--- 	-- Quick work synchronously
--- 	local window_id = ev.id
---
--- 	-- Defer heavy work to not block the window from appearing
--- 	niri.schedule(function()
--- 		-- This runs after the window is shown
--- 		niri.utils.log("Deferred analysis of window: " .. window_id)
--- 	end)
+-- -- Example: Break up heavy work in event handlers
+-- -- niri.events:on("window:open", function(ev)
+-- -- 	-- Quick work synchronously
+-- -- 	local window_id = ev.id
+-- --
+-- -- 	-- Defer heavy work to not block the window from appearing
+-- -- 	niri.schedule(function()
+-- -- 		-- This runs after the window is shown
+-- -- 		niri.utils.log("Deferred analysis of window: " .. window_id)
+-- -- 	end)
+-- -- end)
+
+-- -- ----------------------------------------------------------------------------
+-- -- niri.loop.now() - Get monotonic time in milliseconds
+-- -- ----------------------------------------------------------------------------
+-- -- Useful for timing operations and animations
+
+-- local startup_time = niri.loop.now()
+-- niri.utils.log("Config evaluation started at: " .. startup_time .. "ms since compositor start")
+
+-- -- ----------------------------------------------------------------------------
+-- -- niri.loop.new_timer() - Create timers for delayed/repeated execution
+-- -- ----------------------------------------------------------------------------
+-- -- Timers persist until explicitly closed (Neovim model)
+
+-- -- Example: One-shot timer (runs once after delay)
+-- -- local delayed_timer = niri.loop.new_timer()
+-- -- delayed_timer:start(5000, 0, function()
+-- -- 	niri.utils.log("5 seconds after config load!")
+-- -- 	delayed_timer:close()  -- Clean up (required!)
+-- -- end)
+
+-- -- Example: Repeating timer (runs every N milliseconds)
+-- -- local tick_count = 0
+-- -- local repeating_timer = niri.loop.new_timer()
+-- -- repeating_timer:start(0, 60000, function()  -- Every 60 seconds
+-- -- 	tick_count = tick_count + 1
+-- -- 	niri.utils.log("Heartbeat #" .. tick_count)
+-- -- 	-- To stop: repeating_timer:close()
+-- -- end)
+
+-- -- Example: Debounced operation (useful for rapid events)
+-- -- local debounce_timer = niri.loop.new_timer()
+-- -- local pending_action = nil
+-- --
+-- -- local function debounced_log(msg)
+-- -- 	pending_action = msg
+-- -- 	debounce_timer:stop()  -- Cancel previous
+-- -- 	debounce_timer:start(100, 0, function()  -- 100ms debounce
+-- -- 		if pending_action then
+-- -- 			niri.utils.log("Debounced: " .. pending_action)
+-- -- 			pending_action = nil
+-- -- 		end
+-- -- 	end)
+-- -- end
+
+-- -- Example: set_timeout helper (Neovim-style)
+-- -- local function set_timeout(timeout_ms, callback)
+-- -- 	local timer = niri.loop.new_timer()
+-- -- 	timer:start(timeout_ms, 0, function()
+-- -- 		timer:stop()
+-- -- 		timer:close()
+-- -- 		callback()
+-- -- 	end)
+-- -- 	return timer
+-- -- end
+-- --
+-- -- set_timeout(1000, function()
+-- -- 	niri.utils.log("This runs after 1 second")
+-- -- end)
+
+-- -- Example: set_interval helper (Neovim-style)
+-- -- local function set_interval(interval_ms, callback)
+-- -- 	local timer = niri.loop.new_timer()
+-- -- 	timer:start(0, interval_ms, function()
+-- -- 		callback()
+-- -- 	end)
+-- -- 	return timer
+-- -- end
+-- --
+-- -- local interval = set_interval(5000, function()
+-- -- 	niri.utils.log("Every 5 seconds")
+-- -- end)
+-- -- -- Later: interval:close()
+
+-- -- ============================================================================
+-- -- PRACTICAL ASYNC EXAMPLES
+-- -- ============================================================================
+
+-- -- Example: Log timing of config load
+-- niri.schedule(function()
+-- 	local end_time = niri.loop.now()
+-- 	niri.utils.log("Config load completed in " .. (end_time - startup_time) .. "ms")
 -- end)
-
--- ----------------------------------------------------------------------------
--- niri.loop.now() - Get monotonic time in milliseconds
--- ----------------------------------------------------------------------------
--- Useful for timing operations and animations
-
-local startup_time = niri.loop.now()
-niri.utils.log("Config evaluation started at: " .. startup_time .. "ms since compositor start")
-
--- ----------------------------------------------------------------------------
--- niri.loop.new_timer() - Create timers for delayed/repeated execution
--- ----------------------------------------------------------------------------
--- Timers persist until explicitly closed (Neovim model)
-
--- Example: One-shot timer (runs once after delay)
--- local delayed_timer = niri.loop.new_timer()
--- delayed_timer:start(5000, 0, function()
--- 	niri.utils.log("5 seconds after config load!")
--- 	delayed_timer:close()  -- Clean up (required!)
--- end)
-
--- Example: Repeating timer (runs every N milliseconds)
--- local tick_count = 0
--- local repeating_timer = niri.loop.new_timer()
--- repeating_timer:start(0, 60000, function()  -- Every 60 seconds
--- 	tick_count = tick_count + 1
--- 	niri.utils.log("Heartbeat #" .. tick_count)
--- 	-- To stop: repeating_timer:close()
--- end)
-
--- Example: Debounced operation (useful for rapid events)
--- local debounce_timer = niri.loop.new_timer()
--- local pending_action = nil
---
--- local function debounced_log(msg)
--- 	pending_action = msg
--- 	debounce_timer:stop()  -- Cancel previous
--- 	debounce_timer:start(100, 0, function()  -- 100ms debounce
--- 		if pending_action then
--- 			niri.utils.log("Debounced: " .. pending_action)
--- 			pending_action = nil
--- 		end
--- 	end)
--- end
-
--- Example: set_timeout helper (Neovim-style)
--- local function set_timeout(timeout_ms, callback)
--- 	local timer = niri.loop.new_timer()
--- 	timer:start(timeout_ms, 0, function()
--- 		timer:stop()
--- 		timer:close()
--- 		callback()
--- 	end)
--- 	return timer
--- end
---
--- set_timeout(1000, function()
--- 	niri.utils.log("This runs after 1 second")
--- end)
-
--- Example: set_interval helper (Neovim-style)
--- local function set_interval(interval_ms, callback)
--- 	local timer = niri.loop.new_timer()
--- 	timer:start(0, interval_ms, function()
--- 		callback()
--- 	end)
--- 	return timer
--- end
---
--- local interval = set_interval(5000, function()
--- 	niri.utils.log("Every 5 seconds")
--- end)
--- -- Later: interval:close()
-
--- ============================================================================
--- PRACTICAL ASYNC EXAMPLES
--- ============================================================================
-
--- Example: Log timing of config load
-niri.schedule(function()
-	local end_time = niri.loop.now()
-	niri.utils.log("Config load completed in " .. (end_time - startup_time) .. "ms")
-end)
