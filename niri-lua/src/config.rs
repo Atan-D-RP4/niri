@@ -56,6 +56,13 @@ impl LuaConfig {
 
         debug!("Event system initialized");
 
+        // Initialize the scheduler for niri.schedule() support
+        runtime
+            .init_scheduler()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize scheduler: {}", e))?;
+
+        debug!("Scheduler initialized");
+
         // Initialize the config proxy with empty collections BEFORE loading the script
         // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
         runtime
@@ -172,6 +179,13 @@ impl LuaConfig {
             .map_err(|e| anyhow::anyhow!("Failed to initialize event system: {}", e))?;
 
         debug!("Event system initialized");
+
+        // Initialize the scheduler for niri.schedule() support
+        runtime
+            .init_scheduler()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize scheduler: {}", e))?;
+
+        debug!("Scheduler initialized");
 
         // Initialize the config proxy with empty collections BEFORE loading the script
         // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
