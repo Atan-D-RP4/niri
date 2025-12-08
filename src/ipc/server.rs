@@ -457,11 +457,19 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             let (tx, rx) = async_channel::bounded(1);
             let code_clone = code.clone();
             ctx.event_loop.insert_idle(move |state| {
+                // Set up state snapshot before Lua execution to avoid deadlock.
+                // Without this, niri.state.* calls would try to insert_idle() from
+                // within an idle callback, causing the code to block forever.
+                let snapshot = niri_lua::StateSnapshot::from_compositor_state(state);
+                niri_lua::set_event_context_state(snapshot);
+
                 let (output, success) = if let Some(runtime) = &state.niri.lua_runtime {
                     runtime.execute_string(&code_clone)
                 } else {
                     ("Lua runtime not initialized".to_string(), false)
                 };
+
+                niri_lua::clear_event_context_state();
 
                 // Apply any pending configuration changes from Lua
                 if success {
