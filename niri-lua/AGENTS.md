@@ -296,7 +296,7 @@ end)
 - `get_output(name)` - Output-specific query
 - `focused_workspace()` - Direct access to active workspace
 - `focused_output()` - Direct access to active output
-- `subscribe(event, callback)` - Reactive state subscriptions (push-based updates)
+- `niri.state.watch(path_or_selector, callback)` - Reactive state subscriptions (see LUA_IMPLEMENTATION_ROADMAP.md)
 
 ### 3b. Event Data Structures (`event_data.rs`)
 

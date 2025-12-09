@@ -13,6 +13,7 @@
 | Async/Safety | ✅ COMPLETE | Timeouts, scheduling, timer API (see LUA_ASYNC_IMPLEMENTATION.md) |
 | Tier 5: Plugin Ecosystem | 🚧 NOT IMPLEMENTED | Basic discovery only; lifecycle/sandbox/IPC pending |
 | Tier 6: Developer Experience | ⚙️ IN PROGRESS | REPL/docs done; type gen infrastructure complete |
+| Reactive State Subscription | 📋 OPTIONAL (Low Priority) | `niri.state.watch()` API for property change callbacks |
 
 ---
 
@@ -211,3 +212,311 @@ src/
 
 - [LUA_GUIDE.md](LUA_GUIDE.md) - User guide
 - [LUA_QUICKSTART.md](LUA_QUICKSTART.md) - Quick start
+
+---
+
+## Optional Feature: Reactive State Subscription
+
+**Status:** 📋 LOW PRIORITY - Not implemented
+
+**Summary:** Enables Lua scripts to receive automatic callbacks when compositor state changes, without polling or relying on manually-emitted discrete events.
+
+### Motivation
+
+The current Lua API has two patterns:
+
+| Pattern | API | Characteristics |
+|---------|-----|-----------------|
+| **Events (Push)** | `niri.events:on("window:open", fn)` | Discrete occurrences, manually emitted |
+| **State (Pull)** | `niri.state.windows()` | Point-in-time snapshots, requires polling |
+
+**Gap:** No way to say "call me when X property changes" without:
+- Polling `niri.state.*` functions repeatedly
+- Hoping a discrete event exists for that specific change
+
+### Proposed API: `niri.state.watch()`
+
+**Signature:**
+```lua
+---@param path_or_selector string|fun(state: table): any
+---@param callback fun(value: any)
+---@param opts? { immediate?: boolean, equals?: fun(a: any, b: any): boolean }
+---@return fun(): boolean  -- unwatch function, returns true if successfully unsubscribed
+function niri.state.watch(path_or_selector, callback, opts) end
+```
+
+**Basic Usage:**
+```lua
+-- Path-based subscription (simple cases)
+local unwatch = niri.state.watch("focused_window", function(win)
+    if win then
+        print("Now focused: " .. win.title)
+    end
+end)
+
+-- Watch collections
+niri.state.watch("windows", function(windows)
+    print("Window count: " .. #windows)
+end)
+
+-- Selector-based subscription (complex derived state)
+niri.state.watch(function(state)
+    local firefox = {}
+    for _, w in ipairs(state.windows) do
+        if w.app_id == "firefox" then
+            table.insert(firefox, w)
+        end
+    end
+    return firefox
+end, function(firefox_windows)
+    print("Firefox windows: " .. #firefox_windows)
+end)
+
+-- Unsubscribe when done
+local was_subscribed = unwatch()  -- returns true if was still subscribed
+```
+
+**Options:**
+```lua
+-- Get immediate callback with current value, then on changes
+niri.state.watch("windows", callback, { immediate = true })
+
+-- Custom equality for selectors (avoid deep comparison)
+niri.state.watch(function(state)
+    return state.focused_window
+end, callback, {
+    equals = function(a, b)
+        return (a and a.id) == (b and b.id)
+    end
+})
+```
+
+**Path Constants (for type safety / LSP autocomplete):**
+```lua
+-- Optional: use constants instead of string literals
+niri.state.watch(niri.state.WINDOWS, callback)
+niri.state.watch(niri.state.FOCUSED_WINDOW, callback)
+niri.state.watch(niri.state.WORKSPACES, callback)
+niri.state.watch(niri.state.OUTPUTS, callback)
+niri.state.watch(niri.state.FOCUSED_OUTPUT, callback)
+```
+
+### Watchable Paths
+
+| Path | Type | Description |
+|------|------|-------------|
+| `windows` | `Window[]` | All windows |
+| `workspaces` | `Workspace[]` | All workspaces |
+| `outputs` | `Output[]` | All outputs |
+| `focused_window` | `Window?` | Currently focused window (or nil) |
+| `focused_output` | `Output?` | Currently focused output |
+
+### Behavioral Guarantees
+
+**1. Batching (Once Per Frame):**
+- Callbacks are fired **at most once per event loop iteration**, not per individual state change
+- If 5 windows close in one frame, the `windows` callback fires once with the final state
+- This matches niri's existing `State::refresh()` pattern and prevents callback spam
+
+**2. Error Handling:**
+- If a selector function throws an error, the error is logged and that subscription is **skipped for this cycle**
+- Subscriptions are **not permanently disabled** on error - they will be retried next cycle
+- If a callback throws, the error is logged but other subscriptions continue processing
+
+**3. Ordering:**
+- Path-based subscriptions are processed before selector-based subscriptions
+- Within each category, subscriptions fire in registration order
+- The `immediate` option fires synchronously during `watch()` call, before returning
+
+**4. Lifecycle:**
+- Subscriptions are automatically cleaned up when the Lua runtime is destroyed
+- Calling `unwatch()` multiple times is safe (returns `false` on subsequent calls)
+- Watching the same path multiple times creates independent subscriptions
+
+### Implementation Spec
+
+#### 1. Subscription Registry (`niri-lua/src/state_watch.rs`)
+
+```rust
+pub struct StateWatcher {
+    /// Path-based subscriptions: path -> list of subscriptions
+    path_subscriptions: HashMap<String, Vec<PathSubscription>>,
+    
+    /// Selector-based subscriptions: id -> subscription data
+    selector_subscriptions: HashMap<u64, SelectorSubscription>,
+    
+    /// Previous values for path-based change detection
+    previous_values: HashMap<String, LuaValue>,
+    
+    /// Counter for generating unique subscription IDs
+    next_id: AtomicU64,
+}
+
+struct PathSubscription {
+    id: u64,
+    callback: RegistryKey,
+}
+
+struct SelectorSubscription {
+    selector: RegistryKey,           // Lua function(state) -> value
+    callback: RegistryKey,           // Lua function(value)
+    last_value: Option<LuaValue>,    // For change detection
+    equals: Option<RegistryKey>,     // Optional custom comparator
+}
+```
+
+#### 2. Path Constants
+
+Expose as fields on `niri.state` for LSP support:
+
+```rust
+// In runtime_api.rs when setting up niri.state
+state_table.set("WINDOWS", "windows")?;
+state_table.set("WORKSPACES", "workspaces")?;
+state_table.set("OUTPUTS", "outputs")?;
+state_table.set("FOCUSED_WINDOW", "focused_window")?;
+state_table.set("FOCUSED_OUTPUT", "focused_output")?;
+```
+
+#### 2. State Snapshot Object
+
+Reuse existing `StateSnapshot` but expose as Lua table for selectors:
+
+```rust
+fn create_state_table(lua: &Lua, snapshot: &StateSnapshot) -> LuaResult<LuaTable> {
+    let t = lua.create_table()?;
+    t.set("windows", snapshot_to_windows(lua, snapshot)?)?;
+    t.set("workspaces", snapshot_to_workspaces(lua, snapshot)?)?;
+    t.set("outputs", snapshot_to_outputs(lua, snapshot)?)?;
+    t.set("focused_window", snapshot_to_focused_window(lua, snapshot)?)?;
+    t.set("focused_output", snapshot_to_focused_output(lua, snapshot)?)?;
+    Ok(t)
+}
+```
+
+#### 3. Change Detection Hook
+
+After state mutations, check subscriptions:
+
+```rust
+// In State::refresh() or after specific state changes
+fn check_state_subscriptions(&mut self) {
+    let Some(runtime) = &self.niri.lua_runtime else { return };
+    let Some(watcher) = &runtime.state_watcher else { return };
+    
+    let snapshot = create_state_snapshot(&self.niri);
+    watcher.check_and_notify(&snapshot);
+}
+```
+
+#### 4. Notification Logic (with Error Handling)
+
+```rust
+impl StateWatcher {
+    fn check_and_notify(&mut self, lua: &Lua, snapshot: &StateSnapshot) {
+        let state_table = match create_state_table(lua, snapshot) {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to create state table: {}", e);
+                return;
+            }
+        };
+        
+        // Path-based: compare current value at path with previous
+        for (path, subs) in &self.path_subscriptions {
+            let current = self.get_path_value(&state_table, path);
+            let previous = self.previous_values.get(path);
+            
+            if !values_equal(previous, &current) {
+                for sub in subs {
+                    if let Err(e) = self.invoke_callback(lua, &sub.callback, &current) {
+                        warn!("Path subscription callback error for '{}': {}", path, e);
+                        // Continue processing other subscriptions
+                    }
+                }
+                self.previous_values.insert(path.clone(), current);
+            }
+        }
+        
+        // Selector-based: re-run selector, compare result
+        for (id, sub) in &mut self.selector_subscriptions {
+            // Run selector with error handling
+            let new_value = match self.run_selector(lua, &sub.selector, &state_table) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!("Selector {} threw error (skipping this cycle): {}", id, e);
+                    continue;  // Skip but don't disable
+                }
+            };
+            
+            // Compare using custom or default equality
+            let changed = match &sub.equals {
+                Some(eq_fn) => !self.custom_equals(lua, eq_fn, &sub.last_value, &new_value),
+                None => !lua_deep_equal(&sub.last_value, &new_value),
+            };
+            
+            if changed {
+                if let Err(e) = self.invoke_callback(lua, &sub.callback, &new_value) {
+                    warn!("Selector {} callback error: {}", id, e);
+                }
+                sub.last_value = Some(new_value);
+            }
+        }
+    }
+}
+```
+
+#### 5. Equality Comparison
+
+**Path-based (structured data):**
+- Compare by ID for objects (windows, workspaces, outputs)
+- For collections: compare length + set of IDs (order-independent)
+- Efficient: no deep table comparison needed
+
+**Selector-based (arbitrary Lua values):**
+- Default: deep equality comparison (recursive table comparison)
+- Custom: user-provided `equals` function via options
+- Recommendation: always provide `equals` for complex selectors to avoid performance issues
+
+```lua
+-- Example: efficient ID-based comparison
+niri.state.watch(function(state)
+    return state.focused_window
+end, on_focus_change, {
+    equals = function(a, b)
+        -- Compare by ID only, not full object
+        return (a and a.id) == (b and b.id)
+    end
+})
+```
+
+### Integration Points
+
+| Location | Change |
+|----------|--------|
+| `niri-lua/src/lib.rs` | Export `state_watch` module |
+| `niri-lua/src/runtime.rs` | Add `state_watcher: Option<StateWatcher>` field |
+| `niri-lua/src/runtime_api.rs` | Register `niri.state.watch()` function |
+| `src/niri.rs` | Call `check_state_subscriptions()` in refresh loop |
+
+### Performance Considerations
+
+1. **Debouncing:** Don't check every frame; batch checks after state mutations settle
+2. **Path optimization:** Only re-evaluate paths that could have changed
+3. **Selector cost:** Document that selectors should be cheap; they run on every check
+4. **Memory:** Store previous values efficiently (IDs only for collections)
+
+### Phased Implementation
+
+| Phase | Scope | Effort |
+|-------|-------|--------|
+| Phase 1 | Path-based for 5 core paths | ~2-3 days |
+| Phase 2 | Selector-based subscriptions | ~2 days |
+| Phase 3 | Performance optimization | ~1-2 days |
+
+### Why Low Priority
+
+1. **Existing events cover most use cases** - 25+ discrete events already wired
+2. **Polling works** - Scripts can use timers + `niri.state.*` queries
+3. **Complexity** - State diffing and subscription management adds maintenance burden
+4. **Performance risk** - Must be carefully implemented to avoid frame drops
