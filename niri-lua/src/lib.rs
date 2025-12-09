@@ -16,7 +16,6 @@ pub mod niri_api;
 pub mod runtime;
 
 // Tier 1: Foundation Layer - Core Lua scripting infrastructure
-pub mod event_emitter;
 pub mod event_handlers;
 pub mod event_system;
 pub mod events_proxy;
@@ -29,6 +28,7 @@ pub mod config_api;
 pub mod config_proxy;
 pub mod extractors;
 pub mod lua_types;
+pub mod parse_utils;
 pub mod validators;
 
 // Tier 3: Runtime State Access
@@ -61,7 +61,6 @@ pub use event_data::{
     EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData,
 };
 // Tier 1 exports
-pub use event_emitter::register_to_lua as register_event_emitter;
 pub use event_handlers::EventHandlers;
 pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};

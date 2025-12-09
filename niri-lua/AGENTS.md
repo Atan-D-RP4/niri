@@ -319,24 +319,16 @@ pub struct WorkspaceEventData {
 
 **Purpose**: Provides type-safe event data structures that can be converted to Lua tables when events are emitted.
 
-### 3c. Event Emitter (`event_emitter.rs`)
+### 3c. Events Proxy (`events_proxy.rs`)
 
-Emits events from the compositor to Lua handlers
+Bridges compositor events to Lua handlers
 
 ```text
-pub struct EventEmitter {
-    // Holds references to event system
-}
-
-impl EventEmitter {
-    pub fn emit_window_event(&self, data: WindowEventData) -> LuaResult<()> {
-        // Convert data to Lua table
-        // Emit to event system
-    }
-}
+pub fn register_events_proxy(lua: &Lua) -> LuaResult<()>
+pub fn emit_event(lua: &Lua, event_type: &str, data: LuaValue) -> LuaResult<()>
 ```
 
-**Purpose**: Converts compositor events (window open, workspace switch, etc.) to Lua tables and emits them through the event system.
+**Purpose**: Registers the `niri.events` API in Lua and provides functionality to emit compositor events (window open/close, workspace switch, etc.) to registered Lua handlers.
 
 ### 3d. IPC Bridge (`ipc_bridge.rs`)
 

@@ -17,6 +17,8 @@ use log::debug;
 use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
 
+use crate::parse_utils;
+
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.
 pub type ActionCallback = Arc<dyn Fn(Action) -> LuaResult<()> + Send + Sync>;
@@ -52,53 +54,10 @@ fn parse_size_change(value: LuaValue) -> LuaResult<SizeChange> {
         LuaValue::Number(n) => Ok(SizeChange::SetProportion(n / 100.0)),
         LuaValue::String(s) => {
             let s = s.to_str()?;
-            parse_size_change_str(&s)
+            parse_utils::parse_size_change(&s)
+                .ok_or_else(|| LuaError::external(format!("invalid size change: {}", s)))
         }
         _ => Err(LuaError::external("size change must be a number or string")),
-    }
-}
-
-fn parse_size_change_str(s: &str) -> LuaResult<SizeChange> {
-    let s = s.trim();
-    if s.is_empty() {
-        return Err(LuaError::external("size change cannot be empty"));
-    }
-
-    let is_relative = s.starts_with('+') || s.starts_with('-');
-    let is_proportion = s.ends_with('%');
-
-    let num_str = s
-        .trim_start_matches('+')
-        .trim_start_matches('-')
-        .trim_end_matches('%');
-
-    if is_proportion {
-        let value: f64 = num_str
-            .parse()
-            .map_err(|_| LuaError::external(format!("invalid proportion: {}", s)))?;
-        let proportion = value / 100.0;
-        if is_relative {
-            if s.starts_with('-') {
-                Ok(SizeChange::AdjustProportion(-proportion))
-            } else {
-                Ok(SizeChange::AdjustProportion(proportion))
-            }
-        } else {
-            Ok(SizeChange::SetProportion(proportion))
-        }
-    } else {
-        let value: i32 = num_str
-            .parse()
-            .map_err(|_| LuaError::external(format!("invalid size: {}", s)))?;
-        if is_relative {
-            if s.starts_with('-') {
-                Ok(SizeChange::AdjustFixed(-value))
-            } else {
-                Ok(SizeChange::AdjustFixed(value))
-            }
-        } else {
-            Ok(SizeChange::SetFixed(value))
-        }
     }
 }
 

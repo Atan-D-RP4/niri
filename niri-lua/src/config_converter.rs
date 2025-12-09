@@ -12,76 +12,10 @@ use niri_config::output::Position;
 use niri_config::utils::Percent;
 use niri_config::workspace::WorkspaceName;
 use niri_config::{Config, FloatOrInt};
-use niri_ipc::{ConfiguredMode, SizeChange, Transform};
+use niri_ipc::{ConfiguredMode, Transform};
 
 use super::LuaRuntime;
-
-/// Parse a size change string like "+10%", "-5%", "50%", "+100", "-50", "800"
-fn parse_size_change(s: &str) -> Option<SizeChange> {
-    let s = s.trim();
-
-    if let Some(num_str) = s.strip_suffix('%') {
-        // Percentage change
-        if let Some(stripped) = num_str.strip_prefix('+') {
-            let val: f64 = match stripped.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("Failed to parse percentage value '{}': {}", stripped, e);
-                    return None;
-                }
-            };
-            Some(SizeChange::AdjustProportion(val / 100.0))
-        } else if let Some(stripped) = num_str.strip_prefix('-') {
-            let val: f64 = match stripped.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("Failed to parse percentage value '{}': {}", stripped, e);
-                    return None;
-                }
-            };
-            Some(SizeChange::AdjustProportion(-val / 100.0))
-        } else {
-            let val: f64 = match num_str.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("Failed to parse percentage value '{}': {}", num_str, e);
-                    return None;
-                }
-            };
-            Some(SizeChange::SetProportion(val / 100.0))
-        }
-    } else {
-        // Fixed pixel change
-        if let Some(stripped) = s.strip_prefix('+') {
-            let val: i32 = match stripped.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("Failed to parse fixed pixel value '{}': {}", stripped, e);
-                    return None;
-                }
-            };
-            Some(SizeChange::AdjustFixed(val))
-        } else if s.starts_with('-') {
-            let val: i32 = match s.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("Failed to parse fixed pixel value '{}': {}", s, e);
-                    return None;
-                }
-            };
-            Some(SizeChange::AdjustFixed(val))
-        } else {
-            let val: i32 = match s.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("Failed to parse fixed pixel value '{}': {}", s, e);
-                    return None;
-                }
-            };
-            Some(SizeChange::SetFixed(val))
-        }
-    }
-}
+use crate::parse_utils;
 
 /// Apply pending configuration changes from the reactive config proxy.
 ///
@@ -1238,14 +1172,14 @@ fn parse_action_from_str(action_str: &str, args: &[String]) -> Option<Action> {
             if args.is_empty() {
                 return None;
             }
-            let change = parse_size_change(&args[0])?;
+            let change = parse_utils::parse_size_change(&args[0])?;
             Action::SetColumnWidth(change)
         }
         "set-window-height" => {
             if args.is_empty() {
                 return None;
             }
-            let change = parse_size_change(&args[0])?;
+            let change = parse_utils::parse_size_change(&args[0])?;
             Action::SetWindowHeight(change)
         }
         _ => {
