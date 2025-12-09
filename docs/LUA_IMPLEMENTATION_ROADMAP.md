@@ -4,7 +4,7 @@
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Tier 1: Module System | ✅ COMPLETE | Module loader, plugin discovery, event emitter, hot reload |
+| Tier 1: Module System | ✅ COMPLETE | Module loader, plugin discovery, event emitter |
 | Tier 2: Configuration API | ✅ COMPLETE | Full config API, Lua types, validators, extractors |
 | Tier 3: Runtime State | ✅ COMPLETE | 4 query functions (windows, focused_window, workspaces, outputs) |
 | Tier 4: Event System | ✅ MOSTLY COMPLETE | Core events wired (window, workspace, monitor, overview, config) |

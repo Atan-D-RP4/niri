@@ -8,7 +8,6 @@
 |-----------|------|--------|
 | Plugin System (basic) | `niri-lua/src/plugin_system.rs` | ✅ Complete |
 | Module Loader | `niri-lua/src/module_loader.rs` | ✅ Complete |
-| Hot Reload | `niri-lua/src/hot_reload.rs` | ✅ Complete |
 
 ## Remaining Work
 

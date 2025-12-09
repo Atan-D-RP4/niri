@@ -16,7 +16,6 @@
 | `config.rs` | ✅ | LuaConfig struct, file/string loading |
 | `module_loader.rs` | ✅ | Module system for multi-file plugins |
 | `plugin_system.rs` | ✅ | Plugin discovery and loading |
-| `hot_reload.rs` | ✅ | File watching and reload support |
 | `event_emitter.rs` | ✅ | Event infrastructure base |
 | `test_utils.rs` | ✅ | Testing utilities |
 

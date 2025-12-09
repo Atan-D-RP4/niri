@@ -48,14 +48,6 @@ The Lua API for Niri provides a comprehensive alternative to KDL configuration w
 - Handler removal with `off(event_name, handler)`
 - Event namespacing
 
-**Hot Reload** (`niri-lua/src/hot_reload.rs` - 157 lines)
-- File metadata polling for change detection
-- Automatic config reload on changes
-- Error handling (bad configs don't break running state)
-- Reload notifications via events
-
-> **Note:** Hot reload uses filesystem metadata polling, not inotify. This is simpler but less efficient for large numbers of files.
-
 ### API Surface
 
 ```lua
@@ -80,7 +72,6 @@ niri.emit("custom_event", { data = "value" })
 - `niri-lua/src/module_loader.rs` (180 lines)
 - `niri-lua/src/plugin_system.rs` (245 lines)
 - `niri-lua/src/event_emitter.rs` (198 lines)
-- `niri-lua/src/hot_reload.rs` (157 lines)
 
 ---
 
@@ -626,8 +617,7 @@ niri.utils.log(string.format("%d outputs, %d workspaces, %d windows",
 | `runtime_api.rs` | 229 | Runtime state queries |
 | `event_emitter.rs` | 198 | Event system |
 | `module_loader.rs` | 180 | Module loading |
-| `hot_reload.rs` | 157 | File watching |
-| **Total** | **~8,500** | **15 modules** |
+| **Total** | **~8,350** | **14 modules** |
 
 ### Test Coverage
 
@@ -638,7 +628,6 @@ test result: ok. 127 passed; 0 failed; 0 ignored; 0 measured
 - Module loader: 15 tests
 - Plugin system: 18 tests
 - Event emitter: 22 tests
-- Hot reload: 12 tests
 - Config converter: 35 tests
 - Validators: 15 tests
 - Runtime API: 10 tests

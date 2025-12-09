@@ -20,7 +20,6 @@ pub mod event_emitter;
 pub mod event_handlers;
 pub mod event_system;
 pub mod events_proxy;
-pub mod hot_reload;
 pub mod module_loader;
 pub mod plugin_system;
 
@@ -66,7 +65,6 @@ pub use event_emitter::register_to_lua as register_event_emitter;
 pub use event_handlers::EventHandlers;
 pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};
-pub use hot_reload::HotReloader;
 pub use ipc_repl::IpcLuaExecutor;
 // Tier 4 exports
 pub use loop_api::{

@@ -94,7 +94,6 @@ niri-lua/src/
 ├── event_emitter.rs    - Event system (niri.events.*)
 ├── plugin_system.rs    - Plugin discovery and loading
 ├── module_loader.rs    - Lua require() implementation
-├── hot_reload.rs       - File change detection
 └── ...                 - Additional support modules
 ```
 

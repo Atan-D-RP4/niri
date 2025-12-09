@@ -359,7 +359,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    watcher::setup(&mut state, &config_path, config_includes);
+    // Only set up the KDL config watcher if Lua config wasn't loaded
+    // Lua config has its own file watching mechanism
+    if state.niri.lua_runtime.is_none() {
+        watcher::setup(&mut state, &config_path, config_includes);
+    }
 
     // Spawn commands from cli and auto-start.
     spawn(cli.command, None);

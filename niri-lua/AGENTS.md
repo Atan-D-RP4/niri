@@ -421,7 +421,7 @@ pub fn validate_animation_duration(value: u32) -> Result<()> {
 
 ### 5. Plugin and Module System (Future Work - Tier 5)
 
-> **Note**: The plugin system, module loader, and hot reload are intentionally implemented but not yet integrated into the compositor. These are planned for Tier 5 and will enable external Lua plugins and live configuration reloading.
+> **Note**: The plugin system and module loader are intentionally implemented but not yet integrated into the compositor. These are planned for Tier 5 and will enable external Lua plugins.
 
 ### 5a. Plugin Manager (`plugin_system.rs`)
 
@@ -459,25 +459,6 @@ impl ModuleLoader {
 ```
 
 **Purpose**: Provides standard Lua module loading with Niri-specific search paths for plugins and libraries.
-
-### 5c. Hot Reload (`hot_reload.rs`)
-
-Detects and reloads Lua configuration on file changes
-
-```text
-pub struct HotReloader {
-    file_watcher: RecommendedWatcher,
-}
-
-impl HotReloader {
-    pub fn start_watching(&mut self, path: &Path) -> Result<()> {
-        // Watch config file for changes
-        // Reload on modification
-    }
-}
-```
-
-**Purpose**: Enables live reloading of Lua configuration without restarting the compositor.
 
 ### 6. Type System and Lua Types
 
@@ -568,5 +549,4 @@ This tiered architecture allows different levels of Lua integration:
 
 #### Intentionally Deferred (Tier 5)
 - Plugin system (`plugin_system.rs`) - infrastructure ready, not integrated
-- Module loader (`module_loader.rs`) - infrastructure ready, not integrated  
-- Hot reload (`hot_reload.rs`) - infrastructure ready, not integrated
+- Module loader (`module_loader.rs`) - infrastructure ready, not integrated
