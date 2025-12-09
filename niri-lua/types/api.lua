@@ -42,6 +42,259 @@
 ---Window rule configuration with match criteria and properties
 ---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number? }
 
+---Color value as hex string (e.g., "#ff0000", "#ff000080" with alpha)
+---@alias Color string
+
+---Acceleration profile for input devices
+---@alias AccelProfile "adaptive"|"flat"
+
+---Click method for touchpads
+---@alias ClickMethod "button-areas"|"clickfinger"
+
+---Scroll method for input devices
+---@alias ScrollMethod "no-scroll"|"two-finger"|"edge"|"on-button-press"
+
+---Tap button map for touchpads
+---@alias TapButtonMap "left-right-middle"|"left-middle-right"
+
+---Center focused column mode
+---@alias CenterFocusedColumn "never"|"always"|"on-overflow"
+
+---Column display mode
+---@alias ColumnDisplay "normal"|"tabbed"
+
+-- ============================================================================
+-- Input Configuration Types
+-- ============================================================================
+
+---XKB keyboard layout configuration
+---@class XkbConfig
+---@field rules string? XKB rules file
+---@field model string? Keyboard model
+---@field layout string? Keyboard layout (e.g., "us", "de", "us,ru")
+---@field variant string? Layout variant (e.g., "dvorak", "colemak")
+---@field options string? XKB options (e.g., "ctrl:nocaps", "compose:ralt")
+---@field file string? Path to custom XKB file
+
+---Keyboard configuration
+---@class KeyboardConfig
+---@field xkb XkbConfig? XKB layout configuration
+---@field repeat_delay integer? Key repeat delay in milliseconds
+---@field repeat_rate integer? Key repeat rate in characters per second
+---@field track_layout "global"|"window"? Track layout per-window or globally
+---@field numlock boolean? Enable NumLock on startup
+
+---Touchpad configuration
+---@class TouchpadConfig
+---@field off boolean? Disable touchpad
+---@field tap boolean? Enable tap-to-click
+---@field dwt boolean? Disable while typing
+---@field dwtp boolean? Disable while trackpointing
+---@field drag boolean? Enable tap-and-drag
+---@field drag_lock boolean? Enable drag lock
+---@field natural_scroll boolean? Enable natural (inverted) scrolling
+---@field click_method ClickMethod? Click detection method
+---@field accel_speed number? Acceleration speed (-1.0 to 1.0)
+---@field accel_profile AccelProfile? Acceleration profile
+---@field scroll_method ScrollMethod? Scroll method
+---@field scroll_button integer? Button for on-button-press scrolling
+---@field scroll_button_lock boolean? Lock scroll button
+---@field tap_button_map TapButtonMap? Tap button mapping
+---@field left_handed boolean? Left-handed mode
+---@field disabled_on_external_mouse boolean? Disable when external mouse connected
+---@field middle_emulation boolean? Emulate middle button
+---@field scroll_factor number? Scroll speed multiplier
+
+---Mouse configuration
+---@class MouseConfig
+---@field off boolean? Disable mouse
+---@field natural_scroll boolean? Enable natural scrolling
+---@field accel_speed number? Acceleration speed (-1.0 to 1.0)
+---@field accel_profile AccelProfile? Acceleration profile
+---@field scroll_method ScrollMethod? Scroll method
+---@field scroll_button integer? Button for on-button-press scrolling
+---@field scroll_button_lock boolean? Lock scroll button
+---@field left_handed boolean? Left-handed mode
+---@field middle_emulation boolean? Emulate middle button
+---@field scroll_factor number? Scroll speed multiplier
+
+---Trackpoint configuration
+---@class TrackpointConfig
+---@field off boolean? Disable trackpoint
+---@field natural_scroll boolean? Enable natural scrolling
+---@field accel_speed number? Acceleration speed (-1.0 to 1.0)
+---@field accel_profile AccelProfile? Acceleration profile
+---@field scroll_method ScrollMethod? Scroll method
+---@field scroll_button integer? Button for scrolling
+---@field scroll_button_lock boolean? Lock scroll button
+---@field left_handed boolean? Left-handed mode
+---@field middle_emulation boolean? Emulate middle button
+
+---Touch screen configuration
+---@class TouchConfig
+---@field off boolean? Disable touch
+---@field map_to_output string? Map touch to specific output
+---@field natural_scroll boolean? Enable natural scrolling for gestures
+
+---Tablet configuration
+---@class TabletConfig
+---@field off boolean? Disable tablet
+---@field map_to_output string? Map tablet to specific output
+---@field left_handed boolean? Left-handed mode
+
+---Focus follows mouse configuration
+---@class FocusFollowsMouse
+---@field max_scroll_amount string? Maximum scroll amount (e.g., "0%", "10%")
+
+---Input configuration section
+---@class InputConfig
+---@field keyboard KeyboardConfig? Keyboard settings
+---@field touchpad TouchpadConfig? Touchpad settings
+---@field mouse MouseConfig? Mouse settings
+---@field trackpoint TrackpointConfig? Trackpoint settings
+---@field tablet TabletConfig? Graphics tablet settings
+---@field touch TouchConfig? Touch screen settings
+---@field disable_power_key_handling boolean? Disable compositor power key handling
+---@field warp_mouse_to_focus boolean? Warp mouse to focused window
+---@field focus_follows_mouse FocusFollowsMouse|boolean? Focus follows mouse settings
+---@field workspace_auto_back_and_forth boolean? Auto switch back to previous workspace
+
+-- ============================================================================
+-- Layout Configuration Types
+-- ============================================================================
+
+---Focus ring configuration
+---@class FocusRingConfig
+---@field off boolean? Disable focus ring
+---@field width integer? Ring width in pixels
+---@field active_color Color? Color when focused
+---@field inactive_color Color? Color when unfocused
+---@field urgent_color Color? Color for urgent windows
+
+---Border configuration
+---@class BorderConfig
+---@field off boolean? Disable border
+---@field width integer? Border width in pixels
+---@field active_color Color? Color when focused
+---@field inactive_color Color? Color when unfocused
+---@field urgent_color Color? Color for urgent windows
+
+---Shadow offset
+---@class ShadowOffset
+---@field x number X offset
+---@field y number Y offset
+
+---Shadow configuration
+---@class ShadowConfig
+---@field on boolean? Enable shadow (default true)
+---@field softness integer? Shadow blur softness
+---@field spread integer? Shadow spread
+---@field offset ShadowOffset? Shadow offset { x, y }
+---@field color Color? Shadow color
+---@field active_color Color? Shadow color when focused
+---@field inactive_color Color? Shadow color when unfocused
+
+---Column width preset (use one of these)
+---@class ColumnWidthPreset
+---@field proportion number? Proportion of workspace (0.0-1.0)
+---@field fixed integer? Fixed pixel width
+
+---Struts (reserved space) configuration
+---@class StrutsConfig
+---@field left integer? Left strut in pixels
+---@field right integer? Right strut in pixels
+---@field top integer? Top strut in pixels
+---@field bottom integer? Bottom strut in pixels
+
+---Layout configuration section
+---@class LayoutConfig
+---@field focus_ring FocusRingConfig? Focus ring settings
+---@field border BorderConfig? Border settings
+---@field shadow ShadowConfig? Shadow settings
+---@field preset_column_widths ColumnWidthPreset[]? Preset column widths to cycle
+---@field default_column_width ColumnWidthPreset? Default width for new columns
+---@field preset_window_heights ColumnWidthPreset[]? Preset window heights to cycle
+---@field center_focused_column CenterFocusedColumn? When to center focused column
+---@field always_center_single_column boolean? Always center single column
+---@field empty_workspace_above_first boolean? Keep empty workspace above first
+---@field default_column_display ColumnDisplay? Default column display mode
+---@field gaps integer? Gap between windows in pixels
+---@field struts StrutsConfig? Reserved screen edge space
+---@field background_color Color? Workspace background color
+
+-- ============================================================================
+-- Other Configuration Types
+-- ============================================================================
+
+---Cursor configuration
+---@class CursorConfig
+---@field xcursor_theme string? Cursor theme name
+---@field xcursor_size integer? Cursor size in pixels
+---@field hide_when_typing boolean? Hide cursor while typing
+---@field hide_after_inactive_ms integer? Hide cursor after inactivity (ms)
+
+---Hot corners configuration
+---@class HotCornersConfig
+---@field off boolean? Disable hot corners
+---@field top_left boolean? Enable top-left corner
+---@field top_right boolean? Enable top-right corner
+---@field bottom_left boolean? Enable bottom-left corner
+---@field bottom_right boolean? Enable bottom-right corner
+
+---Gestures configuration
+---@class GesturesConfig
+---@field hot_corners HotCornersConfig? Hot corners settings
+
+---Recent windows highlight configuration
+---@class RecentWindowsHighlight
+---@field active_color Color? Active window highlight color
+---@field urgent_color Color? Urgent window highlight color
+---@field padding integer? Highlight padding
+---@field corner_radius number? Highlight corner radius
+
+---Recent windows preview configuration
+---@class RecentWindowsPreviews
+---@field max_height integer? Maximum preview height
+---@field max_scale number? Maximum preview scale
+
+---Recent windows (MRU) configuration
+---@class RecentWindowsConfig
+---@field off boolean? Disable recent windows UI
+---@field open_delay_ms integer? Delay before showing UI
+---@field highlight RecentWindowsHighlight? Highlight settings
+---@field previews RecentWindowsPreviews? Preview settings
+
+---Overview configuration
+---@class OverviewConfig
+---@field zoom number? Overview zoom level (0.0-1.0)
+---@field backdrop_color Color? Backdrop color with alpha
+---@field workspace_shadow ShadowConfig? Shadow for workspaces in overview
+
+---Animations configuration
+---@class AnimationsConfig
+---@field off boolean? Disable all animations
+---@field slowdown number? Animation slowdown factor (1.0 = normal)
+
+---Clipboard configuration
+---@class ClipboardConfig
+---@field disable_primary boolean? Disable primary selection (middle-click paste)
+
+---Hotkey overlay configuration
+---@class HotkeyOverlayConfig
+---@field skip_at_startup boolean? Don't show overlay on startup
+
+---Config notification configuration
+---@class ConfigNotificationConfig
+---@field disable_failed boolean? Disable failed config notification
+
+---Debug configuration
+---@class DebugConfig
+---@field disable_direct_scanout boolean? Disable direct scanout
+
+---Xwayland satellite configuration
+---@class XwaylandSatelliteConfig
+---@field off boolean? Disable Xwayland satellite
+
 -- ============================================================================
 -- UserData Types
 -- ============================================================================
@@ -234,18 +487,18 @@ function niri_utils.spawn(command) end
 
 ---Configuration proxy for reading and modifying compositor settings
 ---@class niri_config
----@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)
----@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)
----@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)
----@field gestures ConfigSectionProxy Gesture configuration (hot corners, touchpad gestures)
----@field recent_windows ConfigSectionProxy Recent windows (MRU) configuration
----@field overview ConfigSectionProxy Overview mode configuration (zoom, backdrop, shadows)
----@field animations ConfigSectionProxy Animation configuration (off, slowdown)
----@field clipboard ConfigSectionProxy Clipboard configuration
----@field hotkey_overlay ConfigSectionProxy Hotkey overlay configuration
----@field config_notification ConfigSectionProxy Config reload notification settings
----@field debug ConfigSectionProxy Debug configuration options
----@field xwayland_satellite ConfigSectionProxy Xwayland satellite configuration
+---@field input InputConfig Input device configuration (keyboard, mouse, touchpad, etc.)
+---@field layout LayoutConfig Layout configuration (gaps, focus ring, border, shadow, etc.)
+---@field cursor CursorConfig Cursor configuration (size, theme, hide when typing)
+---@field gestures GesturesConfig Gesture configuration (hot corners, touchpad gestures)
+---@field recent_windows RecentWindowsConfig Recent windows (MRU) configuration
+---@field overview OverviewConfig Overview mode configuration (zoom, backdrop, shadows)
+---@field animations AnimationsConfig Animation configuration (off, slowdown)
+---@field clipboard ClipboardConfig Clipboard configuration
+---@field hotkey_overlay HotkeyOverlayConfig Hotkey overlay configuration
+---@field config_notification ConfigNotificationConfig Config reload notification settings
+---@field debug DebugConfig Debug configuration options
+---@field xwayland_satellite XwaylandSatelliteConfig Xwayland satellite configuration
 ---@field screenshot_path string Screenshot save path pattern
 ---@field prefer_no_csd boolean Prefer server-side decorations
 ---@field binds ConfigCollection Keybindings collection

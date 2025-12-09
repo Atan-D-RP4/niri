@@ -72,6 +72,262 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("---Window rule configuration with match criteria and properties\n");
     output.push_str("---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number? }\n\n");
 
+    output.push_str("---Color value as hex string (e.g., \"#ff0000\", \"#ff000080\" with alpha)\n");
+    output.push_str("---@alias Color string\n\n");
+
+    output.push_str("---Acceleration profile for input devices\n");
+    output.push_str("---@alias AccelProfile \"adaptive\"|\"flat\"\n\n");
+
+    output.push_str("---Click method for touchpads\n");
+    output.push_str("---@alias ClickMethod \"button-areas\"|\"clickfinger\"\n\n");
+
+    output.push_str("---Scroll method for input devices\n");
+    output.push_str("---@alias ScrollMethod \"no-scroll\"|\"two-finger\"|\"edge\"|\"on-button-press\"\n\n");
+
+    output.push_str("---Tap button map for touchpads\n");
+    output.push_str("---@alias TapButtonMap \"left-right-middle\"|\"left-middle-right\"\n\n");
+
+    output.push_str("---Center focused column mode\n");
+    output.push_str("---@alias CenterFocusedColumn \"never\"|\"always\"|\"on-overflow\"\n\n");
+
+    output.push_str("---Column display mode\n");
+    output.push_str("---@alias ColumnDisplay \"normal\"|\"tabbed\"\n\n");
+
+    // Input Configuration Types
+    output.push_str("-- ============================================================================\n");
+    output.push_str("-- Input Configuration Types\n");
+    output.push_str("-- ============================================================================\n\n");
+
+    output.push_str("---XKB keyboard layout configuration\n");
+    output.push_str("---@class XkbConfig\n");
+    output.push_str("---@field rules string? XKB rules file\n");
+    output.push_str("---@field model string? Keyboard model\n");
+    output.push_str("---@field layout string? Keyboard layout (e.g., \"us\", \"de\", \"us,ru\")\n");
+    output.push_str("---@field variant string? Layout variant (e.g., \"dvorak\", \"colemak\")\n");
+    output.push_str("---@field options string? XKB options (e.g., \"ctrl:nocaps\", \"compose:ralt\")\n");
+    output.push_str("---@field file string? Path to custom XKB file\n\n");
+
+    output.push_str("---Keyboard configuration\n");
+    output.push_str("---@class KeyboardConfig\n");
+    output.push_str("---@field xkb XkbConfig? XKB layout configuration\n");
+    output.push_str("---@field repeat_delay integer? Key repeat delay in milliseconds\n");
+    output.push_str("---@field repeat_rate integer? Key repeat rate in characters per second\n");
+    output.push_str("---@field track_layout \"global\"|\"window\"? Track layout per-window or globally\n");
+    output.push_str("---@field numlock boolean? Enable NumLock on startup\n\n");
+
+    output.push_str("---Touchpad configuration\n");
+    output.push_str("---@class TouchpadConfig\n");
+    output.push_str("---@field off boolean? Disable touchpad\n");
+    output.push_str("---@field tap boolean? Enable tap-to-click\n");
+    output.push_str("---@field dwt boolean? Disable while typing\n");
+    output.push_str("---@field dwtp boolean? Disable while trackpointing\n");
+    output.push_str("---@field drag boolean? Enable tap-and-drag\n");
+    output.push_str("---@field drag_lock boolean? Enable drag lock\n");
+    output.push_str("---@field natural_scroll boolean? Enable natural (inverted) scrolling\n");
+    output.push_str("---@field click_method ClickMethod? Click detection method\n");
+    output.push_str("---@field accel_speed number? Acceleration speed (-1.0 to 1.0)\n");
+    output.push_str("---@field accel_profile AccelProfile? Acceleration profile\n");
+    output.push_str("---@field scroll_method ScrollMethod? Scroll method\n");
+    output.push_str("---@field scroll_button integer? Button for on-button-press scrolling\n");
+    output.push_str("---@field scroll_button_lock boolean? Lock scroll button\n");
+    output.push_str("---@field tap_button_map TapButtonMap? Tap button mapping\n");
+    output.push_str("---@field left_handed boolean? Left-handed mode\n");
+    output.push_str("---@field disabled_on_external_mouse boolean? Disable when external mouse connected\n");
+    output.push_str("---@field middle_emulation boolean? Emulate middle button\n");
+    output.push_str("---@field scroll_factor number? Scroll speed multiplier\n\n");
+
+    output.push_str("---Mouse configuration\n");
+    output.push_str("---@class MouseConfig\n");
+    output.push_str("---@field off boolean? Disable mouse\n");
+    output.push_str("---@field natural_scroll boolean? Enable natural scrolling\n");
+    output.push_str("---@field accel_speed number? Acceleration speed (-1.0 to 1.0)\n");
+    output.push_str("---@field accel_profile AccelProfile? Acceleration profile\n");
+    output.push_str("---@field scroll_method ScrollMethod? Scroll method\n");
+    output.push_str("---@field scroll_button integer? Button for on-button-press scrolling\n");
+    output.push_str("---@field scroll_button_lock boolean? Lock scroll button\n");
+    output.push_str("---@field left_handed boolean? Left-handed mode\n");
+    output.push_str("---@field middle_emulation boolean? Emulate middle button\n");
+    output.push_str("---@field scroll_factor number? Scroll speed multiplier\n\n");
+
+    output.push_str("---Trackpoint configuration\n");
+    output.push_str("---@class TrackpointConfig\n");
+    output.push_str("---@field off boolean? Disable trackpoint\n");
+    output.push_str("---@field natural_scroll boolean? Enable natural scrolling\n");
+    output.push_str("---@field accel_speed number? Acceleration speed (-1.0 to 1.0)\n");
+    output.push_str("---@field accel_profile AccelProfile? Acceleration profile\n");
+    output.push_str("---@field scroll_method ScrollMethod? Scroll method\n");
+    output.push_str("---@field scroll_button integer? Button for scrolling\n");
+    output.push_str("---@field scroll_button_lock boolean? Lock scroll button\n");
+    output.push_str("---@field left_handed boolean? Left-handed mode\n");
+    output.push_str("---@field middle_emulation boolean? Emulate middle button\n\n");
+
+    output.push_str("---Touch screen configuration\n");
+    output.push_str("---@class TouchConfig\n");
+    output.push_str("---@field off boolean? Disable touch\n");
+    output.push_str("---@field map_to_output string? Map touch to specific output\n");
+    output.push_str("---@field natural_scroll boolean? Enable natural scrolling for gestures\n\n");
+
+    output.push_str("---Tablet configuration\n");
+    output.push_str("---@class TabletConfig\n");
+    output.push_str("---@field off boolean? Disable tablet\n");
+    output.push_str("---@field map_to_output string? Map tablet to specific output\n");
+    output.push_str("---@field left_handed boolean? Left-handed mode\n\n");
+
+    output.push_str("---Focus follows mouse configuration\n");
+    output.push_str("---@class FocusFollowsMouse\n");
+    output.push_str("---@field max_scroll_amount string? Maximum scroll amount (e.g., \"0%\", \"10%\")\n\n");
+
+    output.push_str("---Input configuration section\n");
+    output.push_str("---@class InputConfig\n");
+    output.push_str("---@field keyboard KeyboardConfig? Keyboard settings\n");
+    output.push_str("---@field touchpad TouchpadConfig? Touchpad settings\n");
+    output.push_str("---@field mouse MouseConfig? Mouse settings\n");
+    output.push_str("---@field trackpoint TrackpointConfig? Trackpoint settings\n");
+    output.push_str("---@field tablet TabletConfig? Graphics tablet settings\n");
+    output.push_str("---@field touch TouchConfig? Touch screen settings\n");
+    output.push_str("---@field disable_power_key_handling boolean? Disable compositor power key handling\n");
+    output.push_str("---@field warp_mouse_to_focus boolean? Warp mouse to focused window\n");
+    output.push_str("---@field focus_follows_mouse FocusFollowsMouse|boolean? Focus follows mouse settings\n");
+    output.push_str("---@field workspace_auto_back_and_forth boolean? Auto switch back to previous workspace\n\n");
+
+    // Layout Configuration Types
+    output.push_str("-- ============================================================================\n");
+    output.push_str("-- Layout Configuration Types\n");
+    output.push_str("-- ============================================================================\n\n");
+
+    output.push_str("---Focus ring configuration\n");
+    output.push_str("---@class FocusRingConfig\n");
+    output.push_str("---@field off boolean? Disable focus ring\n");
+    output.push_str("---@field width integer? Ring width in pixels\n");
+    output.push_str("---@field active_color Color? Color when focused\n");
+    output.push_str("---@field inactive_color Color? Color when unfocused\n");
+    output.push_str("---@field urgent_color Color? Color for urgent windows\n\n");
+
+    output.push_str("---Border configuration\n");
+    output.push_str("---@class BorderConfig\n");
+    output.push_str("---@field off boolean? Disable border\n");
+    output.push_str("---@field width integer? Border width in pixels\n");
+    output.push_str("---@field active_color Color? Color when focused\n");
+    output.push_str("---@field inactive_color Color? Color when unfocused\n");
+    output.push_str("---@field urgent_color Color? Color for urgent windows\n\n");
+
+    output.push_str("---Shadow offset\n");
+    output.push_str("---@class ShadowOffset\n");
+    output.push_str("---@field x number X offset\n");
+    output.push_str("---@field y number Y offset\n\n");
+
+    output.push_str("---Shadow configuration\n");
+    output.push_str("---@class ShadowConfig\n");
+    output.push_str("---@field on boolean? Enable shadow (default true)\n");
+    output.push_str("---@field softness integer? Shadow blur softness\n");
+    output.push_str("---@field spread integer? Shadow spread\n");
+    output.push_str("---@field offset ShadowOffset? Shadow offset { x, y }\n");
+    output.push_str("---@field color Color? Shadow color\n");
+    output.push_str("---@field active_color Color? Shadow color when focused\n");
+    output.push_str("---@field inactive_color Color? Shadow color when unfocused\n\n");
+
+    output.push_str("---Column width preset (use one of these)\n");
+    output.push_str("---@class ColumnWidthPreset\n");
+    output.push_str("---@field proportion number? Proportion of workspace (0.0-1.0)\n");
+    output.push_str("---@field fixed integer? Fixed pixel width\n\n");
+
+    output.push_str("---Struts (reserved space) configuration\n");
+    output.push_str("---@class StrutsConfig\n");
+    output.push_str("---@field left integer? Left strut in pixels\n");
+    output.push_str("---@field right integer? Right strut in pixels\n");
+    output.push_str("---@field top integer? Top strut in pixels\n");
+    output.push_str("---@field bottom integer? Bottom strut in pixels\n\n");
+
+    output.push_str("---Layout configuration section\n");
+    output.push_str("---@class LayoutConfig\n");
+    output.push_str("---@field focus_ring FocusRingConfig? Focus ring settings\n");
+    output.push_str("---@field border BorderConfig? Border settings\n");
+    output.push_str("---@field shadow ShadowConfig? Shadow settings\n");
+    output.push_str("---@field preset_column_widths ColumnWidthPreset[]? Preset column widths to cycle\n");
+    output.push_str("---@field default_column_width ColumnWidthPreset? Default width for new columns\n");
+    output.push_str("---@field preset_window_heights ColumnWidthPreset[]? Preset window heights to cycle\n");
+    output.push_str("---@field center_focused_column CenterFocusedColumn? When to center focused column\n");
+    output.push_str("---@field always_center_single_column boolean? Always center single column\n");
+    output.push_str("---@field empty_workspace_above_first boolean? Keep empty workspace above first\n");
+    output.push_str("---@field default_column_display ColumnDisplay? Default column display mode\n");
+    output.push_str("---@field gaps integer? Gap between windows in pixels\n");
+    output.push_str("---@field struts StrutsConfig? Reserved screen edge space\n");
+    output.push_str("---@field background_color Color? Workspace background color\n\n");
+
+    // Other Configuration Types
+    output.push_str("-- ============================================================================\n");
+    output.push_str("-- Other Configuration Types\n");
+    output.push_str("-- ============================================================================\n\n");
+
+    output.push_str("---Cursor configuration\n");
+    output.push_str("---@class CursorConfig\n");
+    output.push_str("---@field xcursor_theme string? Cursor theme name\n");
+    output.push_str("---@field xcursor_size integer? Cursor size in pixels\n");
+    output.push_str("---@field hide_when_typing boolean? Hide cursor while typing\n");
+    output.push_str("---@field hide_after_inactive_ms integer? Hide cursor after inactivity (ms)\n\n");
+
+    output.push_str("---Hot corners configuration\n");
+    output.push_str("---@class HotCornersConfig\n");
+    output.push_str("---@field off boolean? Disable hot corners\n");
+    output.push_str("---@field top_left boolean? Enable top-left corner\n");
+    output.push_str("---@field top_right boolean? Enable top-right corner\n");
+    output.push_str("---@field bottom_left boolean? Enable bottom-left corner\n");
+    output.push_str("---@field bottom_right boolean? Enable bottom-right corner\n\n");
+
+    output.push_str("---Gestures configuration\n");
+    output.push_str("---@class GesturesConfig\n");
+    output.push_str("---@field hot_corners HotCornersConfig? Hot corners settings\n\n");
+
+    output.push_str("---Recent windows highlight configuration\n");
+    output.push_str("---@class RecentWindowsHighlight\n");
+    output.push_str("---@field active_color Color? Active window highlight color\n");
+    output.push_str("---@field urgent_color Color? Urgent window highlight color\n");
+    output.push_str("---@field padding integer? Highlight padding\n");
+    output.push_str("---@field corner_radius number? Highlight corner radius\n\n");
+
+    output.push_str("---Recent windows preview configuration\n");
+    output.push_str("---@class RecentWindowsPreviews\n");
+    output.push_str("---@field max_height integer? Maximum preview height\n");
+    output.push_str("---@field max_scale number? Maximum preview scale\n\n");
+
+    output.push_str("---Recent windows (MRU) configuration\n");
+    output.push_str("---@class RecentWindowsConfig\n");
+    output.push_str("---@field off boolean? Disable recent windows UI\n");
+    output.push_str("---@field open_delay_ms integer? Delay before showing UI\n");
+    output.push_str("---@field highlight RecentWindowsHighlight? Highlight settings\n");
+    output.push_str("---@field previews RecentWindowsPreviews? Preview settings\n\n");
+
+    output.push_str("---Overview configuration\n");
+    output.push_str("---@class OverviewConfig\n");
+    output.push_str("---@field zoom number? Overview zoom level (0.0-1.0)\n");
+    output.push_str("---@field backdrop_color Color? Backdrop color with alpha\n");
+    output.push_str("---@field workspace_shadow ShadowConfig? Shadow for workspaces in overview\n\n");
+
+    output.push_str("---Animations configuration\n");
+    output.push_str("---@class AnimationsConfig\n");
+    output.push_str("---@field off boolean? Disable all animations\n");
+    output.push_str("---@field slowdown number? Animation slowdown factor (1.0 = normal)\n\n");
+
+    output.push_str("---Clipboard configuration\n");
+    output.push_str("---@class ClipboardConfig\n");
+    output.push_str("---@field disable_primary boolean? Disable primary selection (middle-click paste)\n\n");
+
+    output.push_str("---Hotkey overlay configuration\n");
+    output.push_str("---@class HotkeyOverlayConfig\n");
+    output.push_str("---@field skip_at_startup boolean? Don't show overlay on startup\n\n");
+
+    output.push_str("---Config notification configuration\n");
+    output.push_str("---@class ConfigNotificationConfig\n");
+    output.push_str("---@field disable_failed boolean? Disable failed config notification\n\n");
+
+    output.push_str("---Debug configuration\n");
+    output.push_str("---@class DebugConfig\n");
+    output.push_str("---@field disable_direct_scanout boolean? Disable direct scanout\n\n");
+
+    output.push_str("---Xwayland satellite configuration\n");
+    output.push_str("---@class XwaylandSatelliteConfig\n");
+    output.push_str("---@field off boolean? Disable Xwayland satellite\n\n");
+
     // UserData types
     output.push_str("-- ============================================================================\n");
     output.push_str("-- UserData Types\n");
@@ -275,18 +531,18 @@ fn generate_emmylua(output_path: &Path) {
     // niri.config
     output.push_str("---Configuration proxy for reading and modifying compositor settings\n");
     output.push_str("---@class niri_config\n");
-    output.push_str("---@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)\n");
-    output.push_str("---@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)\n");
-    output.push_str("---@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)\n");
-    output.push_str("---@field gestures ConfigSectionProxy Gesture configuration (hot corners, touchpad gestures)\n");
-    output.push_str("---@field recent_windows ConfigSectionProxy Recent windows (MRU) configuration\n");
-    output.push_str("---@field overview ConfigSectionProxy Overview mode configuration (zoom, backdrop, shadows)\n");
-    output.push_str("---@field animations ConfigSectionProxy Animation configuration (off, slowdown)\n");
-    output.push_str("---@field clipboard ConfigSectionProxy Clipboard configuration\n");
-    output.push_str("---@field hotkey_overlay ConfigSectionProxy Hotkey overlay configuration\n");
-    output.push_str("---@field config_notification ConfigSectionProxy Config reload notification settings\n");
-    output.push_str("---@field debug ConfigSectionProxy Debug configuration options\n");
-    output.push_str("---@field xwayland_satellite ConfigSectionProxy Xwayland satellite configuration\n");
+    output.push_str("---@field input InputConfig Input device configuration (keyboard, mouse, touchpad, etc.)\n");
+    output.push_str("---@field layout LayoutConfig Layout configuration (gaps, focus ring, border, shadow, etc.)\n");
+    output.push_str("---@field cursor CursorConfig Cursor configuration (size, theme, hide when typing)\n");
+    output.push_str("---@field gestures GesturesConfig Gesture configuration (hot corners, touchpad gestures)\n");
+    output.push_str("---@field recent_windows RecentWindowsConfig Recent windows (MRU) configuration\n");
+    output.push_str("---@field overview OverviewConfig Overview mode configuration (zoom, backdrop, shadows)\n");
+    output.push_str("---@field animations AnimationsConfig Animation configuration (off, slowdown)\n");
+    output.push_str("---@field clipboard ClipboardConfig Clipboard configuration\n");
+    output.push_str("---@field hotkey_overlay HotkeyOverlayConfig Hotkey overlay configuration\n");
+    output.push_str("---@field config_notification ConfigNotificationConfig Config reload notification settings\n");
+    output.push_str("---@field debug DebugConfig Debug configuration options\n");
+    output.push_str("---@field xwayland_satellite XwaylandSatelliteConfig Xwayland satellite configuration\n");
     output.push_str("---@field screenshot_path string Screenshot save path pattern\n");
     output.push_str("---@field prefer_no_csd boolean Prefer server-side decorations\n");
     output.push_str("---@field binds ConfigCollection Keybindings collection\n");
