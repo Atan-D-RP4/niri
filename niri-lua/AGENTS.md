@@ -290,11 +290,13 @@ end)
 2. Schedule follow-up queries via timers: `niri.utils.defer(function() ... end)`
 3. For multi-action scenarios, chain through separate event handlers
 
-#### Planned Improvements
-- `get_window(id)` - Targeted window query by ID
+#### Planned Improvements (Runtime API)
+- `get_window(id)` - Targeted window query by ID (avoids filtering full list)
 - `get_workspace(ref)` - Query by ID, index, or name  
 - `get_output(name)` - Output-specific query
-- `subscribe(event, callback)` - Reactive state subscriptions
+- `focused_workspace()` - Direct access to active workspace
+- `focused_output()` - Direct access to active output
+- `subscribe(event, callback)` - Reactive state subscriptions (push-based updates)
 
 ### 3b. Event Data Structures (`event_data.rs`)
 
@@ -417,7 +419,9 @@ pub fn validate_animation_duration(value: u32) -> Result<()> {
 
 **Purpose**: Ensures configuration values are within valid ranges before applying them to the compositor.
 
-### 5. Plugin and Module System
+### 5. Plugin and Module System (Future Work - Tier 5)
+
+> **Note**: The plugin system, module loader, and hot reload are intentionally implemented but not yet integrated into the compositor. These are planned for Tier 5 and will enable external Lua plugins and live configuration reloading.
 
 ### 5a. Plugin Manager (`plugin_system.rs`)
 
@@ -542,9 +546,27 @@ pub mod test_utils {
 - **Foundation (Tier 1)**: Runtime creation, component registration, event API
 - **Configuration (Tier 2)**: Read-only access to all KDL-based configuration
 - **Runtime (Tier 3)**: Live state queries, event data, IPC execution
-- **Extensibility**: Plugin system, module loading, hot reloading
+- **Async Primitives (Tier 4)**: Timers, scheduled callbacks, loop integration
+- **Extensibility (Tier 5 - Future)**: Plugin system, module loading, hot reloading
 
 This tiered architecture allows different levels of Lua integration:
 - **Basic**: Scripts that read configuration and handle events
 - **Advanced**: Scripts that query runtime state and control the compositor
 - **Expert**: External IPC clients executing arbitrary Lua code
+
+### 9. Current Implementation Status
+
+#### Fully Working
+- Event system: 23+ events wired with 50+ call sites in compositor
+- Config API: Read-only exposure of all configuration sections
+- Reactive config proxy: Lua can modify config via `niri.config.*`
+- Action proxy: All compositor actions accessible via `niri.action`
+- Timer/loop API: `niri.loop.new_timer()`, `niri.loop.now()`, `niri.schedule()`
+- State queries: `niri.state.windows()`, `focused_window()`, `workspaces()`, `outputs()`
+- REPL: `niri msg lua -- 'code'` executes Lua with full state access
+- API registry with LSP type generation (`types/api.lua`)
+
+#### Intentionally Deferred (Tier 5)
+- Plugin system (`plugin_system.rs`) - infrastructure ready, not integrated
+- Module loader (`module_loader.rs`) - infrastructure ready, not integrated  
+- Hot reload (`hot_reload.rs`) - infrastructure ready, not integrated
