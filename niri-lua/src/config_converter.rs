@@ -13,9 +13,140 @@ use niri_config::utils::Percent;
 use niri_config::workspace::WorkspaceName;
 use niri_config::{Config, FloatOrInt};
 use niri_ipc::{ConfiguredMode, Transform};
+use serde_json::Value as JsonValue;
 
 use super::LuaRuntime;
 use crate::parse_utils;
+
+// ============================================================================
+// JSON Value Extraction Helpers
+// ============================================================================
+
+/// Extract f64 from JSON (handles both float and int).
+#[allow(dead_code)]
+#[inline]
+fn json_as_f64(value: &JsonValue) -> Option<f64> {
+    value.as_f64().or_else(|| value.as_i64().map(|n| n as f64))
+}
+
+/// Extract u16 from JSON.
+#[allow(dead_code)]
+#[inline]
+fn json_as_u16(value: &JsonValue) -> Option<u16> {
+    value.as_u64().and_then(|n| u16::try_from(n).ok())
+}
+
+/// Extract u32 from JSON.
+#[allow(dead_code)]
+#[inline]
+fn json_as_u32(value: &JsonValue) -> Option<u32> {
+    value.as_u64().and_then(|n| u32::try_from(n).ok())
+}
+
+/// Extract i32 from JSON.
+#[allow(dead_code)]
+#[inline]
+fn json_as_i32(value: &JsonValue) -> Option<i32> {
+    value.as_i64().and_then(|n| i32::try_from(n).ok())
+}
+
+// ============================================================================
+// Field Setter Helpers - return true if value was set
+// ============================================================================
+
+/// Set a f64 field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_f64(field: &mut f64, value: &JsonValue) -> bool {
+    if let Some(n) = json_as_f64(value) {
+        *field = n;
+        true
+    } else {
+        false
+    }
+}
+
+/// Extract f64 for use with FloatOrInt fields (caller must construct the specific type).
+#[allow(dead_code)]
+#[inline]
+fn json_as_float_or_int(value: &JsonValue) -> Option<f64> {
+    json_as_f64(value)
+}
+
+/// Set a bool field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_bool(field: &mut bool, value: &JsonValue) -> bool {
+    if let Some(b) = value.as_bool() {
+        *field = b;
+        true
+    } else {
+        false
+    }
+}
+
+/// Set a String field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_string(field: &mut String, value: &JsonValue) -> bool {
+    if let Some(s) = value.as_str() {
+        *field = s.to_string();
+        true
+    } else {
+        false
+    }
+}
+
+/// Set an Option<String> field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_option_string(field: &mut Option<String>, value: &JsonValue) -> bool {
+    if value.is_null() {
+        *field = None;
+        true
+    } else if let Some(s) = value.as_str() {
+        *field = Some(s.to_string());
+        true
+    } else {
+        false
+    }
+}
+
+/// Set a u16 field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_u16(field: &mut u16, value: &JsonValue) -> bool {
+    if let Some(n) = json_as_u16(value) {
+        *field = n;
+        true
+    } else {
+        false
+    }
+}
+
+/// Set a u32 field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_u32(field: &mut u32, value: &JsonValue) -> bool {
+    if let Some(n) = json_as_u32(value) {
+        *field = n;
+        true
+    } else {
+        false
+    }
+}
+
+/// Set an i32 field from JSON value.
+#[allow(dead_code)]
+#[inline]
+fn set_i32(field: &mut i32, value: &JsonValue) -> bool {
+    if let Some(n) = json_as_i32(value) {
+        *field = n;
+        true
+    } else {
+        false
+    }
+}
 
 /// Apply pending configuration changes from the reactive config proxy.
 ///
@@ -306,7 +437,7 @@ pub fn apply_pending_lua_config(runtime: &LuaRuntime, config: &mut Config) -> us
 fn apply_layout_scalar_change(
     layout: &mut niri_config::Layout,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -565,7 +696,7 @@ fn apply_layout_scalar_change(
 fn apply_animation_scalar_change(
     animations: &mut niri_config::Animations,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -596,7 +727,7 @@ fn apply_animation_scalar_change(
 fn apply_input_scalar_change(
     input: &mut niri_config::Input,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -899,7 +1030,7 @@ fn apply_input_scalar_change(
 fn apply_cursor_scalar_change(
     cursor: &mut niri_config::Cursor,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -936,7 +1067,7 @@ fn apply_cursor_scalar_change(
 }
 
 /// Convert a JSON value to a Bind struct.
-fn json_to_bind(json: &serde_json::Value) -> Option<Bind> {
+fn json_to_bind(json: &JsonValue) -> Option<Bind> {
     let obj = json.as_object()?;
 
     // Parse the key string (e.g., "Mod+T")
@@ -1190,13 +1321,13 @@ fn parse_action_from_str(action_str: &str, args: &[String]) -> Option<Action> {
 }
 
 /// Convert a JSON value to a WindowRule struct.
-fn json_to_window_rule(json: &serde_json::Value) -> Option<niri_config::WindowRule> {
+fn json_to_window_rule(json: &JsonValue) -> Option<niri_config::WindowRule> {
     let obj = json.as_object()?;
 
     let mut rule = niri_config::WindowRule::default();
 
     // Helper function to parse a single match object
-    let parse_match = |match_obj: &serde_json::Map<String, serde_json::Value>| -> Option<niri_config::window_rule::Match> {
+    let parse_match = |match_obj: &serde_json::Map<String, JsonValue>| -> Option<niri_config::window_rule::Match> {
         let app_id = match_obj
             .get("app_id")
             .and_then(|v| v.as_str())
@@ -1265,7 +1396,7 @@ fn json_to_window_rule(json: &serde_json::Value) -> Option<niri_config::WindowRu
 }
 
 /// Check if a bind matches the given criteria.
-fn bind_matches_criteria(bind: &Bind, criteria: &serde_json::Value) -> bool {
+fn bind_matches_criteria(bind: &Bind, criteria: &JsonValue) -> bool {
     let obj = match criteria.as_object() {
         Some(o) => o,
         None => return false,
@@ -1296,7 +1427,7 @@ fn bind_matches_criteria(bind: &Bind, criteria: &serde_json::Value) -> bool {
 /// Check if a window rule matches the given criteria.
 fn window_rule_matches_criteria(
     rule: &niri_config::WindowRule,
-    criteria: &serde_json::Value,
+    criteria: &JsonValue,
 ) -> bool {
     let obj = match criteria.as_object() {
         Some(o) => o,
@@ -1336,7 +1467,7 @@ fn window_rule_matches_criteria(
 fn apply_gestures_scalar_change(
     gestures: &mut niri_config::Gestures,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1410,7 +1541,7 @@ fn apply_gestures_scalar_change(
 fn apply_overview_scalar_change(
     overview: &mut niri_config::Overview,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1472,7 +1603,7 @@ fn apply_overview_scalar_change(
 fn apply_recent_windows_scalar_change(
     recent_windows: &mut niri_config::RecentWindows,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1556,7 +1687,7 @@ fn apply_recent_windows_scalar_change(
 fn apply_clipboard_scalar_change(
     clipboard: &mut niri_config::Clipboard,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1575,7 +1706,7 @@ fn apply_clipboard_scalar_change(
 fn apply_hotkey_overlay_scalar_change(
     hotkey_overlay: &mut niri_config::HotkeyOverlay,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1594,7 +1725,7 @@ fn apply_hotkey_overlay_scalar_change(
 fn apply_config_notification_scalar_change(
     config_notification: &mut niri_config::ConfigNotification,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1613,7 +1744,7 @@ fn apply_config_notification_scalar_change(
 fn apply_debug_scalar_change(
     debug: &mut niri_config::Debug,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1659,7 +1790,7 @@ fn apply_debug_scalar_change(
 fn apply_xwayland_satellite_scalar_change(
     xwayland_satellite: &mut niri_config::XwaylandSatellite,
     path: &[&str],
-    value: &serde_json::Value,
+    value: &JsonValue,
 ) -> bool {
     if path.is_empty() {
         return false;
@@ -1684,7 +1815,7 @@ fn apply_xwayland_satellite_scalar_change(
 }
 
 /// Convert a JSON value to a Color.
-fn json_to_color(value: &serde_json::Value) -> Option<niri_config::Color> {
+fn json_to_color(value: &JsonValue) -> Option<niri_config::Color> {
     // Handle string format (e.g., "#ff0000" or "rgba(255, 0, 0, 1.0)")
     if let Some(s) = value.as_str() {
         // Try parsing as hex color
@@ -1769,7 +1900,7 @@ fn json_to_color(value: &serde_json::Value) -> Option<niri_config::Color> {
 }
 
 /// Convert a JSON value to a PresetSize.
-fn json_to_preset_size(value: &serde_json::Value) -> Option<niri_config::PresetSize> {
+fn json_to_preset_size(value: &JsonValue) -> Option<niri_config::PresetSize> {
     if let Some(obj) = value.as_object() {
         // Check for proportion (e.g., { proportion = 0.5 })
         if let Some(prop) = obj.get("proportion").and_then(|v| v.as_f64()) {
@@ -1794,7 +1925,7 @@ fn json_to_preset_size(value: &serde_json::Value) -> Option<niri_config::PresetS
 }
 
 /// Convert a JSON value to an Output config.
-fn json_to_output(json: &serde_json::Value) -> Option<niri_config::Output> {
+fn json_to_output(json: &JsonValue) -> Option<niri_config::Output> {
     let obj = json.as_object()?;
 
     let mut output = niri_config::Output::default();
@@ -1856,7 +1987,7 @@ fn json_to_output(json: &serde_json::Value) -> Option<niri_config::Output> {
 }
 
 /// Convert a JSON value to a SpawnAtStartup config.
-fn json_to_spawn(json: &serde_json::Value) -> Option<niri_config::SpawnAtStartup> {
+fn json_to_spawn(json: &JsonValue) -> Option<niri_config::SpawnAtStartup> {
     // Handle string format (simple command)
     if let Some(s) = json.as_str() {
         return Some(niri_config::SpawnAtStartup {
@@ -1899,7 +2030,7 @@ fn json_to_spawn(json: &serde_json::Value) -> Option<niri_config::SpawnAtStartup
 }
 
 /// Convert a JSON value to an EnvironmentVariable.
-fn json_to_environment(json: &serde_json::Value) -> Option<niri_config::EnvironmentVariable> {
+fn json_to_environment(json: &JsonValue) -> Option<niri_config::EnvironmentVariable> {
     if let Some(obj) = json.as_object() {
         let name = obj.get("key").and_then(|v| v.as_str())?.to_string();
         let value = obj.get("value").and_then(|v| v.as_str()).map(String::from);
@@ -1909,7 +2040,7 @@ fn json_to_environment(json: &serde_json::Value) -> Option<niri_config::Environm
 }
 
 /// Convert a JSON value to a Workspace config.
-fn json_to_workspace(json: &serde_json::Value) -> Option<niri_config::Workspace> {
+fn json_to_workspace(json: &JsonValue) -> Option<niri_config::Workspace> {
     let obj = json.as_object()?;
 
     // Name is required
