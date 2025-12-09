@@ -2072,6 +2072,463 @@ mod tests {
     }
 
     // ========================================================================
+    // JSON Helper Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_json_as_f64_from_float() {
+        let value = serde_json::json!(3.14);
+        assert_eq!(json_as_f64(&value), Some(3.14));
+    }
+
+    #[test]
+    fn test_json_as_f64_from_int() {
+        let value = serde_json::json!(42);
+        assert_eq!(json_as_f64(&value), Some(42.0));
+    }
+
+    #[test]
+    fn test_json_as_f64_from_string_returns_none() {
+        let value = serde_json::json!("not a number");
+        assert_eq!(json_as_f64(&value), None);
+    }
+
+    #[test]
+    fn test_json_as_u16_valid() {
+        let value = serde_json::json!(1000);
+        assert_eq!(json_as_u16(&value), Some(1000));
+    }
+
+    #[test]
+    fn test_json_as_u16_overflow() {
+        let value = serde_json::json!(70000); // > u16::MAX
+        assert_eq!(json_as_u16(&value), None);
+    }
+
+    #[test]
+    fn test_json_as_u32_valid() {
+        let value = serde_json::json!(100000);
+        assert_eq!(json_as_u32(&value), Some(100000));
+    }
+
+    #[test]
+    fn test_json_as_i32_positive() {
+        let value = serde_json::json!(12345);
+        assert_eq!(json_as_i32(&value), Some(12345));
+    }
+
+    #[test]
+    fn test_json_as_i32_negative() {
+        let value = serde_json::json!(-500);
+        assert_eq!(json_as_i32(&value), Some(-500));
+    }
+
+    #[test]
+    fn test_set_f64_success() {
+        let mut field = 0.0;
+        let value = serde_json::json!(99.5);
+        assert!(set_f64(&mut field, &value));
+        assert_eq!(field, 99.5);
+    }
+
+    #[test]
+    fn test_set_f64_from_int() {
+        let mut field = 0.0;
+        let value = serde_json::json!(100);
+        assert!(set_f64(&mut field, &value));
+        assert_eq!(field, 100.0);
+    }
+
+    #[test]
+    fn test_set_f64_failure() {
+        let mut field = 5.0;
+        let value = serde_json::json!("string");
+        assert!(!set_f64(&mut field, &value));
+        assert_eq!(field, 5.0); // unchanged
+    }
+
+    #[test]
+    fn test_set_bool_true() {
+        let mut field = false;
+        let value = serde_json::json!(true);
+        assert!(set_bool(&mut field, &value));
+        assert!(field);
+    }
+
+    #[test]
+    fn test_set_bool_false() {
+        let mut field = true;
+        let value = serde_json::json!(false);
+        assert!(set_bool(&mut field, &value));
+        assert!(!field);
+    }
+
+    #[test]
+    fn test_set_bool_failure() {
+        let mut field = true;
+        let value = serde_json::json!(1); // not a bool
+        assert!(!set_bool(&mut field, &value));
+        assert!(field); // unchanged
+    }
+
+    #[test]
+    fn test_set_string_success() {
+        let mut field = String::new();
+        let value = serde_json::json!("hello");
+        assert!(set_string(&mut field, &value));
+        assert_eq!(field, "hello");
+    }
+
+    #[test]
+    fn test_set_string_failure() {
+        let mut field = String::from("original");
+        let value = serde_json::json!(123);
+        assert!(!set_string(&mut field, &value));
+        assert_eq!(field, "original"); // unchanged
+    }
+
+    #[test]
+    fn test_set_option_string_some() {
+        let mut field: Option<String> = None;
+        let value = serde_json::json!("value");
+        assert!(set_option_string(&mut field, &value));
+        assert_eq!(field, Some("value".to_string()));
+    }
+
+    #[test]
+    fn test_set_option_string_null() {
+        let mut field = Some("existing".to_string());
+        let value = serde_json::json!(null);
+        assert!(set_option_string(&mut field, &value));
+        assert_eq!(field, None);
+    }
+
+    #[test]
+    fn test_set_u16_success() {
+        let mut field: u16 = 0;
+        let value = serde_json::json!(1920);
+        assert!(set_u16(&mut field, &value));
+        assert_eq!(field, 1920);
+    }
+
+    #[test]
+    fn test_set_u32_success() {
+        let mut field: u32 = 0;
+        let value = serde_json::json!(3840);
+        assert!(set_u32(&mut field, &value));
+        assert_eq!(field, 3840);
+    }
+
+    #[test]
+    fn test_set_i32_success() {
+        let mut field: i32 = 0;
+        let value = serde_json::json!(-100);
+        assert!(set_i32(&mut field, &value));
+        assert_eq!(field, -100);
+    }
+
+    // ========================================================================
+    // apply_layout_scalar_change - Direct Unit Tests
+    // ========================================================================
+
+    #[test]
+    fn layout_scalar_gaps_f64() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(16.5);
+        assert!(apply_layout_scalar_change(&mut layout, &["gaps"], &value));
+        assert_eq!(layout.gaps, 16.5);
+    }
+
+    #[test]
+    fn layout_scalar_gaps_int() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(24);
+        assert!(apply_layout_scalar_change(&mut layout, &["gaps"], &value));
+        assert_eq!(layout.gaps, 24.0);
+    }
+
+    #[test]
+    fn layout_scalar_struts_left() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(10);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["struts", "left"],
+            &value
+        ));
+        assert_eq!(layout.struts.left.0, 10.0);
+    }
+
+    #[test]
+    fn layout_scalar_struts_right() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(20.5);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["struts", "right"],
+            &value
+        ));
+        assert_eq!(layout.struts.right.0, 20.5);
+    }
+
+    #[test]
+    fn layout_scalar_struts_top() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(5);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["struts", "top"],
+            &value
+        ));
+        assert_eq!(layout.struts.top.0, 5.0);
+    }
+
+    #[test]
+    fn layout_scalar_struts_bottom() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(15);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["struts", "bottom"],
+            &value
+        ));
+        assert_eq!(layout.struts.bottom.0, 15.0);
+    }
+
+    #[test]
+    fn layout_scalar_focus_ring_off() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(true);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["focus_ring", "off"],
+            &value
+        ));
+        assert!(layout.focus_ring.off);
+    }
+
+    #[test]
+    fn layout_scalar_focus_ring_width() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(4);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["focus_ring", "width"],
+            &value
+        ));
+        assert_eq!(layout.focus_ring.width, 4.0);
+    }
+
+    #[test]
+    fn layout_scalar_border_off() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(false);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["border", "off"],
+            &value
+        ));
+        assert!(!layout.border.off);
+    }
+
+    #[test]
+    fn layout_scalar_border_width() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(2);
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["border", "width"],
+            &value
+        ));
+        assert_eq!(layout.border.width, 2.0);
+    }
+
+    #[test]
+    fn layout_scalar_center_focused_column() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!("always");
+        assert!(apply_layout_scalar_change(
+            &mut layout,
+            &["center_focused_column"],
+            &value
+        ));
+    }
+
+    #[test]
+    fn layout_scalar_empty_path_returns_false() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(10);
+        assert!(!apply_layout_scalar_change(&mut layout, &[], &value));
+    }
+
+    #[test]
+    fn layout_scalar_invalid_path_returns_false() {
+        let mut layout = niri_config::Layout::default();
+        let value = serde_json::json!(10);
+        assert!(!apply_layout_scalar_change(
+            &mut layout,
+            &["nonexistent"],
+            &value
+        ));
+    }
+
+    #[test]
+    fn layout_scalar_wrong_type_returns_false() {
+        let mut layout = niri_config::Layout::default();
+        let original_gaps = layout.gaps;
+        let value = serde_json::json!("not a number");
+        assert!(!apply_layout_scalar_change(&mut layout, &["gaps"], &value));
+        assert_eq!(layout.gaps, original_gaps); // unchanged
+    }
+
+    // ========================================================================
+    // apply_input_scalar_change - Direct Unit Tests
+    // ========================================================================
+
+    #[test]
+    fn input_scalar_keyboard_repeat_delay() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(300);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["keyboard", "repeat_delay"],
+            &value
+        ));
+        assert_eq!(input.keyboard.repeat_delay, 300);
+    }
+
+    #[test]
+    fn input_scalar_keyboard_repeat_rate() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(50);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["keyboard", "repeat_rate"],
+            &value
+        ));
+        assert_eq!(input.keyboard.repeat_rate, 50);
+    }
+
+    #[test]
+    fn input_scalar_touchpad_natural_scroll() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(true);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["touchpad", "natural_scroll"],
+            &value
+        ));
+        assert!(input.touchpad.natural_scroll);
+    }
+
+    #[test]
+    fn input_scalar_touchpad_tap() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(true);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["touchpad", "tap"],
+            &value
+        ));
+        assert!(input.touchpad.tap);
+    }
+
+    #[test]
+    fn input_scalar_touchpad_accel_speed() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(0.3);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["touchpad", "accel_speed"],
+            &value
+        ));
+        assert_eq!(input.touchpad.accel_speed.0, 0.3);
+    }
+
+    #[test]
+    fn input_scalar_mouse_natural_scroll() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(true);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["mouse", "natural_scroll"],
+            &value
+        ));
+        assert!(input.mouse.natural_scroll);
+    }
+
+    #[test]
+    fn input_scalar_mouse_accel_speed() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(0.5);
+        assert!(apply_input_scalar_change(
+            &mut input,
+            &["mouse", "accel_speed"],
+            &value
+        ));
+        assert_eq!(input.mouse.accel_speed.0, 0.5);
+    }
+
+    #[test]
+    fn input_scalar_empty_path_returns_false() {
+        let mut input = niri_config::Input::default();
+        let value = serde_json::json!(10);
+        assert!(!apply_input_scalar_change(&mut input, &[], &value));
+    }
+
+    // ========================================================================
+    // apply_cursor_scalar_change - Direct Unit Tests
+    // ========================================================================
+
+    #[test]
+    fn cursor_scalar_xcursor_theme() {
+        let mut cursor = niri_config::Cursor::default();
+        let value = serde_json::json!("Adwaita");
+        assert!(apply_cursor_scalar_change(
+            &mut cursor,
+            &["xcursor_theme"],
+            &value
+        ));
+        assert_eq!(cursor.xcursor_theme, "Adwaita");
+    }
+
+    #[test]
+    fn cursor_scalar_xcursor_size() {
+        let mut cursor = niri_config::Cursor::default();
+        let value = serde_json::json!(32);
+        assert!(apply_cursor_scalar_change(
+            &mut cursor,
+            &["xcursor_size"],
+            &value
+        ));
+        assert_eq!(cursor.xcursor_size, 32);
+    }
+
+    #[test]
+    fn cursor_scalar_hide_when_typing() {
+        let mut cursor = niri_config::Cursor::default();
+        let value = serde_json::json!(true);
+        assert!(apply_cursor_scalar_change(
+            &mut cursor,
+            &["hide_when_typing"],
+            &value
+        ));
+        assert!(cursor.hide_when_typing);
+    }
+
+    #[test]
+    fn cursor_scalar_hide_after_inactive_ms() {
+        let mut cursor = niri_config::Cursor::default();
+        let value = serde_json::json!(5000);
+        assert!(apply_cursor_scalar_change(
+            &mut cursor,
+            &["hide_after_inactive_ms"],
+            &value
+        ));
+        assert_eq!(cursor.hide_after_inactive_ms, Some(5000));
+    }
+
+    // ========================================================================
     // apply_pending_lua_config - Basic Tests
     // ========================================================================
 
