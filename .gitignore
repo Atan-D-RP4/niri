@@ -1,2 +1,5 @@
 /target
 /result
+
+# Lua LSP config (user-specific)
+.luarc.json
