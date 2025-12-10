@@ -1,6 +1,6 @@
 # Niri Lua Quick Start
 
-**Get started with Niri Lua in 5 minutes**
+Get started with Niri Lua configuration in 5 minutes.
 
 ---
 
@@ -125,7 +125,6 @@ Save this as `~/.config/niri/config.lua`:
 ```lua
 -- ============================================================================
 -- Niri Lua Configuration
--- Place at: ~/.config/niri/config.lua
 -- ============================================================================
 
 niri.utils.log("Loading Niri configuration...")
@@ -278,23 +277,6 @@ niri.utils.log("Configuration loaded successfully!")
 
 ---
 
-## KDL vs Lua Differences
-
-The Lua configuration API has some syntax differences from the KDL config:
-
-| KDL Syntax | Lua Syntax |
-|------------|------------|
-| `Mod+Key` in binds | `"Mod+Key"` (quoted string) |
-| `spawn "alacritty"` | `action = "spawn", args = { "alacritty" }` |
-| `focus-workspace 1` | `action = "focus-workspace", args = { 1 }` |
-| `window-rule { match app-id="..." }` | `matches = { { app_id = "..." } }` |
-| `set-column-width "+10%"` | `action = "set-column-width", args = { "+10%" }` |
-| Hyphens in names | Underscores in Lua field names |
-
-**Note:** Action names use hyphens (e.g., `focus-column-left`), but Lua table keys use underscores (e.g., `app_id`, `open_floating`).
-
----
-
 ## Verify It Works
 
 Check logs:
@@ -313,11 +295,21 @@ Applied N reactive config changes
 
 ---
 
+## KDL vs Lua Syntax
+
+| KDL | Lua |
+|-----|-----|
+| `spawn "alacritty"` | `action = "spawn", args = { "alacritty" }` |
+| `focus-workspace 1` | `action = "focus-workspace", args = { 1 }` |
+| `app-id="firefox"` | `app_id = "firefox"` |
+
+**Note:** Action names use hyphens (`focus-column-left`), but Lua table keys use underscores (`app_id`, `open_floating`).
+
+---
+
 ## Troubleshooting
 
 ### Config won't load?
-
-Check logs for errors:
 
 ```bash
 journalctl -eu niri -n 50
@@ -325,19 +317,10 @@ journalctl -eu niri -n 50
 
 ### Changes not applying?
 
-Restart Niri:
+Restart Niri or use the config reload action.
 
-```bash
-niri msg action quit
-# Then restart your session
-```
+### Need more help?
 
-### Need help?
-
-- Check `LUA_GUIDE.md` for detailed docs
-- Review examples in `examples/`
-- Check Niri logs: `journalctl -eu niri`
-
----
-
-**Happy configuring!**
+- See `LUA_GUIDE.md` for detailed documentation
+- See `LUA_SPECIFICATION.md` for complete API reference
+- Review examples in the `examples/` directory

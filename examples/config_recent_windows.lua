@@ -3,7 +3,7 @@
 -- Recent Windows shows previews of your most recently used windows.
 
 if niri then
-	niri.log("Loading recent windows configuration example...")
+	niri.utils.log("Loading recent windows configuration example...")
 end
 
 -- ============================================================================
@@ -85,11 +85,11 @@ local animations = {
 if niri then
 	-- Check if recent windows is enabled (off = false means it's enabled)
 	if not niri.config.recent_windows.off then
-		niri.log("Recent windows is enabled")
-		niri.log(string.format("Open delay: %dms", niri.config.recent_windows.open_delay_ms))
-		niri.log(string.format("Preview max height: %d", niri.config.recent_windows.previews.max_height))
+		niri.utils.log("Recent windows is enabled")
+		niri.utils.log(string.format("Open delay: %dms", niri.config.recent_windows.open_delay_ms))
+		niri.utils.log(string.format("Preview max height: %d", niri.config.recent_windows.previews.max_height))
 	else
-		niri.log("Recent windows is disabled")
+		niri.utils.log("Recent windows is disabled")
 	end
 end
 

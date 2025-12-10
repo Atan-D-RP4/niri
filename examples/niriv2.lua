@@ -1,23 +1,26 @@
 ---@diagnostic disable: inject-field
 -- ============================================================================
--- Niri Lua Configuration v2 - Refactored API
+-- Niri Lua Configuration v2 - Unified API
 -- ============================================================================
--- This configuration uses the new unified API design:
+-- This configuration uses the unified API design:
+--
 --   niri.config   - Configuration (read/write with explicit apply)
 --   niri.state    - Runtime state queries (read-only)
 --   niri.action   - Execute compositor actions (method-style with :)
 --   niri.events   - Event system (niri.events:on/once/off)
---   niri.utils    - Utilities (log, debug, warn, error, spawn)
+--   niri.utils    - Utilities (log, debug, warn, error)
 --   niri.schedule - Defer execution to next event loop iteration
 --   niri.loop     - Timers and time functions (new_timer, now)
-
--- Key differences from v1:
--- - No `return { ... }` - use proxy tables and explicit apply
+--
+-- Key features:
 -- - Direct property assignment: `niri.config.layout.gaps = 16`
--- - Explicit apply: `niri.config:apply()` (or auto-apply mode)
+-- - Explicit apply: `niri.config:apply()`
 -- - Collection CRUD: `:list()`, `:get()`, `:add()`, `:set()`, `:remove()`
 -- - Events use `niri.events:on(event_name, callback)`
 -- - Actions use method-style: `niri.action:spawn({"cmd"})`
+--
+-- Documentation: See niri-lua/LUA_SPECIFICATION.md
+-- ============================================================================
 
 -- ============================================================================
 -- INPUT CONFIGURATION
@@ -183,7 +186,7 @@ niri.config.clipboard = {
 -- ============================================================================
 
 niri.config.hotkey_overlay = {
-	skip_at_startup = false,
+	skip_at_startup = true,
 }
 
 -- ============================================================================
@@ -459,6 +462,7 @@ niri.action:spawn({ "waybar" })
 niri.action:spawn({ "swaync" })
 niri.action:spawn({ "kitty" })
 niri.action:spawn({ "kitty", "nvim" })
+niri.action:spawn_sh("kitty nvim")
 
 -- Shell commands with pipes/variables:
 -- niri.action:spawn_sh("dbus-update-activation-environment --systemd WAYLAND_DISPLAY")
@@ -484,12 +488,12 @@ niri.events:on("workspace:activate", function(ev)
 	niri.utils.log("Workspace activated: " .. (ev.name or tostring(ev.index)))
 end)
 
--- Log window title changes (new in Phase R6)
+-- Log window title changes
 -- niri.events:on("window:title_changed", function(ev)
 -- 	niri.utils.log("Window title changed: " .. (ev.title or ""))
 -- end)
 
--- Log config reloads (new in Phase R6)
+-- Log config reloads
 niri.events:on("config:reload", function(ev)
 	if ev.success then
 		niri.utils.log("Configuration reloaded successfully")
@@ -498,7 +502,7 @@ niri.events:on("config:reload", function(ev)
 	end
 end)
 
--- Log overview open/close (new in Phase R6)
+-- Log overview open/close
 niri.events:on("overview:open", function(ev)
 	niri.utils.debug("Overview opened")
 end)
@@ -549,7 +553,7 @@ niri.utils.log("Niri v2 configuration loaded!")
 niri.utils.log("Loaded " .. binds_count .. " keybindings")
 
 -- ============================================================================
--- ASYNC PRIMITIVES EXAMPLES (Phase 4 & 5)
+-- ASYNC PRIMITIVES EXAMPLES
 -- ============================================================================
 -- These APIs allow non-blocking operations in the compositor
 
@@ -643,10 +647,14 @@ local function set_interval(interval_ms, callback)
 	return timer
 end
 
-local interval = set_interval(5000, function()
-	niri.utils.log("Every 5 seconds")
+local interval = set_interval(2000, function()
+	niri.utils.log("Every 2 seconds")
 end)
 -- Later: interval:close()
+set_timeout(20000, function()
+	interval:close()
+	niri.utils.log("Stopped 2-second interval after 20 seconds")
+end)
 
 -- ============================================================================
 -- PRACTICAL ASYNC EXAMPLES
@@ -657,5 +665,14 @@ niri.schedule(function()
 	local end_time = niri.loop.now()
 	niri.utils.log("Config load completed in " .. (end_time - startup_time) .. "ms")
 	debounced_log("Config load timing logged 100ms earlier")
-	interval:close()
+	-- niri.action:spawn({ "waybar" })
+	niri.events:once("window:open", function(ev)
+		niri.action:focus_window(ev.id)
+		niri.action:fullscreen_window()
+	end)
+	niri.action:spawn_sh("kitty nvim")
+	-- set_timeout(1000, function()
+	-- 	niri.action:fullscreen_window()
+	-- 	niri.utils.log("Fullscreened the window after 1 second")
+	-- end)
 end)

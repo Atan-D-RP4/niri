@@ -1,8 +1,6 @@
 # Niri Lua Configuration Guide
 
-**Complete Reference for Lua Configuration in Niri**
-
-This guide covers the Lua configuration API for Niri, including all available settings, keybindings, window rules, and the differences between KDL and Lua configuration formats.
+Complete reference for Lua configuration in Niri. For a quick introduction, see [LUA_QUICKSTART.md](LUA_QUICKSTART.md). For the complete API specification, see [LUA_SPECIFICATION.md](LUA_SPECIFICATION.md).
 
 ---
 
@@ -19,9 +17,11 @@ This guide covers the Lua configuration API for Niri, including all available se
 9. [Workspaces](#workspaces)
 10. [Startup Commands](#startup-commands)
 11. [Animations](#animations)
-12. [KDL vs Lua Differences](#kdl-vs-lua-differences)
-13. [Runtime APIs](#runtime-apis)
-14. [Troubleshooting](#troubleshooting)
+12. [Runtime APIs](#runtime-apis)
+13. [Event Handling](#event-handling)
+14. [Timers and Scheduling](#timers-and-scheduling)
+15. [KDL vs Lua Migration](#kdl-vs-lua-migration)
+16. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -40,8 +40,6 @@ If no Lua config is found, Niri falls back to KDL configuration.
 
 ```lua
 -- ~/.config/niri/config.lua
-
--- Log that we're loading
 niri.utils.log("Loading Niri Lua configuration...")
 
 -- Basic keybindings
@@ -68,13 +66,16 @@ journalctl -eu niri -n 50
 
 ### The `niri` Global
 
-The `niri` global table is automatically available in all Lua config files. It provides:
+The `niri` global table is automatically available in all Lua config files:
 
-- `niri.config` - Configuration proxy for setting values
-- `niri.utils` - Utility functions (logging, etc.)
-- `niri.action` - Action execution API
-- `niri.state` - Runtime state queries (windows, workspaces, etc.)
-- `niri.events` - Event handling system
+| Namespace | Purpose |
+|-----------|---------|
+| `niri.config` | Configuration proxy for setting values |
+| `niri.utils` | Utility functions (logging, etc.) |
+| `niri.action` | Action execution API |
+| `niri.state` | Runtime state queries (windows, workspaces, etc.) |
+| `niri.events` | Event handling system |
+| `niri.loop` | Timer API |
 
 ### Lua Syntax Quick Reference
 
@@ -118,7 +119,7 @@ end
 
 ## The Reactive Config API
 
-Niri uses a **reactive configuration proxy** that captures your settings and applies them when the config is loaded.
+Niri uses a **reactive configuration proxy** that captures settings and applies them when config is loaded.
 
 ### Setting Scalar Values
 
@@ -252,6 +253,25 @@ for i = 1, 9 do
 end
 ```
 
+### Bind Options
+
+```lua
+-- Allow when screen is locked
+niri.config.binds:add({
+    key = "XF86AudioRaiseVolume",
+    action = "spawn",
+    args = { "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+" },
+    allow_when_locked = true,
+})
+
+-- Cooldown to prevent rapid triggering
+niri.config.binds:add({
+    key = "Mod+Tab",
+    action = "focus-window-down-or-column-right",
+    cooldown_ms = 150,
+})
+```
+
 ---
 
 ## Layout Configuration
@@ -260,8 +280,7 @@ end
 -- Gap between windows
 niri.config.layout.gaps = 16
 
--- Center focused column behavior
--- "never" | "always" | "on-overflow"
+-- Center focused column behavior: "never" | "always" | "on-overflow"
 niri.config.layout.center_focused_column = "never"
 
 -- Preset column widths (cycle with switch-preset-column-width)
@@ -330,9 +349,9 @@ niri.config.layout.focus_ring.inactive.color = "#333333"
 niri.config.input.keyboard.repeat_delay = 300  -- ms before repeat starts
 niri.config.input.keyboard.repeat_rate = 50    -- repeats per second
 
--- XKB settings (set via environment or xkb options)
--- niri.config.input.keyboard.xkb.layout = "us"
--- niri.config.input.keyboard.xkb.options = "ctrl:nocaps"
+-- XKB settings
+niri.config.input.keyboard.xkb.layout = "us"
+niri.config.input.keyboard.xkb.options = "ctrl:nocaps"
 ```
 
 ### Mouse
@@ -366,10 +385,13 @@ niri.config.input.trackpoint.accel_profile = "flat"
 
 ```lua
 -- Warp mouse to focused window
-niri.config.input.warp_mouse_to_focus.mode = "center-xy"  -- "center-xy" | "center-xy-always"
+niri.config.input.warp_mouse_to_focus = true
 
 -- Workspace auto back-and-forth
 niri.config.input.workspace_auto_back_and_forth = true
+
+-- Focus follows mouse
+niri.config.input.focus_follows_mouse = true
 ```
 
 ---
@@ -402,7 +424,7 @@ niri.config.screenshot_path = "~/Pictures/Screenshots/screenshot-%Y-%m-%d-%H-%M-
 
 ## Window Rules
 
-Window rules let you customize behavior for specific applications.
+Window rules customize behavior for specific applications.
 
 ### Basic Syntax
 
@@ -523,9 +545,192 @@ niri.config.animations.slowdown = 1.0
 
 ---
 
-## KDL vs Lua Differences
+## Runtime APIs
 
-When migrating from KDL to Lua configuration, note these differences:
+These APIs are available at runtime for querying state and executing actions.
+
+### State Queries
+
+```lua
+-- Query all windows
+local windows = niri.state.windows()
+for _, win in ipairs(windows) do
+    niri.utils.log("Window: " .. win.app_id .. " - " .. win.title)
+end
+
+-- Query focused window
+local focused = niri.state.focused_window()
+if focused then
+    niri.utils.log("Focused: " .. focused.title)
+end
+
+-- Query workspaces
+local workspaces = niri.state.workspaces()
+for _, ws in ipairs(workspaces) do
+    niri.utils.log("Workspace: " .. (ws.name or ws.idx))
+end
+
+-- Query outputs
+local outputs = niri.state.outputs()
+for _, out in ipairs(outputs) do
+    niri.utils.log("Output: " .. out.name .. " " .. out.width .. "x" .. out.height)
+end
+```
+
+### Action Execution
+
+```lua
+-- Execute actions directly
+niri.action.spawn("alacritty")
+niri.action.close_window()
+niri.action.focus_workspace(1)
+niri.action.focus_column_left()
+niri.action.toggle_window_floating()
+```
+
+### Utility Functions
+
+```lua
+-- Logging
+niri.utils.log("Info message")
+niri.utils.debug("Debug message")
+niri.utils.warn("Warning message")
+niri.utils.error("Error message")
+```
+
+---
+
+## Event Handling
+
+Subscribe to compositor events for dynamic behavior.
+
+### Basic Event Subscription
+
+```lua
+-- Subscribe to window open events
+niri.events:on("window_opened", function(event)
+    niri.utils.log("Window opened: " .. event.app_id)
+end)
+
+-- Subscribe once (auto-unsubscribes after first call)
+niri.events:once("window_focused", function(event)
+    niri.utils.log("First focus: " .. event.app_id)
+end)
+
+-- Unsubscribe
+local id = niri.events:on("window_opened", handler)
+niri.events:off("window_opened", id)
+```
+
+### Available Events
+
+| Event | Payload |
+|-------|---------|
+| `window_opened` | `{id, app_id, title, workspace_id}` |
+| `window_closed` | `{id, app_id, title}` |
+| `window_focused` | `{id, app_id, title}` |
+| `window_title_changed` | `{id, app_id, title, old_title}` |
+| `workspace_created` | `{id, idx, name, output}` |
+| `workspace_destroyed` | `{id, name, output}` |
+| `workspace_switched` | `{id, idx, name, output}` |
+| `output_added` | `{name, make, model}` |
+| `output_removed` | `{name}` |
+| `config_loaded` | `{}` |
+| `overview_opened` | `{}` |
+| `overview_closed` | `{}` |
+
+### Event Handler Examples
+
+```lua
+-- Auto-move windows by app
+niri.events:on("window_opened", function(event)
+    if event.app_id == "slack" then
+        niri.action.move_window_to_workspace("chat")
+    elseif event.app_id == "spotify" then
+        niri.action.move_window_to_workspace("media")
+    end
+end)
+
+-- Log workspace changes
+niri.events:on("workspace_switched", function(event)
+    local name = event.name or ("Workspace " .. event.idx)
+    niri.utils.log("Switched to: " .. name)
+end)
+```
+
+---
+
+## Timers and Scheduling
+
+### Creating Timers
+
+```lua
+-- One-shot timer (fires once after delay)
+local timer = niri.loop.new_timer()
+timer:start(1000, 0, function()
+    niri.utils.log("Fired after 1 second")
+    timer:close()
+end)
+
+-- Repeating timer (fires every interval)
+local repeating = niri.loop.new_timer()
+repeating:start(0, 500, function()
+    niri.utils.log("Tick every 500ms")
+end)
+-- Later: repeating:close()
+```
+
+### Timer Methods
+
+```lua
+timer:start(delay_ms, repeat_ms, callback)  -- Start timer
+timer:stop()                                 -- Stop timer
+timer:again()                                -- Restart with same settings
+timer:close()                                -- Clean up resources
+timer:is_active()                            -- Check if active
+```
+
+### Deferred Execution
+
+```lua
+-- Schedule callback for next event loop iteration
+niri.schedule(function()
+    niri.utils.log("Deferred execution")
+end)
+
+-- Use case: break up long operations
+niri.events:on("window_opened", function(event)
+    local window_id = event.id
+    
+    -- Defer heavy work
+    niri.schedule(function()
+        do_expensive_analysis(window_id)
+    end)
+end)
+```
+
+### Debouncing Example
+
+```lua
+-- Debounce rapid events
+local debounce_timer = niri.loop.new_timer()
+local pending = nil
+
+niri.events:on("window_opened", function(event)
+    pending = event
+    debounce_timer:stop()
+    debounce_timer:start(100, 0, function()
+        if pending then
+            handle_window(pending)
+            pending = nil
+        end
+    end)
+end)
+```
+
+---
+
+## KDL vs Lua Migration
 
 ### Syntax Mapping
 
@@ -605,69 +810,6 @@ niri.config.window_rules:add({
 
 ---
 
-## Runtime APIs
-
-These APIs are available at runtime (after niri starts) for querying state and executing actions.
-
-### State Queries
-
-```lua
--- Query windows (returns empty array during config load)
-local windows = niri.state.windows()
-for _, win in ipairs(windows) do
-    niri.utils.log("Window: " .. win.title)
-end
-
--- Query workspaces
-local workspaces = niri.state.workspaces()
-
--- Query outputs
-local outputs = niri.state.outputs()
-```
-
-### Action Execution
-
-```lua
--- Execute actions via IPC
-niri.action.spawn({ "alacritty" })
-niri.action.close_window()
-niri.action.focus_workspace(1)
-```
-
-### Event Handling
-
-> **Note:** Event system infrastructure is complete, but not all events are wired to compositor code yet.
-> See `docs/LUA_CONFIG_STATUS.md` for the current event wiring status.
-
-```lua
--- Listen for events (use colon delimiter for event names)
-niri.events:on("window:open", function(event)
-    niri.utils.log("Window opened: " .. (event.title or "unknown"))
-end)
-
-niri.events:on("workspace:activate", function(event)
-    niri.utils.log("Workspace activated: " .. event.name)
-end)
-
--- Currently wired events:
--- - startup
--- - shutdown  
--- - window:open (partial - placeholder data)
--- - workspace:activate
-```
-
-### Utility Functions
-
-```lua
--- Logging
-niri.utils.log("Info message")
-niri.utils.debug("Debug message")
-niri.utils.warn("Warning message")
-niri.utils.error("Error message")
-```
-
----
-
 ## Troubleshooting
 
 ### Configuration Won't Load
@@ -693,26 +835,48 @@ journalctl -eu niri -n 50
 
 ### State Queries Return Empty
 
-State queries like `niri.state.windows()` return empty arrays during config loading. Use event handlers to access state after niri is running:
+State queries return empty arrays during config loading. Use event handlers for runtime access:
 
 ```lua
-niri.events:on("niri-ready", function()
+niri.events:on("startup", function()
     local windows = niri.state.windows()
     niri.utils.log("Windows: " .. #windows)
 end)
+```
+
+### Script Timeouts
+
+Lua scripts have a 1-second default timeout. If your code times out:
+
+```lua
+-- BAD: This will timeout
+for i = 1, 1e12 do end
+
+-- GOOD: Use scheduled chunks
+local function process_chunk()
+    -- Process some items
+    if more_work then
+        niri.schedule(process_chunk)
+    end
+end
+process_chunk()
 ```
 
 ---
 
 ## Examples
 
-See the `examples/` directory for complete configuration examples:
+See the `examples/` directory in the repository:
 
-- `examples/niriv2.lua` - Full configuration example
-- `examples/config_api_demo.lua` - API demonstration
-- `examples/event_system_demo.lua` - Event handling examples
+- `niriv2.lua` - Full configuration example
+- `config_api_demo.lua` - API demonstration
+- `event_system_demo.lua` - Event handling examples
+- `runtime_state_query.lua` - State query examples
 
 ---
 
-**Document Version:** 2.0 (Reactive API)  
-**Last Updated:** December 2025
+## Further Reading
+
+- [LUA_QUICKSTART.md](LUA_QUICKSTART.md) - 5-minute introduction
+- [LUA_SPECIFICATION.md](LUA_SPECIFICATION.md) - Complete API specification
+- [AGENTS.md](AGENTS.md) - Architecture overview for developers

@@ -10,15 +10,15 @@
 local anim_off = niri.config.animations.off
 local anim_slowdown = niri.config.animations.slowdown
 
-niri.log("Animations off: " .. tostring(anim_off))
-niri.log("Animation slowdown: " .. anim_slowdown)
+niri.utils.log("Animations off: " .. tostring(anim_off))
+niri.utils.log("Animation slowdown: " .. anim_slowdown)
 
 -- Access specific animation types
 local ws_switch_anim = niri.config.animations.workspace_switch
-niri.log("Workspace switch animation duration: " .. (ws_switch_anim.duration_ms or "spring"))
+niri.utils.log("Workspace switch animation duration: " .. (ws_switch_anim.duration_ms or "spring"))
 
 local window_open_anim = niri.config.animations.window_open
-niri.log("Window open curve: " .. (window_open_anim.curve or "spring"))
+niri.utils.log("Window open curve: " .. (window_open_anim.curve or "spring"))
 
 -- All available animation types:
 -- - workspace_switch
@@ -42,32 +42,32 @@ local kb_variant = niri.config.input.keyboard.xkb.variant
 local repeat_delay = niri.config.input.keyboard.repeat_delay
 local repeat_rate = niri.config.input.keyboard.repeat_rate
 
-niri.log("Keyboard layout: " .. kb_layout)
-niri.log("Repeat delay: " .. repeat_delay .. "ms, rate: " .. repeat_rate)
+niri.utils.log("Keyboard layout: " .. kb_layout)
+niri.utils.log("Repeat delay: " .. repeat_delay .. "ms, rate: " .. repeat_rate)
 
 -- Mouse settings
 local mouse_accel = niri.config.input.mouse.accel_speed
 local mouse_profile = niri.config.input.mouse.accel_profile
-niri.log("Mouse acceleration: " .. mouse_accel .. ", profile: " .. mouse_profile)
+niri.utils.log("Mouse acceleration: " .. mouse_accel .. ", profile: " .. mouse_profile)
 
 -- Touchpad settings
 local touchpad = niri.config.input.touchpad
-niri.log("Touchpad tap enabled: " .. tostring(touchpad.tap))
-niri.log("Touchpad natural scroll: " .. tostring(touchpad.natural_scroll))
-niri.log("Touchpad accel speed: " .. touchpad.accel_speed)
+niri.utils.log("Touchpad tap enabled: " .. tostring(touchpad.tap))
+niri.utils.log("Touchpad natural scroll: " .. tostring(touchpad.natural_scroll))
+niri.utils.log("Touchpad accel speed: " .. touchpad.accel_speed)
 
 -- Trackpoint settings (NEW - was previously missing)
 local trackpoint = niri.config.input.trackpoint
-niri.log("Trackpoint accel speed: " .. trackpoint.accel_speed)
-niri.log("Trackpoint natural scroll: " .. tostring(trackpoint.natural_scroll))
+niri.utils.log("Trackpoint accel speed: " .. trackpoint.accel_speed)
+niri.utils.log("Trackpoint natural scroll: " .. tostring(trackpoint.natural_scroll))
 
 -- Global input options (NEW)
 if niri.config.input.warp_mouse_to_focus then
-    niri.log("Warp mouse to focus: " .. niri.config.input.warp_mouse_to_focus)
+    niri.utils.log("Warp mouse to focus: " .. niri.config.input.warp_mouse_to_focus)
 end
 
 if niri.config.input.focus_follows_mouse then
-    niri.log("Focus follows mouse enabled with scroll amount: " .. 
+    niri.utils.log("Focus follows mouse enabled with scroll amount: " .. 
         (niri.config.input.focus_follows_mouse.max_scroll_amount or "default"))
 end
 
@@ -77,87 +77,87 @@ end
 
 -- Basic layout settings
 local gaps = niri.config.layout.gaps
-niri.log("Gaps: " .. gaps .. "px")
+niri.utils.log("Gaps: " .. gaps .. "px")
 
 -- Struts (NEW - previously empty placeholder)
 local struts = niri.config.layout.struts
-niri.log(string.format("Struts - left: %d, right: %d, top: %d, bottom: %d",
+niri.utils.log(string.format("Struts - left: %d, right: %d, top: %d, bottom: %d",
     struts.left, struts.right, struts.top, struts.bottom))
 
 -- Focus ring (NEW - now fully exposed)
 local focus_ring = niri.config.layout.focus_ring
-niri.log("Focus ring off: " .. tostring(focus_ring.off))
-niri.log("Focus ring width: " .. focus_ring.width)
-niri.log("Focus ring active color: " .. focus_ring.active_color)
-niri.log("Focus ring inactive color: " .. focus_ring.inactive_color)
-niri.log("Focus ring urgent color: " .. focus_ring.urgent_color)
+niri.utils.log("Focus ring off: " .. tostring(focus_ring.off))
+niri.utils.log("Focus ring width: " .. focus_ring.width)
+niri.utils.log("Focus ring active color: " .. focus_ring.active_color)
+niri.utils.log("Focus ring inactive color: " .. focus_ring.inactive_color)
+niri.utils.log("Focus ring urgent color: " .. focus_ring.urgent_color)
 
 -- Border (NEW - now fully exposed)
 local border = niri.config.layout.border
-niri.log("Border off: " .. tostring(border.off))
-niri.log("Border width: " .. border.width)
-niri.log("Border active color: " .. border.active_color)
+niri.utils.log("Border off: " .. tostring(border.off))
+niri.utils.log("Border width: " .. border.width)
+niri.utils.log("Border active color: " .. border.active_color)
 
 -- Shadow (NEW - now fully exposed)
 local shadow = niri.config.layout.shadow
-niri.log("Shadow on: " .. tostring(shadow.on))
-niri.log("Shadow softness: " .. shadow.softness)
-niri.log("Shadow spread: " .. shadow.spread)
-niri.log(string.format("Shadow offset: x=%d, y=%d", shadow.offset.x, shadow.offset.y))
-niri.log("Shadow color: " .. shadow.color)
-niri.log("Shadow draw behind window: " .. tostring(shadow.draw_behind_window))
+niri.utils.log("Shadow on: " .. tostring(shadow.on))
+niri.utils.log("Shadow softness: " .. shadow.softness)
+niri.utils.log("Shadow spread: " .. shadow.spread)
+niri.utils.log(string.format("Shadow offset: x=%d, y=%d", shadow.offset.x, shadow.offset.y))
+niri.utils.log("Shadow color: " .. shadow.color)
+niri.utils.log("Shadow draw behind window: " .. tostring(shadow.draw_behind_window))
 
 -- Tab indicator (NEW - now fully exposed)
 local tab_indicator = niri.config.layout.tab_indicator
-niri.log("Tab indicator off: " .. tostring(tab_indicator.off))
-niri.log("Tab indicator width: " .. tab_indicator.width)
+niri.utils.log("Tab indicator off: " .. tostring(tab_indicator.off))
+niri.utils.log("Tab indicator width: " .. tab_indicator.width)
 if tab_indicator.active_color then
-    niri.log("Tab indicator active color: " .. tab_indicator.active_color)
+    niri.utils.log("Tab indicator active color: " .. tab_indicator.active_color)
 end
 
 -- Insert hint (NEW - now fully exposed)
 local insert_hint = niri.config.layout.insert_hint
-niri.log("Insert hint off: " .. tostring(insert_hint.off))
-niri.log("Insert hint color: " .. insert_hint.color)
+niri.utils.log("Insert hint off: " .. tostring(insert_hint.off))
+niri.utils.log("Insert hint color: " .. insert_hint.color)
 
 -- Column and window settings
 local center_mode = niri.config.layout.center_focused_column
-niri.log("Center focused column: " .. center_mode)
+niri.utils.log("Center focused column: " .. center_mode)
 
-niri.log("Always center single column: " .. 
+niri.utils.log("Always center single column: " .. 
     tostring(niri.config.layout.always_center_single_column))
-niri.log("Empty workspace above first: " .. 
+niri.utils.log("Empty workspace above first: " .. 
     tostring(niri.config.layout.empty_workspace_above_first))
 
 local default_display = niri.config.layout.default_column_display
-niri.log("Default column display: " .. default_display)
+niri.utils.log("Default column display: " .. default_display)
 
 -- Preset column widths
 local preset_widths = niri.config.layout.preset_column_widths
-niri.log("Preset column widths: " .. table.concat(preset_widths, ", "))
+niri.utils.log("Preset column widths: " .. table.concat(preset_widths, ", "))
 
 -- Default column width
 if niri.config.layout.default_column_width then
-    niri.log("Default column width: " .. niri.config.layout.default_column_width)
+    niri.utils.log("Default column width: " .. niri.config.layout.default_column_width)
 end
 
 -- Preset window heights
 local preset_heights = niri.config.layout.preset_window_heights
-niri.log("Preset window heights: " .. table.concat(preset_heights, ", "))
+niri.utils.log("Preset window heights: " .. table.concat(preset_heights, ", "))
 
 -- Background color
-niri.log("Background color: " .. niri.config.layout.background_color)
+niri.utils.log("Background color: " .. niri.config.layout.background_color)
 
 -- ============================================================================
 -- CURSOR CONFIGURATION
 -- ============================================================================
 
 local cursor = niri.config.cursor
-niri.log("Cursor theme: " .. cursor.xcursor_theme)
-niri.log("Cursor size: " .. cursor.xcursor_size)
-niri.log("Hide cursor when typing: " .. tostring(cursor.hide_when_typing))
+niri.utils.log("Cursor theme: " .. cursor.xcursor_theme)
+niri.utils.log("Cursor size: " .. cursor.xcursor_size)
+niri.utils.log("Hide cursor when typing: " .. tostring(cursor.hide_when_typing))
 if cursor.hide_after_inactive_ms then
-    niri.log("Hide cursor after " .. cursor.hide_after_inactive_ms .. "ms of inactivity")
+    niri.utils.log("Hide cursor after " .. cursor.hide_after_inactive_ms .. "ms of inactivity")
 end
 
 -- ============================================================================
@@ -167,16 +167,16 @@ end
 -- Access per-output settings
 local outputs = niri.config.output
 for output_name, output_config in pairs(outputs) do
-    niri.log("Output: " .. output_name)
-    niri.log("  Off: " .. tostring(output_config.off))
+    niri.utils.log("Output: " .. output_name)
+    niri.utils.log("  Off: " .. tostring(output_config.off))
     if output_config.scale then
-        niri.log("  Scale: " .. output_config.scale)
+        niri.utils.log("  Scale: " .. output_config.scale)
     end
     if output_config.x then
-        niri.log(string.format("  Position: %d, %d", output_config.x, output_config.y))
+        niri.utils.log(string.format("  Position: %d, %d", output_config.x, output_config.y))
     end
     if output_config.mode_custom then
-        niri.log("  Custom mode: " .. tostring(output_config.mode_custom))
+        niri.utils.log("  Custom mode: " .. tostring(output_config.mode_custom))
     end
 end
 
@@ -188,17 +188,17 @@ local gestures = niri.config.gestures
 
 -- Drag & drop edge view scroll
 local dnd_view = gestures.dnd_edge_view_scroll
-niri.log(string.format("DnD edge view scroll - trigger: %d, delay: %d, max speed: %d",
+niri.utils.log(string.format("DnD edge view scroll - trigger: %d, delay: %d, max speed: %d",
     dnd_view.trigger_width, dnd_view.delay_ms, dnd_view.max_speed))
 
 -- Drag & drop edge workspace switch
 local dnd_ws = gestures.dnd_edge_workspace_switch
-niri.log(string.format("DnD edge workspace switch - trigger: %d, delay: %d, max speed: %d",
+niri.utils.log(string.format("DnD edge workspace switch - trigger: %d, delay: %d, max speed: %d",
     dnd_ws.trigger_height, dnd_ws.delay_ms, dnd_ws.max_speed))
 
 -- Hot corners
 local corners = gestures.hot_corners
-niri.log(string.format("Hot corners - TL: %s, TR: %s, BL: %s, BR: %s",
+niri.utils.log(string.format("Hot corners - TL: %s, TR: %s, BL: %s, BR: %s",
     tostring(corners.top_left), tostring(corners.top_right),
     tostring(corners.bottom_left), tostring(corners.bottom_right)))
 
@@ -207,16 +207,16 @@ niri.log(string.format("Hot corners - TL: %s, TR: %s, BL: %s, BR: %s",
 -- ============================================================================
 
 local overview = niri.config.overview
-niri.log("Overview zoom: " .. overview.zoom)
-niri.log("Overview backdrop color: " .. overview.backdrop_color)
+niri.utils.log("Overview zoom: " .. overview.zoom)
+niri.utils.log("Overview backdrop color: " .. overview.backdrop_color)
 
 local ws_shadow = overview.workspace_shadow
-niri.log("Overview workspace shadow:")
-niri.log("  Off: " .. tostring(ws_shadow.off))
-niri.log("  Softness: " .. ws_shadow.softness)
-niri.log("  Spread: " .. ws_shadow.spread)
-niri.log(string.format("  Offset: x=%d, y=%d", ws_shadow.offset.x, ws_shadow.offset.y))
-niri.log("  Color: " .. ws_shadow.color)
+niri.utils.log("Overview workspace shadow:")
+niri.utils.log("  Off: " .. tostring(ws_shadow.off))
+niri.utils.log("  Softness: " .. ws_shadow.softness)
+niri.utils.log("  Spread: " .. ws_shadow.spread)
+niri.utils.log(string.format("  Offset: x=%d, y=%d", ws_shadow.offset.x, ws_shadow.offset.y))
+niri.utils.log("  Color: " .. ws_shadow.color)
 
 -- ============================================================================
 -- DEBUG CONFIGURATION (NEW)
@@ -224,20 +224,20 @@ niri.log("  Color: " .. ws_shadow.color)
 
 local debug = niri.config.debug
 if debug.preview_render then
-    niri.log("Debug preview render: " .. debug.preview_render)
+    niri.utils.log("Debug preview render: " .. debug.preview_render)
 end
-niri.log("Debug enable overlay planes: " .. tostring(debug.enable_overlay_planes))
-niri.log("Debug disable direct scanout: " .. tostring(debug.disable_direct_scanout))
-niri.log("Debug disable cursor plane: " .. tostring(debug.disable_cursor_plane))
+niri.utils.log("Debug enable overlay planes: " .. tostring(debug.enable_overlay_planes))
+niri.utils.log("Debug disable direct scanout: " .. tostring(debug.disable_direct_scanout))
+niri.utils.log("Debug disable cursor plane: " .. tostring(debug.disable_cursor_plane))
 
 if debug.render_drm_device then
-    niri.log("Debug render DRM device: " .. debug.render_drm_device)
+    niri.utils.log("Debug render DRM device: " .. debug.render_drm_device)
 end
 
 if #debug.ignored_drm_devices > 0 then
-    niri.log("Debug ignored DRM devices:")
+    niri.utils.log("Debug ignored DRM devices:")
     for i, device in ipairs(debug.ignored_drm_devices) do
-        niri.log("  " .. i .. ": " .. device)
+        niri.utils.log("  " .. i .. ": " .. device)
     end
 end
 
@@ -246,30 +246,30 @@ end
 -- ============================================================================
 
 local clipboard = niri.config.clipboard
-niri.log("Clipboard disable primary: " .. tostring(clipboard.disable_primary))
+niri.utils.log("Clipboard disable primary: " .. tostring(clipboard.disable_primary))
 
 -- ============================================================================
 -- HOTKEY OVERLAY CONFIGURATION (NEW)
 -- ============================================================================
 
 local hotkey = niri.config.hotkey_overlay
-niri.log("Hotkey overlay skip at startup: " .. tostring(hotkey.skip_at_startup))
-niri.log("Hotkey overlay hide not bound: " .. tostring(hotkey.hide_not_bound))
+niri.utils.log("Hotkey overlay skip at startup: " .. tostring(hotkey.skip_at_startup))
+niri.utils.log("Hotkey overlay hide not bound: " .. tostring(hotkey.hide_not_bound))
 
 -- ============================================================================
 -- CONFIG NOTIFICATION CONFIGURATION (NEW)
 -- ============================================================================
 
 local notif = niri.config.config_notification
-niri.log("Config notification disable failed: " .. tostring(notif.disable_failed))
+niri.utils.log("Config notification disable failed: " .. tostring(notif.disable_failed))
 
 -- ============================================================================
 -- XWAYLAND SATELLITE CONFIGURATION (NEW)
 -- ============================================================================
 
 local xwayland = niri.config.xwayland_satellite
-niri.log("Xwayland satellite off: " .. tostring(xwayland.off))
-niri.log("Xwayland satellite path: " .. xwayland.path)
+niri.utils.log("Xwayland satellite off: " .. tostring(xwayland.off))
+niri.utils.log("Xwayland satellite path: " .. xwayland.path)
 
 -- ============================================================================
 -- MISCELLANEOUS CONFIGURATION (NEW)
@@ -277,35 +277,35 @@ niri.log("Xwayland satellite path: " .. xwayland.path)
 
 -- Spawn at startup
 if #niri.config.spawn_at_startup > 0 then
-    niri.log("Spawn at startup commands:")
+    niri.utils.log("Spawn at startup commands:")
     for i, cmd_array in ipairs(niri.config.spawn_at_startup) do
-        niri.log("  " .. i .. ": " .. table.concat(cmd_array, " "))
+        niri.utils.log("  " .. i .. ": " .. table.concat(cmd_array, " "))
     end
 end
 
 -- Spawn sh at startup
 if #niri.config.spawn_sh_at_startup > 0 then
-    niri.log("Spawn sh at startup commands:")
+    niri.utils.log("Spawn sh at startup commands:")
     for i, cmd in ipairs(niri.config.spawn_sh_at_startup) do
-        niri.log("  " .. i .. ": " .. cmd)
+        niri.utils.log("  " .. i .. ": " .. cmd)
     end
 end
 
 -- Prefer no CSD
-niri.log("Prefer no CSD: " .. tostring(niri.config.prefer_no_csd))
+niri.utils.log("Prefer no CSD: " .. tostring(niri.config.prefer_no_csd))
 
 -- Screenshot path
 if niri.config.screenshot_path then
-    niri.log("Screenshot path: " .. niri.config.screenshot_path)
+    niri.utils.log("Screenshot path: " .. niri.config.screenshot_path)
 end
 
 -- Environment variables
-niri.log("Environment variables:")
+niri.utils.log("Environment variables:")
 for var_name, var_value in pairs(niri.config.environment) do
     if var_value then
-        niri.log("  " .. var_name .. " = " .. var_value)
+        niri.utils.log("  " .. var_name .. " = " .. var_value)
     else
-        niri.log("  " .. var_name .. " = <unset>")
+        niri.utils.log("  " .. var_name .. " = <unset>")
     end
 end
 
@@ -315,15 +315,15 @@ end
 
 -- Example 1: Create a status widget showing current config
 function print_config_summary()
-    niri.log("=== NIRI CONFIGURATION SUMMARY ===")
-    niri.log(string.format("Gaps: %dpx | Focus ring: %s | Border: %s",
+    niri.utils.log("=== NIRI CONFIGURATION SUMMARY ===")
+    niri.utils.log(string.format("Gaps: %dpx | Focus ring: %s | Border: %s",
         niri.config.layout.gaps,
         tostring(not niri.config.layout.focus_ring.off),
         tostring(not niri.config.layout.border.off)))
-    niri.log(string.format("Animations: %s | Cursor theme: %s",
+    niri.utils.log(string.format("Animations: %s | Cursor theme: %s",
         tostring(not niri.config.animations.off),
         niri.config.cursor.xcursor_theme))
-    niri.log("===================================")
+    niri.utils.log("===================================")
 end
 
 print_config_summary()
@@ -345,11 +345,11 @@ function validate_config()
     end
     
     if #issues == 0 then
-        niri.log("✓ Configuration is valid")
+        niri.utils.log("✓ Configuration is valid")
     else
-        niri.log("✗ Configuration issues found:")
+        niri.utils.log("✗ Configuration issues found:")
         for _, issue in ipairs(issues) do
-            niri.log("  - " .. issue)
+            niri.utils.log("  - " .. issue)
         end
     end
 end
@@ -367,7 +367,7 @@ function check_animations()
         end
     end
     
-    niri.log("Enabled animations: " .. enabled_count)
+    niri.utils.log("Enabled animations: " .. enabled_count)
 end
 
 check_animations()
