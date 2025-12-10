@@ -483,7 +483,7 @@ function niri.apply_config(config) end
 function niri.schedule(callback) end
 
 ---Utility functions for logging and process spawning
----@class niri.utils
+---@class niri_utils
 niri_utils = {}
 
 ---Log a message at info level
@@ -507,7 +507,7 @@ function niri_utils.error(...) end
 function niri_utils.spawn(command) end
 
 ---Configuration proxy for reading and modifying compositor settings
----@class niri.config
+---@class niri_config
 ---@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)
 ---@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)
 ---@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)
@@ -542,7 +542,7 @@ function niri_config:auto_apply(enable) end
 function niri_config.version() end
 
 ---Event system for subscribing to compositor events
----@class niri.events
+---@class niri_events
 niri_events = {}
 
 ---Subscribe to an event with a callback. Returns a handler ID for later removal.
@@ -569,7 +569,7 @@ function niri_events:off(event_name, handler_id) end
 function niri_events:emit(event_name, data) end
 
 ---Compositor actions for window management, navigation, and system control
----@class niri.action
+---@class niri_action
 niri_action = {}
 
 ---Quit the compositor
@@ -997,7 +997,7 @@ function niri_action:set_window_urgent() end
 function niri_action:unset_window_urgent() end
 
 ---Runtime state queries for windows, workspaces, and outputs
----@class niri.state
+---@class niri_state
 niri_state = {}
 
 ---Get all windows
@@ -1017,7 +1017,7 @@ function niri_state.workspaces() end
 function niri_state.outputs() end
 
 ---Event loop and timer functionality
----@class niri.loop
+---@class niri_loop
 niri_loop = {}
 
 ---Create a new timer
@@ -1029,7 +1029,7 @@ function niri_loop.new_timer() end
 function niri_loop.now() end
 
 ---Keybinding configuration
----@class niri.keymap
+---@class niri_keymap
 niri_keymap = {}
 
 ---Set a keybinding
@@ -1039,7 +1039,7 @@ niri_keymap = {}
 function niri_keymap.set(mode, key, callback) end
 
 ---Window rules configuration
----@class niri.window
+---@class niri_window
 niri_window = {}
 
 ---Define a window rule
@@ -1047,12 +1047,12 @@ niri_window = {}
 function niri_window.rule(rule) end
 
 ---Overview mode configuration
----@class niri.overview
+---@class niri_overview
 ---@field backdrop_color string? Backdrop color in hex format
 niri_overview = {}
 
 ---Screenshot configuration
----@class niri.screenshot
+---@class niri_screenshot
 ---@field path string? Screenshot save path
 niri_screenshot = {}
 

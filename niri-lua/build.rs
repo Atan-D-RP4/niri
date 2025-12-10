@@ -475,8 +475,10 @@ fn generate_modules(output: &mut String) {
 
     for module in NIRI_LUA_API.modules {
         // Module class definition
+        // Use underscore format for class names to match field type references
+        let class_name = module.path.replace('.', "_");
         output.push_str(&format!("---{}\n", module.description));
-        output.push_str(&format!("---@class {}\n", module.path));
+        output.push_str(&format!("---@class {}\n", class_name));
 
         // Module fields (sub-modules)
         for field in module.fields {
