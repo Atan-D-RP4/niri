@@ -61,48 +61,10 @@ impl IpcLuaExecutor {
 mod tests {
     use super::*;
 
+    /// Test that IpcLuaExecutor gracefully handles uninitialized runtime.
+    /// Other execute_string tests are in repl_integration.rs.
     #[test]
-    fn test_lua_executor_basic() {
-        let lua_runtime = crate::LuaRuntime::new().unwrap();
-        let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(lua_runtime))));
-
-        let (output, success) = executor.execute("return 1 + 1");
-        assert!(success, "Execution should succeed");
-        assert!(output.contains("2"), "Output should contain result");
-    }
-
-    #[test]
-    fn test_lua_executor_print() {
-        let lua_runtime = crate::LuaRuntime::new().unwrap();
-        let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(lua_runtime))));
-
-        let (output, success) = executor.execute("print('Hello'); print('World')");
-        assert!(success, "Execution should succeed");
-        assert!(
-            output.contains("Hello"),
-            "Output should contain first print"
-        );
-        assert!(
-            output.contains("World"),
-            "Output should contain second print"
-        );
-    }
-
-    #[test]
-    fn test_lua_executor_error() {
-        let lua_runtime = crate::LuaRuntime::new().unwrap();
-        let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(lua_runtime))));
-
-        let (output, success) = executor.execute("error('test error')");
-        assert!(!success, "Execution should fail");
-        assert!(
-            output.contains("Error"),
-            "Output should contain error message"
-        );
-    }
-
-    #[test]
-    fn test_lua_executor_not_initialized() {
+    fn executor_handles_uninitialized_runtime() {
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(None)));
         let (output, success) = executor.execute("print('test')");
         assert!(!success, "Execution should fail without runtime");

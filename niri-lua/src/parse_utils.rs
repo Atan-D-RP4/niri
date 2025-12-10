@@ -89,7 +89,10 @@ mod tests {
 
     #[test]
     fn test_parse_size_change_fixed_adjust() {
-        assert_eq!(parse_size_change("+100"), Some(SizeChange::AdjustFixed(100)));
+        assert_eq!(
+            parse_size_change("+100"),
+            Some(SizeChange::AdjustFixed(100))
+        );
         assert_eq!(parse_size_change("-50"), Some(SizeChange::AdjustFixed(-50)));
     }
 
@@ -105,10 +108,7 @@ mod tests {
             parse_size_change("  +10%  "),
             Some(SizeChange::AdjustProportion(0.1))
         );
-        assert_eq!(
-            parse_size_change(" 800 "),
-            Some(SizeChange::SetFixed(800))
-        );
+        assert_eq!(parse_size_change(" 800 "), Some(SizeChange::SetFixed(800)));
     }
 
     #[test]

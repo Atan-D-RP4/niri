@@ -8,7 +8,13 @@ use std::str::FromStr;
 use mlua::prelude::*;
 use niri_config::animations::*;
 use niri_config::appearance::*;
+use niri_config::debug::Debug;
+use niri_config::gestures::Gestures;
+use niri_config::input::*;
+use niri_config::layout::*;
 use niri_config::misc::*;
+use niri_config::recent_windows::{MruHighlight, MruPreviews, RecentWindows};
+use niri_config::{ConfigNotification, FloatOrInt, XwaylandSatellite};
 
 /// Helper to extract an optional string field from a Lua table.
 pub fn extract_string_opt(table: &LuaTable, field: &str) -> LuaResult<Option<String>> {
@@ -213,19 +219,798 @@ pub fn extract_environment(table: &LuaTable) -> LuaResult<Option<Environment>> {
     }
 }
 
+// ============================================================================
+// Input configuration extractors
+// ============================================================================
+
+/// Extract XKB configuration from Lua table.
+pub fn extract_xkb(table: &LuaTable) -> LuaResult<Option<Xkb>> {
+    let layout = extract_string_opt(table, "layout")?;
+    let model = extract_string_opt(table, "model")?;
+    let rules = extract_string_opt(table, "rules")?;
+    let variant = extract_string_opt(table, "variant")?;
+    let options = extract_string_opt(table, "options")?;
+    let file = extract_string_opt(table, "file")?;
+
+    if layout.is_some()
+        || model.is_some()
+        || rules.is_some()
+        || variant.is_some()
+        || options.is_some()
+        || file.is_some()
+    {
+        Ok(Some(Xkb {
+            layout: layout.unwrap_or_default(),
+            model: model.unwrap_or_default(),
+            rules: rules.unwrap_or_default(),
+            variant: variant.unwrap_or_default(),
+            options,
+            file,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract keyboard configuration from Lua table.
+pub fn extract_keyboard(table: &LuaTable) -> LuaResult<Option<Keyboard>> {
+    let xkb = if let Some(xkb_table) = extract_table_opt(table, "xkb")? {
+        extract_xkb(&xkb_table)?
+    } else {
+        None
+    };
+    let repeat_delay = extract_int_opt(table, "repeat_delay")?.map(|v| v as u16);
+    let repeat_rate = extract_int_opt(table, "repeat_rate")?.map(|v| v as u8);
+    let numlock = extract_bool_opt(table, "numlock")?;
+    let track_layout = extract_string_opt(table, "track_layout")?;
+
+    if xkb.is_some()
+        || repeat_delay.is_some()
+        || repeat_rate.is_some()
+        || numlock.is_some()
+        || track_layout.is_some()
+    {
+        let mut keyboard = Keyboard::default();
+        if let Some(x) = xkb {
+            keyboard.xkb = x;
+        }
+        if let Some(d) = repeat_delay {
+            keyboard.repeat_delay = d;
+        }
+        if let Some(r) = repeat_rate {
+            keyboard.repeat_rate = r;
+        }
+        if let Some(n) = numlock {
+            keyboard.numlock = n;
+        }
+        if let Some(t) = track_layout {
+            keyboard.track_layout = match t.as_str() {
+                "global" => TrackLayout::Global,
+                "window" => TrackLayout::Window,
+                _ => TrackLayout::Global,
+            };
+        }
+        Ok(Some(keyboard))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract touchpad configuration from Lua table.
+pub fn extract_touchpad(table: &LuaTable) -> LuaResult<Option<Touchpad>> {
+    let off = extract_bool_opt(table, "off")?;
+    let tap = extract_bool_opt(table, "tap")?;
+    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
+    let accel_speed = extract_float_opt(table, "accel_speed")?;
+    let accel_profile = extract_string_opt(table, "accel_profile")?;
+    let scroll_method = extract_string_opt(table, "scroll_method")?;
+    let disabled_on_external_mouse = extract_bool_opt(table, "disabled_on_external_mouse")?;
+    let dwt = extract_bool_opt(table, "dwt")?;
+    let dwtp = extract_bool_opt(table, "dwtp")?;
+    let left_handed = extract_bool_opt(table, "left_handed")?;
+    let middle_emulation = extract_bool_opt(table, "middle_emulation")?;
+    let tap_button_map = extract_string_opt(table, "tap_button_map")?;
+    let click_method = extract_string_opt(table, "click_method")?;
+
+    if off.is_some()
+        || tap.is_some()
+        || natural_scroll.is_some()
+        || accel_speed.is_some()
+        || accel_profile.is_some()
+        || scroll_method.is_some()
+        || disabled_on_external_mouse.is_some()
+        || dwt.is_some()
+        || dwtp.is_some()
+        || left_handed.is_some()
+        || middle_emulation.is_some()
+        || tap_button_map.is_some()
+        || click_method.is_some()
+    {
+        let mut touchpad = Touchpad::default();
+        if let Some(v) = off {
+            touchpad.off = v;
+        }
+        if let Some(v) = tap {
+            touchpad.tap = v;
+        }
+        if let Some(v) = natural_scroll {
+            touchpad.natural_scroll = v;
+        }
+        if let Some(v) = accel_speed {
+            touchpad.accel_speed = FloatOrInt(v);
+        }
+        if let Some(v) = accel_profile {
+            touchpad.accel_profile = parse_accel_profile(&v);
+        }
+        if let Some(v) = scroll_method {
+            touchpad.scroll_method = parse_scroll_method(&v);
+        }
+        if let Some(v) = disabled_on_external_mouse {
+            touchpad.disabled_on_external_mouse = v;
+        }
+        if let Some(v) = dwt {
+            touchpad.dwt = v;
+        }
+        if let Some(v) = dwtp {
+            touchpad.dwtp = v;
+        }
+        if let Some(v) = left_handed {
+            touchpad.left_handed = v;
+        }
+        if let Some(v) = middle_emulation {
+            touchpad.middle_emulation = v;
+        }
+        if let Some(v) = tap_button_map {
+            touchpad.tap_button_map = parse_tap_button_map(&v);
+        }
+        if let Some(v) = click_method {
+            touchpad.click_method = parse_click_method(&v);
+        }
+        Ok(Some(touchpad))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract mouse configuration from Lua table.
+pub fn extract_mouse(table: &LuaTable) -> LuaResult<Option<Mouse>> {
+    let off = extract_bool_opt(table, "off")?;
+    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
+    let accel_speed = extract_float_opt(table, "accel_speed")?;
+    let accel_profile = extract_string_opt(table, "accel_profile")?;
+    let scroll_method = extract_string_opt(table, "scroll_method")?;
+    let left_handed = extract_bool_opt(table, "left_handed")?;
+    let middle_emulation = extract_bool_opt(table, "middle_emulation")?;
+
+    if off.is_some()
+        || natural_scroll.is_some()
+        || accel_speed.is_some()
+        || accel_profile.is_some()
+        || scroll_method.is_some()
+        || left_handed.is_some()
+        || middle_emulation.is_some()
+    {
+        let mut mouse = Mouse::default();
+        if let Some(v) = off {
+            mouse.off = v;
+        }
+        if let Some(v) = natural_scroll {
+            mouse.natural_scroll = v;
+        }
+        if let Some(v) = accel_speed {
+            mouse.accel_speed = FloatOrInt(v);
+        }
+        if let Some(v) = accel_profile {
+            mouse.accel_profile = parse_accel_profile(&v);
+        }
+        if let Some(v) = scroll_method {
+            mouse.scroll_method = parse_scroll_method(&v);
+        }
+        if let Some(v) = left_handed {
+            mouse.left_handed = v;
+        }
+        if let Some(v) = middle_emulation {
+            mouse.middle_emulation = v;
+        }
+        Ok(Some(mouse))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract trackpoint configuration from Lua table.
+pub fn extract_trackpoint(table: &LuaTable) -> LuaResult<Option<Trackpoint>> {
+    let off = extract_bool_opt(table, "off")?;
+    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
+    let accel_speed = extract_float_opt(table, "accel_speed")?;
+    let accel_profile = extract_string_opt(table, "accel_profile")?;
+    let scroll_method = extract_string_opt(table, "scroll_method")?;
+    let left_handed = extract_bool_opt(table, "left_handed")?;
+    let middle_emulation = extract_bool_opt(table, "middle_emulation")?;
+
+    if off.is_some()
+        || natural_scroll.is_some()
+        || accel_speed.is_some()
+        || accel_profile.is_some()
+        || scroll_method.is_some()
+        || left_handed.is_some()
+        || middle_emulation.is_some()
+    {
+        let mut trackpoint = Trackpoint::default();
+        if let Some(v) = off {
+            trackpoint.off = v;
+        }
+        if let Some(v) = natural_scroll {
+            trackpoint.natural_scroll = v;
+        }
+        if let Some(v) = accel_speed {
+            trackpoint.accel_speed = FloatOrInt(v);
+        }
+        if let Some(v) = accel_profile {
+            trackpoint.accel_profile = parse_accel_profile(&v);
+        }
+        if let Some(v) = scroll_method {
+            trackpoint.scroll_method = parse_scroll_method(&v);
+        }
+        if let Some(v) = left_handed {
+            trackpoint.left_handed = v;
+        }
+        if let Some(v) = middle_emulation {
+            trackpoint.middle_emulation = v;
+        }
+        Ok(Some(trackpoint))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract touch configuration from Lua table.
+pub fn extract_touch(table: &LuaTable) -> LuaResult<Option<Touch>> {
+    let off = extract_bool_opt(table, "off")?;
+    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
+    let map_to_output = extract_string_opt(table, "map_to_output")?;
+
+    if off.is_some() || natural_scroll.is_some() || map_to_output.is_some() {
+        let mut touch = Touch::default();
+        if let Some(v) = off {
+            touch.off = v;
+        }
+        if let Some(v) = natural_scroll {
+            touch.natural_scroll = v;
+        }
+        if let Some(v) = map_to_output {
+            touch.map_to_output = Some(v);
+        }
+        Ok(Some(touch))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract full Input configuration from Lua table.
+pub fn extract_input(table: &LuaTable) -> LuaResult<Option<Input>> {
+    let keyboard = if let Some(kb_table) = extract_table_opt(table, "keyboard")? {
+        extract_keyboard(&kb_table)?
+    } else {
+        None
+    };
+    let touchpad = if let Some(tp_table) = extract_table_opt(table, "touchpad")? {
+        extract_touchpad(&tp_table)?
+    } else {
+        None
+    };
+    let mouse = if let Some(m_table) = extract_table_opt(table, "mouse")? {
+        extract_mouse(&m_table)?
+    } else {
+        None
+    };
+    let trackpoint = if let Some(tp_table) = extract_table_opt(table, "trackpoint")? {
+        extract_trackpoint(&tp_table)?
+    } else {
+        None
+    };
+    let touch = if let Some(t_table) = extract_table_opt(table, "touch")? {
+        extract_touch(&t_table)?
+    } else {
+        None
+    };
+    let disable_power_key_handling = extract_bool_opt(table, "disable_power_key_handling")?;
+    let workspace_auto_back_and_forth = extract_bool_opt(table, "workspace_auto_back_and_forth")?;
+
+    if keyboard.is_some()
+        || touchpad.is_some()
+        || mouse.is_some()
+        || trackpoint.is_some()
+        || touch.is_some()
+        || disable_power_key_handling.is_some()
+        || workspace_auto_back_and_forth.is_some()
+    {
+        let mut input = Input::default();
+        if let Some(kb) = keyboard {
+            input.keyboard = kb;
+        }
+        if let Some(tp) = touchpad {
+            input.touchpad = tp;
+        }
+        if let Some(m) = mouse {
+            input.mouse = m;
+        }
+        if let Some(tp) = trackpoint {
+            input.trackpoint = tp;
+        }
+        if let Some(t) = touch {
+            input.touch = t;
+        }
+        if let Some(v) = disable_power_key_handling {
+            input.disable_power_key_handling = v;
+        }
+        if let Some(v) = workspace_auto_back_and_forth {
+            input.workspace_auto_back_and_forth = v;
+        }
+        Ok(Some(input))
+    } else {
+        Ok(None)
+    }
+}
+
+// Helper functions for parsing enum values
+fn parse_accel_profile(s: &str) -> Option<AccelProfile> {
+    match s.to_lowercase().as_str() {
+        "adaptive" => Some(AccelProfile::Adaptive),
+        "flat" => Some(AccelProfile::Flat),
+        _ => None,
+    }
+}
+
+fn parse_scroll_method(s: &str) -> Option<ScrollMethod> {
+    match s.to_lowercase().replace('-', "_").as_str() {
+        "no_scroll" | "none" => Some(ScrollMethod::NoScroll),
+        "two_finger" | "twofinger" => Some(ScrollMethod::TwoFinger),
+        "edge" => Some(ScrollMethod::Edge),
+        "on_button_down" | "button" => Some(ScrollMethod::OnButtonDown),
+        _ => None,
+    }
+}
+
+fn parse_tap_button_map(s: &str) -> Option<TapButtonMap> {
+    match s.to_lowercase().as_str() {
+        "left_right_middle" | "lrm" => Some(TapButtonMap::LeftRightMiddle),
+        "left_middle_right" | "lmr" => Some(TapButtonMap::LeftMiddleRight),
+        _ => None,
+    }
+}
+
+fn parse_click_method(s: &str) -> Option<ClickMethod> {
+    match s.to_lowercase().replace('-', "_").as_str() {
+        "button_areas" | "areas" => Some(ClickMethod::ButtonAreas),
+        "click_finger" | "clickfinger" => Some(ClickMethod::Clickfinger),
+        _ => None,
+    }
+}
+
+// ============================================================================
+// Layout configuration extractors
+// ============================================================================
+
+/// Extract layout configuration from Lua table.
+pub fn extract_layout(table: &LuaTable) -> LuaResult<Option<Layout>> {
+    let gaps = extract_float_opt(table, "gaps")?;
+    let center_focused_column = extract_string_opt(table, "center_focused_column")?;
+    let focus_ring = if let Some(fr_table) = extract_table_opt(table, "focus_ring")? {
+        extract_focus_ring(&fr_table)?
+    } else {
+        None
+    };
+    let border = if let Some(b_table) = extract_table_opt(table, "border")? {
+        extract_border(&b_table)?
+    } else {
+        None
+    };
+    let shadow = if let Some(s_table) = extract_table_opt(table, "shadow")? {
+        extract_shadow(&s_table)?
+    } else {
+        None
+    };
+    let preset_column_widths = extract_preset_sizes(table, "preset_column_widths")?;
+    let default_column_width =
+        if let Some(dcw_table) = extract_table_opt(table, "default_column_width")? {
+            extract_size_change(&dcw_table)?
+        } else {
+            None
+        };
+    let preset_window_heights = extract_preset_sizes(table, "preset_window_heights")?;
+
+    if gaps.is_some()
+        || center_focused_column.is_some()
+        || focus_ring.is_some()
+        || border.is_some()
+        || shadow.is_some()
+        || preset_column_widths.is_some()
+        || default_column_width.is_some()
+        || preset_window_heights.is_some()
+    {
+        let mut layout = Layout::default();
+        if let Some(g) = gaps {
+            layout.gaps = g;
+        }
+        if let Some(cfc) = center_focused_column {
+            layout.center_focused_column = match cfc.as_str() {
+                "never" => CenterFocusedColumn::Never,
+                "always" => CenterFocusedColumn::Always,
+                "on-overflow" => CenterFocusedColumn::OnOverflow,
+                _ => CenterFocusedColumn::Never,
+            };
+        }
+        if let Some(fr) = focus_ring {
+            layout.focus_ring = fr;
+        }
+        if let Some(b) = border {
+            layout.border = b;
+        }
+        if let Some(s) = shadow {
+            layout.shadow = s;
+        }
+        if let Some(pcw) = preset_column_widths {
+            layout.preset_column_widths = pcw;
+        }
+        if let Some(dcw) = default_column_width {
+            layout.default_column_width = Some(dcw);
+        }
+        if let Some(pwh) = preset_window_heights {
+            layout.preset_window_heights = pwh;
+        }
+        Ok(Some(layout))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract focus_ring configuration from Lua table.
+pub fn extract_focus_ring(table: &LuaTable) -> LuaResult<Option<FocusRing>> {
+    let off = extract_bool_opt(table, "off")?;
+    let width = extract_float_opt(table, "width")?;
+    let active_color = extract_color_opt(table, "active_color")?;
+    let inactive_color = extract_color_opt(table, "inactive_color")?;
+
+    if off.is_some() || width.is_some() || active_color.is_some() || inactive_color.is_some() {
+        let mut focus_ring = FocusRing::default();
+        if let Some(v) = off {
+            focus_ring.off = v;
+        }
+        if let Some(v) = width {
+            focus_ring.width = v;
+        }
+        if let Some(c) = active_color {
+            focus_ring.active_color = c;
+        }
+        if let Some(c) = inactive_color {
+            focus_ring.inactive_color = c;
+        }
+        Ok(Some(focus_ring))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract border configuration from Lua table.
+pub fn extract_border(table: &LuaTable) -> LuaResult<Option<Border>> {
+    let off = extract_bool_opt(table, "off")?;
+    let width = extract_float_opt(table, "width")?;
+    let active_color = extract_color_opt(table, "active_color")?;
+    let inactive_color = extract_color_opt(table, "inactive_color")?;
+    let urgent_color = extract_color_opt(table, "urgent_color")?;
+
+    if off.is_some()
+        || width.is_some()
+        || active_color.is_some()
+        || inactive_color.is_some()
+        || urgent_color.is_some()
+    {
+        let mut border = Border::default();
+        if let Some(v) = off {
+            border.off = v;
+        }
+        if let Some(v) = width {
+            border.width = v;
+        }
+        if let Some(c) = active_color {
+            border.active_color = c;
+        }
+        if let Some(c) = inactive_color {
+            border.inactive_color = c;
+        }
+        if let Some(c) = urgent_color {
+            border.urgent_color = c;
+        }
+        Ok(Some(border))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract shadow configuration from Lua table.
+pub fn extract_shadow(table: &LuaTable) -> LuaResult<Option<Shadow>> {
+    let off = extract_bool_opt(table, "off")?;
+    let on = extract_bool_opt(table, "on")?;
+    let softness = extract_float_opt(table, "softness")?;
+    let spread = extract_float_opt(table, "spread")?;
+    let color = extract_color_opt(table, "color")?;
+    let inactive_color = extract_color_opt(table, "inactive_color")?;
+    let draw_behind_window = extract_bool_opt(table, "draw_behind_window")?;
+    let offset = if let Some(offset_table) = extract_table_opt(table, "offset")? {
+        let x = extract_float_opt(&offset_table, "x")?.unwrap_or(0.0);
+        let y = extract_float_opt(&offset_table, "y")?.unwrap_or(0.0);
+        Some((x, y))
+    } else {
+        None
+    };
+
+    if off.is_some()
+        || on.is_some()
+        || softness.is_some()
+        || spread.is_some()
+        || color.is_some()
+        || offset.is_some()
+        || inactive_color.is_some()
+        || draw_behind_window.is_some()
+    {
+        let mut shadow = Shadow::default();
+        // Handle both "off" (inverted) and "on" directly
+        if let Some(v) = off {
+            shadow.on = !v;
+        }
+        if let Some(v) = on {
+            shadow.on = v;
+        }
+        if let Some(v) = softness {
+            shadow.softness = v;
+        }
+        if let Some(v) = spread {
+            shadow.spread = v;
+        }
+        if let Some(c) = color {
+            shadow.color = c;
+        }
+        if let Some(c) = inactive_color {
+            shadow.inactive_color = Some(c);
+        }
+        if let Some(v) = draw_behind_window {
+            shadow.draw_behind_window = v;
+        }
+        if let Some((x, y)) = offset {
+            shadow.offset = ShadowOffset {
+                x: FloatOrInt(x),
+                y: FloatOrInt(y),
+            };
+        }
+        Ok(Some(shadow))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract preset sizes (column widths or window heights) from Lua table.
+fn extract_preset_sizes(table: &LuaTable, field: &str) -> LuaResult<Option<Vec<PresetSize>>> {
+    if let Some(array_table) = extract_table_opt(table, field)? {
+        let mut sizes = Vec::new();
+        // Iterate as array (1-indexed in Lua)
+        for i in 1..=array_table.len()? {
+            if let Ok(item_table) = array_table.get::<LuaTable>(i) {
+                if let Some(size) = extract_size_change(&item_table)? {
+                    sizes.push(size);
+                }
+            }
+        }
+        if !sizes.is_empty() {
+            return Ok(Some(sizes));
+        }
+    }
+    Ok(None)
+}
+
+/// Extract a single size change (proportion or fixed).
+fn extract_size_change(table: &LuaTable) -> LuaResult<Option<PresetSize>> {
+    if let Some(proportion) = extract_float_opt(table, "proportion")? {
+        return Ok(Some(PresetSize::Proportion(proportion)));
+    }
+    if let Some(fixed) = extract_int_opt(table, "fixed")? {
+        return Ok(Some(PresetSize::Fixed(fixed as i32)));
+    }
+    Ok(None)
+}
+
+// ============================================================================
+// Gestures configuration extractors
+// ============================================================================
+
+/// Extract gestures configuration from Lua table.
+pub fn extract_gestures(table: &LuaTable) -> LuaResult<Option<Gestures>> {
+    // Gestures currently has limited config options (just hot corners).
+    // For now, return a default if the table has any values
+    if table.len()? == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(Gestures::default()))
+    }
+}
+
+// ============================================================================
+// Recent Windows (MRU) configuration extractors
+// ============================================================================
+
+/// Extract recent windows configuration from Lua table.
+pub fn extract_recent_windows(table: &LuaTable) -> LuaResult<Option<RecentWindows>> {
+    let off = extract_bool_opt(table, "off")?;
+    let on = extract_bool_opt(table, "on")?;
+    let open_delay_ms = extract_int_opt(table, "open_delay_ms")?.map(|v| v as u16);
+
+    let highlight = if let Some(hl_table) = extract_table_opt(table, "highlight")? {
+        extract_mru_highlight(&hl_table)?
+    } else {
+        None
+    };
+
+    let previews = if let Some(pv_table) = extract_table_opt(table, "previews")? {
+        extract_mru_previews(&pv_table)?
+    } else {
+        None
+    };
+
+    if off.is_some()
+        || on.is_some()
+        || open_delay_ms.is_some()
+        || highlight.is_some()
+        || previews.is_some()
+    {
+        let mut recent_windows = RecentWindows::default();
+        // Handle "off" (inverted) or "on" directly
+        if let Some(v) = off {
+            recent_windows.on = !v;
+        }
+        if let Some(v) = on {
+            recent_windows.on = v;
+        }
+        if let Some(d) = open_delay_ms {
+            recent_windows.open_delay_ms = d;
+        }
+        if let Some(hl) = highlight {
+            recent_windows.highlight = hl;
+        }
+        if let Some(pv) = previews {
+            recent_windows.previews = pv;
+        }
+        Ok(Some(recent_windows))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract MRU highlight configuration from Lua table.
+fn extract_mru_highlight(table: &LuaTable) -> LuaResult<Option<MruHighlight>> {
+    let active_color = extract_color_opt(table, "active_color")?;
+    let urgent_color = extract_color_opt(table, "urgent_color")?;
+    let padding = extract_float_opt(table, "padding")?;
+    let corner_radius = extract_float_opt(table, "corner_radius")?;
+
+    if active_color.is_some()
+        || urgent_color.is_some()
+        || padding.is_some()
+        || corner_radius.is_some()
+    {
+        let mut highlight = MruHighlight::default();
+        if let Some(c) = active_color {
+            highlight.active_color = c;
+        }
+        if let Some(c) = urgent_color {
+            highlight.urgent_color = c;
+        }
+        if let Some(p) = padding {
+            highlight.padding = p;
+        }
+        if let Some(r) = corner_radius {
+            highlight.corner_radius = r;
+        }
+        Ok(Some(highlight))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract MRU previews configuration from Lua table.
+fn extract_mru_previews(table: &LuaTable) -> LuaResult<Option<MruPreviews>> {
+    let max_height = extract_float_opt(table, "max_height")?;
+    let max_scale = extract_float_opt(table, "max_scale")?;
+
+    if max_height.is_some() || max_scale.is_some() {
+        let mut previews = MruPreviews::default();
+        if let Some(h) = max_height {
+            previews.max_height = h;
+        }
+        if let Some(s) = max_scale {
+            previews.max_scale = s;
+        }
+        Ok(Some(previews))
+    } else {
+        Ok(None)
+    }
+}
+
+// ============================================================================
+// Config notification extractors
+// ============================================================================
+
+/// Extract config notification settings from Lua table.
+pub fn extract_config_notification(table: &LuaTable) -> LuaResult<Option<ConfigNotification>> {
+    let disable_failed = extract_bool_opt(table, "disable_failed")?;
+
+    if disable_failed.is_some() {
+        let mut notification = ConfigNotification::default();
+        if let Some(v) = disable_failed {
+            notification.disable_failed = v;
+        }
+        Ok(Some(notification))
+    } else {
+        Ok(None)
+    }
+}
+
+// ============================================================================
+// Debug configuration extractors
+// ============================================================================
+
+/// Extract debug configuration from Lua table.
+pub fn extract_debug(table: &LuaTable) -> LuaResult<Option<Debug>> {
+    // Debug has many options - only handle common ones here
+    let disable_direct_scanout = extract_bool_opt(table, "disable_direct_scanout")?;
+    let render_drm_device = extract_string_opt(table, "render_drm_device")?;
+    let disable_resize_throttling = extract_bool_opt(table, "disable_resize_throttling")?;
+
+    if disable_direct_scanout.is_some()
+        || render_drm_device.is_some()
+        || disable_resize_throttling.is_some()
+    {
+        let mut debug = Debug::default();
+        if let Some(v) = disable_direct_scanout {
+            debug.disable_direct_scanout = v;
+        }
+        if let Some(v) = render_drm_device {
+            debug.render_drm_device = Some(v.into());
+        }
+        if let Some(v) = disable_resize_throttling {
+            debug.disable_resize_throttling = v;
+        }
+        Ok(Some(debug))
+    } else {
+        Ok(None)
+    }
+}
+
+// ============================================================================
+// Xwayland Satellite extractors
+// ============================================================================
+
+/// Extract xwayland_satellite configuration from Lua table.
+pub fn extract_xwayland_satellite(table: &LuaTable) -> LuaResult<Option<XwaylandSatellite>> {
+    let off = extract_bool_opt(table, "off")?;
+
+    if off.is_some() {
+        let mut xwayland = XwaylandSatellite::default();
+        if let Some(v) = off {
+            xwayland.off = v;
+        }
+        Ok(Some(xwayland))
+    } else {
+        Ok(None)
+    }
+}
+
 // TODO: Add more complex extractors for:
-// - Input configuration (keyboard, touchpad, mouse, etc.)
-// - Layout configuration (focus_ring, border, struts, etc.)
 // - Output configuration
 // - Window rules
 // - Layer rules
 // - Workspaces
-// - Gestures
 // - Switch Events
-// - Recent Windows
-// - Debug options
 // - Named Workspaces
-// - Miscellaneous settings
 
 #[cfg(test)]
 mod tests {
@@ -389,6 +1174,7 @@ mod tests {
     // ========================================================================
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn extract_float_opt_decimal() {
         let (_lua, table) = create_test_table();
         table.set("key", 3.14).unwrap();

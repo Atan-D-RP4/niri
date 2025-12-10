@@ -402,6 +402,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_lua_helpers() {
         let lua = Lua::new();
         let _str = lua_string(&lua, "test");

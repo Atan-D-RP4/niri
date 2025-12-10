@@ -35,7 +35,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use mlua::prelude::*;
@@ -44,14 +44,13 @@ use niri_config::Config;
 
 use crate::action_proxy::{register_action_proxy, ActionCallback};
 use crate::config_api::ConfigApi;
-use crate::config_proxy::{
-    create_shared_pending_changes, register_config_proxy_to_lua, update_config_proxy_values,
-    SharedPendingChanges,
-};
+use crate::config_wrapper::{register_config_wrapper, ConfigWrapper};
 use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
-use crate::loop_api::{create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager};
+use crate::loop_api::{
+    create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
+};
 use crate::{LuaComponent, NiriApi};
 
 /// Maximum callbacks to execute per flush cycle.
@@ -117,8 +116,8 @@ pub struct LuaRuntime {
     lua: Lua,
     /// Event system for emitting Lua events from the compositor
     pub event_system: Option<EventSystem>,
-    /// Pending configuration changes (for the new v2 API)
-    pub pending_config: Option<SharedPendingChanges>,
+    /// New config wrapper with direct niri_config::Config access
+    pub config_wrapper: Option<ConfigWrapper>,
     /// Timer manager for niri.loop timers
     pub timer_manager: Option<SharedTimerManager>,
     /// Queue of scheduled callbacks (stored as registry keys)
@@ -183,7 +182,7 @@ impl LuaRuntime {
         Ok(Self {
             lua,
             event_system: None,
-            pending_config: None,
+            config_wrapper: None,
             timer_manager: None,
             scheduled_callbacks,
             limits,
@@ -450,94 +449,48 @@ impl LuaRuntime {
         ConfigApi::register_to_lua(&self.lua, config)
     }
 
-    /// Register the reactive configuration proxy API to the runtime.
+    /// Register the new config wrapper API.
     ///
-    /// This provides a reactive configuration system through `niri.config` that allows
-    /// reading current values and staging changes via proxy tables. Changes are accumulated
-    /// until `niri.config:apply()` is called, or applied automatically if auto-apply mode
-    /// is enabled via `niri.config:auto_apply(true)`.
+    /// This provides direct access to niri_config::Config through the `niri.config` table.
+    /// Changes are tracked via `ConfigDirtyFlags` and can be extracted after script execution.
+    ///
+    /// This is the new API that will replace the old `register_config_proxy_api` method.
     ///
     /// # Arguments
     ///
-    /// * `config` - The current Niri configuration to initialize proxy values from
+    /// * `config` - The initial Config to populate the wrapper with
     ///
     /// # Returns
     ///
-    /// Returns a shared handle to the pending changes that can be used by the compositor
-    /// to apply configuration updates.
-    ///
-    /// If the config proxy is already initialized (from `init_empty_config_proxy` during
-    /// config loading), this updates the existing proxy's current values from the config
-    /// while keeping the same pending changes handle. This ensures the Lua-side proxy
-    /// remains connected to the same pending changes object that IPC commands will read from.
+    /// The ConfigWrapper handle that can be used to extract the config and dirty flags.
     ///
     /// # Errors
     ///
-    /// Returns an error if configuration proxy API registration fails.
-    pub fn register_config_proxy_api(
-        &mut self,
-        config: &Config,
-    ) -> LuaResult<SharedPendingChanges> {
-        // If already initialized, update the existing proxy's current values
-        // while keeping the same pending changes handle
-        if let Some(ref pending) = self.pending_config {
-            update_config_proxy_values(&self.lua, config)?;
-            return Ok(pending.clone());
-        }
-
-        let pending = create_shared_pending_changes();
-        register_config_proxy_to_lua(&self.lua, pending.clone(), config)?;
-        self.pending_config = Some(pending.clone());
-        Ok(pending)
+    /// Returns an error if configuration wrapper registration fails.
+    pub fn register_config_wrapper_api(&mut self, config: Config) -> LuaResult<ConfigWrapper> {
+        let wrapper = ConfigWrapper::new(Arc::new(Mutex::new(config)));
+        register_config_wrapper(&self.lua, wrapper.clone())?;
+        self.config_wrapper = Some(wrapper.clone());
+        Ok(wrapper)
     }
 
-    /// Initialize an empty config proxy for initial script loading.
+    /// Initialize an empty config wrapper for initial script loading.
     ///
-    /// This creates a config proxy with empty collections that can be populated
-    /// by the Lua script during initial loading. The proxy will be updated with
-    /// real config values later when `register_config_proxy_api` is called.
+    /// This creates a config wrapper with default values that can be modified
+    /// by the Lua script during initial loading.
     ///
-    /// Spawn commands issued via `niri.action:spawn()` during config loading
-    /// are captured and added to `spawn_at_startup` in the pending config changes.
+    /// # Returns
+    ///
+    /// The ConfigWrapper handle that can be used to extract the config and dirty flags.
     ///
     /// # Errors
     ///
-    /// Returns an error if configuration proxy initialization fails.
-    pub fn init_empty_config_proxy(&mut self) -> LuaResult<SharedPendingChanges> {
-        let pending = create_shared_pending_changes();
-        // Use a default config to initialize empty collections
-        let default_config = Config::default();
-        register_config_proxy_to_lua(&self.lua, pending.clone(), &default_config)?;
-        self.pending_config = Some(pending.clone());
-
-        // Also register the action proxy with a callback that captures spawn commands
-        // Spawn actions called during config loading are converted to spawn_at_startup
-        let pending_clone = pending.clone();
-        let capture_callback: ActionCallback = std::sync::Arc::new(move |action| {
-            match &action {
-                niri_ipc::Action::Spawn { command } => {
-                    log::debug!(
-                        "Config load: capturing spawn {:?} as spawn_at_startup",
-                        command
-                    );
-                    // Add to pending config changes as spawn_at_startup
-                    let spawn_json = serde_json::json!(command);
-                    let mut pending = pending_clone.lock().unwrap();
-                    pending
-                        .collection_additions
-                        .entry("spawn_at_startup".to_string())
-                        .or_default()
-                        .push(spawn_json);
-                }
-                _ => {
-                    log::debug!("Config load: action {:?} (deferred/ignored)", action);
-                }
-            }
-            Ok(())
-        });
-        register_action_proxy(&self.lua, capture_callback)?;
-
-        Ok(pending)
+    /// Returns an error if configuration wrapper initialization fails.
+    pub fn init_empty_config_wrapper(&mut self) -> LuaResult<ConfigWrapper> {
+        let wrapper = ConfigWrapper::new_default();
+        register_config_wrapper(&self.lua, wrapper.clone())?;
+        self.config_wrapper = Some(wrapper.clone());
+        Ok(wrapper)
     }
 
     /// Register the runtime API to the runtime.
@@ -609,24 +562,6 @@ impl LuaRuntime {
         register_action_proxy(&self.lua, callback)
     }
 
-    /// Update the config proxy's cached values from the current config.
-    ///
-    /// This should be called after applying config changes (e.g., via IPC) to ensure
-    /// the Lua-side config proxy reflects the current state of the Rust config.
-    /// Without this, reading `niri.config.prefer_no_csd` after an IPC change would
-    /// return the old cached value instead of the new value.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The current config to sync from
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the config proxy cannot be updated.
-    pub fn sync_config_from(&self, config: &Config) -> LuaResult<()> {
-        update_config_proxy_values(&self.lua, config)
-    }
-
     /// Load and execute a Lua script from a file.
     ///
     /// Uses the optimized compiler for better performance.
@@ -671,18 +606,13 @@ impl LuaRuntime {
     /// Captures print() output and returns the result.
     /// Returns a tuple of (output, success).
     pub fn execute_string(&self, code: &str) -> (String, bool) {
-        // Get or create the format_value function for pretty-printing
+        // Get the format_value function for pretty-printing.
+        // This is always registered by NiriApi before REPL usage.
         let format_value: LuaFunction = self
             .lua
             .globals()
             .get::<LuaFunction>("__niri_format_value")
-            .unwrap_or_else(|_| {
-                // Fallback: create inline if not registered
-                self.lua
-                    .load(include_str!("format_value.lua"))
-                    .eval()
-                    .unwrap()
-            });
+            .expect("__niri_format_value must be registered before REPL execution");
 
         // Capture print output using format_value for inspection
         let original_print = self.lua.globals().get::<LuaFunction>("print");
@@ -825,6 +755,8 @@ mod tests {
     #[test]
     fn execute_string_valid_code() {
         let rt = LuaRuntime::new().unwrap();
+        // Register NiriApi to get __niri_format_value (required for REPL)
+        rt.register_component(|_, _| Ok(())).unwrap();
         let (output, success) = rt.execute_string("return 1 + 1");
         assert!(success);
         assert!(output.contains("2"));
@@ -833,6 +765,8 @@ mod tests {
     #[test]
     fn execute_string_syntax_error() {
         let rt = LuaRuntime::new().unwrap();
+        // Register NiriApi to get __niri_format_value (required for REPL)
+        rt.register_component(|_, _| Ok(())).unwrap();
         let (output, success) = rt.execute_string("local x = ");
         assert!(!success);
         assert!(!output.is_empty());
@@ -855,91 +789,6 @@ mod tests {
         let rt = LuaRuntime::new().unwrap();
         let result = rt.call_function_void("nonexistent_func");
         assert!(result.is_err());
-    }
-
-    // ========================================================================
-    // Config Proxy API tests
-    // ========================================================================
-
-    #[test]
-    fn init_empty_config_proxy_creates_shared_changes() {
-        let mut rt = LuaRuntime::new().unwrap();
-        let shared = rt.init_empty_config_proxy();
-        assert!(shared.is_ok());
-    }
-
-    #[test]
-    fn config_proxy_captures_layout_changes() {
-        let mut rt = LuaRuntime::new().unwrap();
-        let shared = rt.init_empty_config_proxy().unwrap();
-
-        // Set a layout value through the proxy
-        rt.load_string("niri.config.layout.gaps = 20").unwrap();
-
-        // Check that the change was captured in scalar_changes
-        let changes = shared.lock().unwrap();
-        let layout_gaps = changes.scalar_changes.get("layout.gaps");
-        assert!(layout_gaps.is_some());
-    }
-
-    #[test]
-    fn config_proxy_captures_nested_values() {
-        let mut rt = LuaRuntime::new().unwrap();
-        let shared = rt.init_empty_config_proxy().unwrap();
-
-        // Set a deeply nested value
-        rt.load_string("niri.config.layout.border.active.color = '#ff0000'")
-            .unwrap();
-
-        let changes = shared.lock().unwrap();
-        let border_color = changes.scalar_changes.get("layout.border.active.color");
-        assert!(border_color.is_some());
-    }
-
-    #[test]
-    fn config_proxy_captures_bind_additions() {
-        let mut rt = LuaRuntime::new().unwrap();
-        let shared = rt.init_empty_config_proxy().unwrap();
-
-        // Add a keybind through the collection API
-        rt.load_string(
-            r#"
-            niri.config.binds:add({
-                key = 'Mod+Return',
-                action = 'spawn',
-                args = { 'alacritty' }
-            })
-        "#,
-        )
-        .unwrap();
-
-        let changes = shared.lock().unwrap();
-        // Collection additions are keyed by collection name
-        let binds = changes.collection_additions.get("binds");
-        assert!(binds.is_some());
-        assert!(!binds.unwrap().is_empty());
-    }
-
-    #[test]
-    fn config_proxy_captures_spawn_at_startup() {
-        let mut rt = LuaRuntime::new().unwrap();
-        let shared = rt.init_empty_config_proxy().unwrap();
-
-        // Add a spawn-at-startup command
-        rt.load_string(
-            r#"
-            niri.config.spawn_at_startup:add({
-                command = { 'waybar' }
-            })
-        "#,
-        )
-        .unwrap();
-
-        let changes = shared.lock().unwrap();
-        // Collection additions are keyed by collection name
-        let spawns = changes.collection_additions.get("spawn_at_startup");
-        assert!(spawns.is_some());
-        assert!(!spawns.unwrap().is_empty());
     }
 
     // ========================================================================
@@ -1468,5 +1317,72 @@ mod tests {
         let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
         assert!(msgs.iter().any(|e| e.contains("timer error")));
         assert!(msgs.iter().any(|e| e.contains("scheduled error")));
+    }
+
+    // ========================================================================
+    // ConfigWrapper API tests (new direct config access API)
+    // ========================================================================
+
+    #[test]
+    fn init_empty_config_wrapper_creates_wrapper() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let wrapper = rt.init_empty_config_wrapper();
+        assert!(wrapper.is_ok());
+        assert!(rt.config_wrapper.is_some());
+    }
+
+    #[test]
+    fn config_wrapper_captures_layout_changes() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let wrapper = rt.init_empty_config_wrapper().unwrap();
+
+        // Set a layout value through the wrapper
+        rt.load_string("niri.config.layout.gaps = 20").unwrap();
+
+        // Check that the change was captured
+        let gaps = wrapper.with_config(|c| c.layout.gaps);
+        assert_eq!(gaps, 20.0);
+        assert!(wrapper.take_dirty_flags().layout);
+    }
+
+    #[test]
+    fn config_wrapper_captures_input_keyboard_changes() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let wrapper = rt.init_empty_config_wrapper().unwrap();
+
+        // Set keyboard repeat delay
+        rt.load_string("niri.config.input.keyboard.repeat_delay = 400")
+            .unwrap();
+
+        let delay = wrapper.with_config(|c| c.input.keyboard.repeat_delay);
+        assert_eq!(delay, 400);
+        assert!(wrapper.take_dirty_flags().keyboard);
+    }
+
+    #[test]
+    fn config_wrapper_captures_workspaces_additions() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let wrapper = rt.init_empty_config_wrapper().unwrap();
+
+        // Add a workspace
+        rt.load_string("niri.config.workspaces:add({ name = 'main' })")
+            .unwrap();
+
+        let count = wrapper.with_config(|c| c.workspaces.len());
+        assert_eq!(count, 1);
+        assert!(wrapper.take_dirty_flags().workspaces);
+    }
+
+    #[test]
+    fn config_wrapper_xkb_nested_access() {
+        let mut rt = LuaRuntime::new().unwrap();
+        let wrapper = rt.init_empty_config_wrapper().unwrap();
+
+        // Set XKB layout through deeply nested access
+        rt.load_string("niri.config.input.keyboard.xkb.layout = 'us,de'")
+            .unwrap();
+
+        let layout = wrapper.with_config(|c| c.input.keyboard.xkb.layout.clone());
+        assert_eq!(layout, "us,de");
     }
 }

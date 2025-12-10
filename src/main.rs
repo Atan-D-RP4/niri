@@ -158,6 +158,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Variable to hold the Lua runtime if a config file is loaded
     let mut lua_runtime: Option<niri_lua::LuaRuntime> = None;
+    // Pending actions from Lua config (e.g., niri.action:spawn() calls)
+    let mut lua_pending_actions: Vec<niri_ipc::Action> = Vec::new();
 
     // Determine Lua config file paths to try
     let lua_files_to_try: Vec<PathBuf> = match &config_path {
@@ -191,21 +193,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         binds_before, startup_before
                     );
 
-                    // Apply pending config changes from the reactive API
-                    // (niri.config.binds:add(), niri.config.layout.gaps = 16, etc.)
-                    let runtime = lua_config.runtime();
-                    let pending_changes = niri_lua::apply_pending_lua_config(runtime, &mut config);
+                    // Extract config from the new ConfigWrapper API
+                    // The script has already modified the config directly via niri.config
+                    if let Some(wrapper) = lua_config.config_wrapper() {
+                        let lua_config_obj = wrapper.extract_config();
+                        let dirty = wrapper.take_dirty_flags();
+
+                        if dirty.any() {
+                            // Merge the Lua config into the existing config
+                            // For now, we replace the entire config with the Lua one
+                            // TODO: More sophisticated merging if needed
+                            config = lua_config_obj;
+                        }
+                    }
 
                     let binds_after = config.binds.0.len();
                     let startup_after = config.spawn_at_startup.len();
                     info!(
-                        "Applied {} reactive config changes: {} binds (+{}), {} startup commands (+{})",
-                        pending_changes,
+                        "Applied Lua config changes: {} binds (+{}), {} startup commands (+{})",
                         binds_after,
                         (binds_after as i32 - binds_before as i32),
                         startup_after,
                         (startup_after as i32 - startup_before as i32)
                     );
+
+                    // Take pending actions before consuming the LuaConfig
+                    let pending = lua_config.take_pending_actions();
+                    if !pending.is_empty() {
+                        info!("Collected {} pending Lua actions for execution", pending.len());
+                    }
+                    lua_pending_actions = pending;
 
                     // Store the runtime for later use
                     lua_runtime = Some(lua_config.into_runtime());
@@ -278,11 +295,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             warn!("Failed to register Lua runtime API: {}", e);
         }
 
-        // Register the config proxy API to enable reactive config access
+        // Register the config wrapper API to enable reactive config access
         // This allows Lua scripts to read/write config values via niri.config
-        let config = state.niri.config.borrow();
-        if let Err(e) = runtime.register_config_proxy_api(&config) {
-            warn!("Failed to register Lua config proxy API: {}", e);
+        // We initialize with a default config; the actual config will be used
+        // when apply_config_wrapper_changes is called
+        if let Err(e) = runtime.register_config_wrapper_api(niri_config::Config::default()) {
+            warn!("Failed to register Lua config wrapper API: {}", e);
         }
 
         // Register live action callback for IPC Lua execution
@@ -373,6 +391,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     for elem in spawn_sh_at_startup {
         spawn_sh(elem.command, None);
+    }
+
+    // Execute pending actions from Lua config
+    for action in lua_pending_actions {
+        info!("Executing pending Lua action: {:?}", action);
+        state.do_action(action.into(), false);
     }
 
     // Show the config error notification right away if needed.

@@ -17,6 +17,8 @@ use crate::LuaRuntime;
 /// allowing scripts to define custom behavior for Niri.
 pub struct LuaConfig {
     runtime: LuaRuntime,
+    /// Actions queued during config loading (e.g., spawn commands)
+    pending_actions: std::sync::Arc<std::sync::Mutex<Vec<niri_ipc::Action>>>,
 }
 
 impl LuaConfig {
@@ -70,13 +72,32 @@ impl LuaConfig {
 
         debug!("Loop API initialized");
 
-        // Initialize the config proxy with empty collections BEFORE loading the script
-        // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
+        // Initialize the new ConfigWrapper API for direct config access
+        // This allows the script to use niri.config.layout.gaps = 16, etc.
         runtime
-            .init_empty_config_proxy()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize config proxy: {}", e))?;
+            .init_empty_config_wrapper()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize config wrapper: {}", e))?;
 
-        debug!("Config proxy initialized");
+        debug!("Config wrapper initialized");
+
+        // Create a shared action queue for actions called during config loading
+        let action_queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let action_queue_clone = action_queue.clone();
+
+        // Initialize the action proxy for niri.action:spawn(), etc.
+        // Actions are queued during config loading and executed afterward
+        let action_callback: crate::ActionCallback =
+            std::sync::Arc::new(move |action: niri_ipc::Action| {
+                info!("Lua action queued: {:?}", action);
+                action_queue_clone.lock().unwrap().push(action);
+                Ok(())
+            });
+
+        runtime
+            .register_action_proxy(action_callback)
+            .map_err(|e| anyhow::anyhow!("Failed to register action proxy: {}", e))?;
+
+        debug!("Action proxy initialized");
 
         // Load the configuration file
         // The script can either:
@@ -154,7 +175,10 @@ impl LuaConfig {
             path_ref.display()
         );
 
-        Ok(Self { runtime })
+        Ok(Self {
+            runtime,
+            pending_actions: action_queue,
+        })
     }
 
     /// Create a new Lua configuration from a string.
@@ -202,12 +226,13 @@ impl LuaConfig {
         debug!("Loop API initialized");
 
         // Initialize the config proxy with empty collections BEFORE loading the script
-        // This allows the script to use niri.config.binds:add(), niri.config.outputs:add(), etc.
+        // Initialize the new ConfigWrapper API for direct config access
+        // This allows the script to use niri.config.layout.gaps = 16, etc.
         runtime
-            .init_empty_config_proxy()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize config proxy: {}", e))?;
+            .init_empty_config_wrapper()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize config wrapper: {}", e))?;
 
-        debug!("Config proxy initialized");
+        debug!("Config wrapper initialized");
 
         // Load and execute the code
         let return_val = runtime
@@ -265,7 +290,10 @@ impl LuaConfig {
             }
         }
 
-        Ok(Self { runtime })
+        Ok(Self {
+            runtime,
+            pending_actions: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        })
     }
 
     /// Get a reference to the underlying Lua runtime.
@@ -275,12 +303,29 @@ impl LuaConfig {
         &self.runtime
     }
 
+    /// Get the ConfigWrapper from the runtime if one was registered.
+    ///
+    /// This returns the ConfigWrapper that was used to track config changes
+    /// during script execution. Use `extract_config()` on the wrapper to
+    /// get the modified Config.
+    pub fn config_wrapper(&self) -> Option<&crate::ConfigWrapper> {
+        self.runtime.config_wrapper.as_ref()
+    }
+
     /// Take ownership of the underlying Lua runtime.
     ///
     /// This consumes the LuaConfig and returns the runtime, allowing it to be
     /// stored in the compositor state for runtime access.
     pub fn into_runtime(self) -> LuaRuntime {
         self.runtime
+    }
+
+    /// Take the pending actions that were queued during config loading.
+    ///
+    /// Actions like `niri.action:spawn()` are collected during script execution
+    /// and can be executed by the compositor after config loading completes.
+    pub fn take_pending_actions(&self) -> Vec<niri_ipc::Action> {
+        std::mem::take(&mut self.pending_actions.lock().unwrap())
     }
 }
 

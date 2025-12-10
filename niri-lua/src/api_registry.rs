@@ -69,7 +69,8 @@ const OUTPUT_ALIAS: AliasSchema = AliasSchema {
 const SIZE_CHANGE_ALIAS: AliasSchema = AliasSchema {
     name: "SizeChange",
     ty: "integer|string",
-    description: "Size change value: integer for absolute, '+N'/'-N' for relative, 'N%' for percentage",
+    description:
+        "Size change value: integer for absolute, '+N'/'-N' for relative, 'N%' for percentage",
 };
 
 const POSITION_CHANGE_ALIAS: AliasSchema = AliasSchema {
@@ -177,35 +178,60 @@ const NIRI_UTILS_MODULE: ModuleSchema = ModuleSchema {
             name: "log",
             description: "Log a message at info level",
             is_method: false,
-            params: &[ParamSchema { name: "...", ty: "any", description: "Values to log", optional: false }],
+            params: &[ParamSchema {
+                name: "...",
+                ty: "any",
+                description: "Values to log",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "debug",
             description: "Log a message at debug level",
             is_method: false,
-            params: &[ParamSchema { name: "...", ty: "any", description: "Values to log", optional: false }],
+            params: &[ParamSchema {
+                name: "...",
+                ty: "any",
+                description: "Values to log",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "warn",
             description: "Log a message at warning level",
             is_method: false,
-            params: &[ParamSchema { name: "...", ty: "any", description: "Values to log", optional: false }],
+            params: &[ParamSchema {
+                name: "...",
+                ty: "any",
+                description: "Values to log",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "error",
             description: "Log a message at error level",
             is_method: false,
-            params: &[ParamSchema { name: "...", ty: "any", description: "Values to log", optional: false }],
+            params: &[ParamSchema {
+                name: "...",
+                ty: "any",
+                description: "Values to log",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "spawn",
             description: "Spawn a command asynchronously",
             is_method: false,
-            params: &[ParamSchema { name: "command", ty: "string[]", description: "Command and arguments", optional: false }],
+            params: &[ParamSchema {
+                name: "command",
+                ty: "string[]",
+                description: "Command and arguments",
+                optional: false,
+            }],
             returns: &[],
         },
     ],
@@ -231,7 +257,12 @@ const NIRI_CONFIG_MODULE: ModuleSchema = ModuleSchema {
             name: "auto_apply",
             description: "Enable or disable automatic application of config changes",
             is_method: true,
-            params: &[ParamSchema { name: "enable", ty: "boolean", description: "Whether to auto-apply changes", optional: false }],
+            params: &[ParamSchema {
+                name: "enable",
+                ty: "boolean",
+                description: "Whether to auto-apply changes",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -239,32 +270,115 @@ const NIRI_CONFIG_MODULE: ModuleSchema = ModuleSchema {
             description: "Returns the config API version",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "string", description: "Config API version" }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Config API version",
+            }],
         },
     ],
     fields: &[
         // Scalar config sections (assignable as tables)
-        FieldSchema { name: "input", ty: "ConfigSectionProxy", description: "Input device configuration (keyboard, mouse, touchpad, etc.)" },
-        FieldSchema { name: "layout", ty: "ConfigSectionProxy", description: "Layout configuration (gaps, focus ring, border, shadow, etc.)" },
-        FieldSchema { name: "cursor", ty: "ConfigSectionProxy", description: "Cursor configuration (size, theme, hide when typing)" },
-        FieldSchema { name: "gestures", ty: "ConfigSectionProxy", description: "Gesture configuration (hot corners, touchpad gestures)" },
-        FieldSchema { name: "recent_windows", ty: "ConfigSectionProxy", description: "Recent windows (MRU) configuration" },
-        FieldSchema { name: "overview", ty: "ConfigSectionProxy", description: "Overview mode configuration (zoom, backdrop, shadows)" },
-        FieldSchema { name: "animations", ty: "ConfigSectionProxy", description: "Animation configuration (off, slowdown)" },
-        FieldSchema { name: "clipboard", ty: "ConfigSectionProxy", description: "Clipboard configuration" },
-        FieldSchema { name: "hotkey_overlay", ty: "ConfigSectionProxy", description: "Hotkey overlay configuration" },
-        FieldSchema { name: "config_notification", ty: "ConfigSectionProxy", description: "Config reload notification settings" },
-        FieldSchema { name: "debug", ty: "ConfigSectionProxy", description: "Debug configuration options" },
-        FieldSchema { name: "xwayland_satellite", ty: "ConfigSectionProxy", description: "Xwayland satellite configuration" },
-        FieldSchema { name: "screenshot_path", ty: "string", description: "Screenshot save path pattern" },
-        FieldSchema { name: "prefer_no_csd", ty: "boolean", description: "Prefer server-side decorations" },
+        FieldSchema {
+            name: "input",
+            ty: "ConfigSectionProxy",
+            description: "Input device configuration (keyboard, mouse, touchpad, etc.)",
+        },
+        FieldSchema {
+            name: "layout",
+            ty: "ConfigSectionProxy",
+            description: "Layout configuration (gaps, focus ring, border, shadow, etc.)",
+        },
+        FieldSchema {
+            name: "cursor",
+            ty: "ConfigSectionProxy",
+            description: "Cursor configuration (size, theme, hide when typing)",
+        },
+        FieldSchema {
+            name: "gestures",
+            ty: "ConfigSectionProxy",
+            description: "Gesture configuration (hot corners, touchpad gestures)",
+        },
+        FieldSchema {
+            name: "recent_windows",
+            ty: "ConfigSectionProxy",
+            description: "Recent windows (MRU) configuration",
+        },
+        FieldSchema {
+            name: "overview",
+            ty: "ConfigSectionProxy",
+            description: "Overview mode configuration (zoom, backdrop, shadows)",
+        },
+        FieldSchema {
+            name: "animations",
+            ty: "ConfigSectionProxy",
+            description: "Animation configuration (off, slowdown)",
+        },
+        FieldSchema {
+            name: "clipboard",
+            ty: "ConfigSectionProxy",
+            description: "Clipboard configuration",
+        },
+        FieldSchema {
+            name: "hotkey_overlay",
+            ty: "ConfigSectionProxy",
+            description: "Hotkey overlay configuration",
+        },
+        FieldSchema {
+            name: "config_notification",
+            ty: "ConfigSectionProxy",
+            description: "Config reload notification settings",
+        },
+        FieldSchema {
+            name: "debug",
+            ty: "ConfigSectionProxy",
+            description: "Debug configuration options",
+        },
+        FieldSchema {
+            name: "xwayland_satellite",
+            ty: "ConfigSectionProxy",
+            description: "Xwayland satellite configuration",
+        },
+        FieldSchema {
+            name: "screenshot_path",
+            ty: "string",
+            description: "Screenshot save path pattern",
+        },
+        FieldSchema {
+            name: "prefer_no_csd",
+            ty: "boolean",
+            description: "Prefer server-side decorations",
+        },
         // Collection config sections (CRUD operations)
-        FieldSchema { name: "binds", ty: "ConfigCollection", description: "Keybindings collection" },
-        FieldSchema { name: "outputs", ty: "ConfigCollection", description: "Output/monitor configurations" },
-        FieldSchema { name: "workspaces", ty: "ConfigCollection", description: "Named workspaces" },
-        FieldSchema { name: "window_rules", ty: "ConfigCollection", description: "Window rules" },
-        FieldSchema { name: "layer_rules", ty: "ConfigCollection", description: "Layer shell rules" },
-        FieldSchema { name: "environment", ty: "ConfigCollection", description: "Environment variables" },
+        FieldSchema {
+            name: "binds",
+            ty: "ConfigCollection",
+            description: "Keybindings collection",
+        },
+        FieldSchema {
+            name: "outputs",
+            ty: "ConfigCollection",
+            description: "Output/monitor configurations",
+        },
+        FieldSchema {
+            name: "workspaces",
+            ty: "ConfigCollection",
+            description: "Named workspaces",
+        },
+        FieldSchema {
+            name: "window_rules",
+            ty: "ConfigCollection",
+            description: "Window rules",
+        },
+        FieldSchema {
+            name: "layer_rules",
+            ty: "ConfigCollection",
+            description: "Layer shell rules",
+        },
+        FieldSchema {
+            name: "environment",
+            ty: "ConfigCollection",
+            description: "Environment variables",
+        },
     ],
 };
 
@@ -327,19 +441,32 @@ const NIRI_EVENTS_MODULE: ModuleSchema = ModuleSchema {
 const NIRI_KEYMAP_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.keymap",
     description: "Keybinding configuration",
-    functions: &[
-        FunctionSchema {
-            name: "set",
-            description: "Set a keybinding",
-            is_method: false,
-            params: &[
-                ParamSchema { name: "mode", ty: "string", description: "Binding mode (e.g., 'normal')", optional: false },
-                ParamSchema { name: "key", ty: "string", description: "Key combination (e.g., 'Mod+Return')", optional: false },
-                ParamSchema { name: "callback", ty: "fun()", description: "Callback function", optional: false },
-            ],
-            returns: &[],
-        },
-    ],
+    functions: &[FunctionSchema {
+        name: "set",
+        description: "Set a keybinding",
+        is_method: false,
+        params: &[
+            ParamSchema {
+                name: "mode",
+                ty: "string",
+                description: "Binding mode (e.g., 'normal')",
+                optional: false,
+            },
+            ParamSchema {
+                name: "key",
+                ty: "string",
+                description: "Key combination (e.g., 'Mod+Return')",
+                optional: false,
+            },
+            ParamSchema {
+                name: "callback",
+                ty: "fun()",
+                description: "Callback function",
+                optional: false,
+            },
+        ],
+        returns: &[],
+    }],
     fields: &[],
 };
 
@@ -350,15 +477,18 @@ const NIRI_KEYMAP_MODULE: ModuleSchema = ModuleSchema {
 const NIRI_WINDOW_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.window",
     description: "Window rules configuration",
-    functions: &[
-        FunctionSchema {
+    functions: &[FunctionSchema {
+        name: "rule",
+        description: "Define a window rule",
+        is_method: false,
+        params: &[ParamSchema {
             name: "rule",
-            description: "Define a window rule",
-            is_method: false,
-            params: &[ParamSchema { name: "rule", ty: "table", description: "Window rule definition", optional: false }],
-            returns: &[],
-        },
-    ],
+            ty: "table",
+            description: "Window rule definition",
+            optional: false,
+        }],
+        returns: &[],
+    }],
     fields: &[],
 };
 
@@ -370,9 +500,11 @@ const NIRI_OVERVIEW_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.overview",
     description: "Overview mode configuration",
     functions: &[],
-    fields: &[
-        FieldSchema { name: "backdrop_color", ty: "string?", description: "Backdrop color in hex format" },
-    ],
+    fields: &[FieldSchema {
+        name: "backdrop_color",
+        ty: "string?",
+        description: "Backdrop color in hex format",
+    }],
 };
 
 // ============================================================================
@@ -383,9 +515,11 @@ const NIRI_SCREENSHOT_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.screenshot",
     description: "Screenshot configuration",
     functions: &[],
-    fields: &[
-        FieldSchema { name: "path", ty: "string?", description: "Screenshot save path" },
-    ],
+    fields: &[FieldSchema {
+        name: "path",
+        ty: "string?",
+        description: "Screenshot save path",
+    }],
 };
 
 // ============================================================================
@@ -401,28 +535,40 @@ const NIRI_STATE_MODULE: ModuleSchema = ModuleSchema {
             description: "Get all windows",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "Window[]", description: "Array of window information" }],
+            returns: &[ReturnSchema {
+                ty: "Window[]",
+                description: "Array of window information",
+            }],
         },
         FunctionSchema {
             name: "focused_window",
             description: "Get the currently focused window",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "Window?", description: "Focused window or nil" }],
+            returns: &[ReturnSchema {
+                ty: "Window?",
+                description: "Focused window or nil",
+            }],
         },
         FunctionSchema {
             name: "workspaces",
             description: "Get all workspaces",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "Workspace[]", description: "Array of workspace information" }],
+            returns: &[ReturnSchema {
+                ty: "Workspace[]",
+                description: "Array of workspace information",
+            }],
         },
         FunctionSchema {
             name: "outputs",
             description: "Get all outputs/monitors",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "Output[]", description: "Array of output information" }],
+            returns: &[ReturnSchema {
+                ty: "Output[]",
+                description: "Array of output information",
+            }],
         },
     ],
     fields: &[],
@@ -441,14 +587,20 @@ const NIRI_LOOP_MODULE: ModuleSchema = ModuleSchema {
             description: "Create a new timer",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "Timer", description: "New timer instance" }],
+            returns: &[ReturnSchema {
+                ty: "Timer",
+                description: "New timer instance",
+            }],
         },
         FunctionSchema {
             name: "now",
             description: "Get current time in milliseconds since compositor start",
             is_method: false,
             params: &[],
-            returns: &[ReturnSchema { ty: "integer", description: "Milliseconds since start" }],
+            returns: &[ReturnSchema {
+                ty: "integer",
+                description: "Milliseconds since start",
+            }],
         },
     ],
     fields: &[],
@@ -467,7 +619,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "quit",
             description: "Quit the compositor",
             is_method: true,
-            params: &[ParamSchema { name: "skip_confirmation", ty: "boolean", description: "Skip confirmation dialog", optional: true }],
+            params: &[ParamSchema {
+                name: "skip_confirmation",
+                ty: "boolean",
+                description: "Skip confirmation dialog",
+                optional: true,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -488,21 +645,36 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "spawn",
             description: "Spawn a command",
             is_method: true,
-            params: &[ParamSchema { name: "command", ty: "string[]", description: "Command and arguments", optional: false }],
+            params: &[ParamSchema {
+                name: "command",
+                ty: "string[]",
+                description: "Command and arguments",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "spawn_sh",
             description: "Spawn a command via shell",
             is_method: true,
-            params: &[ParamSchema { name: "command", ty: "string", description: "Shell command string", optional: false }],
+            params: &[ParamSchema {
+                name: "command",
+                ty: "string",
+                description: "Shell command string",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "do_screen_transition",
             description: "Trigger a screen transition animation",
             is_method: true,
-            params: &[ParamSchema { name: "delay", ty: "boolean", description: "Whether to delay the transition", optional: true }],
+            params: &[ParamSchema {
+                name: "delay",
+                ty: "boolean",
+                description: "Whether to delay the transition",
+                optional: true,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -560,14 +732,24 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "focus_window",
             description: "Focus a specific window by ID",
             is_method: true,
-            params: &[ParamSchema { name: "window_id", ty: "integer", description: "Window ID", optional: false }],
+            params: &[ParamSchema {
+                name: "window_id",
+                ty: "integer",
+                description: "Window ID",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "focus_window_in_column",
             description: "Focus the window at index within current column",
             is_method: true,
-            params: &[ParamSchema { name: "index", ty: "integer", description: "1-based window index", optional: false }],
+            params: &[ParamSchema {
+                name: "index",
+                ty: "integer",
+                description: "1-based window index",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -631,7 +813,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "focus_column",
             description: "Focus column at specific index",
             is_method: true,
-            params: &[ParamSchema { name: "index", ty: "integer", description: "1-based column index", optional: false }],
+            params: &[ParamSchema {
+                name: "index",
+                ty: "integer",
+                description: "1-based column index",
+                optional: false,
+            }],
             returns: &[],
         },
         // === Window Focus ===
@@ -752,7 +939,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "move_column_to_index",
             description: "Move column to specific index",
             is_method: true,
-            params: &[ParamSchema { name: "index", ty: "integer", description: "1-based target index", optional: false }],
+            params: &[ParamSchema {
+                name: "index",
+                ty: "integer",
+                description: "1-based target index",
+                optional: false,
+            }],
             returns: &[],
         },
         // === Window Move ===
@@ -839,7 +1031,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "set_column_display",
             description: "Set column display mode",
             is_method: true,
-            params: &[ParamSchema { name: "mode", ty: "\"normal\"|\"tabbed\"", description: "Display mode", optional: false }],
+            params: &[ParamSchema {
+                name: "mode",
+                ty: "\"normal\"|\"tabbed\"",
+                description: "Display mode",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -882,7 +1079,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "focus_workspace",
             description: "Focus a specific workspace",
             is_method: true,
-            params: &[ParamSchema { name: "reference", ty: "WorkspaceReference", description: "Workspace to focus", optional: false }],
+            params: &[ParamSchema {
+                name: "reference",
+                ty: "WorkspaceReference",
+                description: "Workspace to focus",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -910,7 +1112,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "move_window_to_workspace",
             description: "Move window to specific workspace",
             is_method: true,
-            params: &[ParamSchema { name: "reference", ty: "WorkspaceReference", description: "Target workspace", optional: false }],
+            params: &[ParamSchema {
+                name: "reference",
+                ty: "WorkspaceReference",
+                description: "Target workspace",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -931,7 +1138,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "move_column_to_workspace",
             description: "Move column to specific workspace",
             is_method: true,
-            params: &[ParamSchema { name: "reference", ty: "WorkspaceReference", description: "Target workspace", optional: false }],
+            params: &[ParamSchema {
+                name: "reference",
+                ty: "WorkspaceReference",
+                description: "Target workspace",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -952,7 +1164,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "set_workspace_name",
             description: "Set the name of current workspace",
             is_method: true,
-            params: &[ParamSchema { name: "name", ty: "string", description: "Workspace name", optional: false }],
+            params: &[ParamSchema {
+                name: "name",
+                ty: "string",
+                description: "Workspace name",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -1009,7 +1226,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "focus_monitor",
             description: "Focus specific monitor by name",
             is_method: true,
-            params: &[ParamSchema { name: "name", ty: "string", description: "Monitor name", optional: false }],
+            params: &[ParamSchema {
+                name: "name",
+                ty: "string",
+                description: "Monitor name",
+                optional: false,
+            }],
             returns: &[],
         },
         // === Window to Monitor ===
@@ -1059,7 +1281,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "move_window_to_monitor",
             description: "Move window to specific monitor",
             is_method: true,
-            params: &[ParamSchema { name: "name", ty: "string", description: "Monitor name", optional: false }],
+            params: &[ParamSchema {
+                name: "name",
+                ty: "string",
+                description: "Monitor name",
+                optional: false,
+            }],
             returns: &[],
         },
         // === Column to Monitor ===
@@ -1109,7 +1336,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "move_column_to_monitor",
             description: "Move column to specific monitor",
             is_method: true,
-            params: &[ParamSchema { name: "name", ty: "string", description: "Monitor name", optional: false }],
+            params: &[ParamSchema {
+                name: "name",
+                ty: "string",
+                description: "Monitor name",
+                optional: false,
+            }],
             returns: &[],
         },
         // === Workspace to Monitor ===
@@ -1159,7 +1391,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "move_workspace_to_monitor",
             description: "Move workspace to specific monitor",
             is_method: true,
-            params: &[ParamSchema { name: "name", ty: "string", description: "Monitor name", optional: false }],
+            params: &[ParamSchema {
+                name: "name",
+                ty: "string",
+                description: "Monitor name",
+                optional: false,
+            }],
             returns: &[],
         },
         // === Size/Width/Height ===
@@ -1167,14 +1404,24 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "set_window_width",
             description: "Set the window width",
             is_method: true,
-            params: &[ParamSchema { name: "change", ty: "SizeChange", description: "Width change value", optional: false }],
+            params: &[ParamSchema {
+                name: "change",
+                ty: "SizeChange",
+                description: "Width change value",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "set_window_height",
             description: "Set the window height",
             is_method: true,
-            params: &[ParamSchema { name: "change", ty: "SizeChange", description: "Height change value", optional: false }],
+            params: &[ParamSchema {
+                name: "change",
+                ty: "SizeChange",
+                description: "Height change value",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -1244,7 +1491,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "set_column_width",
             description: "Set column width",
             is_method: true,
-            params: &[ParamSchema { name: "change", ty: "SizeChange", description: "Width change value", optional: false }],
+            params: &[ParamSchema {
+                name: "change",
+                ty: "SizeChange",
+                description: "Width change value",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -1259,7 +1511,12 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "switch_layout",
             description: "Switch keyboard layout",
             is_method: true,
-            params: &[ParamSchema { name: "target", ty: "LayoutSwitchTarget", description: "Layout to switch to", optional: false }],
+            params: &[ParamSchema {
+                name: "target",
+                ty: "LayoutSwitchTarget",
+                description: "Layout to switch to",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -1339,8 +1596,18 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             description: "Move floating window by offset",
             is_method: true,
             params: &[
-                ParamSchema { name: "x", ty: "PositionChange", description: "X offset", optional: false },
-                ParamSchema { name: "y", ty: "PositionChange", description: "Y offset", optional: false },
+                ParamSchema {
+                    name: "x",
+                    ty: "PositionChange",
+                    description: "X offset",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "y",
+                    ty: "PositionChange",
+                    description: "Y offset",
+                    optional: false,
+                },
             ],
             returns: &[],
         },
@@ -1356,14 +1623,24 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
             name: "set_dynamic_cast_window",
             description: "Set dynamic cast target to window",
             is_method: true,
-            params: &[ParamSchema { name: "window_id", ty: "integer?", description: "Window ID or nil for focused", optional: true }],
+            params: &[ParamSchema {
+                name: "window_id",
+                ty: "integer?",
+                description: "Window ID or nil for focused",
+                optional: true,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "set_dynamic_cast_monitor",
             description: "Set dynamic cast target to monitor",
             is_method: true,
-            params: &[ParamSchema { name: "monitor", ty: "string?", description: "Monitor name or nil for focused", optional: true }],
+            params: &[ParamSchema {
+                name: "monitor",
+                ty: "string?",
+                description: "Monitor name or nil for focused",
+                optional: true,
+            }],
             returns: &[],
         },
         FunctionSchema {
@@ -1428,27 +1705,50 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
 const TIMER_TYPE: TypeSchema = TypeSchema {
     name: "Timer",
     description: "A timer for scheduling callbacks",
-    fields: &[
-        FieldSchema { name: "id", ty: "integer", description: "Unique timer identifier" },
-    ],
+    fields: &[FieldSchema {
+        name: "id",
+        ty: "integer",
+        description: "Unique timer identifier",
+    }],
     methods: &[
         FunctionSchema {
             name: "start",
             description: "Start the timer with a delay and optional repeat interval",
             is_method: true,
             params: &[
-                ParamSchema { name: "delay_ms", ty: "integer", description: "Delay in milliseconds before first callback", optional: false },
-                ParamSchema { name: "repeat_ms", ty: "integer", description: "Repeat interval in milliseconds (0 for one-shot)", optional: true },
-                ParamSchema { name: "callback", ty: "fun()", description: "Callback function", optional: false },
+                ParamSchema {
+                    name: "delay_ms",
+                    ty: "integer",
+                    description: "Delay in milliseconds before first callback",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "repeat_ms",
+                    ty: "integer",
+                    description: "Repeat interval in milliseconds (0 for one-shot)",
+                    optional: true,
+                },
+                ParamSchema {
+                    name: "callback",
+                    ty: "fun()",
+                    description: "Callback function",
+                    optional: false,
+                },
             ],
-            returns: &[ReturnSchema { ty: "Timer", description: "Self for chaining" }],
+            returns: &[ReturnSchema {
+                ty: "Timer",
+                description: "Self for chaining",
+            }],
         },
         FunctionSchema {
             name: "stop",
             description: "Stop the timer without closing it",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "Timer", description: "Self for chaining" }],
+            returns: &[ReturnSchema {
+                ty: "Timer",
+                description: "Self for chaining",
+            }],
         },
         FunctionSchema {
             name: "close",
@@ -1462,7 +1762,10 @@ const TIMER_TYPE: TypeSchema = TypeSchema {
             description: "Check if the timer is currently active",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "boolean", description: "True if timer is active" }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if timer is active",
+            }],
         },
     ],
 };
@@ -1471,9 +1774,21 @@ const ANIMATION_TYPE: TypeSchema = TypeSchema {
     name: "Animation",
     description: "Animation configuration",
     fields: &[
-        FieldSchema { name: "name", ty: "string", description: "Animation name" },
-        FieldSchema { name: "duration_ms", ty: "integer", description: "Duration in milliseconds" },
-        FieldSchema { name: "curve", ty: "string", description: "Easing curve" },
+        FieldSchema {
+            name: "name",
+            ty: "string",
+            description: "Animation name",
+        },
+        FieldSchema {
+            name: "duration_ms",
+            ty: "integer",
+            description: "Duration in milliseconds",
+        },
+        FieldSchema {
+            name: "curve",
+            ty: "string",
+            description: "Easing curve",
+        },
     ],
     methods: &[
         FunctionSchema {
@@ -1481,35 +1796,60 @@ const ANIMATION_TYPE: TypeSchema = TypeSchema {
             description: "Get the animation name",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_duration",
             description: "Get the duration in milliseconds",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "integer", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "integer",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_curve",
             description: "Get the easing curve",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "with_duration",
             description: "Create a copy with different duration",
             is_method: true,
-            params: &[ParamSchema { name: "ms", ty: "integer", description: "Duration in milliseconds", optional: false }],
-            returns: &[ReturnSchema { ty: "Animation", description: "New animation with updated duration" }],
+            params: &[ParamSchema {
+                name: "ms",
+                ty: "integer",
+                description: "Duration in milliseconds",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "Animation",
+                description: "New animation with updated duration",
+            }],
         },
         FunctionSchema {
             name: "with_curve",
             description: "Create a copy with different easing curve",
             is_method: true,
-            params: &[ParamSchema { name: "curve", ty: "string", description: "Easing curve name", optional: false }],
-            returns: &[ReturnSchema { ty: "Animation", description: "New animation with updated curve" }],
+            params: &[ParamSchema {
+                name: "curve",
+                ty: "string",
+                description: "Easing curve name",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "Animation",
+                description: "New animation with updated curve",
+            }],
         },
     ],
 };
@@ -1524,24 +1864,43 @@ const FILTER_TYPE: TypeSchema = TypeSchema {
             description: "Check if a window matches this filter",
             is_method: true,
             params: &[
-                ParamSchema { name: "app_id", ty: "string?", description: "Application ID", optional: false },
-                ParamSchema { name: "title", ty: "string?", description: "Window title", optional: false },
+                ParamSchema {
+                    name: "app_id",
+                    ty: "string?",
+                    description: "Application ID",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "title",
+                    ty: "string?",
+                    description: "Window title",
+                    optional: false,
+                },
             ],
-            returns: &[ReturnSchema { ty: "boolean", description: "True if window matches" }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if window matches",
+            }],
         },
         FunctionSchema {
             name: "get_app_id",
             description: "Get the app_id pattern",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_title",
             description: "Get the title pattern",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "",
+            }],
         },
     ],
 };
@@ -1556,52 +1915,98 @@ const WINDOW_RULE_TYPE: TypeSchema = TypeSchema {
             description: "Check if a window matches this rule",
             is_method: true,
             params: &[
-                ParamSchema { name: "app_id", ty: "string?", description: "Application ID", optional: false },
-                ParamSchema { name: "title", ty: "string?", description: "Window title", optional: false },
+                ParamSchema {
+                    name: "app_id",
+                    ty: "string?",
+                    description: "Application ID",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "title",
+                    ty: "string?",
+                    description: "Window title",
+                    optional: false,
+                },
             ],
-            returns: &[ReturnSchema { ty: "boolean", description: "True if window matches" }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if window matches",
+            }],
         },
         FunctionSchema {
             name: "get_floating",
             description: "Get floating setting",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "boolean?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "boolean?",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_fullscreen",
             description: "Get fullscreen setting",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "boolean?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "boolean?",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_tile",
             description: "Get tile setting",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "boolean?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "boolean?",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "with_floating",
             description: "Create a copy with floating setting",
             is_method: true,
-            params: &[ParamSchema { name: "floating", ty: "boolean", description: "Floating state", optional: false }],
-            returns: &[ReturnSchema { ty: "WindowRule", description: "New rule with updated setting" }],
+            params: &[ParamSchema {
+                name: "floating",
+                ty: "boolean",
+                description: "Floating state",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "WindowRule",
+                description: "New rule with updated setting",
+            }],
         },
         FunctionSchema {
             name: "with_fullscreen",
             description: "Create a copy with fullscreen setting",
             is_method: true,
-            params: &[ParamSchema { name: "fullscreen", ty: "boolean", description: "Fullscreen state", optional: false }],
-            returns: &[ReturnSchema { ty: "WindowRule", description: "New rule with updated setting" }],
+            params: &[ParamSchema {
+                name: "fullscreen",
+                ty: "boolean",
+                description: "Fullscreen state",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "WindowRule",
+                description: "New rule with updated setting",
+            }],
         },
         FunctionSchema {
             name: "with_tile",
             description: "Create a copy with tile setting",
             is_method: true,
-            params: &[ParamSchema { name: "tile", ty: "boolean", description: "Tile state", optional: false }],
-            returns: &[ReturnSchema { ty: "WindowRule", description: "New rule with updated setting" }],
+            params: &[ParamSchema {
+                name: "tile",
+                ty: "boolean",
+                description: "Tile state",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "WindowRule",
+                description: "New rule with updated setting",
+            }],
         },
     ],
 };
@@ -1616,49 +2021,78 @@ const GESTURE_TYPE: TypeSchema = TypeSchema {
             description: "Get the gesture type",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_fingers",
             description: "Get the number of fingers",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "integer", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "integer",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_direction",
             description: "Get the gesture direction",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "get_action",
             description: "Get the bound action",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "string?", description: "" }],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "",
+            }],
         },
         FunctionSchema {
             name: "with_direction",
             description: "Create a copy with different direction",
             is_method: true,
-            params: &[ParamSchema { name: "direction", ty: "string", description: "Gesture direction", optional: false }],
-            returns: &[ReturnSchema { ty: "Gesture", description: "New gesture with updated direction" }],
+            params: &[ParamSchema {
+                name: "direction",
+                ty: "string",
+                description: "Gesture direction",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "Gesture",
+                description: "New gesture with updated direction",
+            }],
         },
         FunctionSchema {
             name: "with_action",
             description: "Create a copy with different action",
             is_method: true,
-            params: &[ParamSchema { name: "action", ty: "string", description: "Action to bind", optional: false }],
-            returns: &[ReturnSchema { ty: "Gesture", description: "New gesture with updated action" }],
+            params: &[ParamSchema {
+                name: "action",
+                ty: "string",
+                description: "Action to bind",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "Gesture",
+                description: "New gesture with updated action",
+            }],
         },
     ],
 };
 
 const CONFIG_COLLECTION_TYPE: TypeSchema = TypeSchema {
     name: "ConfigCollection",
-    description: "Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)",
+    description:
+        "Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)",
     fields: &[],
     methods: &[
         FunctionSchema {
@@ -1666,35 +2100,64 @@ const CONFIG_COLLECTION_TYPE: TypeSchema = TypeSchema {
             description: "Get all items in the collection",
             is_method: true,
             params: &[],
-            returns: &[ReturnSchema { ty: "table[]", description: "Array of all items" }],
+            returns: &[ReturnSchema {
+                ty: "table[]",
+                description: "Array of all items",
+            }],
         },
         FunctionSchema {
             name: "get",
             description: "Get items matching criteria",
             is_method: true,
-            params: &[ParamSchema { name: "criteria", ty: "table", description: "Match criteria (e.g., { key = 'Mod+T' })", optional: false }],
-            returns: &[ReturnSchema { ty: "table[]", description: "Matching items" }],
+            params: &[ParamSchema {
+                name: "criteria",
+                ty: "table",
+                description: "Match criteria (e.g., { key = 'Mod+T' })",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "table[]",
+                description: "Matching items",
+            }],
         },
         FunctionSchema {
             name: "add",
             description: "Add one or more items to the collection",
             is_method: true,
-            params: &[ParamSchema { name: "items", ty: "table|table[]", description: "Item or array of items to add", optional: false }],
+            params: &[ParamSchema {
+                name: "items",
+                ty: "table|table[]",
+                description: "Item or array of items to add",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "set",
             description: "Replace the entire collection with new items",
             is_method: true,
-            params: &[ParamSchema { name: "items", ty: "table[]", description: "New items to replace collection", optional: false }],
+            params: &[ParamSchema {
+                name: "items",
+                ty: "table[]",
+                description: "New items to replace collection",
+                optional: false,
+            }],
             returns: &[],
         },
         FunctionSchema {
             name: "remove",
             description: "Remove items matching criteria",
             is_method: true,
-            params: &[ParamSchema { name: "criteria", ty: "table", description: "Match criteria for removal", optional: false }],
-            returns: &[ReturnSchema { ty: "integer", description: "Number of items removed" }],
+            params: &[ParamSchema {
+                name: "criteria",
+                ty: "table",
+                description: "Match criteria for removal",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "integer",
+                description: "Number of items removed",
+            }],
         },
         FunctionSchema {
             name: "clear",
@@ -1708,15 +2171,17 @@ const CONFIG_COLLECTION_TYPE: TypeSchema = TypeSchema {
 
 const CONFIG_SECTION_PROXY_TYPE: TypeSchema = TypeSchema {
     name: "ConfigSectionProxy",
-    description: "Proxy for config sections supporting direct table assignment and nested property access",
+    description:
+        "Proxy for config sections supporting direct table assignment and nested property access",
     fields: &[],
     methods: &[],
 };
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
+
+    use super::*;
 
     /// Verify that all modules have non-empty paths
     #[test]
@@ -1836,8 +2301,7 @@ mod tests {
                 assert!(
                     method.is_method,
                     "Method '{}' in type '{}' should have is_method=true",
-                    method.name,
-                    ty.name
+                    method.name, ty.name
                 );
             }
         }
@@ -1943,7 +2407,13 @@ mod tests {
     fn expected_aliases_present() {
         let alias_names: HashSet<_> = NIRI_LUA_API.aliases.iter().map(|a| a.name).collect();
 
-        let expected = ["Window", "Workspace", "Output", "SizeChange", "WorkspaceReference"];
+        let expected = [
+            "Window",
+            "Workspace",
+            "Output",
+            "SizeChange",
+            "WorkspaceReference",
+        ];
 
         for name in expected {
             assert!(
@@ -1961,24 +2431,35 @@ mod tests {
         let type_count = NIRI_LUA_API.types.len();
         let alias_count = NIRI_LUA_API.aliases.len();
 
-        let function_count: usize = NIRI_LUA_API
-            .modules
-            .iter()
-            .map(|m| m.functions.len())
-            .sum();
+        let function_count: usize = NIRI_LUA_API.modules.iter().map(|m| m.functions.len()).sum();
         let field_count: usize = NIRI_LUA_API.modules.iter().map(|m| m.fields.len()).sum();
         let method_count: usize = NIRI_LUA_API.types.iter().map(|t| t.methods.len()).sum();
 
         // These assertions document expected minimums and will fail if schema shrinks unexpectedly
-        assert!(module_count >= 7, "Expected at least 7 modules, got {module_count}");
-        assert!(type_count >= 5, "Expected at least 5 types, got {type_count}");
-        assert!(alias_count >= 5, "Expected at least 5 aliases, got {alias_count}");
+        assert!(
+            module_count >= 7,
+            "Expected at least 7 modules, got {module_count}"
+        );
+        assert!(
+            type_count >= 5,
+            "Expected at least 5 types, got {type_count}"
+        );
+        assert!(
+            alias_count >= 5,
+            "Expected at least 5 aliases, got {alias_count}"
+        );
         assert!(
             function_count >= 50,
             "Expected at least 50 functions, got {function_count}"
         );
-        assert!(field_count >= 3, "Expected at least 3 fields, got {field_count}");
-        assert!(method_count >= 10, "Expected at least 10 methods, got {method_count}");
+        assert!(
+            field_count >= 3,
+            "Expected at least 3 fields, got {field_count}"
+        );
+        assert!(
+            method_count >= 10,
+            "Expected at least 10 methods, got {method_count}"
+        );
     }
 
     /// Verify niri.action module has key compositor actions

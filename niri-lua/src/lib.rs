@@ -11,7 +11,6 @@
 //! ```
 
 pub mod config;
-pub mod config_converter;
 pub mod niri_api;
 pub mod runtime;
 
@@ -24,8 +23,10 @@ pub mod plugin_system;
 
 // Tier 2: Configuration API
 pub mod action_proxy;
+pub mod collections;
 pub mod config_api;
-pub mod config_proxy;
+pub mod config_dirty;
+pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
 pub mod parse_utils;
@@ -51,11 +52,8 @@ pub mod test_utils;
 // Tier 2 exports
 pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
 pub use config::LuaConfig;
-pub use config_converter::apply_pending_lua_config;
-pub use config_proxy::{
-    create_shared_pending_changes, register_config_proxy_to_lua, ConfigCollectionProxy,
-    ConfigProxy, ConfigSectionProxy, PendingConfigChanges, SharedPendingChanges,
-};
+pub use config_dirty::ConfigDirtyFlags;
+pub use config_wrapper::{register_config_wrapper, ConfigWrapper};
 // Tier 3 exports
 pub use event_data::{
     EventData, LayoutEventData, MonitorEventData, WindowEventData, WorkspaceEventData,
