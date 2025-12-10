@@ -608,42 +608,45 @@ Subscribe to compositor events for dynamic behavior.
 
 ```lua
 -- Subscribe to window open events
-niri.events:on("window_opened", function(event)
+niri.events:on("window:open", function(event)
     niri.utils.log("Window opened: " .. event.app_id)
 end)
 
 -- Subscribe once (auto-unsubscribes after first call)
-niri.events:once("window_focused", function(event)
+niri.events:once("window:focus", function(event)
     niri.utils.log("First focus: " .. event.app_id)
 end)
 
 -- Unsubscribe
-local id = niri.events:on("window_opened", handler)
-niri.events:off("window_opened", id)
+local id = niri.events:on("window:open", handler)
+niri.events:off("window:open", id)
 ```
 
 ### Available Events
 
 | Event | Payload |
 |-------|---------|
-| `window_opened` | `{id, app_id, title, workspace_id}` |
-| `window_closed` | `{id, app_id, title}` |
-| `window_focused` | `{id, app_id, title}` |
-| `window_title_changed` | `{id, app_id, title, old_title}` |
-| `workspace_created` | `{id, idx, name, output}` |
-| `workspace_destroyed` | `{id, name, output}` |
-| `workspace_switched` | `{id, idx, name, output}` |
-| `output_added` | `{name, make, model}` |
-| `output_removed` | `{name}` |
-| `config_loaded` | `{}` |
-| `overview_opened` | `{}` |
-| `overview_closed` | `{}` |
+| `window:open` | `{id, app_id, title, workspace_id}` |
+| `window:close` | `{id, app_id, title}` |
+| `window:focus` | `{id, app_id, title}` |
+| `window:blur` | `{id, title}` |
+| `window:title_changed` | `{id, title}` |
+| `workspace:create` | `{id, idx, name, output}` |
+| `workspace:destroy` | `{id, name, output}` |
+| `workspace:activate` | `{id, idx, name, output}` |
+| `workspace:deactivate` | `{id, idx, name, output}` |
+| `monitor:connect` | `{name, make, model}` |
+| `monitor:disconnect` | `{name}` |
+| `config:reload` | `{}` |
+| `overview:open` | `{}` |
+| `overview:close` | `{}` |
+| `layout:mode_changed` | `{is_floating}` |
 
 ### Event Handler Examples
 
 ```lua
 -- Auto-move windows by app
-niri.events:on("window_opened", function(event)
+niri.events:on("window:open", function(event)
     if event.app_id == "slack" then
         niri.action.move_window_to_workspace("chat")
     elseif event.app_id == "spotify" then
@@ -652,7 +655,7 @@ niri.events:on("window_opened", function(event)
 end)
 
 -- Log workspace changes
-niri.events:on("workspace_switched", function(event)
+niri.events:on("workspace:activate", function(event)
     local name = event.name or ("Workspace " .. event.idx)
     niri.utils.log("Switched to: " .. name)
 end)
@@ -699,7 +702,7 @@ niri.schedule(function()
 end)
 
 -- Use case: break up long operations
-niri.events:on("window_opened", function(event)
+niri.events:on("window:open", function(event)
     local window_id = event.id
     
     -- Defer heavy work
@@ -716,7 +719,7 @@ end)
 local debounce_timer = niri.loop.new_timer()
 local pending = nil
 
-niri.events:on("window_opened", function(event)
+niri.events:on("window:open", function(event)
     pending = event
     debounce_timer:stop()
     debounce_timer:start(100, 0, function()
