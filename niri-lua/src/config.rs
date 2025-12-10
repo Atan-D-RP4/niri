@@ -671,7 +671,6 @@ mod tests {
         .unwrap();
 
         // Should not error and should succeed
-        assert!(true); // Test passed if we got here without panicking
     }
 
     #[test]

@@ -238,7 +238,7 @@ mod tests {
         // Verify basic fields
         assert_eq!(table.get::<u64>("id").unwrap(), 123);
         assert_eq!(table.get::<String>("title").unwrap(), "Test Window");
-        assert_eq!(table.get::<bool>("is_focused").unwrap(), true);
+        assert!(table.get::<bool>("is_focused").unwrap());
 
         // Verify layout exists
         let layout: Table = table.get("layout").unwrap();
@@ -271,7 +271,7 @@ mod tests {
 
         let table = window_to_lua(&lua, &window).unwrap();
         assert_eq!(table.get::<u64>("id").unwrap(), 1);
-        assert_eq!(table.get::<bool>("is_focused").unwrap(), false);
+        assert!(!table.get::<bool>("is_focused").unwrap());
     }
 
     #[test]
@@ -298,8 +298,8 @@ mod tests {
 
         let table = window_to_lua(&lua, &window).unwrap();
         assert_eq!(table.get::<u64>("id").unwrap(), 456);
-        assert_eq!(table.get::<bool>("is_floating").unwrap(), true);
-        assert_eq!(table.get::<bool>("is_urgent").unwrap(), true);
+        assert!(table.get::<bool>("is_floating").unwrap());
+        assert!(table.get::<bool>("is_urgent").unwrap());
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(table.get::<u64>("id").unwrap(), 1);
         assert_eq!(table.get::<u8>("idx").unwrap(), 1);
         assert_eq!(table.get::<String>("name").unwrap(), "Main");
-        assert_eq!(table.get::<bool>("is_focused").unwrap(), true);
+        assert!(table.get::<bool>("is_focused").unwrap());
     }
 
     #[test]
@@ -340,7 +340,7 @@ mod tests {
 
         let table = workspace_to_lua(&lua, &workspace).unwrap();
         assert_eq!(table.get::<u64>("id").unwrap(), 1);
-        assert_eq!(table.get::<bool>("is_active").unwrap(), false);
+        assert!(!table.get::<bool>("is_active").unwrap());
     }
 
     #[test]
@@ -359,7 +359,7 @@ mod tests {
 
         let table = workspace_to_lua(&lua, &workspace).unwrap();
         assert_eq!(table.get::<u64>("id").unwrap(), 2);
-        assert_eq!(table.get::<bool>("is_urgent").unwrap(), true);
+        assert!(table.get::<bool>("is_urgent").unwrap());
     }
 
     // ========================================================================

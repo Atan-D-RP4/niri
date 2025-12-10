@@ -58,6 +58,7 @@ mod tests {
 
     fn create_test_system() -> (Lua, EventSystem) {
         let lua = Lua::new();
+        #[allow(clippy::arc_with_non_send_sync)]
         let handlers = Arc::new(Mutex::new(EventHandlers::new()));
         let event_system = EventSystem::new(handlers);
         (lua, event_system)

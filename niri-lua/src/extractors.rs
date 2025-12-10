@@ -1396,8 +1396,8 @@ mod tests {
         let result = extract_hotkey_overlay(&table).unwrap();
         assert!(result.is_some());
         let overlay = result.unwrap();
-        assert_eq!(overlay.skip_at_startup, true);
-        assert_eq!(overlay.hide_not_bound, false);
+        assert!(overlay.skip_at_startup);
+        assert!(!overlay.hide_not_bound);
     }
 
     #[test]
@@ -1408,8 +1408,8 @@ mod tests {
         let result = extract_hotkey_overlay(&table).unwrap();
         assert!(result.is_some());
         let overlay = result.unwrap();
-        assert_eq!(overlay.skip_at_startup, true);
-        assert_eq!(overlay.hide_not_bound, true);
+        assert!(overlay.skip_at_startup);
+        assert!(overlay.hide_not_bound);
     }
 
     #[test]
@@ -1445,7 +1445,7 @@ mod tests {
         let cursor = result.unwrap();
         assert_eq!(cursor.xcursor_theme, "default");
         assert_eq!(cursor.xcursor_size, 32);
-        assert_eq!(cursor.hide_when_typing, true);
+        assert!(cursor.hide_when_typing);
         assert_eq!(cursor.hide_after_inactive_ms, Some(1000));
     }
 
@@ -1477,7 +1477,7 @@ mod tests {
         table.set("off", true).unwrap();
         let result = extract_animations(&table).unwrap();
         assert!(result.is_some());
-        assert_eq!(result.unwrap().off, true);
+        assert!(result.unwrap().off);
     }
 
     #[test]
@@ -1496,7 +1496,7 @@ mod tests {
         table.set("on", true).unwrap();
         let result = extract_animations(&table).unwrap();
         assert!(result.is_some());
-        assert_eq!(result.unwrap().off, false); // on should override off
+        assert!(!result.unwrap().off); // on should override off
     }
 
     #[test]
@@ -1536,7 +1536,7 @@ mod tests {
         table.set("disable_primary", true).unwrap();
         let result = extract_clipboard(&table).unwrap();
         assert!(result.is_some());
-        assert_eq!(result.unwrap().disable_primary, true);
+        assert!(result.unwrap().disable_primary);
     }
 
     #[test]
@@ -1545,7 +1545,7 @@ mod tests {
         table.set("disable_primary", false).unwrap();
         let result = extract_clipboard(&table).unwrap();
         assert!(result.is_some());
-        assert_eq!(result.unwrap().disable_primary, false);
+        assert!(!result.unwrap().disable_primary);
     }
 
     #[test]

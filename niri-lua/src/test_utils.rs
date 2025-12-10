@@ -12,7 +12,6 @@
 //! - Snapshot testing with insta for regression detection
 //! - Helper functions to reduce boilerplate in tests
 
-#![cfg(test)]
 
 use std::collections::HashMap;
 

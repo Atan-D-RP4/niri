@@ -203,6 +203,7 @@ mod tests {
         let niri = lua.create_table().unwrap();
         lua.globals().set("niri", niri).unwrap();
 
+        #[allow(clippy::arc_with_non_send_sync)]
         let handlers = Arc::new(Mutex::new(EventHandlers::new()));
         register_events_proxy(&lua, handlers.clone()).unwrap();
 

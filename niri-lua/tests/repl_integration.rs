@@ -166,6 +166,7 @@ print("Line 3")
         use niri_lua::IpcLuaExecutor;
 
         let runtime = create_repl_runtime();
+        #[allow(clippy::arc_with_non_send_sync)]
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
 
         let (output, success) = executor.execute("return 1 + 1");
@@ -179,6 +180,7 @@ print("Line 3")
 
         let runtime = create_repl_runtime();
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
+        #[allow(clippy::arc_with_non_send_sync)]
 
         let (output, success) = executor.execute("error('test')");
         assert!(!success, "Executor should fail on error");
@@ -189,6 +191,7 @@ print("Line 3")
     fn test_ipc_executor_no_runtime() {
         use niri_lua::IpcLuaExecutor;
 
+        #[allow(clippy::arc_with_non_send_sync)]
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(None)));
         let (output, success) = executor.execute("print('test')");
 

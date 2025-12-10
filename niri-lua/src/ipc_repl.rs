@@ -65,6 +65,7 @@ mod tests {
     /// Other execute_string tests are in repl_integration.rs.
     #[test]
     fn executor_handles_uninitialized_runtime() {
+        #[allow(clippy::arc_with_non_send_sync)]
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(None)));
         let (output, success) = executor.execute("print('test')");
         assert!(!success, "Execution should fail without runtime");

@@ -822,7 +822,7 @@ mod tests {
         let animations: LuaTable = config_table.get("animations").unwrap();
 
         // Verify animation settings are accessible
-        assert_eq!(animations.get::<bool>("off").unwrap(), false);
+        assert!(!animations.get::<bool>("off").unwrap());
         assert_eq!(animations.get::<f64>("slowdown").unwrap(), 1.0);
 
         // Verify animation tables exist

@@ -339,7 +339,7 @@ mod tests {
 
         let table = event.to_lua(&lua).unwrap();
         assert_eq!(table.get::<String>("type").unwrap(), "mode_changed");
-        assert_eq!(table.get::<bool>("is_floating").unwrap(), true);
+        assert!(table.get::<bool>("is_floating").unwrap());
     }
 
     #[test]
