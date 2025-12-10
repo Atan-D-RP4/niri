@@ -1087,6 +1087,7 @@ mod tests {
                 },
                 touch: Touch {
                     off: false,
+                    natural_scroll: false,
                     calibration_matrix: None,
                     map_to_output: Some(
                         "eDP-1",
