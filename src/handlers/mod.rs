@@ -93,7 +93,7 @@ use crate::utils::{output_size, send_scale_transform};
 use crate::{
     delegate_ext_workspace, delegate_foreign_toplevel, delegate_gamma_control,
     delegate_mutter_x11_interop, delegate_output_management, delegate_screencopy,
-    delegate_virtual_pointer, lua_event_hooks,
+    delegate_virtual_pointer,
 };
 
 pub const XDG_ACTIVATION_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -575,31 +575,6 @@ impl ExtWorkspaceHandler for State {
     fn activate_workspace(&mut self, id: WorkspaceId) {
         let reference = niri_config::WorkspaceReference::Id(id.get());
         if let Some((mut output, index)) = self.niri.find_output_and_workspace_index(reference) {
-            // Get the previously active workspace info for deactivation event
-            let old_workspace_info = if let Some(active) = self.niri.layout.active_output() {
-                if output.as_ref() == Some(active) {
-                    // Same output, get the old workspace
-                    self.niri.layout.active_workspace().map(|ws| {
-                        (
-                            ws.name().map(|s| s.to_string()).unwrap_or_else(|| {
-                                // Get the workspace ID from the old workspace
-                                format!("Workspace {}", ws.id().get())
-                            }),
-                            ws.id().get(),
-                        )
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Emit deactivate event for the workspace we're leaving on this output
-            if let Some((ws_name, ws_id)) = old_workspace_info {
-                lua_event_hooks::emit_workspace_deactivate(self, &ws_name, ws_id as u32);
-            }
-
             if let Some(active) = self.niri.layout.active_output() {
                 if output.as_ref() == Some(active) {
                     output = None;
@@ -611,14 +586,7 @@ impl ExtWorkspaceHandler for State {
             }
             self.niri.layout.switch_workspace(index);
             // No mouse warp: assuming the layer-shell bar workspaces use-case.
-
-            // Emit workspace:activate event for Lua handlers
-            if let Some(workspace) = self.niri.layout.active_workspace() {
-                let ws_name = workspace.name().map(|s| s.as_str());
-                let ws_name_default = format!("Workspace {}", id.get());
-                let ws_name = ws_name.unwrap_or(&ws_name_default);
-                lua_event_hooks::emit_workspace_activate(self, ws_name, id.get() as u32);
-            }
+            // Workspace events are emitted centrally in the refresh cycle.
 
             // FIXME: granular
             self.niri.queue_redraw_all();

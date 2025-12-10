@@ -530,7 +530,7 @@ This tiered architecture allows different levels of Lua integration:
 ### 9. Current Implementation Status
 
 #### Fully Working
-- Event system: 23+ events wired with 50+ call sites in compositor
+- Event system: 23+ events wired with centralized emission in refresh cycle
 - Config API: Read-only exposure of all configuration sections
 - Reactive config proxy: Lua can modify config via `niri.config.*`
 - Action proxy: All compositor actions accessible via `niri.action`
@@ -538,6 +538,24 @@ This tiered architecture allows different levels of Lua integration:
 - State queries: `niri.state.windows()`, `focused_window()`, `workspaces()`, `outputs()`
 - REPL: `niri msg lua -- 'code'` executes Lua with full state access
 - API registry with LSP type generation (`types/api.lua`)
+
+#### Compositor Integration (`src/lua_integration.rs`)
+The Lua setup logic is consolidated in `src/lua_integration.rs`:
+- `load_lua_config()` - Loads and applies Lua config (with dirty flag check)
+- `create_action_channel()` - Creates calloop channel (with `advance_animations()`)
+- `setup_runtime()` - Registers RuntimeApi, ConfigWrapper, ActionProxy
+- `execute_pending_actions()` - Runs deferred actions from config load
+- `is_lua_config_active()` - Checks if Lua runtime is present
+
+This reduces ~150 lines of Lua code in `main.rs` to ~12 lines of function calls.
+
+#### Event Emission Architecture (`src/lua_event_hooks.rs`)
+Events are emitted from centralized locations in the refresh cycle:
+- **Workspace events**: Detected in `ext_workspace.rs` refresh via `WorkspaceRefreshResult`
+- **Overview events**: Detected in `niri.rs` refresh cycle via `LuaEventState`
+- **Layout mode events**: Detected in `niri.rs` refresh cycle via `prev_floating_active`
+
+This ensures events fire regardless of trigger source (keybindings, touch, IPC).
 
 #### Intentionally Deferred (Tier 5)
 - Plugin system (`plugin_system.rs`) - infrastructure ready, not integrated

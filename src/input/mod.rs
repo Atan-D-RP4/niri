@@ -2211,29 +2211,21 @@ impl State {
             }
             Action::ToggleWindowFloating => {
                 self.niri.layout.toggle_window_floating(None);
-                if let Some(ws) = self.niri.layout.active_workspace() {
-                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                }
                 // FIXME: granular
                 self.niri.queue_redraw_all();
+                // Layout mode events are emitted centrally in the refresh cycle.
             }
             Action::ToggleWindowFloatingById(id) => {
                 let window = self.niri.layout.windows().find(|(_, m)| m.id().get() == id);
                 let window = window.map(|(_, m)| m.window.clone());
                 if let Some(window) = window {
                     self.niri.layout.toggle_window_floating(Some(&window));
-                    if let Some(ws) = self.niri.layout.active_workspace() {
-                        lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                    }
                     // FIXME: granular
                     self.niri.queue_redraw_all();
                 }
             }
             Action::MoveWindowToFloating => {
                 self.niri.layout.set_window_floating(None, true);
-                if let Some(ws) = self.niri.layout.active_workspace() {
-                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                }
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
@@ -2242,18 +2234,12 @@ impl State {
                 let window = window.map(|(_, m)| m.window.clone());
                 if let Some(window) = window {
                     self.niri.layout.set_window_floating(Some(&window), true);
-                    if let Some(ws) = self.niri.layout.active_workspace() {
-                        lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                    }
                     // FIXME: granular
                     self.niri.queue_redraw_all();
                 }
             }
             Action::MoveWindowToTiling => {
                 self.niri.layout.set_window_floating(None, false);
-                if let Some(ws) = self.niri.layout.active_workspace() {
-                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                }
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
@@ -2262,9 +2248,6 @@ impl State {
                 let window = window.map(|(_, m)| m.window.clone());
                 if let Some(window) = window {
                     self.niri.layout.set_window_floating(Some(&window), false);
-                    if let Some(ws) = self.niri.layout.active_workspace() {
-                        lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                    }
                     // FIXME: granular
                     self.niri.queue_redraw_all();
                 }
@@ -2283,9 +2266,6 @@ impl State {
             }
             Action::SwitchFocusBetweenFloatingAndTiling => {
                 self.niri.layout.switch_focus_floating_tiling();
-                if let Some(ws) = self.niri.layout.active_workspace() {
-                    lua_event_hooks::emit_layout_mode_changed(self, ws.floating_is_active());
-                }
                 self.maybe_warp_cursor_to_focus();
                 // FIXME: granular
                 self.niri.queue_redraw_all();
@@ -2367,26 +2347,18 @@ impl State {
                 self.set_dynamic_cast_target(CastTarget::Nothing);
             }
             Action::ToggleOverview => {
-                let was_open = self.niri.layout.is_overview_open();
                 self.niri.layout.toggle_overview();
                 self.niri.queue_redraw_all();
-                // Emit overview event based on new state
-                if was_open {
-                    lua_event_hooks::emit_overview_close(self);
-                } else {
-                    lua_event_hooks::emit_overview_open(self);
-                }
+                // Overview events are emitted centrally in the refresh cycle.
             }
             Action::OpenOverview => {
                 if self.niri.layout.open_overview() {
                     self.niri.queue_redraw_all();
-                    lua_event_hooks::emit_overview_open(self);
                 }
             }
             Action::CloseOverview => {
                 if self.niri.layout.close_overview() {
                     self.niri.queue_redraw_all();
-                    lua_event_hooks::emit_overview_close(self);
                 }
             }
             Action::ToggleWindowUrgent(id) => {

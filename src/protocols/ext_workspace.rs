@@ -35,6 +35,33 @@ use crate::window::Mapped;
 
 const VERSION: u32 = 1;
 
+/// Data for a workspace lifecycle event.
+#[derive(Debug, Clone)]
+pub struct WorkspaceEventData {
+    /// Workspace name (or index as string for unnamed workspaces).
+    pub name: String,
+    /// Workspace index on its output (0-based).
+    pub idx: u32,
+    /// Output name.
+    pub output: String,
+}
+
+/// Result of a workspace refresh cycle, containing lifecycle events.
+///
+/// This allows the caller to dispatch events (e.g., Lua hooks) without
+/// coupling the protocol handler to specific event systems.
+#[derive(Debug, Default)]
+pub struct WorkspaceRefreshResult {
+    /// Workspaces that were created during this refresh.
+    pub created: Vec<WorkspaceEventData>,
+    /// Workspaces that were destroyed during this refresh.
+    pub destroyed: Vec<WorkspaceEventData>,
+    /// Workspaces that became active during this refresh.
+    pub activated: Vec<WorkspaceEventData>,
+    /// Workspaces that became inactive during this refresh.
+    pub deactivated: Vec<WorkspaceEventData>,
+}
+
 pub trait ExtWorkspaceHandler {
     fn ext_workspace_manager_state(&mut self) -> &mut ExtWorkspaceManagerState;
     fn activate_workspace(&mut self, id: WorkspaceId);
@@ -81,7 +108,7 @@ pub struct ExtWorkspaceGlobalData {
     filter: Box<dyn for<'c> Fn(&'c Client) -> bool + Send + Sync>,
 }
 
-pub fn refresh(state: &mut State) {
+pub fn refresh(state: &mut State) -> WorkspaceRefreshResult {
     let _span = tracy_client::span!("ext_workspace::refresh");
 
     let protocol_state = &mut state.niri.ext_workspace_state;
@@ -95,25 +122,25 @@ pub fn refresh(state: &mut State) {
         seen_workspaces.insert(ws.id(), output);
     }
 
-    // Track removed workspaces for Lua events (name, idx, output)
-    let mut removed_workspaces: Vec<(String, u32, String)> = Vec::new();
+    // Track removed workspaces for event dispatch
+    let mut destroyed_workspaces: Vec<WorkspaceEventData> = Vec::new();
 
     protocol_state.workspaces.retain(|id, workspace| {
         if seen_workspaces.contains_key(id) {
             return true;
         }
 
-        // Capture workspace info before removal for Lua event
+        // Capture workspace info before removal for event dispatch
         let output_name = workspace
             .output
             .as_ref()
             .map(|o| o.name())
             .unwrap_or_default();
-        removed_workspaces.push((
-            workspace.name.clone(),
-            workspace.coordinates[1],
-            output_name,
-        ));
+        destroyed_workspaces.push(WorkspaceEventData {
+            name: workspace.name.clone(),
+            idx: workspace.coordinates[1],
+            output: output_name,
+        });
 
         remove_workspace_instances(&protocol_state.workspace_groups, workspace);
         changed = true;
@@ -148,21 +175,67 @@ pub fn refresh(state: &mut State) {
 
     // Update existing workspaces and create new ones.
     // First, identify which workspaces are new (not yet tracked in protocol_state.workspaces)
-    let mut new_workspaces: Vec<(String, u32, String)> = Vec::new();
+    let mut created_workspaces: Vec<WorkspaceEventData> = Vec::new();
     for (mon, ws_idx, ws) in state.niri.layout.workspaces() {
         if !protocol_state.workspaces.contains_key(&ws.id()) {
-            // This is a new workspace - capture info for Lua event
+            // This is a new workspace - capture info for event dispatch
             let name = ws
                 .name()
                 .cloned()
                 .unwrap_or_else(|| (ws_idx + 1).to_string());
             let output_name = mon.map(|m| m.output().name()).unwrap_or_default();
-            new_workspaces.push((name, ws_idx as u32, output_name));
+            created_workspaces.push(WorkspaceEventData {
+                name,
+                idx: ws_idx as u32,
+                output: output_name,
+            });
         }
     }
 
+    // Track which workspaces were active before refresh
+    let previously_active: HashMap<WorkspaceId, bool> = protocol_state
+        .workspaces
+        .iter()
+        .map(|(id, data)| {
+            (
+                *id,
+                data.state.contains(ext_workspace_handle_v1::State::Active),
+            )
+        })
+        .collect();
+
     for (mon, ws_idx, ws) in state.niri.layout.workspaces() {
         changed |= refresh_workspace(protocol_state, mon, ws_idx, ws);
+    }
+
+    // Detect activation changes by comparing before/after states
+    let mut activated_workspaces: Vec<WorkspaceEventData> = Vec::new();
+    let mut deactivated_workspaces: Vec<WorkspaceEventData> = Vec::new();
+
+    for (mon, ws_idx, ws) in state.niri.layout.workspaces() {
+        if let Some(data) = protocol_state.workspaces.get(&ws.id()) {
+            let is_now_active = data.state.contains(ext_workspace_handle_v1::State::Active);
+            let was_active = previously_active.get(&ws.id()).copied().unwrap_or(false);
+
+            if is_now_active != was_active {
+                let name = ws
+                    .name()
+                    .cloned()
+                    .unwrap_or_else(|| (ws_idx + 1).to_string());
+                let output_name = mon.map(|m| m.output().name()).unwrap_or_default();
+                let event_data = WorkspaceEventData {
+                    name,
+                    idx: ws_idx as u32,
+                    output: output_name,
+                };
+
+                if is_now_active {
+                    activated_workspaces.push(event_data);
+                } else {
+                    deactivated_workspaces.push(event_data);
+                }
+            }
+        }
     }
 
     // Update workspace groups and create new ones, sending workspace_enter events as needed.
@@ -176,12 +249,12 @@ pub fn refresh(state: &mut State) {
         }
     }
 
-    // Emit Lua events for workspace changes
-    for (name, idx, output) in removed_workspaces {
-        crate::lua_event_hooks::emit_workspace_destroy(state, &name, idx, &output);
-    }
-    for (name, idx, output) in new_workspaces {
-        crate::lua_event_hooks::emit_workspace_create(state, &name, idx, &output);
+    // Return workspace lifecycle events for the caller to dispatch
+    WorkspaceRefreshResult {
+        created: created_workspaces,
+        destroyed: destroyed_workspaces,
+        activated: activated_workspaces,
+        deactivated: deactivated_workspaces,
     }
 }
 

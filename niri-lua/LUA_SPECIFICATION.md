@@ -110,9 +110,14 @@ Just as Neovim users can build entirely custom editing experiences through Lua, 
 - ✅ **niri-lua**: Complete and production-ready
   - Configuration API: 24/24 fields
   - Runtime API: Windows, workspaces, outputs
-  - Events: 25+ compositor events
+  - Events: 25+ compositor events (centralized emission)
   - Actions: 90+ actions
   - REPL: Interactive development
+
+- ✅ **Compositor Integration**: Complete
+  - `src/lua_integration.rs`: Consolidated Lua setup (~12 lines in main.rs)
+  - `src/lua_event_hooks.rs`: Extension traits for event emission
+  - Centralized event emission in refresh cycle (not scattered call sites)
 
 - 🔄 **niri-ui**: Design phase
   - Specification complete
@@ -344,7 +349,25 @@ niri-lua/src/
 ├── error.rs            # Error types
 ├── utils.rs            # Shared utilities
 └── types/api.lua       # Luau type definitions
+
+src/
+├── lua_integration.rs  # Compositor-side Lua setup (consolidates main.rs logic)
+└── lua_event_hooks.rs  # Extension traits for centralized event emission
 ```
+
+### Compositor Integration Module (`src/lua_integration.rs`)
+
+The `lua_integration` module consolidates all Lua setup logic from `main.rs` into reusable functions:
+
+| Function | Purpose |
+|----------|---------|
+| `load_lua_config()` | Loads Lua config file, applies to Config (with dirty flag check) |
+| `create_action_channel()` | Creates calloop channel for Lua actions (with `advance_animations()`) |
+| `setup_runtime()` | Registers RuntimeApi, ConfigWrapper, and ActionProxy |
+| `execute_pending_actions()` | Runs deferred actions from config load |
+| `is_lua_config_active()` | Checks if Lua runtime is present |
+
+This reduces ~150 lines of Lua code in `main.rs` to ~12 lines of function calls.
 
 ### LuaRuntime
 
@@ -708,17 +731,17 @@ The `niri.events` namespace provides pub/sub event handling for compositor event
 
 ```lua
 -- Subscribe to event
-local id = niri.events:on("window_opened", function(event)
+local id = niri.events:on("window:open", function(event)
     print("Window opened:", event.app_id, event.title)
 end)
 
 -- Subscribe once (auto-unsubscribes after first call)
-niri.events:once("window_focused", function(event)
+niri.events:once("window:focus", function(event)
     print("First focus:", event.app_id)
 end)
 
 -- Unsubscribe
-niri.events:off("window_opened", id)
+niri.events:off("window:open", id)
 
 -- Emit custom event (for testing/plugins)
 niri.events:emit("custom_event", { data = "value" })
@@ -727,7 +750,7 @@ niri.events:emit("custom_event", { data = "value" })
 local events = niri.events:list()
 
 -- Clear all handlers for an event
-niri.events:clear("window_opened")
+niri.events:clear("window:open")
 ```
 
 ### Available Events
@@ -735,72 +758,105 @@ niri.events:clear("window_opened")
 #### Window Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `window_opened` | `{id, app_id, title, workspace_id}` | Window created |
-| `window_closed` | `{id, app_id, title}` | Window destroyed |
-| `window_focused` | `{id, app_id, title}` | Window gained focus |
-| `window_focus_changed` | `{id, app_id, title}` | Focus changed to window |
-| `window_title_changed` | `{id, app_id, title, old_title}` | Title updated |
+| `window:open` | `{id, app_id, title, workspace_id}` | Window created |
+| `window:close` | `{id, app_id, title}` | Window destroyed |
+| `window:focus` | `{id, app_id, title}` | Window gained focus |
+| `window:blur` | `{id, title}` | Window lost focus |
+| `window:title_changed` | `{id, title}` | Window title updated |
+| `window:app_id_changed` | `{id, app_id}` | Window app_id updated |
+| `window:fullscreen` | `{id, is_fullscreen}` | Fullscreen state changed |
+| `window:maximize` | `{id, is_maximized}` | Maximize state changed |
+| `window:move` | `{id, workspace_id}` | Window moved to workspace |
+| `window:resize` | `{id, width, height}` | Window resized |
 
 #### Workspace Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `workspace_created` | `{id, idx, name, output}` | Workspace created |
-| `workspace_destroyed` | `{id, name, output}` | Workspace destroyed |
-| `workspace_switched` | `{id, idx, name, output}` | Active workspace changed |
-| `workspace_activated` | `{id, idx, name, output}` | Workspace became active |
-| `workspace_active_changed` | `{id, output, is_active}` | Active state changed |
-
-#### Output Events
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `output_added` | `{name, make, model}` | Output connected |
-| `output_removed` | `{name}` | Output disconnected |
-| `output_focused` | `{name}` | Output gained focus |
-| `output_power_changed` | `{name, is_on}` | Power state changed |
+| `workspace:create` | `{id, idx, name, output}` | Workspace created |
+| `workspace:destroy` | `{id, name, output}` | Workspace destroyed |
+| `workspace:activate` | `{id, idx, name, output}` | Workspace became active |
+| `workspace:deactivate` | `{id, idx, name, output}` | Workspace became inactive |
+| `workspace:rename` | `{id, name, old_name}` | Workspace renamed |
 
 #### Layout Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `layout_changed` | `{workspace_id, ...}` | Layout structure changed |
+| `layout:window_added` | `{window_id, workspace_id}` | Window added to layout |
+| `layout:window_removed` | `{window_id, workspace_id}` | Window removed from layout |
+| `layout:mode_changed` | `{mode}` | Layout mode changed |
+
+#### Output Events
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `output:mode_change` | `{name, width, height, refresh}` | Output mode changed |
 
 #### Monitor Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `monitor_added` | `{name, ...}` | Monitor added |
-| `monitor_removed` | `{name}` | Monitor removed |
+| `monitor:connect` | `{name, make, model}` | Monitor connected |
+| `monitor:disconnect` | `{name}` | Monitor disconnected |
 
 #### Config Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `config_loaded` | `{}` | Configuration reloaded |
+| `config:reload` | `{}` | Configuration reloaded |
 
 #### Overview Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `overview_opened` | `{}` | Overview mode opened |
-| `overview_closed` | `{}` | Overview mode closed |
+| `overview:open` | `{}` | Overview mode opened |
+| `overview:close` | `{}` | Overview mode closed |
 
 #### Lock Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `lock_state_changed` | `{is_locked}` | Lock state changed |
-| `session_locked` | `{}` | Session locked |
-| `session_unlocked` | `{}` | Session unlocked |
+| `lock:activate` | `{}` | Session locked |
+| `lock:deactivate` | `{}` | Session unlocked |
 
-#### Lid/Switch Events
+#### Lifecycle Events
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `lid_opened` | `{}` | Laptop lid opened |
-| `lid_closed` | `{}` | Laptop lid closed |
-| `tablet_mode_on` | `{}` | Tablet mode enabled |
-| `tablet_mode_off` | `{}` | Tablet mode disabled |
+| `startup` | `{}` | Compositor started |
+| `shutdown` | `{}` | Compositor shutting down |
+
+### Intentionally Unimplemented Events
+
+The following events are defined in the API but **intentionally not wired** for security reasons:
+
+#### Idle Events (`idle:start`, `idle:end`)
+
+**Not implemented.** Exposing idle state to Lua scripts creates security risks:
+
+- **Presence detection**: Malicious scripts could track when users are away from their computer
+- **Targeted attacks**: Scripts could wait for idle state to perform unwanted actions undetected
+- **Privacy violation**: User activity patterns could be logged or exfiltrated
+
+Unlike AwesomeWM (which runs in a trusted X11 environment where the user controls all code), niri's Lua environment may eventually support third-party plugins. The idle inhibitor protocol provides the sanctioned way for applications to prevent idle.
+
+#### Key Events (`key:press`, `key:release`)
+
+**Not implemented.** Exposing raw key events to Lua scripts is a severe security risk:
+
+- **Keylogging**: Scripts could capture passwords, private messages, and sensitive data
+- **Credential theft**: Banking credentials, API keys, and authentication tokens could be stolen
+- **Privacy violation**: Complete record of user input could be exfiltrated
+
+AwesomeWM exposes key events because it operates in a single-user X11 model where the window manager configuration is fully trusted. Niri takes a defense-in-depth approach: keybindings are configured declaratively in the config, and Lua scripts receive only high-level events (window focus, workspace changes) that don't leak sensitive input.
+
+**Alternative (TODO - not yet implemented)**: A future `lua-action` binding type would allow triggering named Lua functions from keybindings:
+```kdl
+binds {
+    Mod+X { lua-action "my_custom_action"; }
+}
+```
+This would call a registered Lua function without exposing raw key events. See [Future: Custom Keybinding Actions](#future-custom-keybinding-actions) for the planned design.
 
 ### Event Handler Safety
 
 Event handlers execute with timeout protection (default 1 second). Long-running handlers will be interrupted:
 
 ```lua
-niri.events:on("window_opened", function(event)
+niri.events:on("window:open", function(event)
     -- BAD: This will timeout
     while true do end
     
@@ -1150,7 +1206,7 @@ function M.setup(opts)
     opts = opts or {}
     
     -- Register event handlers
-    niri.events:on("window_opened", function(event)
+    niri.events:on("window:open", function(event)
         -- Plugin logic
     end)
     
@@ -1372,6 +1428,63 @@ niri.config.binds["Mod+grave"] = toggle_scratchpad
 
 ---
 
+## Future: Custom Keybinding Actions
+
+> **Status**: TODO - Not yet implemented
+
+### Motivation
+
+Users need a way to trigger custom Lua functions from keybindings without exposing raw key events (which would be a security risk). This feature bridges the gap between the declarative KDL config and the Lua scripting system.
+
+### Proposed Design
+
+#### 1. Register Named Actions in Lua
+
+```lua
+-- In niri.lua or a plugin
+niri.actions:register("my_custom_action", function()
+    local focused = niri.state:focused_window()
+    if focused and focused.app_id == "firefox" then
+        niri.action:move_window_to_workspace(2)
+    end
+end)
+
+niri.actions:register("toggle_my_layout", function()
+    -- Custom layout toggle logic
+end)
+```
+
+#### 2. Bind in KDL Config
+
+```kdl
+binds {
+    Mod+X { lua-action "my_custom_action"; }
+    Mod+Shift+L { lua-action "toggle_my_layout"; }
+}
+```
+
+#### 3. Security Model
+
+- Only **named, pre-registered** functions can be called (no arbitrary code execution from config)
+- Functions are registered at config load time, not dynamically
+- Timeout protection applies (same as event handlers)
+- No access to raw key/modifier state beyond what triggered the binding
+
+### Implementation Notes
+
+1. Add `LuaAction(String)` variant to `niri_ipc::Action` enum
+2. Add `lua-action` parsing in `niri-config/src/binds.rs`
+3. Add `niri.actions:register(name, fn)` API in niri-lua
+4. In action handler, look up registered function by name and execute
+
+### Alternatives Considered
+
+- **Expose key events**: Rejected for security (keylogging risk)
+- **Inline Lua in KDL**: Rejected for complexity and security (arbitrary code in config)
+- **Signal-based**: Could emit a named signal, but direct function call is simpler
+
+---
+
 ## Appendix: Implementation Status
 
 ### Complete
@@ -1391,6 +1504,7 @@ niri.config.binds["Mod+grave"] = toggle_scratchpad
 - [ ] Resource limits per plugin
 
 ### Planned
+- [ ] Custom keybinding actions (`lua-action` in KDL config)
 - [ ] Hot-reload plugins
 - [ ] Plugin marketplace/registry
 - [ ] Custom protocol handlers

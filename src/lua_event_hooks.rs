@@ -134,6 +134,11 @@ pub fn emit_window_blur(state: &State, window_id: u32, window_title: &str) {
 ///
 /// Call this when a workspace becomes active
 pub fn emit_workspace_activate(state: &State, workspace_name: &str, workspace_idx: u32) {
+    tracing::debug!(
+        "Emitting workspace:activate event: name={:?}, idx={}",
+        workspace_name,
+        workspace_idx
+    );
     emit_with_state_context(state, "workspace:activate", |lua| {
         create_workspace_event_table(lua, workspace_name, workspace_idx, true)
     });
@@ -605,4 +610,244 @@ pub fn emit_key_release(state: &State, key_name: &str, modifiers: &str) {
         table.set("modifiers", modifiers)?;
         Ok(LuaValue::Table(table))
     });
+}
+
+// ===== Phase 2: Extension Trait for cleaner event emission =====
+
+/// Extension trait for emitting Lua events from State.
+///
+/// This trait provides method-style event emission, making call sites cleaner
+/// and reducing the need to import individual emit_* functions.
+///
+/// # Example
+/// ```ignore
+/// use crate::lua_event_hooks::StateLuaEvents;
+///
+/// // Instead of:
+/// lua_event_hooks::emit_window_focus(state, id, title);
+///
+/// // You can write:
+/// state.emit_window_focus(id, title);
+/// ```
+pub trait StateLuaEvents {
+    // Window events
+    fn emit_window_open(&self, window_id: u32, window_title: &str);
+    fn emit_window_open_full(&self, window_id: u32, window_title: &str, app_id: &str);
+    fn emit_window_close(&self, window_id: u32, window_title: &str);
+    fn emit_window_close_full(&self, window_id: u32, window_title: &str, app_id: &str);
+    fn emit_window_focus(&self, window_id: u32, window_title: &str);
+    fn emit_window_blur(&self, window_id: u32, window_title: &str);
+    fn emit_window_title_changed(&self, window_id: u32, new_title: &str);
+    fn emit_window_app_id_changed(&self, window_id: u32, new_app_id: &str);
+    fn emit_window_fullscreen(&self, window_id: u32, window_title: &str, is_fullscreen: bool);
+    fn emit_window_maximize(&self, window_id: u32, window_title: &str, is_maximized: bool);
+    fn emit_window_resize(&self, window_id: u32, window_title: &str, width: i32, height: i32);
+    fn emit_window_move(
+        &self,
+        window_id: u32,
+        window_title: &str,
+        from_workspace: Option<&str>,
+        to_workspace: &str,
+        from_output: Option<&str>,
+        to_output: &str,
+    );
+
+    // Workspace events
+    fn emit_workspace_activate(&self, workspace_name: &str, workspace_idx: u32);
+    fn emit_workspace_deactivate(&self, workspace_name: &str, workspace_idx: u32);
+    fn emit_workspace_create(&self, workspace_name: &str, workspace_idx: u32, output: &str);
+    fn emit_workspace_destroy(&self, workspace_name: &str, workspace_idx: u32, output: &str);
+    fn emit_workspace_rename(
+        &self,
+        workspace_idx: u32,
+        old_name: Option<&str>,
+        new_name: Option<&str>,
+        output: &str,
+    );
+
+    // Layout events
+    fn emit_layout_mode_changed(&self, is_floating: bool);
+    fn emit_layout_window_added(&self, window_id: u32);
+    fn emit_layout_window_removed(&self, window_id: u32);
+
+    // Config events
+    fn emit_config_reload(&self, success: bool);
+
+    // Overview events
+    fn emit_overview_open(&self);
+    fn emit_overview_close(&self);
+
+    // Lifecycle events
+    fn emit_startup(&self);
+    fn emit_shutdown(&self);
+}
+
+impl StateLuaEvents for State {
+    fn emit_window_open(&self, window_id: u32, window_title: &str) {
+        emit_window_open(self, window_id, window_title);
+    }
+
+    fn emit_window_open_full(&self, window_id: u32, window_title: &str, app_id: &str) {
+        emit_window_open_full(self, window_id, window_title, app_id);
+    }
+
+    fn emit_window_close(&self, window_id: u32, window_title: &str) {
+        emit_window_close(self, window_id, window_title);
+    }
+
+    fn emit_window_close_full(&self, window_id: u32, window_title: &str, app_id: &str) {
+        emit_window_close_full(self, window_id, window_title, app_id);
+    }
+
+    fn emit_window_focus(&self, window_id: u32, window_title: &str) {
+        emit_window_focus(self, window_id, window_title);
+    }
+
+    fn emit_window_blur(&self, window_id: u32, window_title: &str) {
+        emit_window_blur(self, window_id, window_title);
+    }
+
+    fn emit_window_title_changed(&self, window_id: u32, new_title: &str) {
+        emit_window_title_changed(self, window_id, new_title);
+    }
+
+    fn emit_window_app_id_changed(&self, window_id: u32, new_app_id: &str) {
+        emit_window_app_id_changed(self, window_id, new_app_id);
+    }
+
+    fn emit_window_fullscreen(&self, window_id: u32, window_title: &str, is_fullscreen: bool) {
+        emit_window_fullscreen(self, window_id, window_title, is_fullscreen);
+    }
+
+    fn emit_window_maximize(&self, window_id: u32, window_title: &str, is_maximized: bool) {
+        emit_window_maximize(self, window_id, window_title, is_maximized);
+    }
+
+    fn emit_window_resize(&self, window_id: u32, window_title: &str, width: i32, height: i32) {
+        emit_window_resize(self, window_id, window_title, width, height);
+    }
+
+    fn emit_window_move(
+        &self,
+        window_id: u32,
+        window_title: &str,
+        from_workspace: Option<&str>,
+        to_workspace: &str,
+        from_output: Option<&str>,
+        to_output: &str,
+    ) {
+        emit_window_move(
+            self,
+            window_id,
+            window_title,
+            from_workspace,
+            to_workspace,
+            from_output,
+            to_output,
+        );
+    }
+
+    fn emit_workspace_activate(&self, workspace_name: &str, workspace_idx: u32) {
+        emit_workspace_activate(self, workspace_name, workspace_idx);
+    }
+
+    fn emit_workspace_deactivate(&self, workspace_name: &str, workspace_idx: u32) {
+        emit_workspace_deactivate(self, workspace_name, workspace_idx);
+    }
+
+    fn emit_workspace_create(&self, workspace_name: &str, workspace_idx: u32, output: &str) {
+        emit_workspace_create(self, workspace_name, workspace_idx, output);
+    }
+
+    fn emit_workspace_destroy(&self, workspace_name: &str, workspace_idx: u32, output: &str) {
+        emit_workspace_destroy(self, workspace_name, workspace_idx, output);
+    }
+
+    fn emit_workspace_rename(
+        &self,
+        workspace_idx: u32,
+        old_name: Option<&str>,
+        new_name: Option<&str>,
+        output: &str,
+    ) {
+        emit_workspace_rename(self, workspace_idx, old_name, new_name, output);
+    }
+
+    fn emit_layout_mode_changed(&self, is_floating: bool) {
+        emit_layout_mode_changed(self, is_floating);
+    }
+
+    fn emit_layout_window_added(&self, window_id: u32) {
+        emit_layout_window_added(self, window_id);
+    }
+
+    fn emit_layout_window_removed(&self, window_id: u32) {
+        emit_layout_window_removed(self, window_id);
+    }
+
+    fn emit_config_reload(&self, success: bool) {
+        emit_config_reload(self, success);
+    }
+
+    fn emit_overview_open(&self) {
+        emit_overview_open(self);
+    }
+
+    fn emit_overview_close(&self) {
+        emit_overview_close(self);
+    }
+
+    fn emit_startup(&self) {
+        emit_startup(self);
+    }
+
+    fn emit_shutdown(&self) {
+        emit_shutdown(self);
+    }
+}
+
+/// Extension trait for emitting Lua events from Niri (when full State is unavailable).
+///
+/// Some events are emitted from contexts where only `Niri` is available (e.g., monitor
+/// connect/disconnect during backend initialization). This trait handles those cases.
+pub trait NiriLuaEvents {
+    fn emit_monitor_connect(&self, monitor_name: &str, connector_name: &str);
+    fn emit_monitor_disconnect(&self, monitor_name: &str, connector_name: &str);
+    fn emit_output_mode_change(
+        &self,
+        output_name: &str,
+        width: i32,
+        height: i32,
+        refresh_rate: Option<f64>,
+    );
+    fn emit_lock_activate(&self);
+    fn emit_lock_deactivate(&self);
+}
+
+impl NiriLuaEvents for Niri {
+    fn emit_monitor_connect(&self, monitor_name: &str, connector_name: &str) {
+        emit_monitor_connect(self, monitor_name, connector_name);
+    }
+
+    fn emit_monitor_disconnect(&self, monitor_name: &str, connector_name: &str) {
+        emit_monitor_disconnect(self, monitor_name, connector_name);
+    }
+
+    fn emit_output_mode_change(
+        &self,
+        output_name: &str,
+        width: i32,
+        height: i32,
+        refresh_rate: Option<f64>,
+    ) {
+        emit_output_mode_change(self, output_name, width, height, refresh_rate);
+    }
+
+    fn emit_lock_activate(&self) {
+        emit_lock_activate_niri(self);
+    }
+
+    fn emit_lock_deactivate(&self) {
+        emit_lock_deactivate_niri(self);
+    }
 }

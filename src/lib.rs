@@ -16,6 +16,7 @@ pub mod ipc;
 pub mod layer;
 pub mod layout;
 pub mod lua_event_hooks;
+pub mod lua_integration;
 pub mod niri;
 pub mod protocols;
 pub mod render_helpers;

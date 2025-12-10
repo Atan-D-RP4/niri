@@ -188,6 +188,19 @@ const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 // should be ~1.995 seconds.
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
 
+/// State tracking for centralized Lua event emission.
+///
+/// This tracks previous state to detect changes during the refresh cycle,
+/// allowing events to be emitted from a single location regardless of how
+/// the state change was triggered (keybindings, gestures, IPC, etc.).
+#[derive(Debug, Default)]
+pub struct LuaEventState {
+    /// Previous overview open state.
+    pub prev_overview_open: bool,
+    /// Previous floating mode active state for the active workspace.
+    pub prev_floating_active: bool,
+}
+
 pub struct Niri {
     pub config: Rc<RefCell<Config>>,
 
@@ -276,6 +289,8 @@ pub struct Niri {
     pub session_lock_state: SessionLockManagerState,
     pub foreign_toplevel_state: ForeignToplevelManagerState,
     pub ext_workspace_state: ExtWorkspaceManagerState,
+    /// Previous state for detecting changes and emitting Lua events.
+    pub lua_event_state: LuaEventState,
     pub screencopy_state: ScreencopyManagerState,
     pub output_management_state: OutputManagementManagerState,
     pub viewporter_state: ViewporterState,
@@ -813,7 +828,44 @@ impl State {
         self.niri.refresh_idle_inhibit();
         self.refresh_pointer_contents();
         foreign_toplevel::refresh(self);
-        ext_workspace::refresh(self);
+
+        // Refresh workspace protocol and dispatch Lua events for lifecycle changes.
+        let ws_events = ext_workspace::refresh(self);
+        for ws in &ws_events.destroyed {
+            lua_event_hooks::emit_workspace_destroy(self, &ws.name, ws.idx, &ws.output);
+        }
+        for ws in &ws_events.created {
+            lua_event_hooks::emit_workspace_create(self, &ws.name, ws.idx, &ws.output);
+        }
+        for ws in &ws_events.deactivated {
+            lua_event_hooks::emit_workspace_deactivate(self, &ws.name, ws.idx);
+        }
+        for ws in &ws_events.activated {
+            lua_event_hooks::emit_workspace_activate(self, &ws.name, ws.idx);
+        }
+
+        // Detect overview state changes and emit Lua events.
+        let overview_open = self.niri.layout.is_overview_open();
+        if overview_open != self.niri.lua_event_state.prev_overview_open {
+            self.niri.lua_event_state.prev_overview_open = overview_open;
+            if overview_open {
+                lua_event_hooks::emit_overview_open(self);
+            } else {
+                lua_event_hooks::emit_overview_close(self);
+            }
+        }
+
+        // Detect layout mode (floating/tiling) changes and emit Lua events.
+        let floating_active = self
+            .niri
+            .layout
+            .active_workspace()
+            .map(|ws| ws.floating_is_active())
+            .unwrap_or(false);
+        if floating_active != self.niri.lua_event_state.prev_floating_active {
+            self.niri.lua_event_state.prev_floating_active = floating_active;
+            lua_event_hooks::emit_layout_mode_changed(self, floating_active);
+        }
 
         #[cfg(feature = "xdp-gnome-screencast")]
         self.niri.refresh_mapped_cast_outputs();
@@ -2893,6 +2945,7 @@ impl Niri {
             session_lock_state,
             foreign_toplevel_state,
             ext_workspace_state,
+            lua_event_state: LuaEventState::default(),
             output_management_state,
             screencopy_state,
             viewporter_state,

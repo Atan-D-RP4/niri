@@ -18,6 +18,7 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
+use niri::lua_integration;
 use niri::niri::State;
 use niri::utils::spawning::{
     spawn, spawn_sh, store_and_increase_nofile_rlimit, CHILD_DISPLAY, CHILD_ENV,
@@ -26,7 +27,6 @@ use niri::utils::spawning::{
 use niri::utils::{cause_panic, version, watcher, xwayland, IS_SYSTEMD_SERVICE};
 use niri_config::{Config, ConfigPath};
 use niri_ipc::socket::SOCKET_PATH_ENV;
-use niri_lua::LuaConfig;
 use portable_atomic::Ordering;
 use sd_notify::NotifyState;
 use smithay::reexports::wayland_server::Display;
@@ -156,88 +156,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let config_includes = config_load_result.includes;
 
-    // Variable to hold the Lua runtime if a config file is loaded
-    let mut lua_runtime: Option<niri_lua::LuaRuntime> = None;
-    // Pending actions from Lua config (e.g., niri.action:spawn() calls)
-    let mut lua_pending_actions: Vec<niri_ipc::Action> = Vec::new();
-
-    // Determine Lua config file paths to try
-    let lua_files_to_try: Vec<PathBuf> = match &config_path {
-        // Explicit Lua config file specified via -c flag
-        ConfigPath::Explicit(path) if ConfigPath::is_lua_config(path) => {
-            vec![path.clone()]
-        }
-        // Regular config path - check for niri.lua or init.lua in the config directory
-        ConfigPath::Regular { user_path, .. } => {
-            if let Some(config_dir) = user_path.parent() {
-                vec![config_dir.join("niri.lua"), config_dir.join("init.lua")]
-            } else {
-                vec![]
-            }
-        }
-        // Explicit non-Lua config - don't try to load Lua
-        ConfigPath::Explicit(_) => vec![],
-    };
-
-    // Try to load Lua config files
-    for lua_file in lua_files_to_try {
-        if lua_file.exists() {
-            match LuaConfig::from_file(&lua_file) {
-                Ok(lua_config) => {
-                    info!("Loaded Lua config from {}", lua_file.display());
-                    // Log bind count before applying Lua config
-                    let binds_before = config.binds.0.len();
-                    let startup_before = config.spawn_at_startup.len();
-                    info!(
-                        "Config state BEFORE Lua application: {} binds, {} startup commands",
-                        binds_before, startup_before
-                    );
-
-                    // Extract config from the new ConfigWrapper API
-                    // The script has already modified the config directly via niri.config
-                    if let Some(wrapper) = lua_config.config_wrapper() {
-                        let lua_config_obj = wrapper.extract_config();
-                        let dirty = wrapper.take_dirty_flags();
-
-                        if dirty.any() {
-                            // Merge the Lua config into the existing config
-                            // For now, we replace the entire config with the Lua one
-                            // TODO: More sophisticated merging if needed
-                            config = lua_config_obj;
-                        }
-                    }
-
-                    let binds_after = config.binds.0.len();
-                    let startup_after = config.spawn_at_startup.len();
-                    info!(
-                        "Applied Lua config changes: {} binds (+{}), {} startup commands (+{})",
-                        binds_after,
-                        (binds_after as i32 - binds_before as i32),
-                        startup_after,
-                        (startup_after as i32 - startup_before as i32)
-                    );
-
-                    // Take pending actions before consuming the LuaConfig
-                    let pending = lua_config.take_pending_actions();
-                    if !pending.is_empty() {
-                        info!("Collected {} pending Lua actions for execution", pending.len());
-                    }
-                    lua_pending_actions = pending;
-
-                    // Store the runtime for later use
-                    lua_runtime = Some(lua_config.into_runtime());
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to load Lua config from {}: {}",
-                        lua_file.display(),
-                        e
-                    );
-                }
-            }
-            break; // Only load the first one found
-        }
-    }
+    // Load Lua config if present
+    let lua_result = lua_integration::load_lua_config(&config_path, &mut config);
 
     let spawn_at_startup = mem::take(&mut config.spawn_at_startup);
     let spawn_sh_at_startup = mem::take(&mut config.spawn_sh_at_startup);
@@ -251,20 +171,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle Ctrl+C and other signals.
     niri::utils::signals::listen(&event_loop.handle());
 
-    // Create a channel for Lua actions - sender is Send+Sync for the callback
-    let (lua_action_tx, lua_action_rx) = calloop::channel::channel::<niri_ipc::Action>();
-
-    // Register the Lua action channel receiver with the event loop
-    event_loop
-        .handle()
-        .insert_source(lua_action_rx, |event, _, state| {
-            if let calloop::channel::Event::Msg(action) = event {
-                let action = niri_config::Action::from(action);
-                state.niri.advance_animations();
-                state.do_action(action, false);
-            }
-        })
-        .expect("Failed to insert Lua action channel source");
+    // Create the Lua action channel
+    let lua_action_tx = lua_integration::create_action_channel(&event_loop.handle());
 
     // Create the compositor.
     let display = Display::new().unwrap();
@@ -283,39 +191,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
 
-    // Store the Lua runtime in the compositor state to keep it alive
-    // This enables runtime state access and event handling from Lua scripts
-    state.niri.lua_runtime = lua_runtime;
-
-    // Register the runtime API with the Lua runtime if present
-    // This allows Lua scripts to query live compositor state (windows, workspaces, etc.)
-    if let Some(ref mut runtime) = state.niri.lua_runtime {
-        let runtime_api = niri_lua::RuntimeApi::new(event_loop.handle());
-        if let Err(e) = runtime.register_runtime_api(runtime_api) {
-            warn!("Failed to register Lua runtime API: {}", e);
-        }
-
-        // Register the config wrapper API to enable reactive config access
-        // This allows Lua scripts to read/write config values via niri.config
-        // We initialize with a default config; the actual config will be used
-        // when apply_config_wrapper_changes is called
-        if let Err(e) = runtime.register_config_wrapper_api(niri_config::Config::default()) {
-            warn!("Failed to register Lua config wrapper API: {}", e);
-        }
-
-        // Register live action callback for IPC Lua execution
-        // This replaces the config-load callback that deferred/ignored actions
-        let action_tx = lua_action_tx.clone();
-        let action_callback: niri_lua::ActionCallback =
-            std::sync::Arc::new(move |action: niri_ipc::Action| {
-                action_tx
-                    .send(action)
-                    .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
-            });
-        if let Err(e) = runtime.register_action_proxy(action_callback) {
-            warn!("Failed to register Lua action proxy: {}", e);
-        }
-    }
+    // Setup Lua runtime with APIs and action callback
+    lua_integration::setup_runtime(
+        &mut state,
+        lua_result.runtime,
+        &event_loop.handle(),
+        lua_action_tx,
+    );
 
     // Set WAYLAND_DISPLAY for children.
     let socket_name = state.niri.socket_name.as_deref().unwrap();
@@ -379,7 +261,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Only set up the KDL config watcher if Lua config wasn't loaded
     // Lua config has its own file watching mechanism
-    if state.niri.lua_runtime.is_none() {
+    if !lua_integration::is_lua_config_active(&state) {
         watcher::setup(&mut state, &config_path, config_includes);
     }
 
@@ -394,10 +276,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Execute pending actions from Lua config
-    for action in lua_pending_actions {
-        info!("Executing pending Lua action: {:?}", action);
-        state.do_action(action.into(), false);
-    }
+    lua_integration::execute_pending_actions(&mut state, lua_result.pending_actions);
 
     // Show the config error notification right away if needed.
     if config_errored {
