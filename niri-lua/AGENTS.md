@@ -388,28 +388,28 @@ pub fn apply_lua_config(lua: &Lua, config: &mut Config) -> LuaResult<()> {
 Safely extracts and converts Lua values to Rust types
 
 ```text
-pub trait FromLua: Sized {
-    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self>;
-}
+pub fn extract_f64_opt(table: &LuaTable, field: &str) -> LuaResult<Option<f64>>
+pub fn extract_color_opt(table: &LuaTable, field: &str) -> LuaResult<Option<Color>>
+// ... specialized extractors for Duration, ColumnWidth, etc.
 ```
 
-**Purpose**: Provides type-safe extraction of configuration values from Lua tables, with proper error handling.
+**Purpose**: Provides type-safe extraction of configuration values from Lua tables, with proper error handling. Includes validation logic inline (no separate validators module).
 
-### 4c. Validators (`validators.rs`)
+### 4c. Shared API Schema (`api_data.rs`)
 
-Validates extracted configuration values
+Contains the complete Lua API schema as const definitions
 
 ```text
-pub fn validate_color(value: &str) -> Result<()> {
-    // Check valid color format
-}
-
-pub fn validate_animation_duration(value: u32) -> Result<()> {
-    // Check reasonable bounds
-}
+pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
+    modules: &[NIRI_MODULE, UTILS_MODULE, CONFIG_MODULE, ...],
+    types: &[TIMER_TYPE, ANIMATION_TYPE, ...],
+    aliases: &[WINDOW_ALIAS, WORKSPACE_ALIAS, ...],
+};
 ```
 
-**Purpose**: Ensures configuration values are within valid ranges before applying them to the compositor.
+**Purpose**: Single source of truth for the Lua API schema. Used by:
+- `api_registry.rs` (runtime schema access via include!)
+- `build.rs` (EmmyLua generation via include!)
 
 ### 5. Plugin and Module System (Future Work - Tier 5)
 
