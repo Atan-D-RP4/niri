@@ -40,28 +40,7 @@
 ---@alias OutputConfig { name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }
 
 ---Window rule configuration with match criteria and properties
----@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number? }
-
----Color value as hex string (e.g., "#ff0000", "#ff000080" with alpha)
----@alias Color string
-
----Acceleration profile for input devices
----@alias AccelProfile "adaptive"|"flat"
-
----Click method for touchpads
----@alias ClickMethod "button-areas"|"clickfinger"
-
----Scroll method for input devices
----@alias ScrollMethod "no-scroll"|"two-finger"|"edge"|"on-button-press"
-
----Tap button map for touchpads
----@alias TapButtonMap "left-right-middle"|"left-middle-right"
-
----Center focused column mode
----@alias CenterFocusedColumn "never"|"always"|"on-overflow"
-
----Column display mode
----@alias ColumnDisplay "normal"|"tabbed"
+---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number?, draw_border_with_background: boolean?, geometry_corner_radius: table?, clip_to_geometry: boolean?, focus_ring: table?, border: table? }
 
 -- ============================================================================
 -- Input Configuration Types
@@ -387,6 +366,10 @@ function WindowRule:get_floating() end
 ---@return boolean?
 function WindowRule:get_fullscreen() end
 
+---Get tile setting
+---@return boolean?
+function WindowRule:get_tile() end
+
 ---Create a copy with floating setting
 ---@param floating boolean Floating state
 ---@return WindowRule # New rule with updated setting
@@ -396,6 +379,41 @@ function WindowRule:with_floating(floating) end
 ---@param fullscreen boolean Fullscreen state
 ---@return WindowRule # New rule with updated setting
 function WindowRule:with_fullscreen(fullscreen) end
+
+---Create a copy with tile setting
+---@param tile boolean Tile state
+---@return WindowRule # New rule with updated setting
+function WindowRule:with_tile(tile) end
+
+---Gesture configuration
+---@class Gesture
+local Gesture = {}
+
+---Get the gesture type
+---@return string
+function Gesture:get_type() end
+
+---Get the number of fingers
+---@return integer
+function Gesture:get_fingers() end
+
+---Get the gesture direction
+---@return string?
+function Gesture:get_direction() end
+
+---Get the bound action
+---@return string?
+function Gesture:get_action() end
+
+---Create a copy with different direction
+---@param direction string Gesture direction
+---@return Gesture # New gesture with updated direction
+function Gesture:with_direction(direction) end
+
+---Create a copy with different action
+---@param action string Action to bind
+---@return Gesture # New gesture with updated action
+function Gesture:with_action(action) end
 
 ---Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)
 ---@class ConfigCollection
@@ -443,6 +461,9 @@ local ConfigSectionProxy = {}
 ---@field state niri_state Runtime state queries
 ---@field loop niri_loop Event loop and timers
 ---@field keymap niri_keymap Keybinding configuration
+---@field window niri_window Window rules configuration
+---@field overview niri_overview Overview mode configuration
+---@field screenshot niri_screenshot Screenshot configuration
 niri = {}
 
 ---Returns the niri version string
@@ -457,13 +478,13 @@ function niri.print(...) end
 ---@param config table Configuration table
 function niri.apply_config(config) end
 
----Schedule a callback to run on the next event loop iteration
----@param callback fun() Function to execute on next iteration
+---Schedule a callback to run on the next event loop iteration. Useful for deferring work or avoiding reentrancy issues.
+---@param callback function Function to execute on next iteration
 function niri.schedule(callback) end
 
 ---Utility functions for logging and process spawning
----@class niri_utils
-local niri_utils = {}
+---@class niri.utils
+niri_utils = {}
 
 ---Log a message at info level
 ---@param ... any Values to log
@@ -486,19 +507,19 @@ function niri_utils.error(...) end
 function niri_utils.spawn(command) end
 
 ---Configuration proxy for reading and modifying compositor settings
----@class niri_config
----@field input InputConfig Input device configuration (keyboard, mouse, touchpad, etc.)
----@field layout LayoutConfig Layout configuration (gaps, focus ring, border, shadow, etc.)
----@field cursor CursorConfig Cursor configuration (size, theme, hide when typing)
----@field gestures GesturesConfig Gesture configuration (hot corners, touchpad gestures)
----@field recent_windows RecentWindowsConfig Recent windows (MRU) configuration
----@field overview OverviewConfig Overview mode configuration (zoom, backdrop, shadows)
----@field animations AnimationsConfig Animation configuration (off, slowdown)
----@field clipboard ClipboardConfig Clipboard configuration
----@field hotkey_overlay HotkeyOverlayConfig Hotkey overlay configuration
----@field config_notification ConfigNotificationConfig Config reload notification settings
----@field debug DebugConfig Debug configuration options
----@field xwayland_satellite XwaylandSatelliteConfig Xwayland satellite configuration
+---@class niri.config
+---@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)
+---@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)
+---@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)
+---@field gestures ConfigSectionProxy Gesture configuration (hot corners, touchpad gestures)
+---@field recent_windows ConfigSectionProxy Recent windows (MRU) configuration
+---@field overview ConfigSectionProxy Overview mode configuration (zoom, backdrop, shadows)
+---@field animations ConfigSectionProxy Animation configuration (off, slowdown)
+---@field clipboard ConfigSectionProxy Clipboard configuration
+---@field hotkey_overlay ConfigSectionProxy Hotkey overlay configuration
+---@field config_notification ConfigSectionProxy Config reload notification settings
+---@field debug ConfigSectionProxy Debug configuration options
+---@field xwayland_satellite ConfigSectionProxy Xwayland satellite configuration
 ---@field screenshot_path string Screenshot save path pattern
 ---@field prefer_no_csd boolean Prefer server-side decorations
 ---@field binds ConfigCollection Keybindings collection
@@ -507,11 +528,7 @@ function niri_utils.spawn(command) end
 ---@field window_rules ConfigCollection Window rules
 ---@field layer_rules ConfigCollection Layer shell rules
 ---@field environment ConfigCollection Environment variables
-local niri_config = {}
-
----Returns the config API version
----@return string # Config API version
-function niri_config.version() end
+niri_config = {}
 
 ---Apply all staged configuration changes to the compositor
 function niri_config:apply() end
@@ -520,80 +537,40 @@ function niri_config:apply() end
 ---@param enable boolean Whether to auto-apply changes
 function niri_config:auto_apply(enable) end
 
+---Returns the config API version
+---@return string # Config API version
+function niri_config.version() end
+
 ---Event system for subscribing to compositor events
----@class niri_events
-local niri_events = {}
+---@class niri.events
+niri_events = {}
 
 ---Subscribe to an event with a callback. Returns a handler ID for later removal.
----@param event_name string Event name (e.g., 'window:open', 'workspace:activate', 'config:reload')
+---@param event_name string Event name (e.g., 'window:open', 'workspace:activate')
 ---@param callback fun(event: table) Callback function receiving event data
----@return integer # Handler ID for removal
+---@return EventHandlerId # Handler ID for removal
 function niri_events:on(event_name, callback) end
 
 ---Subscribe to an event for a single occurrence. Handler is automatically removed after firing.
 ---@param event_name string Event name
 ---@param callback fun(event: table) Callback function
----@return integer # Handler ID for early removal
+---@return EventHandlerId # Handler ID for early removal
 function niri_events:once(event_name, callback) end
 
 ---Unsubscribe from an event using the handler ID
 ---@param event_name string Event name
----@param handler_id integer Handler ID from on() or once()
+---@param handler_id EventHandlerId Handler ID from on() or once()
 ---@return boolean # True if handler was found and removed
 function niri_events:off(event_name, handler_id) end
 
 ---Emit a custom event (for testing or custom integrations)
 ---@param event_name string Event name
----@param data? table Event data
+---@param data? table? Event data
 function niri_events:emit(event_name, data) end
 
----Keybinding configuration
----@class niri_keymap
-local niri_keymap = {}
-
----Set a keybinding
----@param mode string Binding mode (e.g., 'normal')
----@param key string Key combination (e.g., 'Mod+Return')
----@param callback fun() Callback function
-function niri_keymap.set(mode, key, callback) end
-
----Runtime state queries for windows, workspaces, and outputs
----@class niri_state
-local niri_state = {}
-
----Get all windows
----@return Window[] # Array of window information
-function niri_state.windows() end
-
----Get the currently focused window
----@return Window? # Focused window or nil
-function niri_state.focused_window() end
-
----Get all workspaces
----@return Workspace[] # Array of workspace information
-function niri_state.workspaces() end
-
----Get all outputs/monitors
----@return Output[] # Array of output information
-function niri_state.outputs() end
-
----Event loop and timer functionality
----@class niri_loop
-local niri_loop = {}
-
----Create a new timer
----@return Timer # New timer instance
-function niri_loop.new_timer() end
-
----Get current time in milliseconds since compositor start
----@return integer # Milliseconds since start
-function niri_loop.now() end
-
 ---Compositor actions for window management, navigation, and system control
----@class niri_action
-local niri_action = {}
-
--- === System ===
+---@class niri.action
+niri_action = {}
 
 ---Quit the compositor
 ---@param skip_confirmation? boolean Skip confirmation dialog
@@ -614,13 +591,11 @@ function niri_action:spawn(command) end
 function niri_action:spawn_sh(command) end
 
 ---Trigger a screen transition animation
----@param delay? boolean Whether to delay
+---@param delay? boolean Whether to delay the transition
 function niri_action:do_screen_transition(delay) end
 
 ---Reload configuration from file
 function niri_action:load_config_file() end
-
--- === Screenshot ===
 
 ---Take a screenshot (interactive selection)
 function niri_action:screenshot() end
@@ -630,8 +605,6 @@ function niri_action:screenshot_screen() end
 
 ---Screenshot the focused window
 function niri_action:screenshot_window() end
-
--- === Window ===
 
 ---Close the focused window
 function niri_action:close_window() end
@@ -646,13 +619,15 @@ function niri_action:toggle_windowed_fullscreen() end
 ---@param window_id integer Window ID
 function niri_action:focus_window(window_id) end
 
+---Focus the window at index within current column
+---@param index integer 1-based window index
+function niri_action:focus_window_in_column(index) end
+
 ---Focus the previously focused window
 function niri_action:focus_window_previous() end
 
----Toggle keyboard shortcuts inhibit
+---Toggle keyboard shortcuts inhibit for focused window
 function niri_action:toggle_keyboard_shortcuts_inhibit() end
-
--- === Column Focus ===
 
 ---Focus the column to the left
 function niri_action:focus_column_left() end
@@ -666,17 +641,15 @@ function niri_action:focus_column_first() end
 ---Focus the last column
 function niri_action:focus_column_last() end
 
----Focus column right, wrapping to first
+---Focus column to the right, wrapping to first
 function niri_action:focus_column_right_or_first() end
 
----Focus column left, wrapping to last
+---Focus column to the left, wrapping to last
 function niri_action:focus_column_left_or_last() end
 
----Focus column by index
+---Focus column at specific index
 ---@param index integer 1-based column index
 function niri_action:focus_column(index) end
-
--- === Window Focus ===
 
 ---Focus the window below in the column
 function niri_action:focus_window_down() end
@@ -684,9 +657,17 @@ function niri_action:focus_window_down() end
 ---Focus the window above in the column
 function niri_action:focus_window_up() end
 
----Focus window by index in focused column
----@param index integer 1-based index from top
-function niri_action:focus_window_in_column(index) end
+---Focus window below or column left if at bottom
+function niri_action:focus_window_down_or_column_left() end
+
+---Focus window below or column right if at bottom
+function niri_action:focus_window_down_or_column_right() end
+
+---Focus window above or column left if at top
+function niri_action:focus_window_up_or_column_left() end
+
+---Focus window above or column right if at top
+function niri_action:focus_window_up_or_column_right() end
 
 ---Focus window above or monitor above
 function niri_action:focus_window_or_monitor_up() end
@@ -699,38 +680,6 @@ function niri_action:focus_column_or_monitor_left() end
 
 ---Focus column right or monitor right
 function niri_action:focus_column_or_monitor_right() end
-
----Focus window below or column to the left
-function niri_action:focus_window_down_or_column_left() end
-
----Focus window below or column to the right
-function niri_action:focus_window_down_or_column_right() end
-
----Focus window above or column to the left
-function niri_action:focus_window_up_or_column_left() end
-
----Focus window above or column to the right
-function niri_action:focus_window_up_or_column_right() end
-
----Focus window below or workspace below
-function niri_action:focus_window_or_workspace_down() end
-
----Focus window above or workspace above
-function niri_action:focus_window_or_workspace_up() end
-
----Focus the topmost window in column
-function niri_action:focus_window_top() end
-
----Focus the bottommost window in column
-function niri_action:focus_window_bottom() end
-
----Focus window below or wrap to top
-function niri_action:focus_window_down_or_top() end
-
----Focus window above or wrap to bottom
-function niri_action:focus_window_up_or_bottom() end
-
--- === Column Move ===
 
 ---Move column to the left
 function niri_action:move_column_left() end
@@ -754,8 +703,6 @@ function niri_action:move_column_right_or_to_monitor_right() end
 ---@param index integer 1-based target index
 function niri_action:move_column_to_index(index) end
 
--- === Window Move ===
-
 ---Move window down within column
 function niri_action:move_window_down() end
 
@@ -768,18 +715,10 @@ function niri_action:move_window_down_or_to_workspace_down() end
 ---Move window up or to workspace above
 function niri_action:move_window_up_or_to_workspace_up() end
 
----Swap focused window with window to the left
-function niri_action:swap_window_left() end
-
----Swap focused window with window to the right
-function niri_action:swap_window_right() end
-
--- === Consume/Expel ===
-
----Consume window from left or expel to left
+---Consume window from left column or expel to left
 function niri_action:consume_or_expel_window_left() end
 
----Consume window from right or expel to right
+---Consume window from right column or expel to right
 function niri_action:consume_or_expel_window_right() end
 
 ---Consume adjacent window into current column
@@ -788,14 +727,18 @@ function niri_action:consume_window_into_column() end
 ---Expel focused window from column
 function niri_action:expel_window_from_column() end
 
--- === Column Display ===
+---Swap window with the one to the right
+function niri_action:swap_window_right() end
+
+---Swap window with the one to the left
+function niri_action:swap_window_left() end
 
 ---Toggle tabbed display for column
 function niri_action:toggle_column_tabbed_display() end
 
 ---Set column display mode
----@param display "normal"|"tabbed" Display mode
-function niri_action:set_column_display(display) end
+---@param mode "normal"|"tabbed" Display mode
+function niri_action:set_column_display(mode) end
 
 ---Center the current column on screen
 function niri_action:center_column() end
@@ -803,10 +746,8 @@ function niri_action:center_column() end
 ---Center the focused window on screen
 function niri_action:center_window() end
 
----Center all fully visible columns
+---Center all visible columns
 function niri_action:center_visible_columns() end
-
--- === Workspace ===
 
 ---Focus the workspace below
 function niri_action:focus_workspace_down() end
@@ -847,18 +788,78 @@ function niri_action:move_workspace_down() end
 ---Move current workspace up
 function niri_action:move_workspace_up() end
 
----Move workspace to specific index
----@param index integer Target index
-function niri_action:move_workspace_to_index(index) end
-
----Set the name of a workspace
----@param name string New workspace name
+---Set the name of current workspace
+---@param name string Workspace name
 function niri_action:set_workspace_name(name) end
 
----Unset the name of a workspace
+---Clear the name of current workspace
 function niri_action:unset_workspace_name() end
 
--- === Workspace to Monitor ===
+---Focus monitor to the left
+function niri_action:focus_monitor_left() end
+
+---Focus monitor to the right
+function niri_action:focus_monitor_right() end
+
+---Focus monitor below
+function niri_action:focus_monitor_down() end
+
+---Focus monitor above
+function niri_action:focus_monitor_up() end
+
+---Focus previously active monitor
+function niri_action:focus_monitor_previous() end
+
+---Focus next monitor in order
+function niri_action:focus_monitor_next() end
+
+---Focus specific monitor by name
+---@param name string Monitor name
+function niri_action:focus_monitor(name) end
+
+---Move window to monitor on the left
+function niri_action:move_window_to_monitor_left() end
+
+---Move window to monitor on the right
+function niri_action:move_window_to_monitor_right() end
+
+---Move window to monitor below
+function niri_action:move_window_to_monitor_down() end
+
+---Move window to monitor above
+function niri_action:move_window_to_monitor_up() end
+
+---Move window to previously active monitor
+function niri_action:move_window_to_monitor_previous() end
+
+---Move window to next monitor
+function niri_action:move_window_to_monitor_next() end
+
+---Move window to specific monitor
+---@param name string Monitor name
+function niri_action:move_window_to_monitor(name) end
+
+---Move column to monitor on the left
+function niri_action:move_column_to_monitor_left() end
+
+---Move column to monitor on the right
+function niri_action:move_column_to_monitor_right() end
+
+---Move column to monitor below
+function niri_action:move_column_to_monitor_down() end
+
+---Move column to monitor above
+function niri_action:move_column_to_monitor_up() end
+
+---Move column to previously active monitor
+function niri_action:move_column_to_monitor_previous() end
+
+---Move column to next monitor
+function niri_action:move_column_to_monitor_next() end
+
+---Move column to specific monitor
+---@param name string Monitor name
+function niri_action:move_column_to_monitor(name) end
 
 ---Move workspace to monitor on the left
 function niri_action:move_workspace_to_monitor_left() end
@@ -879,82 +880,8 @@ function niri_action:move_workspace_to_monitor_previous() end
 function niri_action:move_workspace_to_monitor_next() end
 
 ---Move workspace to specific monitor
----@param output string Target output name
-function niri_action:move_workspace_to_monitor(output) end
-
--- === Monitor Focus ===
-
----Focus monitor to the left
-function niri_action:focus_monitor_left() end
-
----Focus monitor to the right
-function niri_action:focus_monitor_right() end
-
----Focus monitor below
-function niri_action:focus_monitor_down() end
-
----Focus monitor above
-function niri_action:focus_monitor_up() end
-
----Focus previously active monitor
-function niri_action:focus_monitor_previous() end
-
----Focus next monitor in order
-function niri_action:focus_monitor_next() end
-
----Focus monitor by name
----@param output string Output name
-function niri_action:focus_monitor(output) end
-
--- === Window to Monitor ===
-
----Move window to monitor on the left
-function niri_action:move_window_to_monitor_left() end
-
----Move window to monitor on the right
-function niri_action:move_window_to_monitor_right() end
-
----Move window to monitor below
-function niri_action:move_window_to_monitor_down() end
-
----Move window to monitor above
-function niri_action:move_window_to_monitor_up() end
-
----Move window to next monitor
-function niri_action:move_window_to_monitor_next() end
-
----Move window to previously active monitor
-function niri_action:move_window_to_monitor_previous() end
-
----Move window to specific monitor
----@param output string Target output name
-function niri_action:move_window_to_monitor(output) end
-
--- === Column to Monitor ===
-
----Move column to monitor on the left
-function niri_action:move_column_to_monitor_left() end
-
----Move column to monitor on the right
-function niri_action:move_column_to_monitor_right() end
-
----Move column to monitor below
-function niri_action:move_column_to_monitor_down() end
-
----Move column to monitor above
-function niri_action:move_column_to_monitor_up() end
-
----Move column to next monitor
-function niri_action:move_column_to_monitor_next() end
-
----Move column to previously active monitor
-function niri_action:move_column_to_monitor_previous() end
-
----Move column to specific monitor
----@param output string Target output name
-function niri_action:move_column_to_monitor(output) end
-
--- === Size/Width/Height ===
+---@param name string Monitor name
+function niri_action:move_workspace_to_monitor(name) end
 
 ---Set the window width
 ---@param change SizeChange Width change value
@@ -971,24 +898,24 @@ function niri_action:reset_window_height() end
 function niri_action:switch_preset_column_width() end
 
 ---Switch to previous preset column width
-function niri_action:switch_preset_column_width_back() end
+function niri_action:switch_preset_column_width_reverse() end
 
 ---Switch to next preset window width
 function niri_action:switch_preset_window_width() end
 
 ---Switch to previous preset window width
-function niri_action:switch_preset_window_width_back() end
+function niri_action:switch_preset_window_width_reverse() end
 
 ---Switch to next preset window height
 function niri_action:switch_preset_window_height() end
 
 ---Switch to previous preset window height
-function niri_action:switch_preset_window_height_back() end
+function niri_action:switch_preset_window_height_reverse() end
 
 ---Maximize column to fill workspace
 function niri_action:maximize_column() end
 
----Toggle maximize window to edges
+---Maximize window to edges
 function niri_action:maximize_window_to_edges() end
 
 ---Set column width
@@ -998,8 +925,6 @@ function niri_action:set_column_width(change) end
 ---Expand column to fill available width
 function niri_action:expand_column_to_available_width() end
 
--- === Layout ===
-
 ---Switch keyboard layout
 ---@param target LayoutSwitchTarget Layout to switch to
 function niri_action:switch_layout(target) end
@@ -1007,18 +932,14 @@ function niri_action:switch_layout(target) end
 ---Show the hotkey overlay
 function niri_action:show_hotkey_overlay() end
 
--- === Debug ===
-
 ---Toggle debug tint visualization
 function niri_action:toggle_debug_tint() end
 
----Toggle opaque regions debug
+---Toggle opaque regions debug visualization
 function niri_action:debug_toggle_opaque_regions() end
 
 ---Toggle damage debug visualization
 function niri_action:debug_toggle_damage() end
-
--- === Floating ===
 
 ---Toggle floating state of focused window
 function niri_action:toggle_window_floating() end
@@ -1035,15 +956,27 @@ function niri_action:focus_floating() end
 ---Focus tiling layer
 function niri_action:focus_tiling() end
 
----Switch focus between layers
+---Switch focus between floating and tiling layers
 function niri_action:switch_focus_between_floating_and_tiling() end
 
 ---Move floating window by offset
----@param x PositionChange X position change
----@param y PositionChange Y position change
+---@param x PositionChange X offset
+---@param y PositionChange Y offset
 function niri_action:move_floating_window(x, y) end
 
--- === Overview ===
+---Toggle opacity rule for focused window
+function niri_action:toggle_window_rule_opacity() end
+
+---Set dynamic cast target to window
+---@param window_id? integer? Window ID or nil for focused
+function niri_action:set_dynamic_cast_window(window_id) end
+
+---Set dynamic cast target to monitor
+---@param monitor? string? Monitor name or nil for focused
+function niri_action:set_dynamic_cast_monitor(monitor) end
+
+---Clear dynamic cast target
+function niri_action:clear_dynamic_cast_target() end
 
 ---Toggle overview mode
 function niri_action:toggle_overview() end
@@ -1054,30 +987,72 @@ function niri_action:open_overview() end
 ---Close overview mode
 function niri_action:close_overview() end
 
--- === Window Rules / Misc ===
+---Toggle urgent state of focused window
+function niri_action:toggle_window_urgent() end
 
----Toggle window rule opacity for focused window
-function niri_action:toggle_window_rule_opacity() end
+---Set focused window as urgent
+function niri_action:set_window_urgent() end
 
----Toggle urgent status of a window
----@param id integer Window ID
-function niri_action:toggle_window_urgent(id) end
+---Clear urgent state of focused window
+function niri_action:unset_window_urgent() end
 
----Set urgent status of a window
----@param id integer Window ID
-function niri_action:set_window_urgent(id) end
+---Runtime state queries for windows, workspaces, and outputs
+---@class niri.state
+niri_state = {}
 
----Unset urgent status of a window
----@param id integer Window ID
-function niri_action:unset_window_urgent(id) end
+---Get all windows
+---@return Window[] # Array of window information
+function niri_state.windows() end
 
----Set dynamic cast target to a window
-function niri_action:set_dynamic_cast_window() end
+---Get the currently focused window
+---@return Window? # Focused window or nil
+function niri_state.focused_window() end
 
----Set dynamic cast target to a monitor
----@param output? string Output name (optional)
-function niri_action:set_dynamic_cast_monitor(output) end
+---Get all workspaces
+---@return Workspace[] # Array of workspace information
+function niri_state.workspaces() end
 
----Clear dynamic cast target
-function niri_action:clear_dynamic_cast_target() end
+---Get all outputs/monitors
+---@return Output[] # Array of output information
+function niri_state.outputs() end
+
+---Event loop and timer functionality
+---@class niri.loop
+niri_loop = {}
+
+---Create a new timer
+---@return Timer # New timer instance
+function niri_loop.new_timer() end
+
+---Get current time in milliseconds since compositor start
+---@return integer # Milliseconds since start
+function niri_loop.now() end
+
+---Keybinding configuration
+---@class niri.keymap
+niri_keymap = {}
+
+---Set a keybinding
+---@param mode string Binding mode (e.g., 'normal')
+---@param key string Key combination (e.g., 'Mod+Return')
+---@param callback fun() Callback function
+function niri_keymap.set(mode, key, callback) end
+
+---Window rules configuration
+---@class niri.window
+niri_window = {}
+
+---Define a window rule
+---@param rule table Window rule definition
+function niri_window.rule(rule) end
+
+---Overview mode configuration
+---@class niri.overview
+---@field backdrop_color string? Backdrop color in hex format
+niri_overview = {}
+
+---Screenshot configuration
+---@class niri.screenshot
+---@field path string? Screenshot save path
+niri_screenshot = {}
 

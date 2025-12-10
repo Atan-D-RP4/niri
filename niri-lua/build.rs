@@ -1,11 +1,94 @@
 //! Build script for niri-lua that generates EmmyLua type definitions.
 //!
 //! This script generates `types/api.lua` with EmmyLua annotations for LSP support.
-//! The API schema is defined inline to avoid include!() complications.
+//! The API schema is included from `src/api_data.rs` which is shared with the main crate.
+
+// Allow private_interfaces warning because api_data.rs uses `pub const` for the main crate,
+// but build.rs defines its own private schema types (which is fine for a build script).
+#![allow(private_interfaces)]
 
 use std::io::Write;
 use std::path::Path;
 use std::{env, fs};
+
+// ============================================================================
+// Schema Type Definitions (mirrors lua_api_schema.rs without `pub`)
+// ============================================================================
+
+/// Complete schema for the niri Lua API.
+#[derive(Debug, Clone)]
+struct LuaApiSchema {
+    modules: &'static [ModuleSchema],
+    types: &'static [TypeSchema],
+    aliases: &'static [AliasSchema],
+}
+
+/// Schema for a Lua module/namespace.
+#[derive(Debug, Clone)]
+struct ModuleSchema {
+    path: &'static str,
+    description: &'static str,
+    functions: &'static [FunctionSchema],
+    fields: &'static [FieldSchema],
+}
+
+/// Schema for a function or method.
+#[derive(Debug, Clone)]
+struct FunctionSchema {
+    name: &'static str,
+    description: &'static str,
+    is_method: bool,
+    params: &'static [ParamSchema],
+    returns: &'static [ReturnSchema],
+}
+
+/// Schema for a function parameter.
+#[derive(Debug, Clone)]
+struct ParamSchema {
+    name: &'static str,
+    ty: &'static str,
+    description: &'static str,
+    optional: bool,
+}
+
+/// Schema for a function return value.
+#[derive(Debug, Clone)]
+struct ReturnSchema {
+    ty: &'static str,
+    description: &'static str,
+}
+
+/// Schema for a field (module field or type field).
+#[derive(Debug, Clone)]
+struct FieldSchema {
+    name: &'static str,
+    ty: &'static str,
+    description: &'static str,
+}
+
+/// Schema for a UserData type (class).
+#[derive(Debug, Clone)]
+struct TypeSchema {
+    name: &'static str,
+    description: &'static str,
+    fields: &'static [FieldSchema],
+    methods: &'static [FunctionSchema],
+}
+
+/// Schema for a type alias.
+#[derive(Debug, Clone)]
+struct AliasSchema {
+    name: &'static str,
+    ty: &'static str,
+    description: &'static str,
+}
+
+// Include the shared API data (defines NIRI_LUA_API and all module constants)
+include!("src/api_data.rs");
+
+// ============================================================================
+// EmmyLua Generation
+// ============================================================================
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -18,8 +101,9 @@ fn main() {
     let output_path = types_dir.join("api.lua");
     generate_emmylua(&output_path);
 
-    // Tell Cargo to rerun if this file changes
+    // Tell Cargo to rerun if relevant files change
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/api_data.rs");
 }
 
 fn generate_emmylua(output_path: &Path) {
@@ -33,7 +117,25 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("-- Niri Lua API Type Definitions\n");
     output.push_str("-- For use with EmmyLua-compatible LSP servers\n\n");
 
-    // Type aliases
+    // Generate type aliases from schema
+    generate_aliases(&mut output);
+
+    // Generate config classes (these are not in the schema yet)
+    generate_config_classes(&mut output);
+
+    // Generate UserData types from schema
+    generate_types(&mut output);
+
+    // Generate modules from schema
+    generate_modules(&mut output);
+
+    // Write the output file
+    let mut file = fs::File::create(output_path).unwrap();
+    file.write_all(output.as_bytes()).unwrap();
+}
+
+/// Generate type aliases from NIRI_LUA_API.aliases
+fn generate_aliases(output: &mut String) {
     output.push_str(
         "-- ============================================================================\n",
     );
@@ -42,64 +144,16 @@ fn generate_emmylua(output_path: &Path) {
         "-- ============================================================================\n\n",
     );
 
-    output.push_str("---Window information table\n");
-    output.push_str("---@alias Window { id: integer, title: string?, app_id: string?, workspace_id: integer?, is_focused: boolean, is_floating: boolean }\n\n");
+    for alias in NIRI_LUA_API.aliases {
+        // Description
+        output.push_str(&format!("---{}\n", alias.description));
+        // Alias definition
+        output.push_str(&format!("---@alias {} {}\n\n", alias.name, alias.ty));
+    }
+}
 
-    output.push_str("---Workspace information table\n");
-    output.push_str("---@alias Workspace { id: integer, idx: integer, name: string?, output: string?, is_active: boolean, is_focused: boolean, active_window_id: integer? }\n\n");
-
-    output.push_str("---Output/monitor information table\n");
-    output.push_str("---@alias Output { name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean }\n\n");
-
-    output.push_str(
-        "---Size change value: integer for absolute, '+N'/'-N' for relative, 'N%' for percentage\n",
-    );
-    output.push_str("---@alias SizeChange integer|string\n\n");
-
-    output.push_str("---Position change value: integer for absolute, '+N'/'-N' for relative\n");
-    output.push_str("---@alias PositionChange integer|string\n\n");
-
-    output.push_str("---Layout switch target: 'next', 'prev', or layout name\n");
-    output.push_str("---@alias LayoutSwitchTarget \"next\"|\"prev\"|string\n\n");
-
-    output.push_str("---Workspace reference: index, name, or table with id/name/index\n");
-    output.push_str("---@alias WorkspaceReference integer|string|{ id: integer }|{ name: string }|{ index: integer }\n\n");
-
-    output.push_str("---Event handler identifier returned by niri.events:on() or :once()\n");
-    output.push_str("---@alias EventHandlerId integer\n\n");
-
-    output.push_str("---Keybinding entry with key combination, action, and optional parameters\n");
-    output.push_str("---@alias BindEntry { key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }\n\n");
-
-    output.push_str("---Output/monitor configuration\n");
-    output.push_str("---@alias OutputConfig { name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }\n\n");
-
-    output.push_str("---Window rule configuration with match criteria and properties\n");
-    output.push_str("---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number? }\n\n");
-
-    output.push_str("---Color value as hex string (e.g., \"#ff0000\", \"#ff000080\" with alpha)\n");
-    output.push_str("---@alias Color string\n\n");
-
-    output.push_str("---Acceleration profile for input devices\n");
-    output.push_str("---@alias AccelProfile \"adaptive\"|\"flat\"\n\n");
-
-    output.push_str("---Click method for touchpads\n");
-    output.push_str("---@alias ClickMethod \"button-areas\"|\"clickfinger\"\n\n");
-
-    output.push_str("---Scroll method for input devices\n");
-    output.push_str(
-        "---@alias ScrollMethod \"no-scroll\"|\"two-finger\"|\"edge\"|\"on-button-press\"\n\n",
-    );
-
-    output.push_str("---Tap button map for touchpads\n");
-    output.push_str("---@alias TapButtonMap \"left-right-middle\"|\"left-middle-right\"\n\n");
-
-    output.push_str("---Center focused column mode\n");
-    output.push_str("---@alias CenterFocusedColumn \"never\"|\"always\"|\"on-overflow\"\n\n");
-
-    output.push_str("---Column display mode\n");
-    output.push_str("---@alias ColumnDisplay \"normal\"|\"tabbed\"\n\n");
-
+/// Generate config classes (not yet in schema - kept as hardcoded for now)
+fn generate_config_classes(output: &mut String) {
     // Input Configuration Types
     output.push_str(
         "-- ============================================================================\n",
@@ -374,8 +428,10 @@ fn generate_emmylua(output_path: &Path) {
     output.push_str("---Xwayland satellite configuration\n");
     output.push_str("---@class XwaylandSatelliteConfig\n");
     output.push_str("---@field off boolean? Disable Xwayland satellite\n\n");
+}
 
-    // UserData types
+/// Generate UserData types from NIRI_LUA_API.types
+fn generate_types(output: &mut String) {
     output.push_str(
         "-- ============================================================================\n",
     );
@@ -384,146 +440,31 @@ fn generate_emmylua(output_path: &Path) {
         "-- ============================================================================\n\n",
     );
 
-    // Timer
-    output.push_str("---A timer for scheduling callbacks\n");
-    output.push_str("---@class Timer\n");
-    output.push_str("---@field id integer Unique timer identifier\n");
-    output.push_str("local Timer = {}\n\n");
+    for ty in NIRI_LUA_API.types {
+        // Class description
+        output.push_str(&format!("---{}\n", ty.description));
+        output.push_str(&format!("---@class {}\n", ty.name));
 
-    output.push_str("---Start the timer with a delay and optional repeat interval\n");
-    output.push_str("---@param delay_ms integer Delay in milliseconds before first callback\n");
-    output.push_str(
-        "---@param repeat_ms? integer Repeat interval in milliseconds (0 for one-shot)\n",
-    );
-    output.push_str("---@param callback fun() Callback function\n");
-    output.push_str("---@return Timer # Self for chaining\n");
-    output.push_str("function Timer:start(delay_ms, repeat_ms, callback) end\n\n");
+        // Fields
+        for field in ty.fields {
+            output.push_str(&format!(
+                "---@field {} {} {}\n",
+                field.name, field.ty, field.description
+            ));
+        }
 
-    output.push_str("---Stop the timer without closing it\n");
-    output.push_str("---@return Timer # Self for chaining\n");
-    output.push_str("function Timer:stop() end\n\n");
+        // Local variable declaration (for methods to attach to)
+        output.push_str(&format!("local {} = {{}}\n\n", ty.name));
 
-    output.push_str("---Stop and close the timer, releasing resources\n");
-    output.push_str("function Timer:close() end\n\n");
+        // Methods
+        for method in ty.methods {
+            generate_function(output, ty.name, method, true);
+        }
+    }
+}
 
-    output.push_str("---Check if the timer is currently active\n");
-    output.push_str("---@return boolean # True if timer is active\n");
-    output.push_str("function Timer:is_active() end\n\n");
-
-    // Animation
-    output.push_str("---Animation configuration\n");
-    output.push_str("---@class Animation\n");
-    output.push_str("---@field name string Animation name\n");
-    output.push_str("---@field duration_ms integer Duration in milliseconds\n");
-    output.push_str("---@field curve string Easing curve\n");
-    output.push_str("local Animation = {}\n\n");
-
-    output.push_str("---Get the animation name\n");
-    output.push_str("---@return string\n");
-    output.push_str("function Animation:get_name() end\n\n");
-
-    output.push_str("---Get the duration in milliseconds\n");
-    output.push_str("---@return integer\n");
-    output.push_str("function Animation:get_duration() end\n\n");
-
-    output.push_str("---Get the easing curve\n");
-    output.push_str("---@return string\n");
-    output.push_str("function Animation:get_curve() end\n\n");
-
-    output.push_str("---Create a copy with different duration\n");
-    output.push_str("---@param ms integer Duration in milliseconds\n");
-    output.push_str("---@return Animation # New animation with updated duration\n");
-    output.push_str("function Animation:with_duration(ms) end\n\n");
-
-    output.push_str("---Create a copy with different easing curve\n");
-    output.push_str("---@param curve string Easing curve name\n");
-    output.push_str("---@return Animation # New animation with updated curve\n");
-    output.push_str("function Animation:with_curve(curve) end\n\n");
-
-    // Filter
-    output.push_str("---Window filter for matching windows\n");
-    output.push_str("---@class Filter\n");
-    output.push_str("local Filter = {}\n\n");
-
-    output.push_str("---Check if a window matches this filter\n");
-    output.push_str("---@param app_id string? Application ID\n");
-    output.push_str("---@param title string? Window title\n");
-    output.push_str("---@return boolean # True if window matches\n");
-    output.push_str("function Filter:matches(app_id, title) end\n\n");
-
-    output.push_str("---Get the app_id pattern\n");
-    output.push_str("---@return string?\n");
-    output.push_str("function Filter:get_app_id() end\n\n");
-
-    output.push_str("---Get the title pattern\n");
-    output.push_str("---@return string?\n");
-    output.push_str("function Filter:get_title() end\n\n");
-
-    // WindowRule
-    output.push_str("---Window rule configuration\n");
-    output.push_str("---@class WindowRule\n");
-    output.push_str("local WindowRule = {}\n\n");
-
-    output.push_str("---Check if a window matches this rule\n");
-    output.push_str("---@param app_id string? Application ID\n");
-    output.push_str("---@param title string? Window title\n");
-    output.push_str("---@return boolean # True if window matches\n");
-    output.push_str("function WindowRule:matches(app_id, title) end\n\n");
-
-    output.push_str("---Get floating setting\n");
-    output.push_str("---@return boolean?\n");
-    output.push_str("function WindowRule:get_floating() end\n\n");
-
-    output.push_str("---Get fullscreen setting\n");
-    output.push_str("---@return boolean?\n");
-    output.push_str("function WindowRule:get_fullscreen() end\n\n");
-
-    output.push_str("---Create a copy with floating setting\n");
-    output.push_str("---@param floating boolean Floating state\n");
-    output.push_str("---@return WindowRule # New rule with updated setting\n");
-    output.push_str("function WindowRule:with_floating(floating) end\n\n");
-
-    output.push_str("---Create a copy with fullscreen setting\n");
-    output.push_str("---@param fullscreen boolean Fullscreen state\n");
-    output.push_str("---@return WindowRule # New rule with updated setting\n");
-    output.push_str("function WindowRule:with_fullscreen(fullscreen) end\n\n");
-
-    // ConfigCollection
-    output.push_str("---Collection proxy for CRUD operations on config arrays (binds, outputs, window_rules, etc.)\n");
-    output.push_str("---@class ConfigCollection\n");
-    output.push_str("local ConfigCollection = {}\n\n");
-
-    output.push_str("---Get all items in the collection\n");
-    output.push_str("---@return table[] # Array of all items\n");
-    output.push_str("function ConfigCollection:list() end\n\n");
-
-    output.push_str("---Get items matching criteria\n");
-    output.push_str("---@param criteria table Match criteria (e.g., { key = 'Mod+T' })\n");
-    output.push_str("---@return table[] # Matching items\n");
-    output.push_str("function ConfigCollection:get(criteria) end\n\n");
-
-    output.push_str("---Add one or more items to the collection\n");
-    output.push_str("---@param items table|table[] Item or array of items to add\n");
-    output.push_str("function ConfigCollection:add(items) end\n\n");
-
-    output.push_str("---Replace the entire collection with new items\n");
-    output.push_str("---@param items table[] New items to replace collection\n");
-    output.push_str("function ConfigCollection:set(items) end\n\n");
-
-    output.push_str("---Remove items matching criteria\n");
-    output.push_str("---@param criteria table Match criteria for removal\n");
-    output.push_str("---@return integer # Number of items removed\n");
-    output.push_str("function ConfigCollection:remove(criteria) end\n\n");
-
-    output.push_str("---Remove all items from the collection\n");
-    output.push_str("function ConfigCollection:clear() end\n\n");
-
-    // ConfigSectionProxy
-    output.push_str("---Proxy for config sections supporting direct table assignment and nested property access\n");
-    output.push_str("---@class ConfigSectionProxy\n");
-    output.push_str("local ConfigSectionProxy = {}\n\n");
-
-    // Modules
+/// Generate modules from NIRI_LUA_API.modules
+fn generate_modules(output: &mut String) {
     output.push_str(
         "-- ============================================================================\n",
     );
@@ -532,1248 +473,60 @@ fn generate_emmylua(output_path: &Path) {
         "-- ============================================================================\n\n",
     );
 
-    // niri (root)
-    output.push_str("---Root niri namespace providing access to compositor functionality\n");
-    output.push_str("---@class niri\n");
-    output.push_str("---@field utils niri_utils Utility functions\n");
-    output.push_str("---@field config niri_config Configuration API\n");
-    output.push_str(
-        "---@field events niri_events Event system for subscribing to compositor events\n",
-    );
-    output.push_str("---@field action niri_action Compositor actions\n");
-    output.push_str("---@field state niri_state Runtime state queries\n");
-    output.push_str("---@field loop niri_loop Event loop and timers\n");
-    output.push_str("---@field keymap niri_keymap Keybinding configuration\n");
-    output.push_str("niri = {}\n\n");
+    for module in NIRI_LUA_API.modules {
+        // Module class definition
+        output.push_str(&format!("---{}\n", module.description));
+        output.push_str(&format!("---@class {}\n", module.path));
 
-    output.push_str("---Returns the niri version string\n");
-    output.push_str("---@return string # niri version\n");
-    output.push_str("function niri.version() end\n\n");
+        // Module fields (sub-modules)
+        for field in module.fields {
+            output.push_str(&format!(
+                "---@field {} {} {}\n",
+                field.name, field.ty, field.description
+            ));
+        }
 
-    output.push_str("---Print values to the niri log (info level)\n");
-    output.push_str("---@param ... any Values to print\n");
-    output.push_str("function niri.print(...) end\n\n");
+        // Module variable
+        let var_name = module.path.replace('.', "_");
+        output.push_str(&format!("{} = {{}}\n\n", var_name));
 
-    output.push_str("---Apply configuration from a Lua table\n");
-    output.push_str("---@param config table Configuration table\n");
-    output.push_str("function niri.apply_config(config) end\n\n");
-
-    output.push_str("---Schedule a callback to run on the next event loop iteration\n");
-    output.push_str("---@param callback fun() Function to execute on next iteration\n");
-    output.push_str("function niri.schedule(callback) end\n\n");
-
-    // niri.utils
-    output.push_str("---Utility functions for logging and process spawning\n");
-    output.push_str("---@class niri_utils\n");
-    output.push_str("local niri_utils = {}\n\n");
-
-    output.push_str("---Log a message at info level\n");
-    output.push_str("---@param ... any Values to log\n");
-    output.push_str("function niri_utils.log(...) end\n\n");
-
-    output.push_str("---Log a message at debug level\n");
-    output.push_str("---@param ... any Values to log\n");
-    output.push_str("function niri_utils.debug(...) end\n\n");
-
-    output.push_str("---Log a message at warning level\n");
-    output.push_str("---@param ... any Values to log\n");
-    output.push_str("function niri_utils.warn(...) end\n\n");
-
-    output.push_str("---Log a message at error level\n");
-    output.push_str("---@param ... any Values to log\n");
-    output.push_str("function niri_utils.error(...) end\n\n");
-
-    output.push_str("---Spawn a command asynchronously\n");
-    output.push_str("---@param command string[] Command and arguments\n");
-    output.push_str("function niri_utils.spawn(command) end\n\n");
-
-    // niri.config
-    output.push_str("---Configuration proxy for reading and modifying compositor settings\n");
-    output.push_str("---@class niri_config\n");
-    output.push_str("---@field input InputConfig Input device configuration (keyboard, mouse, touchpad, etc.)\n");
-    output.push_str("---@field layout LayoutConfig Layout configuration (gaps, focus ring, border, shadow, etc.)\n");
-    output.push_str(
-        "---@field cursor CursorConfig Cursor configuration (size, theme, hide when typing)\n",
-    );
-    output.push_str("---@field gestures GesturesConfig Gesture configuration (hot corners, touchpad gestures)\n");
-    output.push_str(
-        "---@field recent_windows RecentWindowsConfig Recent windows (MRU) configuration\n",
-    );
-    output.push_str(
-        "---@field overview OverviewConfig Overview mode configuration (zoom, backdrop, shadows)\n",
-    );
-    output.push_str(
-        "---@field animations AnimationsConfig Animation configuration (off, slowdown)\n",
-    );
-    output.push_str("---@field clipboard ClipboardConfig Clipboard configuration\n");
-    output.push_str("---@field hotkey_overlay HotkeyOverlayConfig Hotkey overlay configuration\n");
-    output.push_str("---@field config_notification ConfigNotificationConfig Config reload notification settings\n");
-    output.push_str("---@field debug DebugConfig Debug configuration options\n");
-    output.push_str(
-        "---@field xwayland_satellite XwaylandSatelliteConfig Xwayland satellite configuration\n",
-    );
-    output.push_str("---@field screenshot_path string Screenshot save path pattern\n");
-    output.push_str("---@field prefer_no_csd boolean Prefer server-side decorations\n");
-    output.push_str("---@field binds ConfigCollection Keybindings collection\n");
-    output.push_str("---@field outputs ConfigCollection Output/monitor configurations\n");
-    output.push_str("---@field workspaces ConfigCollection Named workspaces\n");
-    output.push_str("---@field window_rules ConfigCollection Window rules\n");
-    output.push_str("---@field layer_rules ConfigCollection Layer shell rules\n");
-    output.push_str("---@field environment ConfigCollection Environment variables\n");
-    output.push_str("local niri_config = {}\n\n");
-
-    output.push_str("---Returns the config API version\n");
-    output.push_str("---@return string # Config API version\n");
-    output.push_str("function niri_config.version() end\n\n");
-
-    output.push_str("---Apply all staged configuration changes to the compositor\n");
-    output.push_str("function niri_config:apply() end\n\n");
-
-    output.push_str("---Enable or disable automatic application of config changes\n");
-    output.push_str("---@param enable boolean Whether to auto-apply changes\n");
-    output.push_str("function niri_config:auto_apply(enable) end\n\n");
-
-    // niri.events
-    output.push_str("---Event system for subscribing to compositor events\n");
-    output.push_str("---@class niri_events\n");
-    output.push_str("local niri_events = {}\n\n");
-
-    output.push_str(
-        "---Subscribe to an event with a callback. Returns a handler ID for later removal.\n",
-    );
-    output.push_str("---@param event_name string Event name (e.g., 'window:open', 'workspace:activate', 'config:reload')\n");
-    output
-        .push_str("---@param callback fun(event: table) Callback function receiving event data\n");
-    output.push_str("---@return integer # Handler ID for removal\n");
-    output.push_str("function niri_events:on(event_name, callback) end\n\n");
-
-    output.push_str("---Subscribe to an event for a single occurrence. Handler is automatically removed after firing.\n");
-    output.push_str("---@param event_name string Event name\n");
-    output.push_str("---@param callback fun(event: table) Callback function\n");
-    output.push_str("---@return integer # Handler ID for early removal\n");
-    output.push_str("function niri_events:once(event_name, callback) end\n\n");
-
-    output.push_str("---Unsubscribe from an event using the handler ID\n");
-    output.push_str("---@param event_name string Event name\n");
-    output.push_str("---@param handler_id integer Handler ID from on() or once()\n");
-    output.push_str("---@return boolean # True if handler was found and removed\n");
-    output.push_str("function niri_events:off(event_name, handler_id) end\n\n");
-
-    output.push_str("---Emit a custom event (for testing or custom integrations)\n");
-    output.push_str("---@param event_name string Event name\n");
-    output.push_str("---@param data? table Event data\n");
-    output.push_str("function niri_events:emit(event_name, data) end\n\n");
-
-    // niri.keymap
-    output.push_str("---Keybinding configuration\n");
-    output.push_str("---@class niri_keymap\n");
-    output.push_str("local niri_keymap = {}\n\n");
-
-    output.push_str("---Set a keybinding\n");
-    output.push_str("---@param mode string Binding mode (e.g., 'normal')\n");
-    output.push_str("---@param key string Key combination (e.g., 'Mod+Return')\n");
-    output.push_str("---@param callback fun() Callback function\n");
-    output.push_str("function niri_keymap.set(mode, key, callback) end\n\n");
-
-    // niri.state
-    output.push_str("---Runtime state queries for windows, workspaces, and outputs\n");
-    output.push_str("---@class niri_state\n");
-    output.push_str("local niri_state = {}\n\n");
-
-    output.push_str("---Get all windows\n");
-    output.push_str("---@return Window[] # Array of window information\n");
-    output.push_str("function niri_state.windows() end\n\n");
-
-    output.push_str("---Get the currently focused window\n");
-    output.push_str("---@return Window? # Focused window or nil\n");
-    output.push_str("function niri_state.focused_window() end\n\n");
-
-    output.push_str("---Get all workspaces\n");
-    output.push_str("---@return Workspace[] # Array of workspace information\n");
-    output.push_str("function niri_state.workspaces() end\n\n");
-
-    output.push_str("---Get all outputs/monitors\n");
-    output.push_str("---@return Output[] # Array of output information\n");
-    output.push_str("function niri_state.outputs() end\n\n");
-
-    // niri.loop
-    output.push_str("---Event loop and timer functionality\n");
-    output.push_str("---@class niri_loop\n");
-    output.push_str("local niri_loop = {}\n\n");
-
-    output.push_str("---Create a new timer\n");
-    output.push_str("---@return Timer # New timer instance\n");
-    output.push_str("function niri_loop.new_timer() end\n\n");
-
-    output.push_str("---Get current time in milliseconds since compositor start\n");
-    output.push_str("---@return integer # Milliseconds since start\n");
-    output.push_str("function niri_loop.now() end\n\n");
-
-    // niri.action - this is the big one
-    output
-        .push_str("---Compositor actions for window management, navigation, and system control\n");
-    output.push_str("---@class niri_action\n");
-    output.push_str("local niri_action = {}\n\n");
-
-    // System actions
-    output.push_str("-- === System ===\n\n");
-    add_action(
-        &mut output,
-        "quit",
-        "Quit the compositor",
-        &[("skip_confirmation?", "boolean", "Skip confirmation dialog")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "power_off_monitors",
-        "Turn off all monitors",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "power_on_monitors",
-        "Turn on all monitors",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "spawn",
-        "Spawn a command",
-        &[("command", "string[]", "Command and arguments")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "spawn_sh",
-        "Spawn a command via shell",
-        &[("command", "string", "Shell command string")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "do_screen_transition",
-        "Trigger a screen transition animation",
-        &[("delay?", "boolean", "Whether to delay")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "load_config_file",
-        "Reload configuration from file",
-        &[],
-        &[],
-    );
-
-    // Screenshot actions
-    output.push_str("-- === Screenshot ===\n\n");
-    add_action(
-        &mut output,
-        "screenshot",
-        "Take a screenshot (interactive selection)",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "screenshot_screen",
-        "Screenshot the entire screen",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "screenshot_window",
-        "Screenshot the focused window",
-        &[],
-        &[],
-    );
-
-    // Window actions
-    output.push_str("-- === Window ===\n\n");
-    add_action(
-        &mut output,
-        "close_window",
-        "Close the focused window",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "fullscreen_window",
-        "Toggle fullscreen on the focused window",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "toggle_windowed_fullscreen",
-        "Toggle windowed fullscreen mode",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window",
-        "Focus a specific window by ID",
-        &[("window_id", "integer", "Window ID")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_previous",
-        "Focus the previously focused window",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "toggle_keyboard_shortcuts_inhibit",
-        "Toggle keyboard shortcuts inhibit",
-        &[],
-        &[],
-    );
-
-    // Column focus
-    output.push_str("-- === Column Focus ===\n\n");
-    add_action(
-        &mut output,
-        "focus_column_left",
-        "Focus the column to the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_right",
-        "Focus the column to the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_first",
-        "Focus the first column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_last",
-        "Focus the last column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_right_or_first",
-        "Focus column right, wrapping to first",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_left_or_last",
-        "Focus column left, wrapping to last",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column",
-        "Focus column by index",
-        &[("index", "integer", "1-based column index")],
-        &[],
-    );
-
-    // Window focus
-    output.push_str("-- === Window Focus ===\n\n");
-    add_action(
-        &mut output,
-        "focus_window_down",
-        "Focus the window below in the column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_up",
-        "Focus the window above in the column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_in_column",
-        "Focus window by index in focused column",
-        &[("index", "integer", "1-based index from top")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_or_monitor_up",
-        "Focus window above or monitor above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_or_monitor_down",
-        "Focus window below or monitor below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_or_monitor_left",
-        "Focus column left or monitor left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_column_or_monitor_right",
-        "Focus column right or monitor right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_down_or_column_left",
-        "Focus window below or column to the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_down_or_column_right",
-        "Focus window below or column to the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_up_or_column_left",
-        "Focus window above or column to the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_up_or_column_right",
-        "Focus window above or column to the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_or_workspace_down",
-        "Focus window below or workspace below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_or_workspace_up",
-        "Focus window above or workspace above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_top",
-        "Focus the topmost window in column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_bottom",
-        "Focus the bottommost window in column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_down_or_top",
-        "Focus window below or wrap to top",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_window_up_or_bottom",
-        "Focus window above or wrap to bottom",
-        &[],
-        &[],
-    );
-
-    // Column move
-    output.push_str("-- === Column Move ===\n\n");
-    add_action(
-        &mut output,
-        "move_column_left",
-        "Move column to the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_right",
-        "Move column to the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_first",
-        "Move column to first position",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_last",
-        "Move column to last position",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_left_or_to_monitor_left",
-        "Move column left or to monitor left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_right_or_to_monitor_right",
-        "Move column right or to monitor right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_index",
-        "Move column to specific index",
-        &[("index", "integer", "1-based target index")],
-        &[],
-    );
-
-    // Window move
-    output.push_str("-- === Window Move ===\n\n");
-    add_action(
-        &mut output,
-        "move_window_down",
-        "Move window down within column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_up",
-        "Move window up within column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_down_or_to_workspace_down",
-        "Move window down or to workspace below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_up_or_to_workspace_up",
-        "Move window up or to workspace above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "swap_window_left",
-        "Swap focused window with window to the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "swap_window_right",
-        "Swap focused window with window to the right",
-        &[],
-        &[],
-    );
-
-    // Consume/Expel
-    output.push_str("-- === Consume/Expel ===\n\n");
-    add_action(
-        &mut output,
-        "consume_or_expel_window_left",
-        "Consume window from left or expel to left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "consume_or_expel_window_right",
-        "Consume window from right or expel to right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "consume_window_into_column",
-        "Consume adjacent window into current column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "expel_window_from_column",
-        "Expel focused window from column",
-        &[],
-        &[],
-    );
-
-    // Column display
-    output.push_str("-- === Column Display ===\n\n");
-    add_action(
-        &mut output,
-        "toggle_column_tabbed_display",
-        "Toggle tabbed display for column",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_column_display",
-        "Set column display mode",
-        &[("display", "\"normal\"|\"tabbed\"", "Display mode")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "center_column",
-        "Center the current column on screen",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "center_window",
-        "Center the focused window on screen",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "center_visible_columns",
-        "Center all fully visible columns",
-        &[],
-        &[],
-    );
-
-    // Workspace
-    output.push_str("-- === Workspace ===\n\n");
-    add_action(
-        &mut output,
-        "focus_workspace_down",
-        "Focus the workspace below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_workspace_up",
-        "Focus the workspace above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_workspace",
-        "Focus a specific workspace",
-        &[("reference", "WorkspaceReference", "Workspace to focus")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_workspace_previous",
-        "Focus the previously active workspace",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_workspace_down",
-        "Move window to workspace below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_workspace_up",
-        "Move window to workspace above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_workspace",
-        "Move window to specific workspace",
-        &[("reference", "WorkspaceReference", "Target workspace")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_workspace_down",
-        "Move column to workspace below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_workspace_up",
-        "Move column to workspace above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_workspace",
-        "Move column to specific workspace",
-        &[("reference", "WorkspaceReference", "Target workspace")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_down",
-        "Move current workspace down",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_up",
-        "Move current workspace up",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_index",
-        "Move workspace to specific index",
-        &[("index", "integer", "Target index")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_workspace_name",
-        "Set the name of a workspace",
-        &[("name", "string", "New workspace name")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "unset_workspace_name",
-        "Unset the name of a workspace",
-        &[],
-        &[],
-    );
-
-    // Workspace to monitor
-    output.push_str("-- === Workspace to Monitor ===\n\n");
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor_left",
-        "Move workspace to monitor on the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor_right",
-        "Move workspace to monitor on the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor_down",
-        "Move workspace to monitor below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor_up",
-        "Move workspace to monitor above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor_previous",
-        "Move workspace to previously active monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor_next",
-        "Move workspace to next monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_workspace_to_monitor",
-        "Move workspace to specific monitor",
-        &[("output", "string", "Target output name")],
-        &[],
-    );
-
-    // Monitor focus
-    output.push_str("-- === Monitor Focus ===\n\n");
-    add_action(
-        &mut output,
-        "focus_monitor_left",
-        "Focus monitor to the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_monitor_right",
-        "Focus monitor to the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_monitor_down",
-        "Focus monitor below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_monitor_up",
-        "Focus monitor above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_monitor_previous",
-        "Focus previously active monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_monitor_next",
-        "Focus next monitor in order",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_monitor",
-        "Focus monitor by name",
-        &[("output", "string", "Output name")],
-        &[],
-    );
-
-    // Window to monitor
-    output.push_str("-- === Window to Monitor ===\n\n");
-    add_action(
-        &mut output,
-        "move_window_to_monitor_left",
-        "Move window to monitor on the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_monitor_right",
-        "Move window to monitor on the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_monitor_down",
-        "Move window to monitor below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_monitor_up",
-        "Move window to monitor above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_monitor_next",
-        "Move window to next monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_monitor_previous",
-        "Move window to previously active monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_monitor",
-        "Move window to specific monitor",
-        &[("output", "string", "Target output name")],
-        &[],
-    );
-
-    // Column to monitor
-    output.push_str("-- === Column to Monitor ===\n\n");
-    add_action(
-        &mut output,
-        "move_column_to_monitor_left",
-        "Move column to monitor on the left",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_monitor_right",
-        "Move column to monitor on the right",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_monitor_down",
-        "Move column to monitor below",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_monitor_up",
-        "Move column to monitor above",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_monitor_next",
-        "Move column to next monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_monitor_previous",
-        "Move column to previously active monitor",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_column_to_monitor",
-        "Move column to specific monitor",
-        &[("output", "string", "Target output name")],
-        &[],
-    );
-
-    // Size/Width/Height
-    output.push_str("-- === Size/Width/Height ===\n\n");
-    add_action(
-        &mut output,
-        "set_window_width",
-        "Set the window width",
-        &[("change", "SizeChange", "Width change value")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_window_height",
-        "Set the window height",
-        &[("change", "SizeChange", "Height change value")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "reset_window_height",
-        "Reset window height to default",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "switch_preset_column_width",
-        "Switch to next preset column width",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "switch_preset_column_width_back",
-        "Switch to previous preset column width",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "switch_preset_window_width",
-        "Switch to next preset window width",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "switch_preset_window_width_back",
-        "Switch to previous preset window width",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "switch_preset_window_height",
-        "Switch to next preset window height",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "switch_preset_window_height_back",
-        "Switch to previous preset window height",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "maximize_column",
-        "Maximize column to fill workspace",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "maximize_window_to_edges",
-        "Toggle maximize window to edges",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_column_width",
-        "Set column width",
-        &[("change", "SizeChange", "Width change value")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "expand_column_to_available_width",
-        "Expand column to fill available width",
-        &[],
-        &[],
-    );
-
-    // Layout
-    output.push_str("-- === Layout ===\n\n");
-    add_action(
-        &mut output,
-        "switch_layout",
-        "Switch keyboard layout",
-        &[("target", "LayoutSwitchTarget", "Layout to switch to")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "show_hotkey_overlay",
-        "Show the hotkey overlay",
-        &[],
-        &[],
-    );
-
-    // Debug
-    output.push_str("-- === Debug ===\n\n");
-    add_action(
-        &mut output,
-        "toggle_debug_tint",
-        "Toggle debug tint visualization",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "debug_toggle_opaque_regions",
-        "Toggle opaque regions debug",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "debug_toggle_damage",
-        "Toggle damage debug visualization",
-        &[],
-        &[],
-    );
-
-    // Floating
-    output.push_str("-- === Floating ===\n\n");
-    add_action(
-        &mut output,
-        "toggle_window_floating",
-        "Toggle floating state of focused window",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_floating",
-        "Move focused window to floating layer",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_window_to_tiling",
-        "Move focused window to tiling layer",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "focus_floating",
-        "Focus floating layer",
-        &[],
-        &[],
-    );
-    add_action(&mut output, "focus_tiling", "Focus tiling layer", &[], &[]);
-    add_action(
-        &mut output,
-        "switch_focus_between_floating_and_tiling",
-        "Switch focus between layers",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "move_floating_window",
-        "Move floating window by offset",
-        &[
-            ("x", "PositionChange", "X position change"),
-            ("y", "PositionChange", "Y position change"),
-        ],
-        &[],
-    );
-
-    // Overview
-    output.push_str("-- === Overview ===\n\n");
-    add_action(
-        &mut output,
-        "toggle_overview",
-        "Toggle overview mode",
-        &[],
-        &[],
-    );
-    add_action(&mut output, "open_overview", "Open overview mode", &[], &[]);
-    add_action(
-        &mut output,
-        "close_overview",
-        "Close overview mode",
-        &[],
-        &[],
-    );
-
-    // Window rules / misc
-    output.push_str("-- === Window Rules / Misc ===\n\n");
-    add_action(
-        &mut output,
-        "toggle_window_rule_opacity",
-        "Toggle window rule opacity for focused window",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "toggle_window_urgent",
-        "Toggle urgent status of a window",
-        &[("id", "integer", "Window ID")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_window_urgent",
-        "Set urgent status of a window",
-        &[("id", "integer", "Window ID")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "unset_window_urgent",
-        "Unset urgent status of a window",
-        &[("id", "integer", "Window ID")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_dynamic_cast_window",
-        "Set dynamic cast target to a window",
-        &[],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "set_dynamic_cast_monitor",
-        "Set dynamic cast target to a monitor",
-        &[("output?", "string", "Output name (optional)")],
-        &[],
-    );
-    add_action(
-        &mut output,
-        "clear_dynamic_cast_target",
-        "Clear dynamic cast target",
-        &[],
-        &[],
-    );
-
-    // Write output file
-    let mut file = fs::File::create(output_path).unwrap();
-    file.write_all(output.as_bytes()).unwrap();
-
-    println!(
-        "cargo:warning=Generated Lua type definitions at {:?}",
-        output_path
-    );
+        // Functions
+        for func in module.functions {
+            generate_function(output, &var_name, func, false);
+        }
+    }
 }
 
-fn add_action(
-    output: &mut String,
-    name: &str,
-    desc: &str,
-    params: &[(&str, &str, &str)],
-    _returns: &[(&str, &str)],
-) {
-    output.push_str(&format!("---{}\n", desc));
-    for (pname, ptype, pdesc) in params {
-        output.push_str(&format!("---@param {} {} {}\n", pname, ptype, pdesc));
+/// Generate a function or method
+fn generate_function(output: &mut String, parent: &str, func: &FunctionSchema, is_method: bool) {
+    // Description
+    output.push_str(&format!("---{}\n", func.description));
+
+    // Parameters
+    for param in func.params {
+        let optional_marker = if param.optional { "?" } else { "" };
+        output.push_str(&format!(
+            "---@param {}{} {} {}\n",
+            param.name, optional_marker, param.ty, param.description
+        ));
     }
-    let param_names: Vec<&str> = params
-        .iter()
-        .map(|(n, _, _)| n.trim_end_matches('?'))
-        .collect();
+
+    // Returns
+    for ret in func.returns {
+        if ret.description.is_empty() {
+            output.push_str(&format!("---@return {}\n", ret.ty));
+        } else {
+            output.push_str(&format!("---@return {} # {}\n", ret.ty, ret.description));
+        }
+    }
+
+    // Function signature
+    let params: Vec<&str> = func.params.iter().map(|p| p.name).collect();
+    let params_str = params.join(", ");
+
+    let separator = if is_method || func.is_method { ":" } else { "." };
     output.push_str(&format!(
-        "function niri_action:{}({}) end\n\n",
-        name,
-        param_names.join(", ")
+        "function {}{}{}({}) end\n\n",
+        parent, separator, func.name, params_str
     ));
 }

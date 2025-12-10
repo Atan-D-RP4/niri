@@ -38,6 +38,78 @@ use crate::extractors::{
     extract_overview, extract_recent_windows, extract_xwayland_satellite,
 };
 
+/// Macro to generate simple scalar field getter/setter methods for config proxies.
+///
+/// This reduces boilerplate for fields that are directly copied (no clone needed)
+/// and use a single dirty flag.
+///
+/// # Usage
+/// ```ignore
+/// config_field_methods!(fields, dirty_flag,
+///     "field_name" => [config_path.field]: Type,
+///     "another_field" => [config_path.another]: AnotherType,
+/// );
+/// ```
+macro_rules! config_field_methods {
+    ($fields:expr, $dirty_flag:ident,
+     $( $name:literal => [ $($path:tt).+ ] : $ty:ty ),* $(,)?) => {
+        $(
+            $fields.add_field_method_get($name, |_, this| {
+                Ok(this.config.lock().unwrap().$($path).+)
+            });
+            $fields.add_field_method_set($name, |_, this, value: $ty| {
+                this.config.lock().unwrap().$($path).+ = value;
+                this.dirty.lock().unwrap().$dirty_flag = true;
+                Ok(())
+            });
+        )*
+    };
+}
+
+/// Macro to generate clone-based field getter/setter methods for config proxies.
+///
+/// Use this for String and Option<String> fields that need .clone() on get.
+///
+/// # Usage
+/// ```ignore
+/// config_field_methods_clone!(fields, dirty_flag,
+///     "field_name" => [config_path.field]: String,
+/// );
+/// ```
+macro_rules! config_field_methods_clone {
+    ($fields:expr, $dirty_flag:ident,
+     $( $name:literal => [ $($path:tt).+ ] : $ty:ty ),* $(,)?) => {
+        $(
+            $fields.add_field_method_get($name, |_, this| {
+                Ok(this.config.lock().unwrap().$($path).+.clone())
+            });
+            $fields.add_field_method_set($name, |_, this, value: $ty| {
+                this.config.lock().unwrap().$($path).+ = value;
+                this.dirty.lock().unwrap().$dirty_flag = true;
+                Ok(())
+            });
+        )*
+    };
+}
+
+/// Macro for FloatOrInt wrapper fields (unwraps .0 on get, wraps in FloatOrInt on set).
+macro_rules! config_field_methods_float_or_int {
+    ($fields:expr, $dirty_flag:ident,
+     $( $name:literal => [ $($path:tt).+ ] ),* $(,)?) => {
+        $(
+            $fields.add_field_method_get($name, |_, this| {
+                Ok(this.config.lock().unwrap().$($path).+.0)
+            });
+            $fields.add_field_method_set($name, |_, this, value: f64| {
+                use niri_config::FloatOrInt;
+                this.config.lock().unwrap().$($path).+ = FloatOrInt(value);
+                this.dirty.lock().unwrap().$dirty_flag = true;
+                Ok(())
+            });
+        )*
+    };
+}
+
 /// Wrapper around Config that implements UserData for Lua access.
 ///
 /// This is the main entry point for Lua config access. It provides:
@@ -465,15 +537,9 @@ struct LayoutProxy {
 
 impl UserData for LayoutProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("gaps", |_, this| {
-            Ok(this.config.lock().unwrap().layout.gaps)
-        });
-
-        fields.add_field_method_set("gaps", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.gaps = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
+        config_field_methods!(fields, layout,
+            "gaps" => [layout.gaps]: f64,
+        );
 
         fields.add_field_method_get("center_focused_column", |_, this| {
             let config = this.config.lock().unwrap();
@@ -536,25 +602,10 @@ struct FocusRingProxy {
 
 impl UserData for FocusRingProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("width", |_, this| {
-            Ok(this.config.lock().unwrap().layout.focus_ring.width)
-        });
-
-        fields.add_field_method_set("width", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.focus_ring.width = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().layout.focus_ring.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().layout.focus_ring.off = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
+        config_field_methods!(fields, layout,
+            "width" => [layout.focus_ring.width]: f64,
+            "off" => [layout.focus_ring.off]: bool,
+        );
     }
 }
 
@@ -567,25 +618,10 @@ struct BorderProxy {
 
 impl UserData for BorderProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("width", |_, this| {
-            Ok(this.config.lock().unwrap().layout.border.width)
-        });
-
-        fields.add_field_method_set("width", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.border.width = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().layout.border.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().layout.border.off = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
+        config_field_methods!(fields, layout,
+            "width" => [layout.border.width]: f64,
+            "off" => [layout.border.off]: bool,
+        );
     }
 }
 
@@ -598,25 +634,10 @@ struct ShadowProxy {
 
 impl UserData for ShadowProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("softness", |_, this| {
-            Ok(this.config.lock().unwrap().layout.shadow.softness)
-        });
-
-        fields.add_field_method_set("softness", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.shadow.softness = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("spread", |_, this| {
-            Ok(this.config.lock().unwrap().layout.shadow.spread)
-        });
-
-        fields.add_field_method_set("spread", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.shadow.spread = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
+        config_field_methods!(fields, layout,
+            "softness" => [layout.shadow.softness]: f64,
+            "spread" => [layout.shadow.spread]: f64,
+        );
     }
 }
 
@@ -629,45 +650,14 @@ struct CursorProxy {
 
 impl UserData for CursorProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("xcursor_size", |_, this| {
-            Ok(this.config.lock().unwrap().cursor.xcursor_size)
-        });
-
-        fields.add_field_method_set("xcursor_size", |_, this, value: u8| {
-            this.config.lock().unwrap().cursor.xcursor_size = value;
-            this.dirty.lock().unwrap().cursor = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("xcursor_theme", |_, this| {
-            Ok(this.config.lock().unwrap().cursor.xcursor_theme.clone())
-        });
-
-        fields.add_field_method_set("xcursor_theme", |_, this, value: String| {
-            this.config.lock().unwrap().cursor.xcursor_theme = value;
-            this.dirty.lock().unwrap().cursor = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("hide_when_typing", |_, this| {
-            Ok(this.config.lock().unwrap().cursor.hide_when_typing)
-        });
-
-        fields.add_field_method_set("hide_when_typing", |_, this, value: bool| {
-            this.config.lock().unwrap().cursor.hide_when_typing = value;
-            this.dirty.lock().unwrap().cursor = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("hide_after_inactive_ms", |_, this| {
-            Ok(this.config.lock().unwrap().cursor.hide_after_inactive_ms)
-        });
-
-        fields.add_field_method_set("hide_after_inactive_ms", |_, this, value: Option<u32>| {
-            this.config.lock().unwrap().cursor.hide_after_inactive_ms = value;
-            this.dirty.lock().unwrap().cursor = true;
-            Ok(())
-        });
+        config_field_methods!(fields, cursor,
+            "xcursor_size" => [cursor.xcursor_size]: u8,
+            "hide_when_typing" => [cursor.hide_when_typing]: bool,
+            "hide_after_inactive_ms" => [cursor.hide_after_inactive_ms]: Option<u32>,
+        );
+        config_field_methods_clone!(fields, cursor,
+            "xcursor_theme" => [cursor.xcursor_theme]: String,
+        );
     }
 }
 
@@ -680,25 +670,10 @@ struct AnimationsProxy {
 
 impl UserData for AnimationsProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().animations.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().animations.off = value;
-            this.dirty.lock().unwrap().animations = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("slowdown", |_, this| {
-            Ok(this.config.lock().unwrap().animations.slowdown)
-        });
-
-        fields.add_field_method_set("slowdown", |_, this, value: f64| {
-            this.config.lock().unwrap().animations.slowdown = value;
-            this.dirty.lock().unwrap().animations = true;
-            Ok(())
-        });
+        config_field_methods!(fields, animations,
+            "off" => [animations.off]: bool,
+            "slowdown" => [animations.slowdown]: f64,
+        );
     }
 }
 
@@ -712,34 +687,10 @@ struct InputProxy {
 impl UserData for InputProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
         // Boolean fields
-        fields.add_field_method_get("disable_power_key_handling", |_, this| {
-            Ok(this.config.lock().unwrap().input.disable_power_key_handling)
-        });
-
-        fields.add_field_method_set("disable_power_key_handling", |_, this, value: bool| {
-            this.config.lock().unwrap().input.disable_power_key_handling = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("workspace_auto_back_and_forth", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .input
-                .workspace_auto_back_and_forth)
-        });
-
-        fields.add_field_method_set("workspace_auto_back_and_forth", |_, this, value: bool| {
-            this.config
-                .lock()
-                .unwrap()
-                .input
-                .workspace_auto_back_and_forth = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
+        config_field_methods!(fields, input,
+            "disable_power_key_handling" => [input.disable_power_key_handling]: bool,
+            "workspace_auto_back_and_forth" => [input.workspace_auto_back_and_forth]: bool,
+        );
 
         // Nested device proxies
         fields.add_field_method_get("keyboard", |_, this| {
@@ -798,25 +749,11 @@ impl UserData for KeyboardProxy {
             Ok(())
         });
 
-        fields.add_field_method_get("repeat_rate", |_, this| {
-            Ok(this.config.lock().unwrap().input.keyboard.repeat_rate)
-        });
-
-        fields.add_field_method_set("repeat_rate", |_, this, value: u8| {
-            this.config.lock().unwrap().input.keyboard.repeat_rate = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("numlock", |_, this| {
-            Ok(this.config.lock().unwrap().input.keyboard.numlock)
-        });
-
-        fields.add_field_method_set("numlock", |_, this, value: bool| {
-            this.config.lock().unwrap().input.keyboard.numlock = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
+        config_field_methods!(fields, keyboard,
+            "repeat_delay" => [input.keyboard.repeat_delay]: u16,
+            "repeat_rate" => [input.keyboard.repeat_rate]: u8,
+            "numlock" => [input.keyboard.numlock]: bool,
+        );
 
         fields.add_field_method_get("track_layout", |_, this| {
             use niri_config::input::TrackLayout;
@@ -863,79 +800,13 @@ struct XkbProxy {
 
 impl UserData for XkbProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("layout", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .input
-                .keyboard
-                .xkb
-                .layout
-                .clone())
-        });
-
-        fields.add_field_method_set("layout", |_, this, value: String| {
-            this.config.lock().unwrap().input.keyboard.xkb.layout = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("variant", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .input
-                .keyboard
-                .xkb
-                .variant
-                .clone())
-        });
-
-        fields.add_field_method_set("variant", |_, this, value: String| {
-            this.config.lock().unwrap().input.keyboard.xkb.variant = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("model", |_, this| {
-            Ok(this.config.lock().unwrap().input.keyboard.xkb.model.clone())
-        });
-
-        fields.add_field_method_set("model", |_, this, value: String| {
-            this.config.lock().unwrap().input.keyboard.xkb.model = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("rules", |_, this| {
-            Ok(this.config.lock().unwrap().input.keyboard.xkb.rules.clone())
-        });
-
-        fields.add_field_method_set("rules", |_, this, value: String| {
-            this.config.lock().unwrap().input.keyboard.xkb.rules = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("options", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .input
-                .keyboard
-                .xkb
-                .options
-                .clone())
-        });
-
-        fields.add_field_method_set("options", |_, this, value: Option<String>| {
-            this.config.lock().unwrap().input.keyboard.xkb.options = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
+        config_field_methods_clone!(fields, keyboard,
+            "layout" => [input.keyboard.xkb.layout]: String,
+            "variant" => [input.keyboard.xkb.variant]: String,
+            "model" => [input.keyboard.xkb.model]: String,
+            "rules" => [input.keyboard.xkb.rules]: String,
+            "options" => [input.keyboard.xkb.options]: Option<String>,
+        );
     }
 }
 
@@ -948,114 +819,137 @@ struct TouchpadProxy {
 
 impl UserData for TouchpadProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.off)
+        config_field_methods!(fields, input,
+            "off" => [input.touchpad.off]: bool,
+            "tap" => [input.touchpad.tap]: bool,
+            "dwt" => [input.touchpad.dwt]: bool,
+            "dwtp" => [input.touchpad.dwtp]: bool,
+            "natural_scroll" => [input.touchpad.natural_scroll]: bool,
+            "left_handed" => [input.touchpad.left_handed]: bool,
+            "middle_emulation" => [input.touchpad.middle_emulation]: bool,
+            "drag_lock" => [input.touchpad.drag_lock]: bool,
+            "disabled_on_external_mouse" => [input.touchpad.disabled_on_external_mouse]: bool,
+        );
+        config_field_methods_float_or_int!(fields, input,
+            "accel_speed" => [input.touchpad.accel_speed],
+        );
+
+        // Scroll method (optional enum)
+        fields.add_field_method_get("scroll_method", |_, this| {
+            use niri_config::input::ScrollMethod;
+            let value = match this.config.lock().unwrap().input.touchpad.scroll_method {
+                Some(ScrollMethod::NoScroll) => Some("no-scroll"),
+                Some(ScrollMethod::TwoFinger) => Some("two-finger"),
+                Some(ScrollMethod::Edge) => Some("edge"),
+                Some(ScrollMethod::OnButtonDown) => Some("on-button-down"),
+                None => None,
+            };
+            Ok(value.map(|s| s.to_string()))
         });
 
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.off = value;
+        fields.add_field_method_set("scroll_method", |_, this, value: Option<String>| {
+            use niri_config::input::ScrollMethod;
+            let parsed = match value.as_deref() {
+                Some("no-scroll") => Some(ScrollMethod::NoScroll),
+                Some("two-finger") => Some(ScrollMethod::TwoFinger),
+                Some("edge") => Some(ScrollMethod::Edge),
+                Some("on-button-down") => Some(ScrollMethod::OnButtonDown),
+                None => None,
+                Some(other) => {
+                    return Err(mlua::Error::external(format!(
+                        "Invalid scroll_method: {}. Expected 'no-scroll', 'two-finger', 'edge', or 'on-button-down'",
+                        other
+                    )));
+                }
+            };
+            this.config.lock().unwrap().input.touchpad.scroll_method = parsed;
             this.dirty.lock().unwrap().input = true;
             Ok(())
         });
 
-        fields.add_field_method_get("tap", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.tap)
+        // Click method (optional enum)
+        fields.add_field_method_get("click_method", |_, this| {
+            use niri_config::input::ClickMethod;
+            let value = match this.config.lock().unwrap().input.touchpad.click_method {
+                Some(ClickMethod::ButtonAreas) => Some("button-areas"),
+                Some(ClickMethod::Clickfinger) => Some("clickfinger"),
+                None => None,
+            };
+            Ok(value.map(|s| s.to_string()))
         });
 
-        fields.add_field_method_set("tap", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.tap = value;
+        fields.add_field_method_set("click_method", |_, this, value: Option<String>| {
+            use niri_config::input::ClickMethod;
+            let parsed = match value.as_deref() {
+                Some("button-areas") => Some(ClickMethod::ButtonAreas),
+                Some("clickfinger") => Some(ClickMethod::Clickfinger),
+                None => None,
+                Some(other) => {
+                    return Err(mlua::Error::external(format!(
+                        "Invalid click_method: {}. Expected 'button-areas' or 'clickfinger'",
+                        other
+                    )));
+                }
+            };
+            this.config.lock().unwrap().input.touchpad.click_method = parsed;
             this.dirty.lock().unwrap().input = true;
             Ok(())
         });
 
-        fields.add_field_method_get("dwt", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.dwt)
+        // Tap button map (optional enum)
+        fields.add_field_method_get("tap_button_map", |_, this| {
+            use niri_config::input::TapButtonMap;
+            let value = match this.config.lock().unwrap().input.touchpad.tap_button_map {
+                Some(TapButtonMap::LeftRightMiddle) => Some("left-right-middle"),
+                Some(TapButtonMap::LeftMiddleRight) => Some("left-middle-right"),
+                None => None,
+            };
+            Ok(value.map(|s| s.to_string()))
         });
 
-        fields.add_field_method_set("dwt", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.dwt = value;
+        fields.add_field_method_set("tap_button_map", |_, this, value: Option<String>| {
+            use niri_config::input::TapButtonMap;
+            let parsed = match value.as_deref() {
+                Some("left-right-middle") => Some(TapButtonMap::LeftRightMiddle),
+                Some("left-middle-right") => Some(TapButtonMap::LeftMiddleRight),
+                None => None,
+                Some(other) => {
+                    return Err(mlua::Error::external(format!(
+                        "Invalid tap_button_map: {}. Expected 'left-right-middle' or 'left-middle-right'",
+                        other
+                    )));
+                }
+            };
+            this.config.lock().unwrap().input.touchpad.tap_button_map = parsed;
             this.dirty.lock().unwrap().input = true;
             Ok(())
         });
 
-        fields.add_field_method_get("dwtp", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.dwtp)
+        // Accel profile (optional enum)
+        fields.add_field_method_get("accel_profile", |_, this| {
+            use niri_config::input::AccelProfile;
+            let value = match this.config.lock().unwrap().input.touchpad.accel_profile {
+                Some(AccelProfile::Adaptive) => Some("adaptive"),
+                Some(AccelProfile::Flat) => Some("flat"),
+                None => None,
+            };
+            Ok(value.map(|s| s.to_string()))
         });
 
-        fields.add_field_method_set("dwtp", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.dwtp = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("natural_scroll", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.natural_scroll)
-        });
-
-        fields.add_field_method_set("natural_scroll", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.natural_scroll = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("accel_speed", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.accel_speed.0)
-        });
-
-        fields.add_field_method_set("accel_speed", |_, this, value: f64| {
-            use niri_config::FloatOrInt;
-            this.config.lock().unwrap().input.touchpad.accel_speed = FloatOrInt(value);
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("left_handed", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.left_handed)
-        });
-
-        fields.add_field_method_set("left_handed", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.left_handed = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("middle_emulation", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.middle_emulation)
-        });
-
-        fields.add_field_method_set("middle_emulation", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.middle_emulation = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("drag_lock", |_, this| {
-            Ok(this.config.lock().unwrap().input.touchpad.drag_lock)
-        });
-
-        fields.add_field_method_set("drag_lock", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touchpad.drag_lock = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("disabled_on_external_mouse", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .input
-                .touchpad
-                .disabled_on_external_mouse)
-        });
-
-        fields.add_field_method_set("disabled_on_external_mouse", |_, this, value: bool| {
-            this.config
-                .lock()
-                .unwrap()
-                .input
-                .touchpad
-                .disabled_on_external_mouse = value;
+        fields.add_field_method_set("accel_profile", |_, this, value: Option<String>| {
+            use niri_config::input::AccelProfile;
+            let parsed = match value.as_deref() {
+                Some("adaptive") => Some(AccelProfile::Adaptive),
+                Some("flat") => Some(AccelProfile::Flat),
+                None => None,
+                Some(other) => {
+                    return Err(mlua::Error::external(format!(
+                        "Invalid accel_profile: {}. Expected 'adaptive' or 'flat'",
+                        other
+                    )));
+                }
+            };
+            this.config.lock().unwrap().input.touchpad.accel_profile = parsed;
             this.dirty.lock().unwrap().input = true;
             Ok(())
         });
@@ -1071,56 +965,15 @@ struct MouseProxy {
 
 impl UserData for MouseProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().input.mouse.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().input.mouse.off = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("natural_scroll", |_, this| {
-            Ok(this.config.lock().unwrap().input.mouse.natural_scroll)
-        });
-
-        fields.add_field_method_set("natural_scroll", |_, this, value: bool| {
-            this.config.lock().unwrap().input.mouse.natural_scroll = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("accel_speed", |_, this| {
-            Ok(this.config.lock().unwrap().input.mouse.accel_speed.0)
-        });
-
-        fields.add_field_method_set("accel_speed", |_, this, value: f64| {
-            use niri_config::FloatOrInt;
-            this.config.lock().unwrap().input.mouse.accel_speed = FloatOrInt(value);
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("left_handed", |_, this| {
-            Ok(this.config.lock().unwrap().input.mouse.left_handed)
-        });
-
-        fields.add_field_method_set("left_handed", |_, this, value: bool| {
-            this.config.lock().unwrap().input.mouse.left_handed = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("middle_emulation", |_, this| {
-            Ok(this.config.lock().unwrap().input.mouse.middle_emulation)
-        });
-
-        fields.add_field_method_set("middle_emulation", |_, this, value: bool| {
-            this.config.lock().unwrap().input.mouse.middle_emulation = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
+        config_field_methods!(fields, input,
+            "off" => [input.mouse.off]: bool,
+            "natural_scroll" => [input.mouse.natural_scroll]: bool,
+            "left_handed" => [input.mouse.left_handed]: bool,
+            "middle_emulation" => [input.mouse.middle_emulation]: bool,
+        );
+        config_field_methods_float_or_int!(fields, input,
+            "accel_speed" => [input.mouse.accel_speed],
+        );
     }
 }
 
@@ -1133,46 +986,15 @@ struct TrackpointProxy {
 
 impl UserData for TrackpointProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().input.trackpoint.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().input.trackpoint.off = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("natural_scroll", |_, this| {
-            Ok(this.config.lock().unwrap().input.trackpoint.natural_scroll)
-        });
-
-        fields.add_field_method_set("natural_scroll", |_, this, value: bool| {
-            this.config.lock().unwrap().input.trackpoint.natural_scroll = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("accel_speed", |_, this| {
-            Ok(this.config.lock().unwrap().input.trackpoint.accel_speed.0)
-        });
-
-        fields.add_field_method_set("accel_speed", |_, this, value: f64| {
-            use niri_config::FloatOrInt;
-            this.config.lock().unwrap().input.trackpoint.accel_speed = FloatOrInt(value);
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("left_handed", |_, this| {
-            Ok(this.config.lock().unwrap().input.trackpoint.left_handed)
-        });
-
-        fields.add_field_method_set("left_handed", |_, this, value: bool| {
-            this.config.lock().unwrap().input.trackpoint.left_handed = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
+        config_field_methods!(fields, input,
+            "off" => [input.trackpoint.off]: bool,
+            "natural_scroll" => [input.trackpoint.natural_scroll]: bool,
+            "left_handed" => [input.trackpoint.left_handed]: bool,
+            "middle_emulation" => [input.trackpoint.middle_emulation]: bool,
+        );
+        config_field_methods_float_or_int!(fields, input,
+            "accel_speed" => [input.trackpoint.accel_speed],
+        );
     }
 }
 
@@ -1185,42 +1007,13 @@ struct TouchProxy {
 
 impl UserData for TouchProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().input.touch.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touch.off = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("natural_scroll", |_, this| {
-            Ok(this.config.lock().unwrap().input.touch.natural_scroll)
-        });
-
-        fields.add_field_method_set("natural_scroll", |_, this, value: bool| {
-            this.config.lock().unwrap().input.touch.natural_scroll = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("map_to_output", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .input
-                .touch
-                .map_to_output
-                .clone())
-        });
-
-        fields.add_field_method_set("map_to_output", |_, this, value: Option<String>| {
-            this.config.lock().unwrap().input.touch.map_to_output = value;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
+        config_field_methods!(fields, input,
+            "off" => [input.touch.off]: bool,
+            "natural_scroll" => [input.touch.natural_scroll]: bool,
+        );
+        config_field_methods_clone!(fields, input,
+            "map_to_output" => [input.touch.map_to_output]: Option<String>,
+        );
     }
 }
 
@@ -1233,15 +1026,9 @@ struct OverviewProxy {
 
 impl UserData for OverviewProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("zoom", |_, this| {
-            Ok(this.config.lock().unwrap().overview.zoom)
-        });
-
-        fields.add_field_method_set("zoom", |_, this, value: f64| {
-            this.config.lock().unwrap().overview.zoom = value;
-            this.dirty.lock().unwrap().overview = true;
-            Ok(())
-        });
+        config_field_methods!(fields, overview,
+            "zoom" => [overview.zoom]: f64,
+        );
     }
 }
 
@@ -1254,25 +1041,10 @@ struct HotkeyOverlayProxy {
 
 impl UserData for HotkeyOverlayProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("skip_at_startup", |_, this| {
-            Ok(this.config.lock().unwrap().hotkey_overlay.skip_at_startup)
-        });
-
-        fields.add_field_method_set("skip_at_startup", |_, this, value: bool| {
-            this.config.lock().unwrap().hotkey_overlay.skip_at_startup = value;
-            this.dirty.lock().unwrap().hotkey_overlay = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("hide_not_bound", |_, this| {
-            Ok(this.config.lock().unwrap().hotkey_overlay.hide_not_bound)
-        });
-
-        fields.add_field_method_set("hide_not_bound", |_, this, value: bool| {
-            this.config.lock().unwrap().hotkey_overlay.hide_not_bound = value;
-            this.dirty.lock().unwrap().hotkey_overlay = true;
-            Ok(())
-        });
+        config_field_methods!(fields, hotkey_overlay,
+            "skip_at_startup" => [hotkey_overlay.skip_at_startup]: bool,
+            "hide_not_bound" => [hotkey_overlay.hide_not_bound]: bool,
+        );
     }
 }
 
@@ -1285,24 +1057,9 @@ struct ConfigNotificationProxy {
 
 impl UserData for ConfigNotificationProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("disable_failed", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .config_notification
-                .disable_failed)
-        });
-
-        fields.add_field_method_set("disable_failed", |_, this, value: bool| {
-            this.config
-                .lock()
-                .unwrap()
-                .config_notification
-                .disable_failed = value;
-            this.dirty.lock().unwrap().config_notification = true;
-            Ok(())
-        });
+        config_field_methods!(fields, config_notification,
+            "disable_failed" => [config_notification.disable_failed]: bool,
+        );
     }
 }
 
@@ -1315,15 +1072,9 @@ struct ClipboardProxy {
 
 impl UserData for ClipboardProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("disable_primary", |_, this| {
-            Ok(this.config.lock().unwrap().clipboard.disable_primary)
-        });
-
-        fields.add_field_method_set("disable_primary", |_, this, value: bool| {
-            this.config.lock().unwrap().clipboard.disable_primary = value;
-            this.dirty.lock().unwrap().clipboard = true;
-            Ok(())
-        });
+        config_field_methods!(fields, clipboard,
+            "disable_primary" => [clipboard.disable_primary]: bool,
+        );
     }
 }
 
@@ -1336,25 +1087,12 @@ struct XwaylandSatelliteProxy {
 
 impl UserData for XwaylandSatelliteProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().xwayland_satellite.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().xwayland_satellite.off = value;
-            this.dirty.lock().unwrap().xwayland_satellite = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("path", |_, this| {
-            Ok(this.config.lock().unwrap().xwayland_satellite.path.clone())
-        });
-
-        fields.add_field_method_set("path", |_, this, value: String| {
-            this.config.lock().unwrap().xwayland_satellite.path = value;
-            this.dirty.lock().unwrap().xwayland_satellite = true;
-            Ok(())
-        });
+        config_field_methods!(fields, xwayland_satellite,
+            "off" => [xwayland_satellite.off]: bool,
+        );
+        config_field_methods_clone!(fields, xwayland_satellite,
+            "path" => [xwayland_satellite.path]: String,
+        );
     }
 }
 
@@ -1367,110 +1105,14 @@ struct DebugProxy {
 
 impl UserData for DebugProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("dbus_interfaces_in_non_session_instances", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .debug
-                .dbus_interfaces_in_non_session_instances)
-        });
-
-        fields.add_field_method_set(
-            "dbus_interfaces_in_non_session_instances",
-            |_, this, value: bool| {
-                this.config
-                    .lock()
-                    .unwrap()
-                    .debug
-                    .dbus_interfaces_in_non_session_instances = value;
-                this.dirty.lock().unwrap().debug = true;
-                Ok(())
-            },
-        );
-
-        fields.add_field_method_get("wait_for_frame_completion_before_queueing", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .debug
-                .wait_for_frame_completion_before_queueing)
-        });
-
-        fields.add_field_method_set(
-            "wait_for_frame_completion_before_queueing",
-            |_, this, value: bool| {
-                this.config
-                    .lock()
-                    .unwrap()
-                    .debug
-                    .wait_for_frame_completion_before_queueing = value;
-                this.dirty.lock().unwrap().debug = true;
-                Ok(())
-            },
-        );
-
-        fields.add_field_method_get("enable_overlay_planes", |_, this| {
-            Ok(this.config.lock().unwrap().debug.enable_overlay_planes)
-        });
-
-        fields.add_field_method_set("enable_overlay_planes", |_, this, value: bool| {
-            this.config.lock().unwrap().debug.enable_overlay_planes = value;
-            this.dirty.lock().unwrap().debug = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("disable_cursor_plane", |_, this| {
-            Ok(this.config.lock().unwrap().debug.disable_cursor_plane)
-        });
-
-        fields.add_field_method_set("disable_cursor_plane", |_, this, value: bool| {
-            this.config.lock().unwrap().debug.disable_cursor_plane = value;
-            this.dirty.lock().unwrap().debug = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("disable_direct_scanout", |_, this| {
-            Ok(this.config.lock().unwrap().debug.disable_direct_scanout)
-        });
-
-        fields.add_field_method_set("disable_direct_scanout", |_, this, value: bool| {
-            this.config.lock().unwrap().debug.disable_direct_scanout = value;
-            this.dirty.lock().unwrap().debug = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("keep_max_bpc_unchanged", |_, this| {
-            Ok(this.config.lock().unwrap().debug.keep_max_bpc_unchanged)
-        });
-
-        fields.add_field_method_set("keep_max_bpc_unchanged", |_, this, value: bool| {
-            this.config.lock().unwrap().debug.keep_max_bpc_unchanged = value;
-            this.dirty.lock().unwrap().debug = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("restrict_primary_scanout_to_matching_format", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .debug
-                .restrict_primary_scanout_to_matching_format)
-        });
-
-        fields.add_field_method_set(
-            "restrict_primary_scanout_to_matching_format",
-            |_, this, value: bool| {
-                this.config
-                    .lock()
-                    .unwrap()
-                    .debug
-                    .restrict_primary_scanout_to_matching_format = value;
-                this.dirty.lock().unwrap().debug = true;
-                Ok(())
-            },
+        config_field_methods!(fields, debug,
+            "dbus_interfaces_in_non_session_instances" => [debug.dbus_interfaces_in_non_session_instances]: bool,
+            "wait_for_frame_completion_before_queueing" => [debug.wait_for_frame_completion_before_queueing]: bool,
+            "enable_overlay_planes" => [debug.enable_overlay_planes]: bool,
+            "disable_cursor_plane" => [debug.disable_cursor_plane]: bool,
+            "disable_direct_scanout" => [debug.disable_direct_scanout]: bool,
+            "keep_max_bpc_unchanged" => [debug.keep_max_bpc_unchanged]: bool,
+            "restrict_primary_scanout_to_matching_format" => [debug.restrict_primary_scanout_to_matching_format]: bool,
         );
     }
 }

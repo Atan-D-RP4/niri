@@ -21,26 +21,40 @@ pub struct LuaConfig {
     pending_actions: std::sync::Arc<std::sync::Mutex<Vec<niri_ipc::Action>>>,
 }
 
+/// Common configuration field names for extraction from returned tables.
+const CONFIG_FIELD_NAMES: &[&str] = &[
+    "binds",
+    "startup",
+    "spawn_at_startup",
+    "spawn_sh_at_startup",
+    "input",
+    "outputs",
+    "layout",
+    "animations",
+    "gestures",
+    "clipboard",
+    "hotkey_overlay",
+    "config_notification",
+    "screenshot",
+    "window_rules",
+    "layer_rules",
+    "prefer_no_csd",
+    "cursor",
+    "screenshot_path",
+    "environment",
+    "debug",
+    "workspaces",
+    "xwayland_satellite",
+    "recent_windows",
+    "overview",
+];
+
 impl LuaConfig {
-    /// Create a new Lua configuration from a file.
+    /// Initialize the runtime with all standard APIs.
     ///
-    /// This initializes the Lua runtime, registers all built-in components,
-    /// and loads the specified configuration file.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the Lua configuration file
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the runtime cannot be created or the file cannot be loaded.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path_ref = path.as_ref();
-        let mut runtime = LuaRuntime::new()
-            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime from file: {}", e))?;
-
-        info!("Loading Lua config from {}", path_ref.display());
-
+    /// This is called by both `from_file()` and `from_string()` to set up
+    /// the Lua environment with the niri API, event system, scheduler, etc.
+    fn init_runtime_apis(runtime: &mut LuaRuntime) -> Result<()> {
         // Register the Niri API component (which creates the niri table)
         runtime
             .register_component(|action, args| {
@@ -80,6 +94,61 @@ impl LuaConfig {
 
         debug!("Config wrapper initialized");
 
+        Ok(())
+    }
+
+    /// Extract config fields from a returned Lua table and set them as globals.
+    ///
+    /// This is a fallback for backward compatibility - new scripts should use
+    /// the reactive `niri.config` API instead of returning a table.
+    fn extract_config_table(runtime: &LuaRuntime, config_table: &LuaTable) {
+        let globals = runtime.inner().globals();
+
+        for &field_name in CONFIG_FIELD_NAMES {
+            if let Ok(value) = config_table.get::<LuaValue>(field_name) {
+                if value != LuaValue::Nil {
+                    debug!("Extracting returned config field: {}", field_name);
+                    if let Err(e) = globals.set(field_name, value) {
+                        debug!("Failed to set global {}: {}", field_name, e);
+                    }
+                }
+            }
+        }
+
+        // Also check for startup_commands and map it to startup
+        if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
+            if value != LuaValue::Nil {
+                debug!(
+                    "Extracting returned config field: startup_commands (mapping to startup)"
+                );
+                if let Err(e) = globals.set("startup", value) {
+                    debug!("Failed to set global startup from startup_commands: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Create a new Lua configuration from a file.
+    ///
+    /// This initializes the Lua runtime, registers all built-in components,
+    /// and loads the specified configuration file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the Lua configuration file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot be created or the file cannot be loaded.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path_ref = path.as_ref();
+        let mut runtime = LuaRuntime::new()
+            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime from file: {}", e))?;
+
+        info!("Loading Lua config from {}", path_ref.display());
+
+        Self::init_runtime_apis(&mut runtime)?;
+
         // Create a shared action queue for actions called during config loading
         let action_queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let action_queue_clone = action_queue.clone();
@@ -113,59 +182,7 @@ impl LuaConfig {
         if let LuaValue::Table(config_table) = return_val {
             debug!("Lua file returned a table, extracting configuration (fallback mode)");
             debug!("Note: Consider using niri.apply_config() instead of returning a table");
-
-            // Extract fields from returned table and set as globals
-            // This allows scripts to use local variables and return a config table
-            let globals = runtime.inner().globals();
-
-            // Extract common configuration tables
-            for &field_name in &[
-                "binds",
-                "startup",
-                "spawn_at_startup",
-                "spawn_sh_at_startup",
-                "input",
-                "outputs",
-                "layout",
-                "animations",
-                "gestures",
-                "clipboard",
-                "hotkey_overlay",
-                "config_notification",
-                "screenshot",
-                "window_rules",
-                "layer_rules",
-                "prefer_no_csd",
-                "cursor",
-                "screenshot_path",
-                "environment",
-                "debug",
-                "workspaces",
-                "xwayland_satellite",
-                "recent_windows",
-                "overview",
-            ] {
-                if let Ok(value) = config_table.get::<LuaValue>(field_name) {
-                    if value != LuaValue::Nil {
-                        debug!("Extracting returned config field: {}", field_name);
-                        if let Err(e) = globals.set(field_name, value) {
-                            debug!("Failed to set global {}: {}", field_name, e);
-                        }
-                    }
-                }
-            }
-
-            // Also check for startup_commands and map it to startup
-            if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
-                if value != LuaValue::Nil {
-                    debug!(
-                        "Extracting returned config field: startup_commands (mapping to startup)"
-                    );
-                    if let Err(e) = globals.set("startup", value) {
-                        debug!("Failed to set global startup from startup_commands: {}", e);
-                    }
-                }
-            }
+            Self::extract_config_table(&runtime, &config_table);
         } else {
             debug!("Lua file did not return a table (using niri.apply_config() is preferred)");
         }
@@ -196,43 +213,7 @@ impl LuaConfig {
         let mut runtime = LuaRuntime::new()
             .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime from string: {}", e))?;
 
-        // Register the Niri API component (which creates the niri table)
-        runtime
-            .register_component(|action, args| {
-                info!("Lua action: {} with args {:?}", action, args);
-                Ok(())
-            })
-            .map_err(|e| anyhow::anyhow!("Failed to register Niri API: {}", e))?;
-
-        // Initialize the event system AFTER the niri table is created
-        runtime
-            .init_event_system()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize event system: {}", e))?;
-
-        debug!("Event system initialized");
-
-        // Initialize the scheduler for niri.schedule() support
-        runtime
-            .init_scheduler()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize scheduler: {}", e))?;
-
-        debug!("Scheduler initialized");
-
-        // Initialize the loop API for niri.loop.new_timer() and niri.loop.now()
-        runtime
-            .init_loop_api()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize loop API: {}", e))?;
-
-        debug!("Loop API initialized");
-
-        // Initialize the config proxy with empty collections BEFORE loading the script
-        // Initialize the new ConfigWrapper API for direct config access
-        // This allows the script to use niri.config.layout.gaps = 16, etc.
-        runtime
-            .init_empty_config_wrapper()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize config wrapper: {}", e))?;
-
-        debug!("Config wrapper initialized");
+        Self::init_runtime_apis(&mut runtime)?;
 
         // Load and execute the code
         let return_val = runtime
@@ -242,52 +223,7 @@ impl LuaConfig {
         // If the script returns a table, extract its fields and set them as globals
         if let LuaValue::Table(config_table) = return_val {
             debug!("Lua string returned a table, extracting configuration");
-
-            // Extract fields from returned table and set as globals
-            let globals = runtime.inner().globals();
-
-            // Extract common configuration tables
-            for &field_name in &[
-                "binds",
-                "startup",
-                "input",
-                "outputs",
-                "layout",
-                "animations",
-                "gestures",
-                "clipboard",
-                "hotkey_overlay",
-                "config_notification",
-                "screenshot",
-                "window_rules",
-                "prefer_no_csd",
-                "cursor",
-                "screenshot_path",
-                "environment",
-                "debug",
-                "workspaces",
-            ] {
-                if let Ok(value) = config_table.get::<LuaValue>(field_name) {
-                    if value != LuaValue::Nil {
-                        debug!("Extracting returned config field: {}", field_name);
-                        if let Err(e) = globals.set(field_name, value) {
-                            debug!("Failed to set global {}: {}", field_name, e);
-                        }
-                    }
-                }
-            }
-
-            // Also check for startup_commands and map it to startup
-            if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
-                if value != LuaValue::Nil {
-                    debug!(
-                        "Extracting returned config field: startup_commands (mapping to startup)"
-                    );
-                    if let Err(e) = globals.set("startup", value) {
-                        debug!("Failed to set global startup from startup_commands: {}", e);
-                    }
-                }
-            }
+            Self::extract_config_table(&runtime, &config_table);
         }
 
         Ok(Self {

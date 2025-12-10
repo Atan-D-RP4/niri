@@ -30,7 +30,6 @@ pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
 pub mod parse_utils;
-pub mod validators;
 
 // Tier 3: Runtime State Access
 pub mod event_data;

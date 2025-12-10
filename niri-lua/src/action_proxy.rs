@@ -13,6 +13,28 @@
 
 use std::sync::Arc;
 
+/// Macro to register multiple no-argument action methods.
+///
+/// This reduces boilerplate for actions that take no parameters and have
+/// a direct mapping from Lua method name to Action variant.
+///
+/// # Usage
+/// ```ignore
+/// register_actions!(methods,
+///     "method_name" => ActionVariant,
+///     "another_method" => AnotherVariant,
+/// );
+/// ```
+macro_rules! register_actions {
+    ($methods:expr, $( $name:literal => $action:ident ),* $(,)?) => {
+        $(
+            $methods.add_method($name, |_lua, this, ()| {
+                this.execute(Action::$action {})
+            });
+        )*
+    };
+}
+
 use log::debug;
 use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
@@ -185,7 +207,120 @@ fn parse_layout_switch_target(value: LuaValue) -> LuaResult<LayoutSwitchTarget> 
 impl LuaUserData for ActionProxy {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         // ============================================================
-        // System Actions
+        // No-argument actions (via macro)
+        // ============================================================
+        register_actions!(methods,
+            // System
+            "power_off_monitors" => PowerOffMonitors,
+            "power_on_monitors" => PowerOnMonitors,
+            "load_config_file" => LoadConfigFile,
+            // Window focus
+            "focus_window_previous" => FocusWindowPrevious,
+            "toggle_keyboard_shortcuts_inhibit" => ToggleKeyboardShortcutsInhibit,
+            // Column focus
+            "focus_column_left" => FocusColumnLeft,
+            "focus_column_right" => FocusColumnRight,
+            "focus_column_first" => FocusColumnFirst,
+            "focus_column_last" => FocusColumnLast,
+            "focus_column_right_or_first" => FocusColumnRightOrFirst,
+            "focus_column_left_or_last" => FocusColumnLeftOrLast,
+            // Window focus (vertical)
+            "focus_window_down" => FocusWindowDown,
+            "focus_window_up" => FocusWindowUp,
+            "focus_window_or_monitor_up" => FocusWindowOrMonitorUp,
+            "focus_window_or_monitor_down" => FocusWindowOrMonitorDown,
+            "focus_column_or_monitor_left" => FocusColumnOrMonitorLeft,
+            "focus_column_or_monitor_right" => FocusColumnOrMonitorRight,
+            "focus_window_down_or_column_left" => FocusWindowDownOrColumnLeft,
+            "focus_window_down_or_column_right" => FocusWindowDownOrColumnRight,
+            "focus_window_up_or_column_left" => FocusWindowUpOrColumnLeft,
+            "focus_window_up_or_column_right" => FocusWindowUpOrColumnRight,
+            "focus_window_or_workspace_down" => FocusWindowOrWorkspaceDown,
+            "focus_window_or_workspace_up" => FocusWindowOrWorkspaceUp,
+            "focus_window_top" => FocusWindowTop,
+            "focus_window_bottom" => FocusWindowBottom,
+            "focus_window_down_or_top" => FocusWindowDownOrTop,
+            "focus_window_up_or_bottom" => FocusWindowUpOrBottom,
+            // Column move
+            "move_column_left" => MoveColumnLeft,
+            "move_column_right" => MoveColumnRight,
+            "move_column_to_first" => MoveColumnToFirst,
+            "move_column_to_last" => MoveColumnToLast,
+            "move_column_left_or_to_monitor_left" => MoveColumnLeftOrToMonitorLeft,
+            "move_column_right_or_to_monitor_right" => MoveColumnRightOrToMonitorRight,
+            // Window move (vertical)
+            "move_window_down" => MoveWindowDown,
+            "move_window_up" => MoveWindowUp,
+            "move_window_down_or_to_workspace_down" => MoveWindowDownOrToWorkspaceDown,
+            "move_window_up_or_to_workspace_up" => MoveWindowUpOrToWorkspaceUp,
+            // Consume/expel
+            "consume_window_into_column" => ConsumeWindowIntoColumn,
+            "expel_window_from_column" => ExpelWindowFromColumn,
+            "swap_window_right" => SwapWindowRight,
+            "swap_window_left" => SwapWindowLeft,
+            // Column display
+            "toggle_column_tabbed_display" => ToggleColumnTabbedDisplay,
+            "center_column" => CenterColumn,
+            "center_visible_columns" => CenterVisibleColumns,
+            // Workspace
+            "focus_workspace_down" => FocusWorkspaceDown,
+            "focus_workspace_up" => FocusWorkspaceUp,
+            "focus_workspace_previous" => FocusWorkspacePrevious,
+            "move_workspace_down" => MoveWorkspaceDown,
+            "move_workspace_up" => MoveWorkspaceUp,
+            // Monitor focus
+            "focus_monitor_left" => FocusMonitorLeft,
+            "focus_monitor_right" => FocusMonitorRight,
+            "focus_monitor_down" => FocusMonitorDown,
+            "focus_monitor_up" => FocusMonitorUp,
+            "focus_monitor_previous" => FocusMonitorPrevious,
+            "focus_monitor_next" => FocusMonitorNext,
+            // Window to monitor
+            "move_window_to_monitor_left" => MoveWindowToMonitorLeft,
+            "move_window_to_monitor_right" => MoveWindowToMonitorRight,
+            "move_window_to_monitor_down" => MoveWindowToMonitorDown,
+            "move_window_to_monitor_up" => MoveWindowToMonitorUp,
+            "move_window_to_monitor_previous" => MoveWindowToMonitorPrevious,
+            "move_window_to_monitor_next" => MoveWindowToMonitorNext,
+            // Column to monitor
+            "move_column_to_monitor_left" => MoveColumnToMonitorLeft,
+            "move_column_to_monitor_right" => MoveColumnToMonitorRight,
+            "move_column_to_monitor_down" => MoveColumnToMonitorDown,
+            "move_column_to_monitor_up" => MoveColumnToMonitorUp,
+            "move_column_to_monitor_previous" => MoveColumnToMonitorPrevious,
+            "move_column_to_monitor_next" => MoveColumnToMonitorNext,
+            // Size/width
+            "switch_preset_column_width" => SwitchPresetColumnWidth,
+            "switch_preset_column_width_back" => SwitchPresetColumnWidthBack,
+            "maximize_column" => MaximizeColumn,
+            "expand_column_to_available_width" => ExpandColumnToAvailableWidth,
+            // Layout
+            "show_hotkey_overlay" => ShowHotkeyOverlay,
+            // Workspace to monitor
+            "move_workspace_to_monitor_left" => MoveWorkspaceToMonitorLeft,
+            "move_workspace_to_monitor_right" => MoveWorkspaceToMonitorRight,
+            "move_workspace_to_monitor_down" => MoveWorkspaceToMonitorDown,
+            "move_workspace_to_monitor_up" => MoveWorkspaceToMonitorUp,
+            "move_workspace_to_monitor_previous" => MoveWorkspaceToMonitorPrevious,
+            "move_workspace_to_monitor_next" => MoveWorkspaceToMonitorNext,
+            // Debug
+            "toggle_debug_tint" => ToggleDebugTint,
+            "debug_toggle_opaque_regions" => DebugToggleOpaqueRegions,
+            "debug_toggle_damage" => DebugToggleDamage,
+            // Floating
+            "focus_floating" => FocusFloating,
+            "focus_tiling" => FocusTiling,
+            "switch_focus_between_floating_and_tiling" => SwitchFocusBetweenFloatingAndTiling,
+            // Dynamic cast
+            "clear_dynamic_cast_target" => ClearDynamicCastTarget,
+            // Overview
+            "toggle_overview" => ToggleOverview,
+            "open_overview" => OpenOverview,
+            "close_overview" => CloseOverview,
+        );
+
+        // ============================================================
+        // Actions with parameters (manual registration)
         // ============================================================
 
         // quit(skip_confirmation?)
@@ -193,16 +328,6 @@ impl LuaUserData for ActionProxy {
             this.execute(Action::Quit {
                 skip_confirmation: skip_confirmation.unwrap_or(false),
             })
-        });
-
-        // power_off_monitors()
-        methods.add_method("power_off_monitors", |_lua, this, ()| {
-            this.execute(Action::PowerOffMonitors {})
-        });
-
-        // power_on_monitors()
-        methods.add_method("power_on_monitors", |_lua, this, ()| {
-            this.execute(Action::PowerOnMonitors {})
         });
 
         // spawn(command) - command is array of strings
@@ -222,15 +347,6 @@ impl LuaUserData for ActionProxy {
                 this.execute(Action::DoScreenTransition { delay_ms })
             },
         );
-
-        // load_config_file()
-        methods.add_method("load_config_file", |_lua, this, ()| {
-            this.execute(Action::LoadConfigFile {})
-        });
-
-        // ============================================================
-        // Screenshot Actions
-        // ============================================================
 
         // screenshot(show_pointer?, path?)
         methods.add_method(
@@ -269,10 +385,6 @@ impl LuaUserData for ActionProxy {
             },
         );
 
-        // ============================================================
-        // Window Actions
-        // ============================================================
-
         // close_window(id?)
         methods.add_method("close_window", |_lua, this, id: Option<u64>| {
             this.execute(Action::CloseWindow { id })
@@ -299,205 +411,15 @@ impl LuaUserData for ActionProxy {
             this.execute(Action::FocusWindowInColumn { index })
         });
 
-        // focus_window_previous()
-        methods.add_method("focus_window_previous", |_lua, this, ()| {
-            this.execute(Action::FocusWindowPrevious {})
-        });
-
-        // toggle_keyboard_shortcuts_inhibit()
-        methods.add_method("toggle_keyboard_shortcuts_inhibit", |_lua, this, ()| {
-            this.execute(Action::ToggleKeyboardShortcutsInhibit {})
-        });
-
-        // ============================================================
-        // Column Focus Actions
-        // ============================================================
-
-        // focus_column_left()
-        methods.add_method("focus_column_left", |_lua, this, ()| {
-            this.execute(Action::FocusColumnLeft {})
-        });
-
-        // focus_column_right()
-        methods.add_method("focus_column_right", |_lua, this, ()| {
-            this.execute(Action::FocusColumnRight {})
-        });
-
-        // focus_column_first()
-        methods.add_method("focus_column_first", |_lua, this, ()| {
-            this.execute(Action::FocusColumnFirst {})
-        });
-
-        // focus_column_last()
-        methods.add_method("focus_column_last", |_lua, this, ()| {
-            this.execute(Action::FocusColumnLast {})
-        });
-
-        // focus_column_right_or_first()
-        methods.add_method("focus_column_right_or_first", |_lua, this, ()| {
-            this.execute(Action::FocusColumnRightOrFirst {})
-        });
-
-        // focus_column_left_or_last()
-        methods.add_method("focus_column_left_or_last", |_lua, this, ()| {
-            this.execute(Action::FocusColumnLeftOrLast {})
-        });
-
         // focus_column(index)
         methods.add_method("focus_column", |_lua, this, index: usize| {
             this.execute(Action::FocusColumn { index })
-        });
-
-        // ============================================================
-        // Window Focus Actions (vertical)
-        // ============================================================
-
-        // focus_window_down()
-        methods.add_method("focus_window_down", |_lua, this, ()| {
-            this.execute(Action::FocusWindowDown {})
-        });
-
-        // focus_window_up()
-        methods.add_method("focus_window_up", |_lua, this, ()| {
-            this.execute(Action::FocusWindowUp {})
-        });
-
-        // focus_window_or_monitor_up()
-        methods.add_method("focus_window_or_monitor_up", |_lua, this, ()| {
-            this.execute(Action::FocusWindowOrMonitorUp {})
-        });
-
-        // focus_window_or_monitor_down()
-        methods.add_method("focus_window_or_monitor_down", |_lua, this, ()| {
-            this.execute(Action::FocusWindowOrMonitorDown {})
-        });
-
-        // focus_column_or_monitor_left()
-        methods.add_method("focus_column_or_monitor_left", |_lua, this, ()| {
-            this.execute(Action::FocusColumnOrMonitorLeft {})
-        });
-
-        // focus_column_or_monitor_right()
-        methods.add_method("focus_column_or_monitor_right", |_lua, this, ()| {
-            this.execute(Action::FocusColumnOrMonitorRight {})
-        });
-
-        // focus_window_down_or_column_left()
-        methods.add_method("focus_window_down_or_column_left", |_lua, this, ()| {
-            this.execute(Action::FocusWindowDownOrColumnLeft {})
-        });
-
-        // focus_window_down_or_column_right()
-        methods.add_method("focus_window_down_or_column_right", |_lua, this, ()| {
-            this.execute(Action::FocusWindowDownOrColumnRight {})
-        });
-
-        // focus_window_up_or_column_left()
-        methods.add_method("focus_window_up_or_column_left", |_lua, this, ()| {
-            this.execute(Action::FocusWindowUpOrColumnLeft {})
-        });
-
-        // focus_window_up_or_column_right()
-        methods.add_method("focus_window_up_or_column_right", |_lua, this, ()| {
-            this.execute(Action::FocusWindowUpOrColumnRight {})
-        });
-
-        // focus_window_or_workspace_down()
-        methods.add_method("focus_window_or_workspace_down", |_lua, this, ()| {
-            this.execute(Action::FocusWindowOrWorkspaceDown {})
-        });
-
-        // focus_window_or_workspace_up()
-        methods.add_method("focus_window_or_workspace_up", |_lua, this, ()| {
-            this.execute(Action::FocusWindowOrWorkspaceUp {})
-        });
-
-        // focus_window_top()
-        methods.add_method("focus_window_top", |_lua, this, ()| {
-            this.execute(Action::FocusWindowTop {})
-        });
-
-        // focus_window_bottom()
-        methods.add_method("focus_window_bottom", |_lua, this, ()| {
-            this.execute(Action::FocusWindowBottom {})
-        });
-
-        // focus_window_down_or_top()
-        methods.add_method("focus_window_down_or_top", |_lua, this, ()| {
-            this.execute(Action::FocusWindowDownOrTop {})
-        });
-
-        // focus_window_up_or_bottom()
-        methods.add_method("focus_window_up_or_bottom", |_lua, this, ()| {
-            this.execute(Action::FocusWindowUpOrBottom {})
-        });
-
-        // ============================================================
-        // Column Move Actions
-        // ============================================================
-
-        // move_column_left()
-        methods.add_method("move_column_left", |_lua, this, ()| {
-            this.execute(Action::MoveColumnLeft {})
-        });
-
-        // move_column_right()
-        methods.add_method("move_column_right", |_lua, this, ()| {
-            this.execute(Action::MoveColumnRight {})
-        });
-
-        // move_column_to_first()
-        methods.add_method("move_column_to_first", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToFirst {})
-        });
-
-        // move_column_to_last()
-        methods.add_method("move_column_to_last", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToLast {})
-        });
-
-        // move_column_left_or_to_monitor_left()
-        methods.add_method("move_column_left_or_to_monitor_left", |_lua, this, ()| {
-            this.execute(Action::MoveColumnLeftOrToMonitorLeft {})
-        });
-
-        // move_column_right_or_to_monitor_right()
-        methods.add_method("move_column_right_or_to_monitor_right", |_lua, this, ()| {
-            this.execute(Action::MoveColumnRightOrToMonitorRight {})
         });
 
         // move_column_to_index(index)
         methods.add_method("move_column_to_index", |_lua, this, index: usize| {
             this.execute(Action::MoveColumnToIndex { index })
         });
-
-        // ============================================================
-        // Window Move Actions (vertical)
-        // ============================================================
-
-        // move_window_down()
-        methods.add_method("move_window_down", |_lua, this, ()| {
-            this.execute(Action::MoveWindowDown {})
-        });
-
-        // move_window_up()
-        methods.add_method("move_window_up", |_lua, this, ()| {
-            this.execute(Action::MoveWindowUp {})
-        });
-
-        // move_window_down_or_to_workspace_down()
-        methods.add_method("move_window_down_or_to_workspace_down", |_lua, this, ()| {
-            this.execute(Action::MoveWindowDownOrToWorkspaceDown {})
-        });
-
-        // move_window_up_or_to_workspace_up()
-        methods.add_method("move_window_up_or_to_workspace_up", |_lua, this, ()| {
-            this.execute(Action::MoveWindowUpOrToWorkspaceUp {})
-        });
-
-        // ============================================================
-        // Consume/Expel Window Actions
-        // ============================================================
 
         // consume_or_expel_window_left(id?)
         methods.add_method(
@@ -510,35 +432,6 @@ impl LuaUserData for ActionProxy {
             "consume_or_expel_window_right",
             |_lua, this, id: Option<u64>| this.execute(Action::ConsumeOrExpelWindowRight { id }),
         );
-
-        // consume_window_into_column()
-        methods.add_method("consume_window_into_column", |_lua, this, ()| {
-            this.execute(Action::ConsumeWindowIntoColumn {})
-        });
-
-        // expel_window_from_column()
-        methods.add_method("expel_window_from_column", |_lua, this, ()| {
-            this.execute(Action::ExpelWindowFromColumn {})
-        });
-
-        // swap_window_right()
-        methods.add_method("swap_window_right", |_lua, this, ()| {
-            this.execute(Action::SwapWindowRight {})
-        });
-
-        // swap_window_left()
-        methods.add_method("swap_window_left", |_lua, this, ()| {
-            this.execute(Action::SwapWindowLeft {})
-        });
-
-        // ============================================================
-        // Column Display Actions
-        // ============================================================
-
-        // toggle_column_tabbed_display()
-        methods.add_method("toggle_column_tabbed_display", |_lua, this, ()| {
-            this.execute(Action::ToggleColumnTabbedDisplay {})
-        });
 
         // set_column_display(display) - "normal" or "tabbed"
         methods.add_method("set_column_display", |_lua, this, display: String| {
@@ -555,44 +448,15 @@ impl LuaUserData for ActionProxy {
             this.execute(Action::SetColumnDisplay { display })
         });
 
-        // center_column()
-        methods.add_method("center_column", |_lua, this, ()| {
-            this.execute(Action::CenterColumn {})
-        });
-
         // center_window(id?)
         methods.add_method("center_window", |_lua, this, id: Option<u64>| {
             this.execute(Action::CenterWindow { id })
-        });
-
-        // center_visible_columns()
-        methods.add_method("center_visible_columns", |_lua, this, ()| {
-            this.execute(Action::CenterVisibleColumns {})
-        });
-
-        // ============================================================
-        // Workspace Actions
-        // ============================================================
-
-        // focus_workspace_down()
-        methods.add_method("focus_workspace_down", |_lua, this, ()| {
-            this.execute(Action::FocusWorkspaceDown {})
-        });
-
-        // focus_workspace_up()
-        methods.add_method("focus_workspace_up", |_lua, this, ()| {
-            this.execute(Action::FocusWorkspaceUp {})
         });
 
         // focus_workspace(reference) - index, name, or {id=N}
         methods.add_method("focus_workspace", |_lua, this, reference: LuaValue| {
             let reference = parse_workspace_reference(reference)?;
             this.execute(Action::FocusWorkspace { reference })
-        });
-
-        // focus_workspace_previous()
-        methods.add_method("focus_workspace_previous", |_lua, this, ()| {
-            this.execute(Action::FocusWorkspacePrevious {})
         });
 
         // move_window_to_workspace_down(focus?)
@@ -660,16 +524,6 @@ impl LuaUserData for ActionProxy {
             },
         );
 
-        // move_workspace_down()
-        methods.add_method("move_workspace_down", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceDown {})
-        });
-
-        // move_workspace_up()
-        methods.add_method("move_workspace_up", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceUp {})
-        });
-
         // move_workspace_to_index(index, reference?)
         methods.add_method(
             "move_workspace_to_index",
@@ -697,77 +551,9 @@ impl LuaUserData for ActionProxy {
             },
         );
 
-        // ============================================================
-        // Monitor Focus Actions
-        // ============================================================
-
-        // focus_monitor_left()
-        methods.add_method("focus_monitor_left", |_lua, this, ()| {
-            this.execute(Action::FocusMonitorLeft {})
-        });
-
-        // focus_monitor_right()
-        methods.add_method("focus_monitor_right", |_lua, this, ()| {
-            this.execute(Action::FocusMonitorRight {})
-        });
-
-        // focus_monitor_down()
-        methods.add_method("focus_monitor_down", |_lua, this, ()| {
-            this.execute(Action::FocusMonitorDown {})
-        });
-
-        // focus_monitor_up()
-        methods.add_method("focus_monitor_up", |_lua, this, ()| {
-            this.execute(Action::FocusMonitorUp {})
-        });
-
-        // focus_monitor_previous()
-        methods.add_method("focus_monitor_previous", |_lua, this, ()| {
-            this.execute(Action::FocusMonitorPrevious {})
-        });
-
-        // focus_monitor_next()
-        methods.add_method("focus_monitor_next", |_lua, this, ()| {
-            this.execute(Action::FocusMonitorNext {})
-        });
-
         // focus_monitor(output)
         methods.add_method("focus_monitor", |_lua, this, output: String| {
             this.execute(Action::FocusMonitor { output })
-        });
-
-        // ============================================================
-        // Window to Monitor Actions
-        // ============================================================
-
-        // move_window_to_monitor_left()
-        methods.add_method("move_window_to_monitor_left", |_lua, this, ()| {
-            this.execute(Action::MoveWindowToMonitorLeft {})
-        });
-
-        // move_window_to_monitor_right()
-        methods.add_method("move_window_to_monitor_right", |_lua, this, ()| {
-            this.execute(Action::MoveWindowToMonitorRight {})
-        });
-
-        // move_window_to_monitor_down()
-        methods.add_method("move_window_to_monitor_down", |_lua, this, ()| {
-            this.execute(Action::MoveWindowToMonitorDown {})
-        });
-
-        // move_window_to_monitor_up()
-        methods.add_method("move_window_to_monitor_up", |_lua, this, ()| {
-            this.execute(Action::MoveWindowToMonitorUp {})
-        });
-
-        // move_window_to_monitor_previous()
-        methods.add_method("move_window_to_monitor_previous", |_lua, this, ()| {
-            this.execute(Action::MoveWindowToMonitorPrevious {})
-        });
-
-        // move_window_to_monitor_next()
-        methods.add_method("move_window_to_monitor_next", |_lua, this, ()| {
-            this.execute(Action::MoveWindowToMonitorNext {})
         });
 
         // move_window_to_monitor(output, id?)
@@ -778,48 +564,10 @@ impl LuaUserData for ActionProxy {
             },
         );
 
-        // ============================================================
-        // Column to Monitor Actions
-        // ============================================================
-
-        // move_column_to_monitor_left()
-        methods.add_method("move_column_to_monitor_left", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToMonitorLeft {})
-        });
-
-        // move_column_to_monitor_right()
-        methods.add_method("move_column_to_monitor_right", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToMonitorRight {})
-        });
-
-        // move_column_to_monitor_down()
-        methods.add_method("move_column_to_monitor_down", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToMonitorDown {})
-        });
-
-        // move_column_to_monitor_up()
-        methods.add_method("move_column_to_monitor_up", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToMonitorUp {})
-        });
-
-        // move_column_to_monitor_previous()
-        methods.add_method("move_column_to_monitor_previous", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToMonitorPrevious {})
-        });
-
-        // move_column_to_monitor_next()
-        methods.add_method("move_column_to_monitor_next", |_lua, this, ()| {
-            this.execute(Action::MoveColumnToMonitorNext {})
-        });
-
         // move_column_to_monitor(output)
         methods.add_method("move_column_to_monitor", |_lua, this, output: String| {
             this.execute(Action::MoveColumnToMonitor { output })
         });
-
-        // ============================================================
-        // Size/Width/Height Actions
-        // ============================================================
 
         // set_window_width(change, id?)
         methods.add_method(
@@ -842,16 +590,6 @@ impl LuaUserData for ActionProxy {
         // reset_window_height(id?)
         methods.add_method("reset_window_height", |_lua, this, id: Option<u64>| {
             this.execute(Action::ResetWindowHeight { id })
-        });
-
-        // switch_preset_column_width()
-        methods.add_method("switch_preset_column_width", |_lua, this, ()| {
-            this.execute(Action::SwitchPresetColumnWidth {})
-        });
-
-        // switch_preset_column_width_back()
-        methods.add_method("switch_preset_column_width_back", |_lua, this, ()| {
-            this.execute(Action::SwitchPresetColumnWidthBack {})
         });
 
         // switch_preset_window_width(id?)
@@ -878,11 +616,6 @@ impl LuaUserData for ActionProxy {
             |_lua, this, id: Option<u64>| this.execute(Action::SwitchPresetWindowHeightBack { id }),
         );
 
-        // maximize_column()
-        methods.add_method("maximize_column", |_lua, this, ()| {
-            this.execute(Action::MaximizeColumn {})
-        });
-
         // maximize_window_to_edges(id?)
         methods.add_method("maximize_window_to_edges", |_lua, this, id: Option<u64>| {
             this.execute(Action::MaximizeWindowToEdges { id })
@@ -894,58 +627,10 @@ impl LuaUserData for ActionProxy {
             this.execute(Action::SetColumnWidth { change })
         });
 
-        // expand_column_to_available_width()
-        methods.add_method("expand_column_to_available_width", |_lua, this, ()| {
-            this.execute(Action::ExpandColumnToAvailableWidth {})
-        });
-
-        // ============================================================
-        // Layout Actions
-        // ============================================================
-
         // switch_layout(layout) - "next", "prev", or index
         methods.add_method("switch_layout", |_lua, this, layout: LuaValue| {
             let layout = parse_layout_switch_target(layout)?;
             this.execute(Action::SwitchLayout { layout })
-        });
-
-        // show_hotkey_overlay()
-        methods.add_method("show_hotkey_overlay", |_lua, this, ()| {
-            this.execute(Action::ShowHotkeyOverlay {})
-        });
-
-        // ============================================================
-        // Workspace to Monitor Actions
-        // ============================================================
-
-        // move_workspace_to_monitor_left()
-        methods.add_method("move_workspace_to_monitor_left", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceToMonitorLeft {})
-        });
-
-        // move_workspace_to_monitor_right()
-        methods.add_method("move_workspace_to_monitor_right", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceToMonitorRight {})
-        });
-
-        // move_workspace_to_monitor_down()
-        methods.add_method("move_workspace_to_monitor_down", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceToMonitorDown {})
-        });
-
-        // move_workspace_to_monitor_up()
-        methods.add_method("move_workspace_to_monitor_up", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceToMonitorUp {})
-        });
-
-        // move_workspace_to_monitor_previous()
-        methods.add_method("move_workspace_to_monitor_previous", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceToMonitorPrevious {})
-        });
-
-        // move_workspace_to_monitor_next()
-        methods.add_method("move_workspace_to_monitor_next", |_lua, this, ()| {
-            this.execute(Action::MoveWorkspaceToMonitorNext {})
         });
 
         // move_workspace_to_monitor(output, reference?)
@@ -956,29 +641,6 @@ impl LuaUserData for ActionProxy {
                 this.execute(Action::MoveWorkspaceToMonitor { output, reference })
             },
         );
-
-        // ============================================================
-        // Debug Actions
-        // ============================================================
-
-        // toggle_debug_tint()
-        methods.add_method("toggle_debug_tint", |_lua, this, ()| {
-            this.execute(Action::ToggleDebugTint {})
-        });
-
-        // debug_toggle_opaque_regions()
-        methods.add_method("debug_toggle_opaque_regions", |_lua, this, ()| {
-            this.execute(Action::DebugToggleOpaqueRegions {})
-        });
-
-        // debug_toggle_damage()
-        methods.add_method("debug_toggle_damage", |_lua, this, ()| {
-            this.execute(Action::DebugToggleDamage {})
-        });
-
-        // ============================================================
-        // Floating Window Actions
-        // ============================================================
 
         // toggle_window_floating(id?)
         methods.add_method("toggle_window_floating", |_lua, this, id: Option<u64>| {
@@ -994,22 +656,6 @@ impl LuaUserData for ActionProxy {
         methods.add_method("move_window_to_tiling", |_lua, this, id: Option<u64>| {
             this.execute(Action::MoveWindowToTiling { id })
         });
-
-        // focus_floating()
-        methods.add_method("focus_floating", |_lua, this, ()| {
-            this.execute(Action::FocusFloating {})
-        });
-
-        // focus_tiling()
-        methods.add_method("focus_tiling", |_lua, this, ()| {
-            this.execute(Action::FocusTiling {})
-        });
-
-        // switch_focus_between_floating_and_tiling()
-        methods.add_method(
-            "switch_focus_between_floating_and_tiling",
-            |_lua, this, ()| this.execute(Action::SwitchFocusBetweenFloatingAndTiling {}),
-        );
 
         // move_floating_window(x, y, id?)
         methods.add_method(
@@ -1027,10 +673,6 @@ impl LuaUserData for ActionProxy {
             |_lua, this, id: Option<u64>| this.execute(Action::ToggleWindowRuleOpacity { id }),
         );
 
-        // ============================================================
-        // Dynamic Cast Actions
-        // ============================================================
-
         // set_dynamic_cast_window(id?)
         methods.add_method("set_dynamic_cast_window", |_lua, this, id: Option<u64>| {
             this.execute(Action::SetDynamicCastWindow { id })
@@ -1043,34 +685,6 @@ impl LuaUserData for ActionProxy {
                 this.execute(Action::SetDynamicCastMonitor { output })
             },
         );
-
-        // clear_dynamic_cast_target()
-        methods.add_method("clear_dynamic_cast_target", |_lua, this, ()| {
-            this.execute(Action::ClearDynamicCastTarget {})
-        });
-
-        // ============================================================
-        // Overview Actions
-        // ============================================================
-
-        // toggle_overview()
-        methods.add_method("toggle_overview", |_lua, this, ()| {
-            this.execute(Action::ToggleOverview {})
-        });
-
-        // open_overview()
-        methods.add_method("open_overview", |_lua, this, ()| {
-            this.execute(Action::OpenOverview {})
-        });
-
-        // close_overview()
-        methods.add_method("close_overview", |_lua, this, ()| {
-            this.execute(Action::CloseOverview {})
-        });
-
-        // ============================================================
-        // Window Urgent Actions
-        // ============================================================
 
         // toggle_window_urgent(id)
         methods.add_method("toggle_window_urgent", |_lua, this, id: u64| {
