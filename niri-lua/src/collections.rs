@@ -292,9 +292,7 @@ impl LuaUserData for BindsCollection {
                     dirty.binds = true;
                     Ok(())
                 }
-                _ => Err(LuaError::external(
-                    "binds:add() expects a table or string",
-                )),
+                _ => Err(LuaError::external("binds:add() expects a table or string")),
             }
         });
 
@@ -349,7 +347,6 @@ impl LuaUserData for BindsCollection {
 }
 
 fn extract_bind(_lua: &Lua, tbl: &LuaTable) -> LuaResult<Bind> {
-
     let key_str = extract_string_opt(tbl, "key")?
         .ok_or_else(|| LuaError::external("bind requires 'key' field"))?;
 
@@ -374,8 +371,7 @@ fn extract_bind(_lua: &Lua, tbl: &LuaTable) -> LuaResult<Bind> {
     let action = parse_action(&action_str, args.as_deref())?;
 
     let repeat = extract_bool_opt(tbl, "repeat")?.unwrap_or(false);
-    let cooldown =
-        extract_int_opt(tbl, "cooldown_ms")?.map(|v| Duration::from_millis(v as u64));
+    let cooldown = extract_int_opt(tbl, "cooldown_ms")?.map(|v| Duration::from_millis(v as u64));
     let allow_when_locked = extract_bool_opt(tbl, "allow_when_locked")?.unwrap_or(false);
     let allow_inhibiting = extract_bool_opt(tbl, "allow_inhibiting")?.unwrap_or(true);
 
@@ -409,7 +405,11 @@ fn parse_bind_string(s: &str) -> LuaResult<Bind> {
         .parse()
         .map_err(|e| LuaError::external(format!("Invalid key '{}': {}", key_str, e)))?;
 
-    let args_opt = if args.is_empty() { None } else { Some(&args[..]) };
+    let args_opt = if args.is_empty() {
+        None
+    } else {
+        Some(&args[..])
+    };
     let action = parse_action(action_str, args_opt)?;
 
     Ok(Bind {
@@ -586,7 +586,10 @@ fn parse_action(
             Ok(Action::MoveWorkspaceToMonitor(monitor))
         }
 
-        _ => Err(LuaError::external(format!("Unknown action: {}", action_str))),
+        _ => Err(LuaError::external(format!(
+            "Unknown action: {}",
+            action_str
+        ))),
     }
 }
 

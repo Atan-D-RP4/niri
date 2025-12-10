@@ -1936,10 +1936,7 @@ mod tests {
             .exec()
             .unwrap();
 
-        let len: usize = lua
-            .load("return wrapper.environment:len()")
-            .eval()
-            .unwrap();
+        let len: usize = lua.load("return wrapper.environment:len()").eval().unwrap();
         assert!(len >= 1);
 
         // Test get - returns a table with name and value fields
@@ -1964,10 +1961,7 @@ mod tests {
             .exec()
             .unwrap();
 
-        let len: usize = lua
-            .load("return wrapper.layer_rules:len()")
-            .eval()
-            .unwrap();
+        let len: usize = lua.load("return wrapper.layer_rules:len()").eval().unwrap();
         assert!(len >= 1);
 
         assert!(wrapper.dirty.lock().unwrap().layer_rules);
