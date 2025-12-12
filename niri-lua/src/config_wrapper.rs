@@ -21,11 +21,12 @@
 //! niri.config.binds:add({ key = "Mod+Return", action = "spawn", args = { "kitty" } })
 //! ```
 
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use mlua::prelude::*;
 use mlua::UserData;
-use niri_config::Config;
+use niri_config::{Color, Config};
 
 use crate::collections::{
     BindsCollection, EnvironmentCollection, LayerRulesCollection, OutputsCollection,
@@ -108,6 +109,220 @@ macro_rules! config_field_methods_float_or_int {
             });
         )*
     };
+}
+
+/// Convert a Color to a hex string with alpha (e.g., "#rrggbbaa").
+fn color_to_hex(color: &Color) -> String {
+    let r = (color.r * 255.0).round() as u8;
+    let g = (color.g * 255.0).round() as u8;
+    let b = (color.b * 255.0).round() as u8;
+    let a = (color.a * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a)
+}
+
+/// Convert a Gradient to a Lua table representation.
+fn gradient_to_table(
+    lua: &mlua::Lua,
+    gradient: &niri_config::Gradient,
+) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table()?;
+    table.set("from", color_to_hex(&gradient.from))?;
+    table.set("to", color_to_hex(&gradient.to))?;
+    table.set("angle", gradient.angle)?;
+    table.set(
+        "relative_to",
+        match gradient.relative_to {
+            niri_config::GradientRelativeTo::Window => "window",
+            niri_config::GradientRelativeTo::WorkspaceView => "workspace-view",
+        },
+    )?;
+    // Include interpolation settings
+    let in_table = lua.create_table()?;
+    in_table.set(
+        "color_space",
+        match gradient.in_.color_space {
+            niri_config::GradientColorSpace::Srgb => "srgb",
+            niri_config::GradientColorSpace::SrgbLinear => "srgb-linear",
+            niri_config::GradientColorSpace::Oklab => "oklab",
+            niri_config::GradientColorSpace::Oklch => "oklch",
+        },
+    )?;
+    in_table.set(
+        "hue_interpolation",
+        match gradient.in_.hue_interpolation {
+            niri_config::HueInterpolation::Shorter => "shorter",
+            niri_config::HueInterpolation::Longer => "longer",
+            niri_config::HueInterpolation::Increasing => "increasing",
+            niri_config::HueInterpolation::Decreasing => "decreasing",
+        },
+    )?;
+    table.set("in", in_table)?;
+    Ok(table)
+}
+
+/// Parse a Gradient from a Lua table.
+fn table_to_gradient(table: mlua::Table) -> mlua::Result<niri_config::Gradient> {
+    let from_str: String = table.get("from")?;
+    let to_str: String = table.get("to")?;
+    let angle: i16 = table.get::<Option<i16>>("angle")?.unwrap_or(180);
+    let relative_to_str: Option<String> = table.get("relative_to")?;
+    let in_table: Option<mlua::Table> = table.get("in")?;
+
+    let from = Color::from_str(&from_str)
+        .map_err(|e| mlua::Error::external(format!("Invalid 'from' color: {}", e)))?;
+    let to = Color::from_str(&to_str)
+        .map_err(|e| mlua::Error::external(format!("Invalid 'to' color: {}", e)))?;
+
+    let relative_to = match relative_to_str.as_deref() {
+        Some("window") | None => niri_config::GradientRelativeTo::Window,
+        Some("workspace-view") => niri_config::GradientRelativeTo::WorkspaceView,
+        Some(other) => {
+            return Err(mlua::Error::external(format!(
+                "Invalid relative_to: {}. Expected 'window' or 'workspace-view'",
+                other
+            )));
+        }
+    };
+
+    let in_ = if let Some(in_tbl) = in_table {
+        let color_space_str: Option<String> = in_tbl.get("color_space")?;
+        let hue_str: Option<String> = in_tbl.get("hue_interpolation")?;
+
+        let color_space = match color_space_str.as_deref() {
+            Some("srgb") | None => niri_config::GradientColorSpace::Srgb,
+            Some("srgb-linear") => niri_config::GradientColorSpace::SrgbLinear,
+            Some("oklab") => niri_config::GradientColorSpace::Oklab,
+            Some("oklch") => niri_config::GradientColorSpace::Oklch,
+            Some(other) => {
+                return Err(mlua::Error::external(format!(
+                    "Invalid color_space: {}",
+                    other
+                )));
+            }
+        };
+
+        let hue_interpolation = match hue_str.as_deref() {
+            Some("shorter") | None => niri_config::HueInterpolation::Shorter,
+            Some("longer") => niri_config::HueInterpolation::Longer,
+            Some("increasing") => niri_config::HueInterpolation::Increasing,
+            Some("decreasing") => niri_config::HueInterpolation::Decreasing,
+            Some(other) => {
+                return Err(mlua::Error::external(format!(
+                    "Invalid hue_interpolation: {}",
+                    other
+                )));
+            }
+        };
+
+        niri_config::GradientInterpolation {
+            color_space,
+            hue_interpolation,
+        }
+    } else {
+        niri_config::GradientInterpolation::default()
+    };
+
+    Ok(niri_config::Gradient {
+        from,
+        to,
+        angle,
+        relative_to,
+        in_,
+    })
+}
+
+/// Convert an animation Kind to a Lua table representation.
+fn anim_kind_to_table(
+    lua: &mlua::Lua,
+    kind: &niri_config::animations::Kind,
+) -> mlua::Result<mlua::Table> {
+    use niri_config::animations::Kind;
+    let table = lua.create_table()?;
+
+    match kind {
+        Kind::Easing(params) => {
+            table.set("type", "easing")?;
+            table.set("duration_ms", params.duration_ms)?;
+            let curve_str = match params.curve {
+                niri_config::animations::Curve::Linear => "linear",
+                niri_config::animations::Curve::EaseOutQuad => "ease-out-quad",
+                niri_config::animations::Curve::EaseOutCubic => "ease-out-cubic",
+                niri_config::animations::Curve::EaseOutExpo => "ease-out-expo",
+                niri_config::animations::Curve::CubicBezier(x1, y1, x2, y2) => {
+                    // For cubic bezier, include the control points
+                    let points = lua.create_table()?;
+                    points.set("x1", x1)?;
+                    points.set("y1", y1)?;
+                    points.set("x2", x2)?;
+                    points.set("y2", y2)?;
+                    table.set("cubic_bezier", points)?;
+                    "cubic-bezier"
+                }
+            };
+            table.set("curve", curve_str)?;
+        }
+        Kind::Spring(params) => {
+            table.set("type", "spring")?;
+            table.set("damping_ratio", params.damping_ratio)?;
+            table.set("stiffness", params.stiffness)?;
+            table.set("epsilon", params.epsilon)?;
+        }
+    }
+
+    Ok(table)
+}
+
+/// Parse an animation Kind from a Lua table.
+fn table_to_anim_kind(table: mlua::Table) -> mlua::Result<niri_config::animations::Kind> {
+    use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
+
+    let kind_type: String = table.get("type")?;
+
+    match kind_type.as_str() {
+        "easing" => {
+            let duration_ms: u32 = table.get::<Option<u32>>("duration_ms")?.unwrap_or(250);
+            let curve_str: Option<String> = table.get("curve")?;
+            let cubic_bezier: Option<mlua::Table> = table.get("cubic_bezier")?;
+
+            let curve = if let Some(cb) = cubic_bezier {
+                let x1: f64 = cb.get("x1")?;
+                let y1: f64 = cb.get("y1")?;
+                let x2: f64 = cb.get("x2")?;
+                let y2: f64 = cb.get("y2")?;
+                Curve::CubicBezier(x1, y1, x2, y2)
+            } else {
+                match curve_str.as_deref() {
+                    Some("linear") => Curve::Linear,
+                    Some("ease-out-quad") => Curve::EaseOutQuad,
+                    Some("ease-out-cubic") | None => Curve::EaseOutCubic,
+                    Some("ease-out-expo") => Curve::EaseOutExpo,
+                    Some(other) => {
+                        return Err(mlua::Error::external(format!(
+                            "Invalid curve: {}. Expected 'linear', 'ease-out-quad', 'ease-out-cubic', 'ease-out-expo', or provide 'cubic_bezier' table",
+                            other
+                        )));
+                    }
+                }
+            };
+
+            Ok(Kind::Easing(EasingParams { duration_ms, curve }))
+        }
+        "spring" => {
+            let damping_ratio: f64 = table.get::<Option<f64>>("damping_ratio")?.unwrap_or(1.0);
+            let stiffness: u32 = table.get::<Option<u32>>("stiffness")?.unwrap_or(800);
+            let epsilon: f64 = table.get::<Option<f64>>("epsilon")?.unwrap_or(0.0001);
+
+            Ok(Kind::Spring(SpringParams {
+                damping_ratio,
+                stiffness,
+                epsilon,
+            }))
+        }
+        other => Err(mlua::Error::external(format!(
+            "Invalid animation type: {}. Expected 'easing' or 'spring'",
+            other
+        ))),
+    }
 }
 
 /// Wrapper around Config that implements UserData for Lua access.
@@ -539,8 +754,11 @@ impl UserData for LayoutProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
         config_field_methods!(fields, layout,
             "gaps" => [layout.gaps]: f64,
+            "always_center_single_column" => [layout.always_center_single_column]: bool,
+            "empty_workspace_above_first" => [layout.empty_workspace_above_first]: bool,
         );
 
+        // center_focused_column enum
         fields.add_field_method_get("center_focused_column", |_, this| {
             let config = this.config.lock().unwrap();
             let value = match config.layout.center_focused_column {
@@ -569,7 +787,48 @@ impl UserData for LayoutProxy {
             Ok(())
         });
 
-        // Nested proxies for focus_ring, border, shadow
+        // default_column_display enum
+        fields.add_field_method_get("default_column_display", |_, this| {
+            let config = this.config.lock().unwrap();
+            let value = match config.layout.default_column_display {
+                niri_ipc::ColumnDisplay::Normal => "normal",
+                niri_ipc::ColumnDisplay::Tabbed => "tabbed",
+            };
+            Ok(value.to_string())
+        });
+
+        fields.add_field_method_set("default_column_display", |_, this, value: String| {
+            use niri_ipc::ColumnDisplay;
+            let parsed = match value.as_str() {
+                "normal" => ColumnDisplay::Normal,
+                "tabbed" => ColumnDisplay::Tabbed,
+                _ => {
+                    return Err(mlua::Error::external(format!(
+                        "Invalid default_column_display value: {}. Expected 'normal' or 'tabbed'",
+                        value
+                    )));
+                }
+            };
+            this.config.lock().unwrap().layout.default_column_display = parsed;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // background_color
+        fields.add_field_method_get("background_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.background_color))
+        });
+
+        fields.add_field_method_set("background_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.background_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // Nested proxies for focus_ring, border, shadow, struts, tab_indicator, insert_hint
         fields.add_field_method_get("focus_ring", |_, this| {
             Ok(FocusRingProxy {
                 config: this.config.clone(),
@@ -590,6 +849,27 @@ impl UserData for LayoutProxy {
                 dirty: this.dirty.clone(),
             })
         });
+
+        fields.add_field_method_get("struts", |_, this| {
+            Ok(StrutsProxy {
+                config: this.config.clone(),
+                dirty: this.dirty.clone(),
+            })
+        });
+
+        fields.add_field_method_get("tab_indicator", |_, this| {
+            Ok(TabIndicatorProxy {
+                config: this.config.clone(),
+                dirty: this.dirty.clone(),
+            })
+        });
+
+        fields.add_field_method_get("insert_hint", |_, this| {
+            Ok(InsertHintProxy {
+                config: this.config.clone(),
+                dirty: this.dirty.clone(),
+            })
+        });
     }
 }
 
@@ -606,6 +886,112 @@ impl UserData for FocusRingProxy {
             "width" => [layout.focus_ring.width]: f64,
             "off" => [layout.focus_ring.off]: bool,
         );
+
+        // Color fields - active_color
+        fields.add_field_method_get("active_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.focus_ring.active_color))
+        });
+
+        fields.add_field_method_set("active_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.focus_ring.active_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // inactive_color
+        fields.add_field_method_get("inactive_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.focus_ring.inactive_color))
+        });
+
+        fields.add_field_method_set("inactive_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.focus_ring.inactive_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // urgent_color
+        fields.add_field_method_get("urgent_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.focus_ring.urgent_color))
+        });
+
+        fields.add_field_method_set("urgent_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.focus_ring.urgent_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // Gradient fields (optional)
+        fields.add_field_method_get("active_gradient", |lua, this| {
+            let config = this.config.lock().unwrap();
+            match &config.layout.focus_ring.active_gradient {
+                Some(g) => Ok(mlua::Value::Table(gradient_to_table(lua, g)?)),
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        fields.add_field_method_set("active_gradient", |_, this, value: Option<mlua::Table>| {
+            let gradient = value.map(table_to_gradient).transpose()?;
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .focus_ring
+                .active_gradient = gradient;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("inactive_gradient", |lua, this| {
+            let config = this.config.lock().unwrap();
+            match &config.layout.focus_ring.inactive_gradient {
+                Some(g) => Ok(mlua::Value::Table(gradient_to_table(lua, g)?)),
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        fields.add_field_method_set(
+            "inactive_gradient",
+            |_, this, value: Option<mlua::Table>| {
+                let gradient = value.map(table_to_gradient).transpose()?;
+                this.config
+                    .lock()
+                    .unwrap()
+                    .layout
+                    .focus_ring
+                    .inactive_gradient = gradient;
+                this.dirty.lock().unwrap().layout = true;
+                Ok(())
+            },
+        );
+
+        fields.add_field_method_get("urgent_gradient", |lua, this| {
+            let config = this.config.lock().unwrap();
+            match &config.layout.focus_ring.urgent_gradient {
+                Some(g) => Ok(mlua::Value::Table(gradient_to_table(lua, g)?)),
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        fields.add_field_method_set("urgent_gradient", |_, this, value: Option<mlua::Table>| {
+            let gradient = value.map(table_to_gradient).transpose()?;
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .focus_ring
+                .urgent_gradient = gradient;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
     }
 }
 
@@ -622,6 +1008,97 @@ impl UserData for BorderProxy {
             "width" => [layout.border.width]: f64,
             "off" => [layout.border.off]: bool,
         );
+
+        // active_color
+        fields.add_field_method_get("active_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.border.active_color))
+        });
+
+        fields.add_field_method_set("active_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.border.active_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // inactive_color
+        fields.add_field_method_get("inactive_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.border.inactive_color))
+        });
+
+        fields.add_field_method_set("inactive_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.border.inactive_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // urgent_color
+        fields.add_field_method_get("urgent_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.border.urgent_color))
+        });
+
+        fields.add_field_method_set("urgent_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.border.urgent_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // Gradient fields (optional)
+        fields.add_field_method_get("active_gradient", |lua, this| {
+            let config = this.config.lock().unwrap();
+            match &config.layout.border.active_gradient {
+                Some(g) => Ok(mlua::Value::Table(gradient_to_table(lua, g)?)),
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        fields.add_field_method_set("active_gradient", |_, this, value: Option<mlua::Table>| {
+            let gradient = value.map(table_to_gradient).transpose()?;
+            this.config.lock().unwrap().layout.border.active_gradient = gradient;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("inactive_gradient", |lua, this| {
+            let config = this.config.lock().unwrap();
+            match &config.layout.border.inactive_gradient {
+                Some(g) => Ok(mlua::Value::Table(gradient_to_table(lua, g)?)),
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        fields.add_field_method_set(
+            "inactive_gradient",
+            |_, this, value: Option<mlua::Table>| {
+                let gradient = value.map(table_to_gradient).transpose()?;
+                this.config.lock().unwrap().layout.border.inactive_gradient = gradient;
+                this.dirty.lock().unwrap().layout = true;
+                Ok(())
+            },
+        );
+
+        fields.add_field_method_get("urgent_gradient", |lua, this| {
+            let config = this.config.lock().unwrap();
+            match &config.layout.border.urgent_gradient {
+                Some(g) => Ok(mlua::Value::Table(gradient_to_table(lua, g)?)),
+                None => Ok(mlua::Value::Nil),
+            }
+        });
+
+        fields.add_field_method_set("urgent_gradient", |_, this, value: Option<mlua::Table>| {
+            let gradient = value.map(table_to_gradient).transpose()?;
+            this.config.lock().unwrap().layout.border.urgent_gradient = gradient;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
     }
 }
 
@@ -635,9 +1112,400 @@ struct ShadowProxy {
 impl UserData for ShadowProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
         config_field_methods!(fields, layout,
+            "on" => [layout.shadow.on]: bool,
             "softness" => [layout.shadow.softness]: f64,
             "spread" => [layout.shadow.spread]: f64,
+            "draw_behind_window" => [layout.shadow.draw_behind_window]: bool,
         );
+
+        // Offset as table {x, y}
+        fields.add_field_method_get("offset", |lua, this| {
+            let config = this.config.lock().unwrap();
+            let table = lua.create_table()?;
+            table.set("x", config.layout.shadow.offset.x.0)?;
+            table.set("y", config.layout.shadow.offset.y.0)?;
+            Ok(table)
+        });
+
+        fields.add_field_method_set("offset", |_, this, value: LuaTable| {
+            use niri_config::FloatOrInt;
+            let x: f64 = value.get("x")?;
+            let y: f64 = value.get("y")?;
+            let mut config = this.config.lock().unwrap();
+            config.layout.shadow.offset.x = FloatOrInt(x);
+            config.layout.shadow.offset.y = FloatOrInt(y);
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // color
+        fields.add_field_method_get("color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.shadow.color))
+        });
+
+        fields.add_field_method_set("color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.shadow.color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // inactive_color (optional)
+        fields.add_field_method_get("inactive_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(config
+                .layout
+                .shadow
+                .inactive_color
+                .as_ref()
+                .map(color_to_hex))
+        });
+
+        fields.add_field_method_set("inactive_color", |_, this, value: Option<String>| {
+            let color = value
+                .map(|v| {
+                    Color::from_str(&v)
+                        .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", v, e)))
+                })
+                .transpose()?;
+            this.config.lock().unwrap().layout.shadow.inactive_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+    }
+}
+
+/// Proxy for layout.struts config section.
+#[derive(Clone)]
+struct StrutsProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for StrutsProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        // left
+        fields.add_field_method_get("left", |_, this| {
+            Ok(this.config.lock().unwrap().layout.struts.left.0)
+        });
+
+        fields.add_field_method_set("left", |_, this, value: f64| {
+            this.config.lock().unwrap().layout.struts.left = niri_config::FloatOrInt(value);
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // right
+        fields.add_field_method_get("right", |_, this| {
+            Ok(this.config.lock().unwrap().layout.struts.right.0)
+        });
+
+        fields.add_field_method_set("right", |_, this, value: f64| {
+            this.config.lock().unwrap().layout.struts.right = niri_config::FloatOrInt(value);
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // top
+        fields.add_field_method_get("top", |_, this| {
+            Ok(this.config.lock().unwrap().layout.struts.top.0)
+        });
+
+        fields.add_field_method_set("top", |_, this, value: f64| {
+            this.config.lock().unwrap().layout.struts.top = niri_config::FloatOrInt(value);
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // bottom
+        fields.add_field_method_get("bottom", |_, this| {
+            Ok(this.config.lock().unwrap().layout.struts.bottom.0)
+        });
+
+        fields.add_field_method_set("bottom", |_, this, value: f64| {
+            this.config.lock().unwrap().layout.struts.bottom = niri_config::FloatOrInt(value);
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+    }
+}
+
+/// Proxy for layout.tab_indicator config section.
+#[derive(Clone)]
+struct TabIndicatorProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for TabIndicatorProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        // Boolean fields
+        fields.add_field_method_get("off", |_, this| {
+            Ok(this.config.lock().unwrap().layout.tab_indicator.off)
+        });
+
+        fields.add_field_method_set("off", |_, this, value: bool| {
+            this.config.lock().unwrap().layout.tab_indicator.off = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("hide_when_single_tab", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .hide_when_single_tab)
+        });
+
+        fields.add_field_method_set("hide_when_single_tab", |_, this, value: bool| {
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .hide_when_single_tab = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("place_within_column", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .place_within_column)
+        });
+
+        fields.add_field_method_set("place_within_column", |_, this, value: bool| {
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .place_within_column = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // Numeric fields
+        fields.add_field_method_get("gap", |_, this| {
+            Ok(this.config.lock().unwrap().layout.tab_indicator.gap)
+        });
+
+        fields.add_field_method_set("gap", |_, this, value: f64| {
+            this.config.lock().unwrap().layout.tab_indicator.gap = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("width", |_, this| {
+            Ok(this.config.lock().unwrap().layout.tab_indicator.width)
+        });
+
+        fields.add_field_method_set("width", |_, this, value: f64| {
+            this.config.lock().unwrap().layout.tab_indicator.width = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("gaps_between_tabs", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .gaps_between_tabs)
+        });
+
+        fields.add_field_method_set("gaps_between_tabs", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .gaps_between_tabs = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("corner_radius", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .corner_radius)
+        });
+
+        fields.add_field_method_set("corner_radius", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .corner_radius = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // Position enum
+        fields.add_field_method_get("position", |_, this| {
+            use niri_config::TabIndicatorPosition;
+            let config = this.config.lock().unwrap();
+            let value = match config.layout.tab_indicator.position {
+                TabIndicatorPosition::Left => "left",
+                TabIndicatorPosition::Right => "right",
+                TabIndicatorPosition::Top => "top",
+                TabIndicatorPosition::Bottom => "bottom",
+            };
+            Ok(value.to_string())
+        });
+
+        fields.add_field_method_set("position", |_, this, value: String| {
+            use niri_config::TabIndicatorPosition;
+            let parsed = match value.as_str() {
+                "left" => TabIndicatorPosition::Left,
+                "right" => TabIndicatorPosition::Right,
+                "top" => TabIndicatorPosition::Top,
+                "bottom" => TabIndicatorPosition::Bottom,
+                _ => {
+                    return Err(mlua::Error::external(format!(
+                        "Invalid position: {}. Expected 'left', 'right', 'top', or 'bottom'",
+                        value
+                    )));
+                }
+            };
+            this.config.lock().unwrap().layout.tab_indicator.position = parsed;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // Color fields (optional)
+        fields.add_field_method_get("active_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(config
+                .layout
+                .tab_indicator
+                .active_color
+                .as_ref()
+                .map(color_to_hex))
+        });
+
+        fields.add_field_method_set("active_color", |_, this, value: Option<String>| {
+            let color = value
+                .map(|v| {
+                    Color::from_str(&v)
+                        .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", v, e)))
+                })
+                .transpose()?;
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .active_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("inactive_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(config
+                .layout
+                .tab_indicator
+                .inactive_color
+                .as_ref()
+                .map(color_to_hex))
+        });
+
+        fields.add_field_method_set("inactive_color", |_, this, value: Option<String>| {
+            let color = value
+                .map(|v| {
+                    Color::from_str(&v)
+                        .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", v, e)))
+                })
+                .transpose()?;
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .inactive_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("urgent_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(config
+                .layout
+                .tab_indicator
+                .urgent_color
+                .as_ref()
+                .map(color_to_hex))
+        });
+
+        fields.add_field_method_set("urgent_color", |_, this, value: Option<String>| {
+            let color = value
+                .map(|v| {
+                    Color::from_str(&v)
+                        .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", v, e)))
+                })
+                .transpose()?;
+            this.config
+                .lock()
+                .unwrap()
+                .layout
+                .tab_indicator
+                .urgent_color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+    }
+}
+
+/// Proxy for layout.insert_hint config section.
+#[derive(Clone)]
+struct InsertHintProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for InsertHintProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        // off
+        fields.add_field_method_get("off", |_, this| {
+            Ok(this.config.lock().unwrap().layout.insert_hint.off)
+        });
+
+        fields.add_field_method_set("off", |_, this, value: bool| {
+            this.config.lock().unwrap().layout.insert_hint.off = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+
+        // color
+        fields.add_field_method_get("color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.layout.insert_hint.color))
+        });
+
+        fields.add_field_method_set("color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().layout.insert_hint.color = color;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
     }
 }
 
@@ -674,8 +1542,185 @@ impl UserData for AnimationsProxy {
             "off" => [animations.off]: bool,
             "slowdown" => [animations.slowdown]: f64,
         );
+
+        // Nested animation proxies
+        fields.add_field_method_get("workspace_switch", |_, this| {
+            Ok(WorkspaceSwitchAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("window_open", |_, this| {
+            Ok(WindowOpenAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("window_close", |_, this| {
+            Ok(WindowCloseAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("horizontal_view_movement", |_, this| {
+            Ok(HorizontalViewMovementAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("window_movement", |_, this| {
+            Ok(WindowMovementAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("window_resize", |_, this| {
+            Ok(WindowResizeAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("config_notification_open_close", |_, this| {
+            Ok(ConfigNotificationAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("overview_open_close", |_, this| {
+            Ok(OverviewAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("screenshot_ui_open", |_, this| {
+            Ok(ScreenshotUiAnimProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
     }
 }
+
+// Helper macro for animation proxy implementations with just `off` field
+macro_rules! simple_anim_proxy {
+    ($proxy_name:ident, $anim_field:ident) => {
+        #[derive(Clone)]
+        struct $proxy_name {
+            config: Arc<Mutex<Config>>,
+            dirty: Arc<Mutex<ConfigDirtyFlags>>,
+        }
+
+        impl UserData for $proxy_name {
+            fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+                fields.add_field_method_get("off", |_, this| {
+                    Ok(this.config.lock().unwrap().animations.$anim_field.0.off)
+                });
+
+                fields.add_field_method_set("off", |_, this, value: bool| {
+                    this.config.lock().unwrap().animations.$anim_field.0.off = value;
+                    this.dirty.lock().unwrap().animations = true;
+                    Ok(())
+                });
+
+                // Animation kind getter - returns type and parameters
+                fields.add_field_method_get("kind", |lua, this| {
+                    let config = this.config.lock().unwrap();
+                    anim_kind_to_table(lua, &config.animations.$anim_field.0.kind)
+                });
+
+                // Animation kind setter - accepts table with type and parameters
+                fields.add_field_method_set("kind", |_, this, value: mlua::Table| {
+                    let kind = table_to_anim_kind(value)?;
+                    this.config.lock().unwrap().animations.$anim_field.0.kind = kind;
+                    this.dirty.lock().unwrap().animations = true;
+                    Ok(())
+                });
+            }
+        }
+    };
+}
+
+// Helper macro for animation proxy with `off` and `custom_shader` fields
+macro_rules! anim_with_shader_proxy {
+    ($proxy_name:ident, $anim_field:ident) => {
+        #[derive(Clone)]
+        struct $proxy_name {
+            config: Arc<Mutex<Config>>,
+            dirty: Arc<Mutex<ConfigDirtyFlags>>,
+        }
+
+        impl UserData for $proxy_name {
+            fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+                fields.add_field_method_get("off", |_, this| {
+                    Ok(this.config.lock().unwrap().animations.$anim_field.anim.off)
+                });
+
+                fields.add_field_method_set("off", |_, this, value: bool| {
+                    this.config.lock().unwrap().animations.$anim_field.anim.off = value;
+                    this.dirty.lock().unwrap().animations = true;
+                    Ok(())
+                });
+
+                fields.add_field_method_get("custom_shader", |_, this| {
+                    Ok(this
+                        .config
+                        .lock()
+                        .unwrap()
+                        .animations
+                        .$anim_field
+                        .custom_shader
+                        .clone())
+                });
+
+                fields.add_field_method_set("custom_shader", |_, this, value: Option<String>| {
+                    this.config
+                        .lock()
+                        .unwrap()
+                        .animations
+                        .$anim_field
+                        .custom_shader = value;
+                    this.dirty.lock().unwrap().animations = true;
+                    Ok(())
+                });
+
+                // Animation kind getter - returns type and parameters
+                fields.add_field_method_get("kind", |lua, this| {
+                    let config = this.config.lock().unwrap();
+                    anim_kind_to_table(lua, &config.animations.$anim_field.anim.kind)
+                });
+
+                // Animation kind setter - accepts table with type and parameters
+                fields.add_field_method_set("kind", |_, this, value: mlua::Table| {
+                    let kind = table_to_anim_kind(value)?;
+                    this.config.lock().unwrap().animations.$anim_field.anim.kind = kind;
+                    this.dirty.lock().unwrap().animations = true;
+                    Ok(())
+                });
+            }
+        }
+    };
+}
+
+// Simple animation proxies (tuple struct wrapping Animation)
+simple_anim_proxy!(WorkspaceSwitchAnimProxy, workspace_switch);
+simple_anim_proxy!(HorizontalViewMovementAnimProxy, horizontal_view_movement);
+simple_anim_proxy!(WindowMovementAnimProxy, window_movement);
+simple_anim_proxy!(ConfigNotificationAnimProxy, config_notification_open_close);
+simple_anim_proxy!(OverviewAnimProxy, overview_open_close);
+simple_anim_proxy!(ScreenshotUiAnimProxy, screenshot_ui_open);
+
+// Animation proxies with custom_shader field
+anim_with_shader_proxy!(WindowOpenAnimProxy, window_open);
+anim_with_shader_proxy!(WindowCloseAnimProxy, window_close);
+anim_with_shader_proxy!(WindowResizeAnimProxy, window_resize);
 
 /// Proxy for input config section.
 #[derive(Clone)]
@@ -1029,6 +2074,79 @@ impl UserData for OverviewProxy {
         config_field_methods!(fields, overview,
             "zoom" => [overview.zoom]: f64,
         );
+
+        // backdrop_color
+        fields.add_field_method_get("backdrop_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.overview.backdrop_color))
+        });
+
+        fields.add_field_method_set("backdrop_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().overview.backdrop_color = color;
+            this.dirty.lock().unwrap().overview = true;
+            Ok(())
+        });
+
+        // workspace_shadow nested proxy
+        fields.add_field_method_get("workspace_shadow", |_, this| {
+            Ok(OverviewWorkspaceShadowProxy {
+                config: this.config.clone(),
+                dirty: this.dirty.clone(),
+            })
+        });
+    }
+}
+
+/// Proxy for overview.workspace_shadow config section.
+#[derive(Clone)]
+struct OverviewWorkspaceShadowProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for OverviewWorkspaceShadowProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        config_field_methods!(fields, overview,
+            "off" => [overview.workspace_shadow.off]: bool,
+            "softness" => [overview.workspace_shadow.softness]: f64,
+            "spread" => [overview.workspace_shadow.spread]: f64,
+        );
+
+        // Offset as table {x, y}
+        fields.add_field_method_get("offset", |lua, this| {
+            let config = this.config.lock().unwrap();
+            let table = lua.create_table()?;
+            table.set("x", config.overview.workspace_shadow.offset.x.0)?;
+            table.set("y", config.overview.workspace_shadow.offset.y.0)?;
+            Ok(table)
+        });
+
+        fields.add_field_method_set("offset", |_, this, value: LuaTable| {
+            use niri_config::FloatOrInt;
+            let x: f64 = value.get("x")?;
+            let y: f64 = value.get("y")?;
+            let mut config = this.config.lock().unwrap();
+            config.overview.workspace_shadow.offset.x = FloatOrInt(x);
+            config.overview.workspace_shadow.offset.y = FloatOrInt(y);
+            this.dirty.lock().unwrap().overview = true;
+            Ok(())
+        });
+
+        // color
+        fields.add_field_method_get("color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.overview.workspace_shadow.color))
+        });
+
+        fields.add_field_method_set("color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config.lock().unwrap().overview.workspace_shadow.color = color;
+            this.dirty.lock().unwrap().overview = true;
+            Ok(())
+        });
     }
 }
 
@@ -1126,13 +2244,246 @@ struct GesturesProxy {
 
 impl UserData for GesturesProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        // Gestures currently has limited public config options
-        // Expose the internal state to silence dead_code warning and enable future expansion
-        fields.add_field_method_get("_configured", |_, this| {
-            // Just check if config is accessible - returns true if gestures are configured
-            let _config = this.config.lock().unwrap();
-            let _ = &this.dirty;
-            Ok(true)
+        // Nested proxies for gesture settings
+        fields.add_field_method_get("dnd_edge_view_scroll", |_, this| {
+            Ok(DndEdgeViewScrollProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("dnd_edge_workspace_switch", |_, this| {
+            Ok(DndEdgeWorkspaceSwitchProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        fields.add_field_method_get("hot_corners", |_, this| {
+            Ok(HotCornersProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+    }
+}
+
+/// Proxy for gestures.dnd_edge_view_scroll config section.
+#[derive(Clone)]
+struct DndEdgeViewScrollProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for DndEdgeViewScrollProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("trigger_width", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_view_scroll
+                .trigger_width)
+        });
+
+        fields.add_field_method_set("trigger_width", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_view_scroll
+                .trigger_width = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("delay_ms", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_view_scroll
+                .delay_ms)
+        });
+
+        fields.add_field_method_set("delay_ms", |_, this, value: u16| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_view_scroll
+                .delay_ms = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("max_speed", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_view_scroll
+                .max_speed)
+        });
+
+        fields.add_field_method_set("max_speed", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_view_scroll
+                .max_speed = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+    }
+}
+
+/// Proxy for gestures.dnd_edge_workspace_switch config section.
+#[derive(Clone)]
+struct DndEdgeWorkspaceSwitchProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for DndEdgeWorkspaceSwitchProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("trigger_height", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_workspace_switch
+                .trigger_height)
+        });
+
+        fields.add_field_method_set("trigger_height", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_workspace_switch
+                .trigger_height = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("delay_ms", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_workspace_switch
+                .delay_ms)
+        });
+
+        fields.add_field_method_set("delay_ms", |_, this, value: u16| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_workspace_switch
+                .delay_ms = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("max_speed", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_workspace_switch
+                .max_speed)
+        });
+
+        fields.add_field_method_set("max_speed", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .dnd_edge_workspace_switch
+                .max_speed = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+    }
+}
+
+/// Proxy for gestures.hot_corners config section.
+#[derive(Clone)]
+struct HotCornersProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for HotCornersProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("off", |_, this| {
+            Ok(this.config.lock().unwrap().gestures.hot_corners.off)
+        });
+
+        fields.add_field_method_set("off", |_, this, value: bool| {
+            this.config.lock().unwrap().gestures.hot_corners.off = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("top_left", |_, this| {
+            Ok(this.config.lock().unwrap().gestures.hot_corners.top_left)
+        });
+
+        fields.add_field_method_set("top_left", |_, this, value: bool| {
+            this.config.lock().unwrap().gestures.hot_corners.top_left = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("top_right", |_, this| {
+            Ok(this.config.lock().unwrap().gestures.hot_corners.top_right)
+        });
+
+        fields.add_field_method_set("top_right", |_, this, value: bool| {
+            this.config.lock().unwrap().gestures.hot_corners.top_right = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("bottom_left", |_, this| {
+            Ok(this.config.lock().unwrap().gestures.hot_corners.bottom_left)
+        });
+
+        fields.add_field_method_set("bottom_left", |_, this, value: bool| {
+            this.config.lock().unwrap().gestures.hot_corners.bottom_left = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
+        });
+
+        fields.add_field_method_get("bottom_right", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .gestures
+                .hot_corners
+                .bottom_right)
+        });
+
+        fields.add_field_method_set("bottom_right", |_, this, value: bool| {
+            this.config
+                .lock()
+                .unwrap()
+                .gestures
+                .hot_corners
+                .bottom_right = value;
+            this.dirty.lock().unwrap().gestures = true;
+            Ok(())
         });
     }
 }
@@ -1172,6 +2523,159 @@ impl UserData for RecentWindowsProxy {
 
         fields.add_field_method_set("open_delay_ms", |_, this, value: u16| {
             this.config.lock().unwrap().recent_windows.open_delay_ms = value;
+            this.dirty.lock().unwrap().recent_windows = true;
+            Ok(())
+        });
+
+        // Nested proxy: highlight
+        fields.add_field_method_get("highlight", |_, this| {
+            Ok(MruHighlightProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+
+        // Nested proxy: previews
+        fields.add_field_method_get("previews", |_, this| {
+            Ok(MruPreviewsProxy {
+                config: Arc::clone(&this.config),
+                dirty: Arc::clone(&this.dirty),
+            })
+        });
+    }
+}
+
+/// Proxy for recent_windows.highlight config section.
+#[derive(Clone)]
+struct MruHighlightProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for MruHighlightProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        // active_color
+        fields.add_field_method_get("active_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.recent_windows.highlight.active_color))
+        });
+
+        fields.add_field_method_set("active_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .highlight
+                .active_color = color;
+            this.dirty.lock().unwrap().recent_windows = true;
+            Ok(())
+        });
+
+        // urgent_color
+        fields.add_field_method_get("urgent_color", |_, this| {
+            let config = this.config.lock().unwrap();
+            Ok(color_to_hex(&config.recent_windows.highlight.urgent_color))
+        });
+
+        fields.add_field_method_set("urgent_color", |_, this, value: String| {
+            let color = Color::from_str(&value)
+                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
+            this.config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .highlight
+                .urgent_color = color;
+            this.dirty.lock().unwrap().recent_windows = true;
+            Ok(())
+        });
+
+        // padding
+        fields.add_field_method_get("padding", |_, this| {
+            Ok(this.config.lock().unwrap().recent_windows.highlight.padding)
+        });
+
+        fields.add_field_method_set("padding", |_, this, value: f64| {
+            this.config.lock().unwrap().recent_windows.highlight.padding = value;
+            this.dirty.lock().unwrap().recent_windows = true;
+            Ok(())
+        });
+
+        // corner_radius
+        fields.add_field_method_get("corner_radius", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .highlight
+                .corner_radius)
+        });
+
+        fields.add_field_method_set("corner_radius", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .highlight
+                .corner_radius = value;
+            this.dirty.lock().unwrap().recent_windows = true;
+            Ok(())
+        });
+    }
+}
+
+/// Proxy for recent_windows.previews config section.
+#[derive(Clone)]
+struct MruPreviewsProxy {
+    config: Arc<Mutex<Config>>,
+    dirty: Arc<Mutex<ConfigDirtyFlags>>,
+}
+
+impl UserData for MruPreviewsProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        // max_height
+        fields.add_field_method_get("max_height", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .previews
+                .max_height)
+        });
+
+        fields.add_field_method_set("max_height", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .previews
+                .max_height = value;
+            this.dirty.lock().unwrap().recent_windows = true;
+            Ok(())
+        });
+
+        // max_scale
+        fields.add_field_method_get("max_scale", |_, this| {
+            Ok(this
+                .config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .previews
+                .max_scale)
+        });
+
+        fields.add_field_method_set("max_scale", |_, this, value: f64| {
+            this.config
+                .lock()
+                .unwrap()
+                .recent_windows
+                .previews
+                .max_scale = value;
             this.dirty.lock().unwrap().recent_windows = true;
             Ok(())
         });

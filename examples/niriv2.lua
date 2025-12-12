@@ -3,7 +3,7 @@
 -- Niri Lua Configuration v2 - Unified API
 -- ============================================================================
 -- This configuration uses the unified API design:
---
+
 --   niri.config   - Configuration (read/write with explicit apply)
 --   niri.state    - Runtime state queries (read-only)
 --   niri.action   - Execute compositor actions (method-style with :)
@@ -11,21 +11,20 @@
 --   niri.utils    - Utilities (log, debug, warn, error)
 --   niri.schedule - Defer execution to next event loop iteration
 --   niri.loop     - Timers and time functions (new_timer, now)
---
+
 -- Key features:
 -- - Direct property assignment: `niri.config.layout.gaps = 16`
 -- - Explicit apply: `niri.config:apply()`
 -- - Collection CRUD: `:list()`, `:get()`, `:add()`, `:set()`, `:remove()`
 -- - Events use `niri.events:on(event_name, callback)`
 -- - Actions use method-style: `niri.action:spawn({"cmd"})`
---
+
 -- Documentation: See niri-lua/LUA_SPECIFICATION.md
 -- ============================================================================
 
 -- ============================================================================
 -- INPUT CONFIGURATION
 -- ============================================================================
-pcall(require, "./../niri-lua/types/api.lua") -- Ensure API types are loaded'
 
 niri.config.input = {
 	keyboard = {
@@ -155,7 +154,7 @@ niri.config.recent_windows = {
 
 niri.config.overview = {
 	zoom = 0.5,
-	backdrop_color = "#00000080",
+	backdrop_color = "#ffffaaff",
 	workspace_shadow = {
 		softness = 30,
 		spread = 5,
@@ -654,6 +653,12 @@ end)
 set_timeout(20000, function()
 	interval:close()
 	niri.utils.log("Stopped 2-second interval after 20 seconds")
+end)
+
+set_timeout(5000, function()
+	niri.config.overview.backdrop_color = "#ff0000aa"
+	niri.config:apply()
+	niri.utils.log("Changed overview backdrop color after 5 seconds")
 end)
 
 -- ============================================================================

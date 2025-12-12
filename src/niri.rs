@@ -761,6 +761,13 @@ impl State {
         self.niri.advance_animations();
 
         // Process Lua async work: fire due timers and flush scheduled callbacks
+        // Clone the wrapper reference outside the runtime borrow to avoid borrow conflicts
+        let config_wrapper = self
+            .niri
+            .lua_runtime
+            .as_ref()
+            .and_then(|r| r.config_wrapper.clone());
+
         if let Some(ref runtime) = self.niri.lua_runtime {
             let (timers, scheduled, errors) = runtime.process_async();
             for error in errors {
@@ -772,6 +779,13 @@ impl State {
                     timers,
                     scheduled
                 );
+            }
+        }
+
+        // Check if Lua code called config:apply() during async processing
+        if let Some(ref wrapper) = config_wrapper {
+            if wrapper.has_dirty_flags() {
+                self.apply_config_wrapper_changes(wrapper);
             }
         }
 
@@ -1892,6 +1906,16 @@ impl State {
                     .clock
                     .set_complete_instantly(config.animations.off);
             }
+        }
+
+        // Apply overview changes (backdrop color updates)
+        if dirty.overview {
+            self.reload_output_config();
+        }
+
+        // Apply recent_windows (MRU) changes
+        if dirty.recent_windows {
+            self.niri.window_mru_ui.update_config();
         }
 
         self.niri.queue_redraw_all();
