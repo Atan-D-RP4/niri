@@ -236,7 +236,7 @@ Just as Neovim users can build entirely custom editing experiences through Lua, 
 2. **Smithay-native rendering**: No external GUI dependencies; use niri's existing Cairo/Pango → GlowRenderer pipeline
 3. **Minimal compositor changes**: niri-ui lives in a separate crate with <50 lines of integration code
 4. **Lua-first API**: All shell components are defined declaratively in Lua tables
-5. **Plugin ecosystem ready**: Sandboxed plugins with lifecycle management, dependencies, and permissions
+5. **Simple plugin model**: Neovim-style `require()` from extended `package.path`
 
 ### Current Status
 
@@ -458,11 +458,11 @@ The Lua system is organized into tiers of increasing functionality:
 
 | Tier | Feature | Status |
 |------|---------|--------|
-| 1 | Module system, plugin discovery, event emitter | Complete |
+| 1 | Module system, event emitter | Complete |
 | 2 | Configuration API with full KDL parity | Complete |
 | 3 | Runtime state queries (windows, workspaces, outputs) | Complete |
 | 4 | Event system with compositor integration | Complete |
-| 5 | Plugin ecosystem (sandboxing, lifecycle) | Partial |
+| 5 | Module loader (extends package.path for niri directories) | Complete |
 | 6 | Developer experience (REPL, docs, types) | Complete |
 
 ### Core Components
@@ -493,8 +493,7 @@ niri-lua/src/
 ├── extractors.rs       # Value extraction helpers
 ├── parse_utils.rs      # Parsing utilities
 ├── test_utils.rs       # Test helpers
-├── plugin_system.rs    # Plugin discovery, lifecycle, sandboxing (Tier 5)
-├── module_loader.rs    # Custom Lua module resolution (Tier 5)
+├── module_loader.rs    # Extends package.path for niri lua directories
 └── types/api.lua       # EmmyLua type definitions (generated)
 
 src/
@@ -3438,8 +3437,7 @@ Based on risk and usage frequency:
 | P1 | `event_data.rs` | Medium | Memory management, callback lifecycle |
 | P1 | `state_query.rs` | Medium | Data freshness, consistency |
 | P2 | `repl.rs` | Low | Developer-facing, simpler scope |
-| P2 | `module_loader.rs` | Low | Not yet integrated |
-| P3 | `plugin_system.rs` | Low | Future feature, not active |
+| P2 | `module_loader.rs` | Low | Simple package.path extension |
 
 ### Code Review Guidelines
 
@@ -3551,10 +3549,9 @@ The following modules are intentionally kept for future Tier 5 plugin features:
 
 | File | LOC | Purpose |
 |------|-----|---------|
-| `plugin_system.rs` | 716 | Plugin discovery, lifecycle, sandboxing |
-| `module_loader.rs` | 276 | Custom Lua module resolution |
+| `module_loader.rs` | 120 | Extends package.path for niri lua directories |
 
-These are fully implemented but not yet integrated into the compositor.
+The module loader is integrated and extends Lua's standard `require()` mechanism.
 
 ### Cancelled Phases
 
@@ -3976,8 +3973,7 @@ niri.config:apply()
 | `state_query.rs` | Partial | No | Yes | ~50% | Query return types covered |
 | `repl.rs` | Yes | Yes | No | ~70% | Command execution covered |
 | `timer_api.rs` | Yes | No | No | ~80% | Timer lifecycle tested |
-| `module_loader.rs` | Partial | No | No | ~30% | Not yet integrated |
-| `plugin_system.rs` | Partial | No | No | ~20% | Future feature |
+| `module_loader.rs` | Yes | No | No | ~80% | Simple package.path extension |
 
 ### Test Priorities
 
@@ -4104,14 +4100,22 @@ A comprehensive code quality analysis was performed on the niri-lua crate using 
 - Replaced defensive fallback code with explicit `.expect()` calls
 - Removed trivial assertions (`assert!(true)`, `assert_eq!(x, false)`)
 
-#### Intentionally Kept (Not Dead Code)
+#### Simplified (December 2025)
 
-The following modules were flagged by automated analysis but are intentionally preserved:
+The plugin/module system was simplified to follow the Neovim model more closely:
+
+| Change | Before | After |
+|--------|--------|-------|
+| `plugin_system.rs` | 716 LOC with PluginManager, metadata, lifecycle | Deleted - over-engineered |
+| `module_loader.rs` | 277 LOC with custom require override | 120 LOC extending package.path |
+
+The new approach simply extends Lua's `package.path` with niri directories, allowing standard `require()` to find modules. No custom require override, no plugin metadata, no lifecycle management.
+
+#### Intentionally Kept (Not Dead Code)
 
 | File | LOC | Justification |
 |------|-----|---------------|
-| `plugin_system.rs` | 716 | Tier 5 plugin ecosystem foundation (see Section 5) |
-| `module_loader.rs` | 276 | Required for plugin system's `require()` resolution |
+| `module_loader.rs` | 120 | Extends package.path for niri lua directories |
 | `ipc_repl.rs` | 77 | Neovim-style `:lua` command via IPC (`niri msg lua "code"`) |
 | `config_dirty.rs` | 161 | Granular change tracking enables future partial config reload optimization |
 | `lua_types.rs` | 395 | Type definitions required for config/runtime APIs |
@@ -4124,13 +4128,14 @@ The `config_dirty.rs` module tracks 21 individual config section flags, though c
 2. **Clean implementation**: Well-structured code with minimal maintenance burden
 3. **Debugging value**: Individual flags aid in debugging config change propagation
 
-#### Design Decision: Keep Plugin Infrastructure
+#### Design Decision: Simple Module Loading
 
-The plugin system and module loader are fully implemented but not yet integrated with the compositor. These are kept because:
+The module loader follows the Neovim model:
 
-1. **Tier 5 roadmap**: Explicitly documented as planned feature
-2. **Avoid re-implementation**: Significant work already invested
-3. **Architecture commitment**: Signals direction for future development
+1. **Extend, don't replace**: Adds paths to `package.path`, doesn't override `require`
+2. **Standard Lua semantics**: `require("foo.bar")` works exactly as expected
+3. **No plugin manager**: Users load plugins explicitly via `require()` in their config
+4. **Simple paths**: `~/.config/niri/lua/`, `~/.local/share/niri/lua/`, `/usr/share/niri/lua/`
 
 ### Future Optimization Opportunities
 

@@ -19,7 +19,6 @@ pub mod event_handlers;
 pub mod event_system;
 pub mod events_proxy;
 pub mod module_loader;
-pub mod plugin_system;
 
 // Tier 2: Configuration API
 pub mod action_proxy;
@@ -69,9 +68,7 @@ pub use loop_api::{
 };
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
 use mlua::prelude::*;
-pub use module_loader::ModuleLoader;
 pub use niri_api::NiriApi;
-pub use plugin_system::PluginManager;
 pub use runtime::LuaRuntime;
 pub use runtime_api::{
     clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,
