@@ -118,9 +118,7 @@ impl LuaConfig {
         // Also check for startup_commands and map it to startup
         if let Ok(value) = config_table.get::<LuaValue>("startup_commands") {
             if value != LuaValue::Nil {
-                debug!(
-                    "Extracting returned config field: startup_commands (mapping to startup)"
-                );
+                debug!("Extracting returned config field: startup_commands (mapping to startup)");
                 if let Err(e) = globals.set("startup", value) {
                     debug!("Failed to set global startup from startup_commands: {}", e);
                 }

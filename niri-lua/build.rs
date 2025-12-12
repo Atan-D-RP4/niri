@@ -526,7 +526,11 @@ fn generate_function(output: &mut String, parent: &str, func: &FunctionSchema, i
     let params: Vec<&str> = func.params.iter().map(|p| p.name).collect();
     let params_str = params.join(", ");
 
-    let separator = if is_method || func.is_method { ":" } else { "." };
+    let separator = if is_method || func.is_method {
+        ":"
+    } else {
+        "."
+    };
     output.push_str(&format!(
         "function {}{}{}({}) end\n\n",
         parent, separator, func.name, params_str
