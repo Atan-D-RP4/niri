@@ -622,6 +622,26 @@ local id = niri.events:on("window:open", handler)
 niri.events:off("window:open", id)
 ```
 
+### Multi-Event Subscription (vim-style)
+
+You can register the same callback for multiple events at once, similar to Vim's autocmd:
+
+```lua
+-- Subscribe to multiple events with one callback
+local ids = niri.events:on({"window:open", "window:close", "window:focus"}, function(event)
+    niri.utils.log("Window event: " .. event.id)
+end)
+-- Returns: { ["window:open"] = 1, ["window:close"] = 2, ["window:focus"] = 3 }
+
+-- Subscribe once to multiple events (each fires independently)
+niri.events:once({"workspace:create", "output:connect"}, function(event)
+    niri.utils.log("First occurrence of either event")
+end)
+
+-- Unsubscribe all at once using the returned table
+niri.events:off(ids)  -- Removes all handlers
+```
+
 ### Available Events
 
 | Event | Payload |

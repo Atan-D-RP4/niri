@@ -2,8 +2,11 @@
 //!
 //! This module implements Phase R4 of the API refactor, providing a cleaner event API:
 //! - `niri.events:on(event_name, callback)` - Register persistent handler
+//! - `niri.events:on({event1, event2, ...}, callback)` - Register for multiple events
 //! - `niri.events:once(event_name, callback)` - Register one-time handler
+//! - `niri.events:once({event1, event2, ...}, callback)` - Register one-time for multiple events
 //! - `niri.events:off(event_name, handler_id)` - Remove handler
+//! - `niri.events:off({event1, event2, ...}, handler_ids)` - Remove handlers from multiple events
 //! - `niri.events:emit(event_name, data)` - Emit custom events
 //!
 //! This follows the same pattern as `niri.config:*` from Phase R1/R2 for consistency.
@@ -13,6 +16,34 @@ use mlua::prelude::*;
 
 use crate::event_handlers::EventHandlerId;
 use crate::event_system::SharedEventHandlers;
+
+/// Parse event types from a Lua value.
+///
+/// Accepts either:
+/// - A single string: `"window:open"`
+/// - A table of strings: `{"window:open", "window:close"}`
+///
+/// Returns a vector of event type strings.
+fn parse_event_types(value: LuaValue) -> LuaResult<Vec<String>> {
+    match value {
+        LuaValue::String(s) => Ok(vec![s.to_str()?.to_string()]),
+        LuaValue::Table(table) => {
+            let mut events = Vec::new();
+            for pair in table.sequence_values::<String>() {
+                events.push(pair?);
+            }
+            if events.is_empty() {
+                return Err(LuaError::external(
+                    "event table must contain at least one event name",
+                ));
+            }
+            Ok(events)
+        }
+        _ => Err(LuaError::external(
+            "event must be a string or table of strings",
+        )),
+    }
+}
 
 /// Proxy for the `niri.events` namespace.
 ///
@@ -34,49 +65,124 @@ impl EventsProxy {
 impl LuaUserData for EventsProxy {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         // niri.events:on(event_name, callback) -> handler_id
+        // niri.events:on({event1, event2, ...}, callback) -> {event1 = id1, event2 = id2, ...}
         // Register a persistent event handler that fires on every matching event
         methods.add_method(
             "on",
-            |_lua, this, (event_type, callback): (String, LuaFunction)| {
+            |lua, this, (event_spec, callback): (LuaValue, LuaFunction)| {
+                let event_types = parse_event_types(event_spec)?;
                 let mut h = this.handlers.lock().unwrap();
-                let handler_id = h.register_handler(&event_type, callback, false);
-                debug!(
-                    "events:on('{}') registered handler {}",
-                    event_type, handler_id
-                );
-                Ok(handler_id)
+
+                if event_types.len() == 1 {
+                    // Single event: return just the handler ID (backwards compatible)
+                    let event_type = &event_types[0];
+                    let handler_id = h.register_handler(event_type, callback, false);
+                    debug!(
+                        "events:on('{}') registered handler {}",
+                        event_type, handler_id
+                    );
+                    Ok(LuaValue::Integer(handler_id as i64))
+                } else {
+                    // Multiple events: return a table mapping event names to handler IDs
+                    let result = lua.create_table()?;
+                    for event_type in &event_types {
+                        let handler_id = h.register_handler(event_type, callback.clone(), false);
+                        debug!(
+                            "events:on('{}') registered handler {}",
+                            event_type, handler_id
+                        );
+                        result.set(event_type.as_str(), handler_id)?;
+                    }
+                    Ok(LuaValue::Table(result))
+                }
             },
         );
 
         // niri.events:once(event_name, callback) -> handler_id
+        // niri.events:once({event1, event2, ...}, callback) -> {event1 = id1, event2 = id2, ...}
         // Register a one-time event handler that fires only once
         methods.add_method(
             "once",
-            |_lua, this, (event_type, callback): (String, LuaFunction)| {
+            |lua, this, (event_spec, callback): (LuaValue, LuaFunction)| {
+                let event_types = parse_event_types(event_spec)?;
                 let mut h = this.handlers.lock().unwrap();
-                let handler_id = h.register_handler(&event_type, callback, true);
-                debug!(
-                    "events:once('{}') registered handler {}",
-                    event_type, handler_id
-                );
-                Ok(handler_id)
+
+                if event_types.len() == 1 {
+                    // Single event: return just the handler ID (backwards compatible)
+                    let event_type = &event_types[0];
+                    let handler_id = h.register_handler(event_type, callback, true);
+                    debug!(
+                        "events:once('{}') registered handler {}",
+                        event_type, handler_id
+                    );
+                    Ok(LuaValue::Integer(handler_id as i64))
+                } else {
+                    // Multiple events: return a table mapping event names to handler IDs
+                    let result = lua.create_table()?;
+                    for event_type in &event_types {
+                        let handler_id = h.register_handler(event_type, callback.clone(), true);
+                        debug!(
+                            "events:once('{}') registered handler {}",
+                            event_type, handler_id
+                        );
+                        result.set(event_type.as_str(), handler_id)?;
+                    }
+                    Ok(LuaValue::Table(result))
+                }
             },
         );
 
-        // niri.events:off(event_name, handler_id)
-        // Remove a previously registered event handler
-        methods.add_method(
-            "off",
-            |_lua, this, (event_type, handler_id): (String, EventHandlerId)| {
-                let mut h = this.handlers.lock().unwrap();
-                let removed = h.unregister_handler(&event_type, handler_id);
-                debug!(
-                    "events:off('{}', {}) -> removed={}",
-                    event_type, handler_id, removed
-                );
-                Ok(removed)
-            },
-        );
+        // niri.events:off(event_name, handler_id) -> boolean
+        // niri.events:off({event1 = id1, event2 = id2, ...}) -> {event1 = bool, event2 = bool, ...}
+        // Remove previously registered event handlers
+        methods.add_method("off", |lua, this, args: LuaMultiValue| {
+            let mut args_iter = args.into_iter();
+            let first = args_iter
+                .next()
+                .ok_or_else(|| LuaError::external("off requires at least one argument"))?;
+
+            match first {
+                LuaValue::String(event_type) => {
+                    // Single event mode: (event_name, handler_id)
+                    let handler_id: EventHandlerId = match args_iter.next() {
+                        Some(LuaValue::Integer(id)) => id as EventHandlerId,
+                        Some(LuaValue::Number(id)) => id as EventHandlerId,
+                        _ => {
+                            return Err(LuaError::external(
+                                "off(event_name, handler_id) requires a handler_id number",
+                            ))
+                        }
+                    };
+                    let event_str = event_type.to_str()?;
+                    let mut h = this.handlers.lock().unwrap();
+                    let removed = h.unregister_handler(&event_str, handler_id);
+                    debug!(
+                        "events:off('{}', {}) -> removed={}",
+                        event_str, handler_id, removed
+                    );
+                    Ok(LuaValue::Boolean(removed))
+                }
+                LuaValue::Table(handler_map) => {
+                    // Multi-event mode: ({event1 = id1, event2 = id2})
+                    let result = lua.create_table()?;
+                    let mut h = this.handlers.lock().unwrap();
+
+                    for pair in handler_map.pairs::<String, EventHandlerId>() {
+                        let (event_type, handler_id) = pair?;
+                        let removed = h.unregister_handler(&event_type, handler_id);
+                        debug!(
+                            "events:off('{}', {}) -> removed={}",
+                            event_type, handler_id, removed
+                        );
+                        result.set(event_type.as_str(), removed)?;
+                    }
+                    Ok(LuaValue::Table(result))
+                }
+                _ => Err(LuaError::external(
+                    "off requires either (event_name, handler_id) or a handler table",
+                )),
+            }
+        });
 
         // niri.events:emit(event_name, data)
         // Emit a custom event to all registered handlers
@@ -493,5 +599,191 @@ mod tests {
 
         let called: bool = lua.globals().get("_test_called").unwrap();
         assert!(called);
+    }
+
+    #[test]
+    fn test_events_on_multiple_events() {
+        let (lua, handlers) = create_test_env();
+
+        // Register a handler for multiple events at once
+        lua.load(
+            r#"
+            _test_handler_ids = niri.events:on({"event1", "event2", "event3"}, function(data)
+                -- handler code
+            end)
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        // Verify all handlers were registered
+        let h = handlers.lock().unwrap();
+        assert_eq!(h.handler_count("event1"), 1);
+        assert_eq!(h.handler_count("event2"), 1);
+        assert_eq!(h.handler_count("event3"), 1);
+        assert_eq!(h.total_handlers(), 3);
+
+        // Verify the returned table has correct structure
+        let ids_table: LuaTable = lua.globals().get("_test_handler_ids").unwrap();
+        let id1: EventHandlerId = ids_table.get("event1").unwrap();
+        let id2: EventHandlerId = ids_table.get("event2").unwrap();
+        let id3: EventHandlerId = ids_table.get("event3").unwrap();
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(id3, 3);
+    }
+
+    #[test]
+    fn test_events_on_multiple_events_fires_correctly() {
+        let (lua, _handlers) = create_test_env();
+
+        // Register same handler for multiple events and verify it fires for each
+        lua.load(
+            r#"
+            _test_events_fired = {}
+            niri.events:on({"event1", "event2"}, function(data)
+                table.insert(_test_events_fired, data.name)
+            end)
+            niri.events:emit("event1", { name = "event1" })
+            niri.events:emit("event2", { name = "event2" })
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        let events_table: LuaTable = lua.globals().get("_test_events_fired").unwrap();
+        let event1: String = events_table.get(1).unwrap();
+        let event2: String = events_table.get(2).unwrap();
+        assert_eq!(event1, "event1");
+        assert_eq!(event2, "event2");
+    }
+
+    #[test]
+    fn test_events_once_multiple_events() {
+        let (lua, handlers) = create_test_env();
+
+        // Register a one-time handler for multiple events
+        lua.load(
+            r#"
+            niri.events:once({"event1", "event2"}, function() end)
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        // Verify handlers were registered
+        {
+            let h = handlers.lock().unwrap();
+            assert_eq!(h.handler_count("event1"), 1);
+            assert_eq!(h.handler_count("event2"), 1);
+        }
+
+        // Emit event1 - its handler should be removed
+        lua.load(r#"niri.events:emit("event1", {})"#)
+            .exec()
+            .unwrap();
+
+        {
+            let h = handlers.lock().unwrap();
+            assert_eq!(h.handler_count("event1"), 0);
+            assert_eq!(h.handler_count("event2"), 1); // Still there
+        }
+
+        // Emit event2 - its handler should be removed
+        lua.load(r#"niri.events:emit("event2", {})"#)
+            .exec()
+            .unwrap();
+
+        {
+            let h = handlers.lock().unwrap();
+            assert_eq!(h.handler_count("event2"), 0);
+        }
+    }
+
+    #[test]
+    fn test_events_off_with_handler_table() {
+        let (lua, handlers) = create_test_env();
+
+        // Register handlers for multiple events and then remove them using the returned table
+        lua.load(
+            r#"
+            local ids = niri.events:on({"event1", "event2"}, function() end)
+            _test_remove_result = niri.events:off(ids)
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        // Verify all handlers were removed
+        let h = handlers.lock().unwrap();
+        assert_eq!(h.handler_count("event1"), 0);
+        assert_eq!(h.handler_count("event2"), 0);
+
+        // Verify the result table
+        let result: LuaTable = lua.globals().get("_test_remove_result").unwrap();
+        let removed1: bool = result.get("event1").unwrap();
+        let removed2: bool = result.get("event2").unwrap();
+        assert!(removed1);
+        assert!(removed2);
+    }
+
+    #[test]
+    fn test_events_on_single_event_backwards_compatible() {
+        let (lua, handlers) = create_test_env();
+
+        // Verify single event still returns a number (backwards compatible)
+        let result: LuaResult<EventHandlerId> = lua
+            .load(
+                r#"
+            return niri.events:on("test:event", function() end)
+        "#,
+            )
+            .eval();
+
+        assert!(result.is_ok());
+        let handler_id = result.unwrap();
+        assert_eq!(handler_id, 1);
+
+        let h = handlers.lock().unwrap();
+        assert_eq!(h.handler_count("test:event"), 1);
+    }
+
+    #[test]
+    fn test_events_on_empty_table_errors() {
+        let (lua, _handlers) = create_test_env();
+
+        // Empty table should produce an error
+        let result: LuaResult<()> = lua
+            .load(
+                r#"
+            niri.events:on({}, function() end)
+        "#,
+            )
+            .exec();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("at least one event name"));
+    }
+
+    #[test]
+    fn test_events_off_single_backwards_compatible() {
+        let (lua, handlers) = create_test_env();
+
+        // Verify single event off still works with (event, id) signature
+        lua.load(
+            r#"
+            local id = niri.events:on("test:event", function() end)
+            _test_removed = niri.events:off("test:event", id)
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        let h = handlers.lock().unwrap();
+        assert_eq!(h.handler_count("test:event"), 0);
+
+        let removed: bool = lua.globals().get("_test_removed").unwrap();
+        assert!(removed);
     }
 }

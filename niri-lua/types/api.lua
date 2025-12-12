@@ -33,6 +33,12 @@
 ---Event handler identifier returned by niri.events:on() or :once()
 ---@alias EventHandlerId integer
 
+---Event specification: single event name or array of event names
+---@alias EventSpec string|string[]
+
+---Map of event names to handler IDs, returned when registering multiple events
+---@alias HandlerIdMap table<string, EventHandlerId>
+
 ---Keybinding entry with key combination, action, and optional parameters
 ---@alias BindEntry { key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }
 
@@ -545,23 +551,23 @@ function niri_config.version() end
 ---@class niri_events
 niri_events = {}
 
----Subscribe to an event with a callback. Returns a handler ID for later removal.
----@param event_name string Event name (e.g., 'window:open', 'workspace:activate')
+---Subscribe to event(s) with a callback. Pass a single event name to get a handler ID, or an array of event names to get a table mapping event names to handler IDs.
+---@param event_spec EventSpec Event name or array of event names (e.g., 'window:open' or {'window:open', 'window:close'})
 ---@param callback fun(event: table) Callback function receiving event data
----@return EventHandlerId # Handler ID for removal
-function niri_events:on(event_name, callback) end
+---@return EventHandlerId|HandlerIdMap # Handler ID (single event) or table of handler IDs (multiple events)
+function niri_events:on(event_spec, callback) end
 
----Subscribe to an event for a single occurrence. Handler is automatically removed after firing.
----@param event_name string Event name
+---Subscribe to event(s) for a single occurrence. Handler is automatically removed after firing. Pass a single event name to get a handler ID, or an array of event names to get a table mapping event names to handler IDs.
+---@param event_spec EventSpec Event name or array of event names
 ---@param callback fun(event: table) Callback function
----@return EventHandlerId # Handler ID for early removal
-function niri_events:once(event_name, callback) end
+---@return EventHandlerId|HandlerIdMap # Handler ID (single event) or table of handler IDs (multiple events)
+function niri_events:once(event_spec, callback) end
 
----Unsubscribe from an event using the handler ID
----@param event_name string Event name
----@param handler_id EventHandlerId Handler ID from on() or once()
----@return boolean # True if handler was found and removed
-function niri_events:off(event_name, handler_id) end
+---Unsubscribe from event(s). Pass (event_name, handler_id) to remove a single handler, or pass a HandlerIdMap table to remove multiple handlers at once.
+---@param event_or_map string|HandlerIdMap Event name (with handler_id) or handler ID map from on()/once()
+---@param handler_id? EventHandlerId Handler ID (only when first arg is event name)
+---@return boolean|table<string, boolean> # True if handler removed (single) or table of results (multiple)
+function niri_events:off(event_or_map, handler_id) end
 
 ---Emit a custom event (for testing or custom integrations)
 ---@param event_name string Event name

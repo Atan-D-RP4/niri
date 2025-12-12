@@ -98,6 +98,30 @@ niri.events:once("window:open", function(data)
     niri.utils.log("    App: " .. (data.app_id or "unknown"))
 end)
 
+-- Demonstrate multi-event registration (vim-style autocmd pattern)
+-- Register the same callback for multiple events at once
+niri.utils.log("=== Multi-Event Registration Demo ===")
+
+-- Track window lifecycle with a single handler for multiple events
+local lifecycle_handler_ids = niri.events:on({"window:open", "window:close", "window:focus"}, function(data)
+    local window_id = data.id or "unknown"
+    local app_id = data.app_id or "unknown"
+    niri.utils.log(string.format(">>> Lifecycle event for window %s (%s)", window_id, app_id))
+end)
+
+-- The return value is a table mapping event names to handler IDs:
+-- lifecycle_handler_ids = { ["window:open"] = 1, ["window:close"] = 2, ["window:focus"] = 3 }
+niri.utils.log("Multi-event handlers registered for window lifecycle events")
+
+-- You can also use :once() with multiple events
+-- Each handler fires independently and is removed after its first occurrence
+niri.events:once({"workspace:create", "output:connect"}, function(data)
+    niri.utils.log(">>> First occurrence of workspace:create or output:connect")
+end)
+
+-- To remove multi-event handlers, pass the handler table to :off()
+-- niri.events:off(lifecycle_handler_ids)  -- Removes all handlers at once
+
 -- Example: Remove a listener
 -- local function my_handler(data)
 --     niri.utils.log("Focus: " .. (data.title or ""))

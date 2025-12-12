@@ -40,6 +40,8 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         LAYOUT_SWITCH_TARGET_ALIAS,
         WORKSPACE_REFERENCE_ALIAS,
         EVENT_HANDLER_ID_ALIAS,
+        EVENT_SPEC_ALIAS,
+        HANDLER_ID_MAP_ALIAS,
         BIND_ENTRY_ALIAS,
         OUTPUT_CONFIG_ALIAS,
         WINDOW_RULE_CONFIG_ALIAS,
@@ -97,6 +99,18 @@ const EVENT_HANDLER_ID_ALIAS: AliasSchema = AliasSchema {
     name: "EventHandlerId",
     ty: "integer",
     description: "Event handler identifier returned by niri.events:on() or :once()",
+};
+
+const EVENT_SPEC_ALIAS: AliasSchema = AliasSchema {
+    name: "EventSpec",
+    ty: "string|string[]",
+    description: "Event specification: single event name or array of event names",
+};
+
+const HANDLER_ID_MAP_ALIAS: AliasSchema = AliasSchema {
+    name: "HandlerIdMap",
+    ty: "table<string, EventHandlerId>",
+    description: "Map of event names to handler IDs, returned when registering multiple events",
 };
 
 const BIND_ENTRY_ALIAS: AliasSchema = AliasSchema {
@@ -394,33 +408,33 @@ const NIRI_EVENTS_MODULE: ModuleSchema = ModuleSchema {
     functions: &[
         FunctionSchema {
             name: "on",
-            description: "Subscribe to an event with a callback. Returns a handler ID for later removal.",
+            description: "Subscribe to event(s) with a callback. Pass a single event name to get a handler ID, or an array of event names to get a table mapping event names to handler IDs.",
             is_method: true,
             params: &[
-                ParamSchema { name: "event_name", ty: "string", description: "Event name (e.g., 'window:open', 'workspace:activate')", optional: false },
+                ParamSchema { name: "event_spec", ty: "EventSpec", description: "Event name or array of event names (e.g., 'window:open' or {'window:open', 'window:close'})", optional: false },
                 ParamSchema { name: "callback", ty: "fun(event: table)", description: "Callback function receiving event data", optional: false },
             ],
-            returns: &[ReturnSchema { ty: "EventHandlerId", description: "Handler ID for removal" }],
+            returns: &[ReturnSchema { ty: "EventHandlerId|HandlerIdMap", description: "Handler ID (single event) or table of handler IDs (multiple events)" }],
         },
         FunctionSchema {
             name: "once",
-            description: "Subscribe to an event for a single occurrence. Handler is automatically removed after firing.",
+            description: "Subscribe to event(s) for a single occurrence. Handler is automatically removed after firing. Pass a single event name to get a handler ID, or an array of event names to get a table mapping event names to handler IDs.",
             is_method: true,
             params: &[
-                ParamSchema { name: "event_name", ty: "string", description: "Event name", optional: false },
+                ParamSchema { name: "event_spec", ty: "EventSpec", description: "Event name or array of event names", optional: false },
                 ParamSchema { name: "callback", ty: "fun(event: table)", description: "Callback function", optional: false },
             ],
-            returns: &[ReturnSchema { ty: "EventHandlerId", description: "Handler ID for early removal" }],
+            returns: &[ReturnSchema { ty: "EventHandlerId|HandlerIdMap", description: "Handler ID (single event) or table of handler IDs (multiple events)" }],
         },
         FunctionSchema {
             name: "off",
-            description: "Unsubscribe from an event using the handler ID",
+            description: "Unsubscribe from event(s). Pass (event_name, handler_id) to remove a single handler, or pass a HandlerIdMap table to remove multiple handlers at once.",
             is_method: true,
             params: &[
-                ParamSchema { name: "event_name", ty: "string", description: "Event name", optional: false },
-                ParamSchema { name: "handler_id", ty: "EventHandlerId", description: "Handler ID from on() or once()", optional: false },
+                ParamSchema { name: "event_or_map", ty: "string|HandlerIdMap", description: "Event name (with handler_id) or handler ID map from on()/once()", optional: false },
+                ParamSchema { name: "handler_id", ty: "EventHandlerId", description: "Handler ID (only when first arg is event name)", optional: true },
             ],
-            returns: &[ReturnSchema { ty: "boolean", description: "True if handler was found and removed" }],
+            returns: &[ReturnSchema { ty: "boolean|table<string, boolean>", description: "True if handler removed (single) or table of results (multiple)" }],
         },
         FunctionSchema {
             name: "emit",
@@ -2178,4 +2192,3 @@ const CONFIG_SECTION_PROXY_TYPE: TypeSchema = TypeSchema {
     fields: &[],
     methods: &[],
 };
-
