@@ -4079,3 +4079,88 @@ open target/llvm-cov/html/index.html
 - [ ] **Examples**: Non-obvious usage has examples
 - [ ] **Since annotations**: New features marked with version
 - [ ] **Type annotations**: EmmyLua types updated
+
+---
+
+## Appendix E: Refactor History
+
+> **Purpose**: Document significant refactoring decisions and cleanup work for future reference.
+
+### December 2025 Cleanup
+
+A comprehensive code quality analysis was performed on the niri-lua crate using redundancy-checker and yagni-checker tools. The following changes were made:
+
+#### Removed (Dead Code)
+| File | LOC | Reason |
+|------|-----|--------|
+| `event_emitter.rs` | 284 | Duplicate implementation; `events_proxy.rs` is the active event system |
+
+#### Created (Consolidation)
+| File | LOC | Purpose |
+|------|-----|---------|
+| `parse_utils.rs` | 122 | Shared size/position parsing extracted from multiple files |
+
+#### Fixed (Code Quality)
+- Replaced defensive fallback code with explicit `.expect()` calls
+- Removed trivial assertions (`assert!(true)`, `assert_eq!(x, false)`)
+
+#### Intentionally Kept (Not Dead Code)
+
+The following modules were flagged by automated analysis but are intentionally preserved:
+
+| File | LOC | Justification |
+|------|-----|---------------|
+| `plugin_system.rs` | 716 | Tier 5 plugin ecosystem foundation (see Section 5) |
+| `module_loader.rs` | 276 | Required for plugin system's `require()` resolution |
+| `ipc_repl.rs` | 77 | Neovim-style `:lua` command via IPC (`niri msg lua "code"`) |
+| `config_dirty.rs` | 161 | Granular change tracking enables future partial config reload optimization |
+| `lua_types.rs` | 395 | Type definitions required for config/runtime APIs |
+
+#### Design Decision: Keep Granular Dirty Flags
+
+The `config_dirty.rs` module tracks 21 individual config section flags, though currently only `.any()` is called. This was intentionally kept because:
+
+1. **Future optimization**: Enables partial config reload (only re-apply changed sections)
+2. **Clean implementation**: Well-structured code with minimal maintenance burden
+3. **Debugging value**: Individual flags aid in debugging config change propagation
+
+#### Design Decision: Keep Plugin Infrastructure
+
+The plugin system and module loader are fully implemented but not yet integrated with the compositor. These are kept because:
+
+1. **Tier 5 roadmap**: Explicitly documented as planned feature
+2. **Avoid re-implementation**: Significant work already invested
+3. **Architecture commitment**: Signals direction for future development
+
+### Future Optimization Opportunities
+
+The following items were identified during analysis but deferred as low-priority optimizations:
+
+#### P2: Config Conversion Pipeline Refactoring
+
+**Files involved**:
+- `config_wrapper.rs` (~3,200 LOC)
+- `extractors.rs` (~1,600 LOC)
+- `config_api.rs` (~950 LOC)
+
+**Current flow**: Lua table → JSON → HashMap → niri Config (triple conversion)
+
+**Potential optimization**: Direct Lua → Config conversion via a `ConfigPatch` trait pattern
+
+**Trade-offs**:
+- Current approach works correctly and is well-tested
+- JSON intermediary simplifies debugging (human-readable)
+- Refactoring effort estimated at 40-60 hours
+- Performance impact is minimal for config loading (one-time operation)
+
+**Decision**: Defer until performance profiling indicates this is a bottleneck.
+
+#### P3: Minor Optimizations
+
+**Snapshot test coverage** (`src/snapshots/`):
+- Consider auditing for tests that verify implementation details vs. behavior
+- Low priority; current tests provide good regression coverage
+
+**String cloning patterns** (`collections.rs`):
+- Some string clones in loops could potentially be avoided
+- Profile before optimizing; impact is likely negligible
