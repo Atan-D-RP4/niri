@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(invalid, typo, wrong_case, empty,)"
+---
+(
+    None,
+    None,
+    None,
+    None,
+)

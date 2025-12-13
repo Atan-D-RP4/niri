@@ -1,0 +1,22 @@
+---
+source: niri-lua/src/event_data.rs
+expression: event
+---
+Deactivate {
+    workspace: Workspace {
+        id: 1,
+        idx: 1,
+        name: Some(
+            "Main",
+        ),
+        output: Some(
+            "DP-1",
+        ),
+        is_urgent: false,
+        is_active: true,
+        is_focused: true,
+        active_window_id: Some(
+            123,
+        ),
+    },
+}

@@ -1,0 +1,8 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: "(len, dirty)"
+---
+(
+    2,
+    true,
+)

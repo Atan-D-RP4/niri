@@ -1,0 +1,12 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(invalid, typo, uppercase, empty,)"
+---
+(
+    None,
+    None,
+    Some(
+        Adaptive,
+    ),
+    None,
+)

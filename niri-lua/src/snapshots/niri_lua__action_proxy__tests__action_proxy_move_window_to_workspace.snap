@@ -1,0 +1,13 @@
+---
+source: niri-lua/src/action_proxy.rs
+expression: action
+---
+MoveWindowToWorkspace {
+    window_id: Some(
+        9876,
+    ),
+    reference: Name(
+        "browser",
+    ),
+    focus: false,
+}

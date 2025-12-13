@@ -1,0 +1,8 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: "(gaps, dirty)"
+---
+(
+    32.0,
+    true,
+)

@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/extractors.rs
+expression: names
+---
+[
+    "HOME",
+    "PATH",
+    "WAYLAND_DISPLAY",
+]

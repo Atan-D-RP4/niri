@@ -1,0 +1,13 @@
+---
+source: niri-lua/src/api_registry.rs
+expression: names
+---
+[
+    "Timer",
+    "Animation",
+    "Filter",
+    "WindowRule",
+    "Gesture",
+    "ConfigCollection",
+    "ConfigSectionProxy",
+]

@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/event_data.rs
+expression: "(open_type, close_type, focus_type, blur_type)"
+---
+(
+    "open",
+    "close",
+    "focus",
+    "blur",
+)

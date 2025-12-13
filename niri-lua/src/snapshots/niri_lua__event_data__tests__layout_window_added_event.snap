@@ -1,0 +1,8 @@
+---
+source: niri-lua/src/event_data.rs
+expression: "(event_type, window_id)"
+---
+(
+    "window_added",
+    123,
+)

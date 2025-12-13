@@ -1,0 +1,12 @@
+---
+source: niri-lua/src/event_data.rs
+expression: "(event_type, workspace_id, workspace_name, output_name)"
+---
+(
+    "activate",
+    1,
+    Some(
+        "Main",
+    ),
+    "DP-1",
+)

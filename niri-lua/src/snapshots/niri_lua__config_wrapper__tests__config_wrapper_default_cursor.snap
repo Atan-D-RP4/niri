@@ -1,0 +1,5 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: cursor
+---
+"Cursor {\n    xcursor_theme: \"default\",\n    xcursor_size: 24,\n    hide_when_typing: false,\n    hide_after_inactive_ms: None,\n}"

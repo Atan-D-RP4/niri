@@ -1084,4 +1084,76 @@ mod tests {
         assert!(matches!(actions[1], Action::FocusColumnRight {}));
         assert!(matches!(actions[2], Action::MoveColumnLeft {}));
     }
+
+    // ============================================================
+    // Snapshot Tests
+    // ============================================================
+
+    #[test]
+    fn snapshot_action_spawn_with_args() {
+        let action = Action::Spawn {
+            command: vec!["firefox".into(), "--new-window".into(), "https://example.com".into()],
+        };
+        insta::assert_debug_snapshot!("action_proxy_spawn_with_args", action);
+    }
+
+    #[test]
+    fn snapshot_action_focus_workspace_index() {
+        let action = Action::FocusWorkspace {
+            reference: WorkspaceReferenceArg::Index(3),
+        };
+        insta::assert_debug_snapshot!("action_proxy_focus_workspace_index", action);
+    }
+
+    #[test]
+    fn snapshot_action_focus_workspace_name() {
+        let action = Action::FocusWorkspace {
+            reference: WorkspaceReferenceArg::Name("development".into()),
+        };
+        insta::assert_debug_snapshot!("action_proxy_focus_workspace_name", action);
+    }
+
+    #[test]
+    fn snapshot_action_set_column_width_fixed() {
+        let action = Action::SetColumnWidth {
+            change: SizeChange::SetFixed(800),
+        };
+        insta::assert_debug_snapshot!("action_proxy_set_column_width_fixed", action);
+    }
+
+    #[test]
+    fn snapshot_action_set_column_width_proportion() {
+        let action = Action::SetColumnWidth {
+            change: SizeChange::SetProportion(0.5),
+        };
+        insta::assert_debug_snapshot!("action_proxy_set_column_width_proportion", action);
+    }
+
+    #[test]
+    fn snapshot_action_set_column_width_adjust() {
+        let action = Action::SetColumnWidth {
+            change: SizeChange::AdjustProportion(0.1),
+        };
+        insta::assert_debug_snapshot!("action_proxy_set_column_width_adjust", action);
+    }
+
+    #[test]
+    fn snapshot_action_move_floating_window_complex() {
+        let action = Action::MoveFloatingWindow {
+            id: Some(12345),
+            x: PositionChange::AdjustFixed(50.0),
+            y: PositionChange::AdjustProportion(-0.15),
+        };
+        insta::assert_debug_snapshot!("action_proxy_move_floating_window_complex", action);
+    }
+
+    #[test]
+    fn snapshot_action_move_window_to_workspace() {
+        let action = Action::MoveWindowToWorkspace {
+            window_id: Some(9876),
+            reference: WorkspaceReferenceArg::Name("browser".into()),
+            focus: false,
+        };
+        insta::assert_debug_snapshot!("action_proxy_move_window_to_workspace", action);
+    }
 }

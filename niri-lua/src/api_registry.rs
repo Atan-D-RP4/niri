@@ -15,6 +15,131 @@ mod tests {
 
     use super::*;
 
+    // ============================================================================
+    // SNAPSHOT TESTS - Detect API schema regressions
+    // ============================================================================
+
+    /// Snapshot of all module paths - detects module additions/removals
+    #[test]
+    fn snapshot_module_paths() {
+        let paths: Vec<_> = NIRI_LUA_API.modules.iter().map(|m| m.path).collect();
+        insta::assert_debug_snapshot!("api_module_paths", paths);
+    }
+
+    /// Snapshot of all type names - detects type additions/removals
+    #[test]
+    fn snapshot_type_names() {
+        let names: Vec<_> = NIRI_LUA_API.types.iter().map(|t| t.name).collect();
+        insta::assert_debug_snapshot!("api_type_names", names);
+    }
+
+    /// Snapshot of all alias names - detects alias additions/removals
+    #[test]
+    fn snapshot_alias_names() {
+        let names: Vec<_> = NIRI_LUA_API.aliases.iter().map(|a| a.name).collect();
+        insta::assert_debug_snapshot!("api_alias_names", names);
+    }
+
+    /// Snapshot of function signatures per module - detects function signature changes
+    #[test]
+    fn snapshot_function_signatures() {
+        let mut signatures: Vec<String> = Vec::new();
+        for module in NIRI_LUA_API.modules {
+            for func in module.functions {
+                let params: Vec<_> = func
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.ty))
+                    .collect();
+                let returns: Vec<_> = func.returns.iter().map(|r| r.ty).collect();
+                signatures.push(format!(
+                    "{}::{}({}) -> ({})",
+                    module.path,
+                    func.name,
+                    params.join(", "),
+                    returns.join(", ")
+                ));
+            }
+        }
+        signatures.sort();
+        insta::assert_debug_snapshot!("api_function_signatures", signatures);
+    }
+
+    /// Snapshot of method signatures per type - detects method signature changes
+    #[test]
+    fn snapshot_method_signatures() {
+        let mut signatures: Vec<String> = Vec::new();
+        for ty in NIRI_LUA_API.types {
+            for method in ty.methods {
+                let params: Vec<_> = method
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.ty))
+                    .collect();
+                let returns: Vec<_> = method.returns.iter().map(|r| r.ty).collect();
+                signatures.push(format!(
+                    "{}:{}({}) -> ({})",
+                    ty.name,
+                    method.name,
+                    params.join(", "),
+                    returns.join(", ")
+                ));
+            }
+        }
+        signatures.sort();
+        insta::assert_debug_snapshot!("api_method_signatures", signatures);
+    }
+
+    /// Snapshot of alias type definitions - detects alias type changes
+    #[test]
+    fn snapshot_alias_definitions() {
+        let defs: Vec<_> = NIRI_LUA_API
+            .aliases
+            .iter()
+            .map(|a| format!("{} = {}", a.name, a.ty))
+            .collect();
+        insta::assert_debug_snapshot!("api_alias_definitions", defs);
+    }
+
+    /// Snapshot of schema statistics - detects significant API size changes
+    #[test]
+    fn snapshot_schema_statistics() {
+        let stats = (
+            ("modules", NIRI_LUA_API.modules.len()),
+            ("types", NIRI_LUA_API.types.len()),
+            ("aliases", NIRI_LUA_API.aliases.len()),
+            (
+                "functions",
+                NIRI_LUA_API
+                    .modules
+                    .iter()
+                    .map(|m| m.functions.len())
+                    .sum::<usize>(),
+            ),
+            (
+                "methods",
+                NIRI_LUA_API
+                    .types
+                    .iter()
+                    .map(|t| t.methods.len())
+                    .sum::<usize>(),
+            ),
+            (
+                "fields",
+                NIRI_LUA_API
+                    .modules
+                    .iter()
+                    .map(|m| m.fields.len())
+                    .sum::<usize>(),
+            ),
+        );
+        insta::assert_debug_snapshot!("api_schema_statistics", stats);
+    }
+
+    // ============================================================================
+    // VALIDATION TESTS
+    // ============================================================================
+
     /// Verify that all modules have non-empty paths
     #[test]
     fn all_modules_have_valid_paths() {

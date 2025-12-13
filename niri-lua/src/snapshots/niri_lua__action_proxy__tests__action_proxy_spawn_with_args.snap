@@ -1,0 +1,11 @@
+---
+source: niri-lua/src/action_proxy.rs
+expression: action
+---
+Spawn {
+    command: [
+        "firefox",
+        "--new-window",
+        "https://example.com",
+    ],
+}

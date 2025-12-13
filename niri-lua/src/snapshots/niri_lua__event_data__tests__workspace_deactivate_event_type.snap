@@ -1,0 +1,5 @@
+---
+source: niri-lua/src/event_data.rs
+expression: event_type
+---
+"deactivate"

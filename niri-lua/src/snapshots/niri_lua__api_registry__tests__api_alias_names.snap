@@ -1,0 +1,19 @@
+---
+source: niri-lua/src/api_registry.rs
+expression: names
+---
+[
+    "Window",
+    "Workspace",
+    "Output",
+    "SizeChange",
+    "PositionChange",
+    "LayoutSwitchTarget",
+    "WorkspaceReference",
+    "EventHandlerId",
+    "EventSpec",
+    "HandlerIdMap",
+    "BindEntry",
+    "OutputConfig",
+    "WindowRuleConfig",
+]

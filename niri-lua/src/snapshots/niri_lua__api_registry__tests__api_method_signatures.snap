@@ -1,0 +1,37 @@
+---
+source: niri-lua/src/api_registry.rs
+expression: signatures
+---
+[
+    "Animation:get_curve() -> (string)",
+    "Animation:get_duration() -> (integer)",
+    "Animation:get_name() -> (string)",
+    "Animation:with_curve(curve: string) -> (Animation)",
+    "Animation:with_duration(ms: integer) -> (Animation)",
+    "ConfigCollection:add(items: table|table[]) -> ()",
+    "ConfigCollection:clear() -> ()",
+    "ConfigCollection:get(criteria: table) -> (table[])",
+    "ConfigCollection:list() -> (table[])",
+    "ConfigCollection:remove(criteria: table) -> (integer)",
+    "ConfigCollection:set(items: table[]) -> ()",
+    "Filter:get_app_id() -> (string?)",
+    "Filter:get_title() -> (string?)",
+    "Filter:matches(app_id: string?, title: string?) -> (boolean)",
+    "Gesture:get_action() -> (string?)",
+    "Gesture:get_direction() -> (string?)",
+    "Gesture:get_fingers() -> (integer)",
+    "Gesture:get_type() -> (string)",
+    "Gesture:with_action(action: string) -> (Gesture)",
+    "Gesture:with_direction(direction: string) -> (Gesture)",
+    "Timer:close() -> ()",
+    "Timer:is_active() -> (boolean)",
+    "Timer:start(delay_ms: integer, repeat_ms: integer, callback: fun()) -> (Timer)",
+    "Timer:stop() -> (Timer)",
+    "WindowRule:get_floating() -> (boolean?)",
+    "WindowRule:get_fullscreen() -> (boolean?)",
+    "WindowRule:get_tile() -> (boolean?)",
+    "WindowRule:matches(app_id: string?, title: string?) -> (boolean)",
+    "WindowRule:with_floating(floating: boolean) -> (WindowRule)",
+    "WindowRule:with_fullscreen(fullscreen: boolean) -> (WindowRule)",
+    "WindowRule:with_tile(tile: boolean) -> (WindowRule)",
+]

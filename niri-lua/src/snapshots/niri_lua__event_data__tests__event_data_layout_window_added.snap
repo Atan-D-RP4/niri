@@ -1,0 +1,51 @@
+---
+source: niri-lua/src/event_data.rs
+expression: event
+---
+WindowAdded {
+    window: Window {
+        id: 123,
+        title: Some(
+            "Test Window",
+        ),
+        app_id: Some(
+            "org.test.App",
+        ),
+        pid: Some(
+            4567,
+        ),
+        workspace_id: Some(
+            1,
+        ),
+        is_focused: true,
+        is_floating: false,
+        is_urgent: false,
+        layout: WindowLayout {
+            pos_in_scrolling_layout: Some(
+                (
+                    1,
+                    1,
+                ),
+            ),
+            tile_size: (
+                1920.0,
+                1080.0,
+            ),
+            window_size: (
+                1900,
+                1060,
+            ),
+            tile_pos_in_workspace_view: Some(
+                (
+                    0.0,
+                    0.0,
+                ),
+            ),
+            window_offset_in_tile: (
+                10.0,
+                10.0,
+            ),
+        },
+        focus_timestamp: None,
+    },
+}

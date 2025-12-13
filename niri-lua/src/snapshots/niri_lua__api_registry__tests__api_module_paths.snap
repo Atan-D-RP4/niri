@@ -1,0 +1,17 @@
+---
+source: niri-lua/src/api_registry.rs
+expression: paths
+---
+[
+    "niri",
+    "niri.utils",
+    "niri.config",
+    "niri.events",
+    "niri.action",
+    "niri.state",
+    "niri.loop",
+    "niri.keymap",
+    "niri.window",
+    "niri.overview",
+    "niri.screenshot",
+]

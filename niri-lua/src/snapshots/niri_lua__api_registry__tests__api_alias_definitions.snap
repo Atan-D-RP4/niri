@@ -1,0 +1,19 @@
+---
+source: niri-lua/src/api_registry.rs
+expression: defs
+---
+[
+    "Window = { id: integer, title: string?, app_id: string?, workspace_id: integer?, is_focused: boolean, is_floating: boolean }",
+    "Workspace = { id: integer, idx: integer, name: string?, output: string?, is_active: boolean, is_focused: boolean, active_window_id: integer? }",
+    "Output = { name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean }",
+    "SizeChange = integer|string",
+    "PositionChange = integer|string",
+    "LayoutSwitchTarget = \"next\"|\"prev\"|string",
+    "WorkspaceReference = integer|string|{ id: integer }|{ name: string }|{ index: integer }",
+    "EventHandlerId = integer",
+    "EventSpec = string|string[]",
+    "HandlerIdMap = table<string, EventHandlerId>",
+    "BindEntry = { key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }",
+    "OutputConfig = { name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }",
+    "WindowRuleConfig = { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number?, draw_border_with_background: boolean?, geometry_corner_radius: table?, clip_to_geometry: boolean?, focus_ring: table?, border: table? }",
+]

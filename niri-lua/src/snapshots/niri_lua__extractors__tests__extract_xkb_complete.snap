@@ -1,0 +1,12 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(xkb.layout.clone(), xkb.model.clone(), xkb.variant.clone(),\nxkb.options.clone(),)"
+---
+(
+    "us,de",
+    "pc104",
+    "dvorak",
+    Some(
+        "grp:alt_shift_toggle",
+    ),
+)

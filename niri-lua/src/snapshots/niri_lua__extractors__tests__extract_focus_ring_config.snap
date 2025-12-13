@@ -1,0 +1,8 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(focus_ring.off, focus_ring.width,)"
+---
+(
+    false,
+    4.0,
+)

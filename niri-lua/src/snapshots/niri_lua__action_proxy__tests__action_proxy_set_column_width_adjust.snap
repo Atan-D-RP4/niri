@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/action_proxy.rs
+expression: action
+---
+SetColumnWidth {
+    change: AdjustProportion(
+        0.1,
+    ),
+}

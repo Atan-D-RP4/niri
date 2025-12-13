@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/event_data.rs
+expression: "(event_type, window_id, has_title, has_app_id)"
+---
+(
+    "open",
+    123,
+    true,
+    true,
+)

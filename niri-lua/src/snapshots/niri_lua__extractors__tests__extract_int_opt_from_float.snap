@@ -1,0 +1,7 @@
+---
+source: niri-lua/src/extractors.rs
+expression: result
+---
+Some(
+    42,
+)

@@ -389,4 +389,251 @@ mod tests {
         let table = event.to_lua(&lua).unwrap();
         assert_eq!(table.get::<String>("type").unwrap(), "mode_changed");
     }
+
+    // ========================================================================
+    // SNAPSHOT TESTS - Event Data Serialization Formats
+    // ========================================================================
+
+    #[test]
+    fn snapshot_window_open_event_format() {
+        let lua = Lua::new();
+        let window = create_test_window();
+        let event = WindowEventData::Open { window };
+
+        let table = event.to_lua(&lua).unwrap();
+        
+        // Snapshot the structure
+        let event_type: String = table.get("type").unwrap();
+        let window_table: Table = table.get("window").unwrap();
+        let window_id: u64 = window_table.get("id").unwrap();
+        let has_title = window_table.contains_key("title").unwrap();
+        let has_app_id = window_table.contains_key("app_id").unwrap();
+        
+        insta::assert_debug_snapshot!("window_open_event", (event_type, window_id, has_title, has_app_id));
+    }
+
+    #[test]
+    fn snapshot_window_close_event_format() {
+        let lua = Lua::new();
+        let window = create_test_window();
+        let event = WindowEventData::Close { window };
+
+        let table = event.to_lua(&lua).unwrap();
+        let event_type: String = table.get("type").unwrap();
+        insta::assert_debug_snapshot!("window_close_event_type", event_type);
+    }
+
+    #[test]
+    fn snapshot_workspace_activate_event_format() {
+        let lua = Lua::new();
+        let workspace = create_test_workspace();
+        let output = create_test_output();
+        let event = WorkspaceEventData::Activate { workspace, output };
+
+        let table = event.to_lua(&lua).unwrap();
+        
+        let event_type: String = table.get("type").unwrap();
+        let workspace_table: Table = table.get("workspace").unwrap();
+        let output_table: Table = table.get("output").unwrap();
+        
+        let workspace_id: u64 = workspace_table.get("id").unwrap();
+        let workspace_name: Option<String> = workspace_table.get("name").ok();
+        let output_name: String = output_table.get("name").unwrap();
+        
+        insta::assert_debug_snapshot!("workspace_activate_event", (event_type, workspace_id, workspace_name, output_name));
+    }
+
+    #[test]
+    fn snapshot_workspace_deactivate_event_format() {
+        let lua = Lua::new();
+        let workspace = create_test_workspace();
+        let event = WorkspaceEventData::Deactivate { workspace };
+
+        let table = event.to_lua(&lua).unwrap();
+        let event_type: String = table.get("type").unwrap();
+        insta::assert_debug_snapshot!("workspace_deactivate_event_type", event_type);
+    }
+
+    #[test]
+    fn snapshot_monitor_connect_event_format() {
+        let lua = Lua::new();
+        let output = create_test_output();
+        let event = MonitorEventData::Connect { output };
+
+        let table = event.to_lua(&lua).unwrap();
+        
+        let event_type: String = table.get("type").unwrap();
+        let output_table: Table = table.get("output").unwrap();
+        let output_name: String = output_table.get("name").unwrap();
+        let output_make: String = output_table.get("make").unwrap();
+        let output_model: String = output_table.get("model").unwrap();
+        
+        insta::assert_debug_snapshot!("monitor_connect_event", (event_type, output_name, output_make, output_model));
+    }
+
+    #[test]
+    fn snapshot_monitor_disconnect_event_format() {
+        let lua = Lua::new();
+        let output = create_test_output();
+        let event = MonitorEventData::Disconnect { output };
+
+        let table = event.to_lua(&lua).unwrap();
+        let event_type: String = table.get("type").unwrap();
+        insta::assert_debug_snapshot!("monitor_disconnect_event_type", event_type);
+    }
+
+    #[test]
+    fn snapshot_layout_mode_changed_event_format() {
+        let lua = Lua::new();
+        let event = LayoutEventData::ModeChanged { is_floating: true };
+
+        let table = event.to_lua(&lua).unwrap();
+        
+        let event_type: String = table.get("type").unwrap();
+        let is_floating: bool = table.get("is_floating").unwrap();
+        
+        insta::assert_debug_snapshot!("layout_mode_changed_event", (event_type, is_floating));
+    }
+
+    #[test]
+    fn snapshot_layout_window_added_event_format() {
+        let lua = Lua::new();
+        let window = create_test_window();
+        let event = LayoutEventData::WindowAdded { window };
+
+        let table = event.to_lua(&lua).unwrap();
+        
+        let event_type: String = table.get("type").unwrap();
+        let window_table: Table = table.get("window").unwrap();
+        let window_id: u64 = window_table.get("id").unwrap();
+        
+        insta::assert_debug_snapshot!("layout_window_added_event", (event_type, window_id));
+    }
+
+    #[test]
+    fn snapshot_event_data_categories() {
+        let window = create_test_window();
+        let workspace = create_test_workspace();
+        let output = create_test_output();
+
+        let window_event = EventData::Window(WindowEventData::Open { window: window.clone() });
+        let workspace_event = EventData::Workspace(WorkspaceEventData::Deactivate { workspace });
+        let monitor_event = EventData::Monitor(MonitorEventData::Connect { output });
+        let layout_event = EventData::Layout(LayoutEventData::ModeChanged { is_floating: false });
+
+        let categories = (
+            window_event.category(),
+            workspace_event.category(),
+            monitor_event.category(),
+            layout_event.category(),
+        );
+
+        insta::assert_debug_snapshot!("event_categories", categories);
+    }
+
+    #[test]
+    fn snapshot_window_event_variants() {
+        let lua = Lua::new();
+        let window = create_test_window();
+
+        let open = WindowEventData::Open { window: window.clone() };
+        let close = WindowEventData::Close { window: window.clone() };
+        let focus = WindowEventData::Focus { window: window.clone() };
+        let blur = WindowEventData::Blur { window };
+
+        let open_type: String = open.to_lua(&lua).unwrap().get("type").unwrap();
+        let close_type: String = close.to_lua(&lua).unwrap().get("type").unwrap();
+        let focus_type: String = focus.to_lua(&lua).unwrap().get("type").unwrap();
+        let blur_type: String = blur.to_lua(&lua).unwrap().get("type").unwrap();
+
+        insta::assert_debug_snapshot!("window_event_types", (open_type, close_type, focus_type, blur_type));
+    }
+
+    // ========================================================================
+    // DIRECT DEBUG FORMAT SNAPSHOT TESTS - Rust Structure Stability
+    // ========================================================================
+
+    #[test]
+    fn snapshot_event_data_window_opened() {
+        let window = create_test_window();
+        let event = WindowEventData::Open { window };
+        insta::assert_debug_snapshot!("event_data_window_opened", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_window_closed() {
+        let window = create_test_window();
+        let event = WindowEventData::Close { window };
+        insta::assert_debug_snapshot!("event_data_window_closed", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_window_focus() {
+        let window = create_test_window();
+        let event = WindowEventData::Focus { window };
+        insta::assert_debug_snapshot!("event_data_window_focus", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_window_blur() {
+        let window = create_test_window();
+        let event = WindowEventData::Blur { window };
+        insta::assert_debug_snapshot!("event_data_window_blur", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_workspace_activate() {
+        let workspace = create_test_workspace();
+        let output = create_test_output();
+        let event = WorkspaceEventData::Activate { workspace, output };
+        insta::assert_debug_snapshot!("event_data_workspace_activate", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_workspace_deactivate() {
+        let workspace = create_test_workspace();
+        let event = WorkspaceEventData::Deactivate { workspace };
+        insta::assert_debug_snapshot!("event_data_workspace_deactivate", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_monitor_connect() {
+        let output = create_test_output();
+        let event = MonitorEventData::Connect { output };
+        insta::assert_debug_snapshot!("event_data_monitor_connect", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_monitor_disconnect() {
+        let output = create_test_output();
+        let event = MonitorEventData::Disconnect { output };
+        insta::assert_debug_snapshot!("event_data_monitor_disconnect", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_layout_mode_changed() {
+        let event = LayoutEventData::ModeChanged { is_floating: true };
+        insta::assert_debug_snapshot!("event_data_layout_mode_changed", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_layout_window_added() {
+        let window = create_test_window();
+        let event = LayoutEventData::WindowAdded { window };
+        insta::assert_debug_snapshot!("event_data_layout_window_added", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_layout_window_removed() {
+        let window = create_test_window();
+        let event = LayoutEventData::WindowRemoved { window };
+        insta::assert_debug_snapshot!("event_data_layout_window_removed", event);
+    }
+
+    #[test]
+    fn snapshot_event_data_generic_wrapper() {
+        let window = create_test_window();
+        let event = EventData::Window(WindowEventData::Open { window });
+        insta::assert_debug_snapshot!("event_data_generic_wrapper", event);
+    }
 }

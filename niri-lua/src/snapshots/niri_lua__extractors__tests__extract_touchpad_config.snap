@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(touchpad.tap, touchpad.natural_scroll, touchpad.accel_speed.0,)"
+---
+(
+    true,
+    true,
+    0.5,
+)

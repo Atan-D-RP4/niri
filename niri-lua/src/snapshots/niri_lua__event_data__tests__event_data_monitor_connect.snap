@@ -1,0 +1,26 @@
+---
+source: niri-lua/src/event_data.rs
+expression: event
+---
+Connect {
+    output: Output {
+        name: "DP-1",
+        make: "Samsung",
+        model: "S27AG50",
+        serial: Some(
+            "SN123456",
+        ),
+        physical_size: Some(
+            (
+                600,
+                340,
+            ),
+        ),
+        modes: [],
+        current_mode: None,
+        is_custom_mode: false,
+        vrr_supported: false,
+        vrr_enabled: false,
+        logical: None,
+    },
+}

@@ -1,0 +1,8 @@
+---
+source: niri-lua/src/event_data.rs
+expression: "(event_type, is_floating)"
+---
+(
+    "mode_changed",
+    true,
+)

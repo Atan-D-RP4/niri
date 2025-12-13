@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: "(theme, size, hide)"
+---
+(
+    "Adwaita",
+    24,
+    true,
+)

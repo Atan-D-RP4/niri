@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/event_data.rs
+expression: categories
+---
+(
+    "window",
+    "workspace",
+    "monitor",
+    "layout",
+)

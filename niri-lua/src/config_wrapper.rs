@@ -3228,4 +3228,394 @@ mod tests {
         assert!(dirty.environment);
         assert!(dirty.layer_rules);
     }
+
+    // ========================================================================
+    // SNAPSHOT TESTS - Config Transformation Patterns
+    // ========================================================================
+
+    #[test]
+    fn snapshot_layout_gaps_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        // Set gaps from Lua
+        lua.load("wrapper.layout.gaps = 32").exec().unwrap();
+
+        let gaps = wrapper.with_config(|c| c.layout.gaps);
+        let dirty = wrapper.dirty.lock().unwrap().layout;
+        
+        insta::assert_debug_snapshot!("layout_gaps_transformation", (gaps, dirty));
+    }
+
+    #[test]
+    fn snapshot_cursor_config_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load(r#"
+            wrapper.cursor.xcursor_theme = "Adwaita"
+            wrapper.cursor.xcursor_size = 24
+            wrapper.cursor.hide_when_typing = true
+        "#)
+        .exec()
+        .unwrap();
+
+        let (theme, size, hide) = wrapper.with_config(|c| {
+            (
+                c.cursor.xcursor_theme.clone(),
+                c.cursor.xcursor_size,
+                c.cursor.hide_when_typing,
+            )
+        });
+        
+        insta::assert_debug_snapshot!("cursor_config_transformation", (theme, size, hide));
+    }
+
+    #[test]
+    fn snapshot_keyboard_xkb_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load(r#"
+            wrapper.input.keyboard.xkb.layout = "us,de,fr"
+            wrapper.input.keyboard.xkb.variant = "dvorak"
+            wrapper.input.keyboard.xkb.options = "grp:alt_shift_toggle,caps:escape"
+        "#)
+        .exec()
+        .unwrap();
+
+        let (layout, variant, options) = wrapper.with_config(|c| {
+            (
+                c.input.keyboard.xkb.layout.clone(),
+                c.input.keyboard.xkb.variant.clone(),
+                c.input.keyboard.xkb.options.clone(),
+            )
+        });
+        
+        insta::assert_debug_snapshot!("keyboard_xkb_transformation", (layout, variant, options));
+    }
+
+    #[test]
+    fn snapshot_animations_slowdown_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load("wrapper.animations.slowdown = 3.0")
+            .exec()
+            .unwrap();
+
+        let slowdown = wrapper.with_config(|c| c.animations.slowdown);
+        let off = wrapper.with_config(|c| c.animations.off);
+        
+        insta::assert_debug_snapshot!("animations_slowdown_transformation", (slowdown, off));
+    }
+
+    #[test]
+    fn snapshot_center_focused_column_enum_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        // Test all valid enum values
+        lua.load("wrapper.layout.center_focused_column = 'never'")
+            .exec()
+            .unwrap();
+        let never_value = wrapper.with_config(|c| format!("{:?}", c.layout.center_focused_column));
+
+        lua.load("wrapper.layout.center_focused_column = 'always'")
+            .exec()
+            .unwrap();
+        let always_value = wrapper.with_config(|c| format!("{:?}", c.layout.center_focused_column));
+
+        lua.load("wrapper.layout.center_focused_column = 'on-overflow'")
+            .exec()
+            .unwrap();
+        let overflow_value =
+            wrapper.with_config(|c| format!("{:?}", c.layout.center_focused_column));
+
+        insta::assert_debug_snapshot!(
+            "center_focused_column_enum_values",
+            (never_value, always_value, overflow_value)
+        );
+    }
+
+    #[test]
+    fn snapshot_touchpad_config_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load(r#"
+            wrapper.input.touchpad.tap = true
+            wrapper.input.touchpad.natural_scroll = true
+            wrapper.input.touchpad.accel_speed = 0.3
+        "#)
+        .exec()
+        .unwrap();
+
+        let (tap, natural_scroll, accel_speed) = wrapper.with_config(|c| {
+            (
+                c.input.touchpad.tap,
+                c.input.touchpad.natural_scroll,
+                c.input.touchpad.accel_speed.0,
+            )
+        });
+        
+        insta::assert_debug_snapshot!(
+            "touchpad_config_transformation",
+            (tap, natural_scroll, accel_speed)
+        );
+    }
+
+    #[test]
+    fn snapshot_workspace_collection_operations() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        // Add multiple workspaces
+        lua.load(r#"
+            wrapper.workspaces:add({ name = "main" })
+            wrapper.workspaces:add({ name = "web" })
+            wrapper.workspaces:add({ name = "dev" })
+        "#)
+        .exec()
+        .unwrap();
+
+        let len: usize = lua.load("return wrapper.workspaces:len()").eval().unwrap();
+        let first_name: String = lua
+            .load("return wrapper.workspaces:get(1).name")
+            .eval()
+            .unwrap();
+        let third_name: String = lua
+            .load("return wrapper.workspaces:get(3).name")
+            .eval()
+            .unwrap();
+        
+        insta::assert_debug_snapshot!(
+            "workspace_collection_operations",
+            (len, first_name, third_name)
+        );
+    }
+
+    #[test]
+    fn snapshot_output_collection_with_scale() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load(r#"
+            wrapper.outputs:add({
+                name = "eDP-1",
+                scale = 2.0,
+                off = false,
+            })
+            wrapper.outputs:add({
+                name = "HDMI-A-1",
+                scale = 1.5,
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        let len: usize = lua.load("return wrapper.outputs:len()").eval().unwrap();
+        let first_scale: f64 = lua
+            .load("return wrapper.outputs:get('eDP-1').scale")
+            .eval()
+            .unwrap();
+        let second_scale: f64 = lua
+            .load("return wrapper.outputs:get('HDMI-A-1').scale")
+            .eval()
+            .unwrap();
+        
+        insta::assert_debug_snapshot!(
+            "output_collection_with_scale",
+            (len, first_scale, second_scale)
+        );
+    }
+
+    #[test]
+    fn snapshot_window_rule_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load(r#"
+            wrapper.window_rules:add({
+                match = { app_id = "firefox" },
+                open_floating = true,
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        let len: usize = lua
+            .load("return wrapper.window_rules:len()")
+            .eval()
+            .unwrap();
+        let dirty = wrapper.dirty.lock().unwrap().window_rules;
+        
+        insta::assert_debug_snapshot!("window_rule_transformation", (len, dirty));
+    }
+
+    #[test]
+    fn snapshot_binds_collection_string_format() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        // Add binds using string format
+        lua.load(r#"
+            wrapper.binds:add("Mod+Return spawn alacritty")
+            wrapper.binds:add("Mod+Q close-window")
+        "#)
+        .exec()
+        .unwrap();
+
+        let len: usize = lua.load("return wrapper.binds:len()").eval().unwrap();
+        let dirty = wrapper.dirty.lock().unwrap().binds;
+        
+        insta::assert_debug_snapshot!("binds_collection_string_format", (len, dirty));
+    }
+
+    #[test]
+    fn snapshot_binds_collection_table_format() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        // Add binds using table format
+        lua.load(r#"
+            wrapper.binds:add({
+                key = "Mod+T",
+                action = "spawn",
+                args = { "kitty" },
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        let len: usize = lua.load("return wrapper.binds:len()").eval().unwrap();
+        insta::assert_debug_snapshot!("binds_collection_table_format", len);
+    }
+
+    #[test]
+    fn snapshot_environment_variable_transformation() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        lua.load(r#"
+            wrapper.environment:add({ name = "QT_QPA_PLATFORM", value = "wayland" })
+            wrapper.environment:add({ name = "MOZ_ENABLE_WAYLAND", value = "1" })
+        "#)
+        .exec()
+        .unwrap();
+
+        let len: usize = lua.load("return wrapper.environment:len()").eval().unwrap();
+        let first_value: String = lua
+            .load("return wrapper.environment:get('QT_QPA_PLATFORM').value")
+            .eval()
+            .unwrap();
+        
+        insta::assert_debug_snapshot!("environment_variable_transformation", (len, first_value));
+    }
+
+    #[test]
+    fn snapshot_dirty_flags_after_multiple_changes() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+
+        // Make changes to different subsystems
+        lua.load(r#"
+            wrapper.layout.gaps = 16
+            wrapper.cursor.xcursor_size = 32
+            wrapper.input.touchpad.tap = true
+            wrapper.animations.slowdown = 2.0
+        "#)
+        .exec()
+        .unwrap();
+
+        let dirty = wrapper.dirty.lock().unwrap();
+        let flags = (
+            dirty.layout,
+            dirty.cursor,
+            dirty.input,
+            dirty.animations,
+            dirty.keyboard,
+            dirty.binds,
+        );
+        
+        insta::assert_debug_snapshot!("dirty_flags_after_multiple_changes", flags);
+    }
+
+    // ========================================================================
+    // SNAPSHOT TESTS - Default Config Structure and Values
+    // ========================================================================
+
+    #[test]
+    fn snapshot_default_layout_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let layout = wrapper.with_config(|c| format!("{:#?}", c.layout));
+        insta::assert_debug_snapshot!("config_wrapper_default_layout", layout);
+    }
+
+    #[test]
+    fn snapshot_default_input_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let input = wrapper.with_config(|c| format!("{:#?}", c.input));
+        insta::assert_debug_snapshot!("config_wrapper_default_input", input);
+    }
+
+    #[test]
+    fn snapshot_default_animations_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let animations = wrapper.with_config(|c| format!("{:#?}", c.animations));
+        insta::assert_debug_snapshot!("config_wrapper_default_animations", animations);
+    }
+
+    #[test]
+    fn snapshot_default_cursor_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let cursor = wrapper.with_config(|c| format!("{:#?}", c.cursor));
+        insta::assert_debug_snapshot!("config_wrapper_default_cursor", cursor);
+    }
+
+    #[test]
+    fn snapshot_default_overview_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let overview = wrapper.with_config(|c| format!("{:#?}", c.overview));
+        insta::assert_debug_snapshot!("config_wrapper_default_overview", overview);
+    }
+
+    #[test]
+    fn snapshot_default_gestures_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let gestures = wrapper.with_config(|c| format!("{:#?}", c.gestures));
+        insta::assert_debug_snapshot!("config_wrapper_default_gestures", gestures);
+    }
+
+    #[test]
+    fn snapshot_default_debug_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let debug = wrapper.with_config(|c| format!("{:#?}", c.debug));
+        insta::assert_debug_snapshot!("config_wrapper_default_debug", debug);
+    }
+
+    #[test]
+    fn snapshot_default_top_level_config() {
+        let wrapper = ConfigWrapper::new_default();
+        let top_level = wrapper.with_config(|c| {
+            (
+                c.prefer_no_csd,
+                c.screenshot_path.0.clone(),
+            )
+        });
+        insta::assert_debug_snapshot!("config_wrapper_default_top_level", top_level);
+    }
 }

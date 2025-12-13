@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/action_proxy.rs
+expression: action
+---
+FocusWorkspace {
+    reference: Index(
+        3,
+    ),
+}

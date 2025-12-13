@@ -1,0 +1,9 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: "(tap, natural_scroll, accel_speed)"
+---
+(
+    true,
+    true,
+    0.3,
+)

@@ -1,0 +1,15 @@
+---
+source: niri-lua/src/action_proxy.rs
+expression: action
+---
+MoveFloatingWindow {
+    id: Some(
+        12345,
+    ),
+    x: AdjustFixed(
+        50.0,
+    ),
+    y: AdjustProportion(
+        -0.15,
+    ),
+}

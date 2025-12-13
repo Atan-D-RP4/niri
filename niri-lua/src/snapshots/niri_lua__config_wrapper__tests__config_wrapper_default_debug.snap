@@ -1,0 +1,5 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: debug
+---
+"Debug {\n    preview_render: None,\n    dbus_interfaces_in_non_session_instances: false,\n    wait_for_frame_completion_before_queueing: false,\n    enable_overlay_planes: false,\n    disable_cursor_plane: false,\n    disable_direct_scanout: false,\n    keep_max_bpc_unchanged: false,\n    restrict_primary_scanout_to_matching_format: false,\n    render_drm_device: None,\n    ignored_drm_devices: [],\n    force_pipewire_invalid_modifier: false,\n    emulate_zero_presentation_time: false,\n    disable_resize_throttling: false,\n    disable_transactions: false,\n    keep_laptop_panel_on_when_lid_is_closed: false,\n    disable_monitor_names: false,\n    strict_new_window_focus_policy: false,\n    honor_xdg_activation_with_invalid_serial: false,\n    deactivate_unfocused_windows: false,\n    skip_cursor_only_updates_during_vrr: false,\n}"

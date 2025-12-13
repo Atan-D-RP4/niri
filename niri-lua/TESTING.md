@@ -1,28 +1,66 @@
 # Niri Lua Testing Guide
 
-This document provides comprehensive guidelines for understanding and writing tests for the Niri Lua API. The test suite contains 332 tests covering all major modules with extensive edge case validation.
+This document provides comprehensive guidelines for understanding and writing tests for the Niri Lua API. The test suite provides coverage of all major modules with extensive edge case validation.
 
 ## Overview
 
 The niri-lua crate contains comprehensive unit tests organized by module. The test organization follows Rust conventions with inline test modules in each source file.
 
 ### Test Statistics
-- **Total Tests**: 332
+- **Total Tests**: 583
 - **Success Rate**: 100%
 - **Coverage**: All major public APIs
-- **Test Execution Time**: ~2-3 seconds
+- **Test Execution Time**: ~10-15 seconds total
 
-### Module Breakdown
-| Module | Tests | Focus |
-|--------|-------|-------|
-| config_api | 152 | Configuration API validation and application |
-| extractors | 66 | Lua value extraction and type conversion |
-| validators | 67 | Configuration value validation with boundaries |
-| runtime | 34 | Lua runtime management and interaction |
-| ipc_bridge | 14 | IPC data type conversion (Window, Workspace, Output) |
-| plugin_system | 20 | Plugin discovery, loading, and management |
-| test_utils | 10 | Shared test utilities and helpers |
-| Other modules | ~30 | Hot reload, event emitter, module loader, etc. |
+### Test Breakdown by Category
+| Category | Count | Run Command | Focus |
+|----------|-------|-------------|-------|
+| Unit Tests (lib) | 427 | `cargo test --lib` | Module functions, data extraction, validation |
+| Integration Tests | 52 | `cargo test --test integration_tests` | Full Lua execution, end-to-end workflows |
+| REPL Integration Tests | 104 | `cargo test --test repl_integration` | REPL execution, events proxy, action proxy |
+
+## Test Infrastructure History
+
+The niri-lua test suite has evolved significantly through focused improvements in testing infrastructure and coverage:
+
+### Initial State
+- **Test Count**: ~104 tests
+- **Focus**: Primarily REPL integration tests
+- **Coverage**: Event system, action proxy, basic configuration
+
+### Current State
+- **Test Count**: 583 tests (5.6x growth)
+- **Coverage**: Comprehensive snapshot testing across all modules
+- **Infrastructure**: Snapshot testing, fixture generation, reusable test utilities
+
+### Key Improvements
+
+#### 1. Snapshot Testing Infrastructure (Added)
+- Added 7 API schema snapshot tests to `api_registry.rs` for schema validation
+- Added 12 event data snapshot tests to `event_data.rs` for event structure serialization
+- Added 8 error format snapshot tests to `extractors.rs` for Lua value extraction
+- Added 8 config transformation snapshot tests to `config_wrapper.rs` for configuration application
+- Added 8 action parsing snapshot tests to `action_proxy.rs` for action data transformations
+
+**Impact**: Enables regression detection for complex data structures without manual assertion maintenance
+
+#### 2. Test Code Cleanup (Removed)
+- Deleted 7 orphaned snapshot files from removed `validators` and `plugin_system` modules
+- Cleaned up test data that no longer had corresponding code
+
+**Impact**: Improved test maintainability and removed dead code
+
+#### 3. Integration Test Rewrite (Modified)
+- Rewrote `tests/integration_tests.rs` with 52 working tests
+- Consolidated testing patterns and reduced duplication with REPL tests
+- Added end-to-end workflow coverage
+
+**Impact**: Clearer separation of concerns between unit, integration, and REPL tests
+
+#### 4. Clippy Warnings (Fixed)
+- Fixed clippy warning in `repl_integration.rs`
+
+**Impact**: Clean compilation with no warnings
 
 ## Test Organization
 
@@ -385,67 +423,205 @@ cargo test --package niri-lua
 cargo insta review
 ```
 
-## Test Categories
+## Snapshot Testing Infrastructure
 
-### Boundary Tests
-Tests that verify behavior at numerical boundaries:
-- Minimum values: 0, -∞, empty strings
-- Maximum values: system limits, large numbers
-- Just valid/invalid: values at transition points
+The niri-lua crate uses the `insta` crate for snapshot-based regression testing. Snapshots capture Debug output of complex structures and are stored in version control for easy review.
 
-Example: `test_validate_refresh_rate_low_boundary`, `test_validate_scale_boundary_high`
+### Snapshot Organization
 
-### Type Validation Tests
-Tests that verify type checking and conversion:
-- Correct types accepted
-- Wrong types rejected or handled gracefully
-- Nil/None values handled appropriately
+Snapshots are located in `src/snapshots/` directory with the following naming prefixes:
 
-Example: `test_validate_bool_true`, `test_validate_curve_wrong_type`
+| Prefix | Module | Purpose |
+|--------|--------|---------|
+| `api_` | `api_registry.rs`, `api_data.rs` | Schema validation, API structure dumps |
+| `event_data_` | `event_system.rs` | Event data structure serialization |
+| `extractors_` | `extractors.rs` | Lua value extraction and type conversion results |
+| `config_wrapper_` | `config_api.rs` | Configuration wrapper and application |
+| `action_proxy_` | `action_proxy.rs` | Action proxy data transformations |
 
-### Integration Tests
-Tests that verify multiple components working together:
-- Multiple configurations applied
-- State consistency
-- Complex object creation
+### Working with Snapshots
 
-Example: `test_apply_all_misc_configs_together`, `test_multiple_plugin_operations`
+#### Reviewing New Snapshots
+When tests create new snapshots, `insta` generates `.snap.new` files:
 
-### Fixture Tests
-Tests that verify data structure conversions:
-- Window/Workspace/Output conversions
-- Optional fields handling
-- Nested data structures
-
-Example: `test_window_to_lua`, `test_workspace_to_lua_urgent`
-
-## Running Tests
-
-### Run All Tests
 ```bash
+# Run tests to generate .snap.new files
 cargo test --package niri-lua
+
+# Review and accept snapshots
+cargo insta review
 ```
 
-### Run Specific Module Tests
+#### Manual Snapshot Acceptance
 ```bash
-cargo test --package niri-lua validators::
-cargo test --package niri-lua extractors::
-cargo test --package niri-lua config_api::
+# Move .snap.new to .snap to accept
+mv src/snapshots/api_registry__test_name.snap.new \
+   src/snapshots/api_registry__test_name.snap
 ```
 
-### Run Specific Test
+#### Updating Snapshots After Intentional Changes
+If you've intentionally changed code and need to update snapshots:
+
 ```bash
-cargo test --package niri-lua test_apply_animations_spring_config -- --exact
+# Accept all pending snapshot changes
+cargo insta accept
+
+# Or review them one by one
+cargo insta review
 ```
 
-### Run Tests with Output
-```bash
-cargo test --package niri-lua -- --nocapture
+## Test Categories by Type
+
+Tests in niri-lua fall into four main categories:
+
+### 1. Unit Tests
+**Location**: Inline in source files with `#[cfg(test)]` modules  
+**Count**: 419 tests  
+**Run**: `cargo test --lib`
+
+Tests individual functions and small components:
+- Value extraction (`extractors.rs`)
+- Type validation and conversion
+- Configuration parsing
+- Data structure transformations
+
+**Example**:
+```rust
+#[test]
+fn test_extract_string_opt_with_value() {
+    let (lua, table) = create_test_lua_table();
+    table.set("field", "hello").unwrap();
+    let result = extract_string_opt(&table, "field").unwrap();
+    assert_eq!(result, Some("hello".to_string()));
+}
 ```
 
-### Run Tests with Thread Count
-```bash
-cargo test --package niri-lua -- --test-threads=1
+### 2. Snapshot Tests
+**Location**: Source files using `insta::assert_snapshot!` macro  
+**Count**: Integrated within unit and integration tests  
+**Purpose**: Regression detection for complex structures
+
+Uses `insta` to capture Debug output and compare against stored snapshots:
+- API structure validation
+- Configuration state changes
+- Event data serialization
+- Complex extraction results
+
+**Example**:
+```rust
+#[test]
+fn test_api_schema_completeness() {
+    use insta::assert_snapshot;
+    let schema = ApiRegistry::schema();
+    assert_snapshot!(format!("{:?}", schema));
+}
+```
+
+**Workflow**:
+1. Run test: `cargo test --lib api_registry`
+2. Review: Check `src/snapshots/*.snap.new` files
+3. Accept: `cargo insta review` or `cargo insta accept`
+
+### 3. Integration Tests
+**Location**: `tests/integration_tests.rs`  
+**Count**: 52 tests  
+**Run**: `cargo test --test integration_tests`
+
+Tests full Lua execution workflows and component interaction:
+- Configuration loading and application
+- Window/workspace/output conversions
+- Multi-step state changes
+- Configuration file parsing
+
+**Example**:
+```rust
+#[test]
+fn test_lua_config_applies_to_niri_config() {
+    let lua = create_test_runtime().unwrap();
+    lua.load(r#"
+        config.layout = "floating"
+        config.misc.gaps = 10
+    "#).exec().unwrap();
+    
+    let result = apply_config(&lua);
+    assert!(result.is_ok());
+}
+```
+
+### 4. REPL Integration Tests
+**Location**: `tests/repl_integration.rs`  
+**Count**: 104 tests  
+**Run**: `cargo test --test repl_integration`
+
+Tests the interactive REPL environment and advanced features:
+- REPL command execution and output
+- Event system (handlers, event data)
+- Action proxy (compositing actions)
+- Error handling and edge cases
+- Lua stdlib availability
+
+**Example**:
+```rust
+#[test]
+fn test_repl_executes_simple_command() {
+    let mut runtime = create_repl_runtime();
+    let output = runtime.execute("return 1 + 1");
+    assert_eq!(output, "2");
+}
+```
+
+## Adding New Tests
+
+### Where to Add Different Test Types
+
+#### For New Unit Tests
+Add directly in the source file being tested:
+
+```rust
+// In src/extractors.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_new_extractor_function() {
+        // Test code
+    }
+}
+```
+
+#### For New Integration Tests
+Add to `tests/integration_tests.rs`:
+
+```rust
+#[test]
+fn test_new_integration_scenario() {
+    let lua = create_test_runtime().unwrap();
+    // Test code
+}
+```
+
+#### For New REPL Tests
+Add to `tests/repl_integration.rs`:
+
+```rust
+#[test]
+fn test_new_repl_feature() {
+    let mut runtime = create_repl_runtime();
+    // Test code
+}
+```
+
+#### For New Snapshot Tests
+Add snapshot assertions to any test file:
+
+```rust
+#[test]
+fn test_complex_structure_snapshot() {
+    use insta::assert_snapshot;
+    let result = complex_operation();
+    assert_snapshot!(format!("{:?}", result));
+}
 ```
 
 ## Best Practices
@@ -544,12 +720,12 @@ fn test_window_to_lua_all_properties() {
 ### Coverage by Module
 The test suite achieves the following coverage:
 
-- **extractors.rs**: All 15 functions covered, 100+ test scenarios
-- **validators.rs**: All 20+ validators covered, boundary + type tests
-- **config_api.rs**: All 50+ configuration options covered
-- **runtime_api.rs**: All 5 trait methods covered
-- **ipc_bridge.rs**: All 4 conversion functions covered
-- **plugin_system.rs**: All 10+ methods covered
+- **runtime.rs**: Core runtime management, REPL execution
+- **extractors.rs**: Lua value extraction and type conversion
+- **config_api.rs**: Configuration options covered
+- **runtime_api.rs**: State query methods covered
+- **ipc_bridge.rs**: IPC data type conversion functions covered
+- **repl_integration.rs**: Comprehensive integration tests for REPL, events, and actions
 
 ### Coverage Gaps
 
@@ -716,6 +892,33 @@ end)
 - Tests should verify snapshot isolation (handlers don't see their own changes)
 - Tests should verify deferred queries see updated state
 
+## Known Issues and Cleanup Opportunities
+
+The following issues have been identified through testing reviews and are documented for future cleanup:
+
+### Test Duplication
+**Location**: Between `tests/integration_tests.rs` and `tests/repl_integration.rs`
+**Issue**: Some test scenarios are duplicated across both test files
+**Impact**: Maintenance burden when changing test patterns
+**Priority**: Low - Tests are independent and pass
+**Future Action**: Consolidate overlapping test cases and establish clear boundaries between test categories
+
+### Unused Test Helpers
+**Location**: `src/test_utils.rs`
+**Issue**: Several test fixture builders and helper functions have low usage
+**Examples**: Some workspace/window builder methods, conversion helpers
+**Impact**: Code maintenance complexity
+**Priority**: Low - Helper functions don't affect runtime
+**Future Action**: Profile test helper usage and remove/consolidate unused utilities
+
+### Snapshot Organization
+**Current**: Snapshots use module-based naming prefixes (`api_`, `event_data_`, etc.)
+**Opportunity**: Consider grouping snapshots by functionality or feature area
+**Impact**: Minor - Organizational improvement only
+**Future Action**: No immediate action needed; revisit if snapshot count grows significantly
+
+---
+
 ## Debugging Tests
 
 ### Run Single Test with Backtrace
@@ -746,33 +949,66 @@ fn test_lua_conversion() {
 }
 ```
 
-## Adding New Tests
-
 ### Checklist for New Tests
-- [ ] Function/module being tested is clearly identified
+- [ ] Test location matches test type (lib, integration, or REPL)
 - [ ] Test name follows `test_<function>_<scenario>` pattern
 - [ ] Test uses appropriate fixtures from `test_utils`
-- [ ] Both success and failure cases tested
-- [ ] Boundary conditions included where applicable
+- [ ] Both success and failure cases tested where applicable
+- [ ] Boundary conditions included for validation tests
 - [ ] Test is isolated and doesn't depend on other tests
-- [ ] Comments explain complex test logic
-- [ ] Test runs successfully: `cargo test --package niri-lua`
+- [ ] Comments explain complex test logic or unusual patterns
+- [ ] For snapshot tests: snapshot has been reviewed and accepted
+- [ ] All tests pass: `cargo test --package niri-lua`
+- [ ] Lint passes: `cargo clippy --package niri-lua`
 
-### Template for New Test
+## Running Tests
 
-```rust
-#[test]
-fn test_new_function_scenario() {
-    // Arrange
-    let input = create_test_fixture();
-    let expected = known_result;
-    
-    // Act
-    let result = new_function(input);
-    
-    // Assert
-    assert_eq!(result, expected);
-}
+### Run All Tests
+```bash
+cargo test --package niri-lua
+```
+
+### Run Tests by Category
+```bash
+# Unit tests only
+cargo test --lib --package niri-lua
+
+# Integration tests only
+cargo test --test integration_tests --package niri-lua
+
+# REPL integration tests only
+cargo test --test repl_integration --package niri-lua
+```
+
+### Run Specific Module Tests
+```bash
+cargo test --package niri-lua config_api::
+cargo test --package niri-lua extractors::
+cargo test --package niri-lua action_proxy::
+```
+
+### Run Specific Test
+```bash
+cargo test --package niri-lua test_apply_animations_spring_config -- --exact
+```
+
+### Run Tests with Output
+```bash
+cargo test --package niri-lua -- --nocapture
+```
+
+### Run Tests with Thread Count
+```bash
+cargo test --package niri-lua -- --test-threads=1
+```
+
+### Review and Accept Snapshots
+```bash
+# Interactive review of new snapshots
+cargo insta review
+
+# Accept all snapshots at once
+cargo insta accept
 ```
 
 ## Continuous Integration
@@ -782,7 +1018,7 @@ Tests are automatically run on:
 - Commits to main branch
 - Release builds
 
-All 332 tests must pass before merging.
+All tests must pass before merging.
 
 ## Resources
 

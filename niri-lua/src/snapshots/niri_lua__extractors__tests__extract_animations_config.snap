@@ -1,0 +1,8 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(animations.off, animations.slowdown,)"
+---
+(
+    false,
+    2.0,
+)

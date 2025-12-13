@@ -1,0 +1,12 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: flags
+---
+(
+    true,
+    true,
+    true,
+    true,
+    false,
+    false,
+)

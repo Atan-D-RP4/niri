@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/event_data.rs
+expression: "(event_type, output_name, output_make, output_model)"
+---
+(
+    "connect",
+    "DP-1",
+    "Samsung",
+    "S27AG50",
+)

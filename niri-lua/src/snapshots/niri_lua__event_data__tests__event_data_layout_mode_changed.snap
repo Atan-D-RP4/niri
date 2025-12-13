@@ -1,0 +1,7 @@
+---
+source: niri-lua/src/event_data.rs
+expression: event
+---
+ModeChanged {
+    is_floating: true,
+}

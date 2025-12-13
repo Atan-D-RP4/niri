@@ -530,7 +530,7 @@ This tiered architecture allows different levels of Lua integration:
 ### 9. Current Implementation Status
 
 #### Fully Working
-- Event system: 23+ events wired with centralized emission in refresh cycle
+- Event system: 28 events integrated with centralized emission (4 intentionally excluded for security: idle:*, key:*)
 - Config API: Read-only exposure of all configuration sections
 - Reactive config proxy: Lua can modify config via `niri.config.*`
 - Action proxy: All compositor actions accessible via `niri.action`
@@ -556,6 +556,88 @@ Events are emitted from centralized locations in the refresh cycle:
 - **Layout mode events**: Detected in `niri.rs` refresh cycle via `prev_floating_active`
 
 This ensures events fire regardless of trigger source (keybindings, touch, IPC).
+
+#### Event Integration Reference
+
+The following table shows all 28 integrated events and their call sites in the main compositor:
+
+| Event | Call Site(s) | Description |
+|-------|--------------|-------------|
+| **Window Events (10)** | | |
+| `window:open` | `handlers/compositor.rs:237` | Window created and mapped |
+| `window:close` | `handlers/xdg_shell.rs:922` | Window destroyed |
+| `window:focus` | `niri.rs:1075` | Window receives focus |
+| `window:blur` | `niri.rs:1069` | Window loses focus |
+| `window:title_changed` | `handlers/xdg_shell.rs:978` | Window title updated |
+| `window:app_id_changed` | `handlers/xdg_shell.rs:962` | Window app_id updated |
+| `window:fullscreen` | `handlers/xdg_shell.rs:675,757` | Fullscreen enter/exit |
+| `window:move` | `input/mod.rs:1300,1348` | Window moved to different workspace/output |
+| `window:resize` | `input/resize_grab.rs:37`, `input/touch_resize_grab.rs:35` | Window size changed |
+| `window:maximize` | `handlers/xdg_shell.rs:436,526` | Maximize/unmaximize |
+| **Workspace Events (5)** | | |
+| `workspace:activate` | `niri.rs:858` | Workspace becomes active |
+| `workspace:deactivate` | `niri.rs:855` | Workspace becomes inactive |
+| `workspace:create` | `niri.rs:852` | New workspace created |
+| `workspace:destroy` | `niri.rs:849` | Workspace destroyed |
+| `workspace:rename` | `input/mod.rs:1617` | Workspace renamed |
+| **Monitor Events (2)** | | |
+| `monitor:connect` | `backend/tty.rs:1477` | Monitor connected |
+| `monitor:disconnect` | `backend/tty.rs:1546` | Monitor disconnected |
+| **Layout Events (3)** | | |
+| `layout:mode_changed` | `niri.rs:881` | Tiling/floating mode changed |
+| `layout:window_added` | `handlers/compositor.rs:229` | Window added to layout |
+| `layout:window_removed` | `handlers/xdg_shell.rs:919` | Window removed from layout |
+| **Output Events (1)** | | |
+| `output:mode_change` | `niri.rs:3471` | Output resolution/refresh changed |
+| **Lock Events (2)** | | |
+| `lock:activate` | `niri.rs:6173` | Screen locked |
+| `lock:deactivate` | `niri.rs:6300` | Screen unlocked |
+| **Overview Events (2)** | | |
+| `overview:open` | `niri.rs:866` | Overview mode opened |
+| `overview:close` | `niri.rs:868` | Overview mode closed |
+| **Config Events (1)** | | |
+| `config:reload` | `niri.rs:1537,1822` | Configuration reloaded |
+| **Lifecycle Events (2)** | | |
+| `startup` | `main.rs:290` | Compositor finished initializing |
+| `shutdown` | `main.rs:298` | Compositor shutting down |
+
+#### Security-Excluded Events (4)
+
+These events are defined in `lua_event_hooks.rs` but intentionally NOT called from compositor code:
+
+| Event | Reason |
+|-------|--------|
+| `idle:start` | Could leak user activity patterns |
+| `idle:end` | Could leak user activity patterns |
+| `key:press` | Keylogging security risk |
+| `key:release` | Keylogging security risk |
+
+#### How to Add New Events
+
+1. **Define emit function** in `src/lua_event_hooks.rs`:
+   ```rust
+   pub fn emit_my_event(state: &State, param: &str) {
+       emit_with_state_context(state, "category:my_event", |lua| {
+           let table = lua.create_table()?;
+           table.set("param", param)?;
+           Ok(LuaValue::Table(table))
+       });
+   }
+   ```
+
+2. **Add to extension trait** (`StateLuaEvents` or `NiriLuaEvents`):
+   ```rust
+   fn emit_my_event(&self, param: &str);
+   // ... impl block
+   ```
+
+3. **Call from compositor** at the appropriate location:
+   ```rust
+   use crate::lua_event_hooks::StateLuaEvents;
+   state.emit_my_event("value");
+   ```
+
+4. **Document** in this table and in `LUA_SPECIFICATION.md`
 
 #### Intentionally Deferred (Tier 5)
 - Plugin system (`plugin_system.rs`) - infrastructure ready, not integrated

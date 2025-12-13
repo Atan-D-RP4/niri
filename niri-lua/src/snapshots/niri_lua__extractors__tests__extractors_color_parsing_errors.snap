@@ -1,0 +1,19 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(invalid_hex, too_short, too_long, no_hash_invalid, empty, rgb_format,)"
+---
+(
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some(
+        Color {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        },
+    ),
+)

@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/extractors.rs
+expression: "(color1.is_some(), color2.is_some(), color3.is_some(), color4.is_some(),)"
+---
+(
+    true,
+    true,
+    true,
+    true,
+)

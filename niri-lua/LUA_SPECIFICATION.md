@@ -90,7 +90,7 @@ local layouts = niri.state.keyboard_layouts -- {names, current_idx}
 local focused = niri.state.focused_window -- {id, app_id, title} | nil
 ```
 
-### Events (14 total)
+### Events (28 integrated, 4 excluded for security)
 
 ```lua
 -- Single event subscription
@@ -177,7 +177,7 @@ The niri Lua system enables configuration and runtime scripting of the niri Wayl
 - 400+ passing tests
 - Full KDL configuration parity (all sections implemented)
 - ~90 actions available
-- 14 events wired across 5 categories
+- 28 events integrated (4 intentionally excluded for security: idle:*, key:*)
 
 ---
 
@@ -1891,7 +1891,7 @@ end
 
 The `niri.events` namespace provides pub/sub event handling for compositor events.
 
-> **For LLM Agents**: This section documents 14 events with fully typed payloads.
+> **For LLM Agents**: This section documents 28 integrated events with fully typed payloads (4 intentionally excluded for security: idle:*, key:*).
 
 ### API Methods
 
@@ -3407,7 +3407,7 @@ Use this checklist when reviewing each module:
 
 #### `event_data.rs` / `lua_event_hooks.rs` (Event System)
 
-- [ ] All 14 events are wired
+- [ ] All 28 events are integrated (4 excluded for security: idle:*, key:*)
 - [ ] Event payloads match documented types
 - [ ] Handler registration/unregistration works correctly
 - [ ] Memory leaks prevented (handlers cleaned up)
@@ -3460,6 +3460,200 @@ When reviewing niri-lua code:
 | Error messages | Many errors are generic | P2 |
 | Documentation | Some modules lack doc comments | P2 |
 | Edge cases | Collection proxies with unusual inputs | P2 |
+
+### Testing Requirements
+
+This section defines mandatory testing practices to prevent regression and ensure API stability.
+
+#### Every API Feature Must Have Tests
+
+**Core Principle**: No feature is considered complete until it has corresponding tests.
+
+**Testing Strategy**:
+- **Snapshot tests** for deterministic outputs (schemas, serialization)
+- **Integration tests** for end-to-end workflows
+- **Unit tests** for edge cases and error conditions
+
+#### Snapshot Testing Modules
+
+The following modules use snapshot tests to prevent API regression:
+
+| Module | Snapshot Prefix | Test File | Purpose |
+|--------|-----------------|-----------|---------|
+| `api_registry.rs` | `api_` | `tests/snapshots/api_registry*.rs.snap` | API schema definitions, function signatures |
+| `event_data.rs` | `event_data_` | `tests/snapshots/event_data*.rs.snap` | Event payload serialization |
+| `extractors.rs` | `extractors_` | `tests/snapshots/extractors*.rs.snap` | Type extraction, error messages |
+| `config_wrapper.rs` | `config_wrapper_` | `tests/snapshots/config_wrapper*.rs.snap` | Config transformations, defaults |
+| `action_proxy.rs` | `action_proxy_` | `tests/snapshots/action_proxy*.rs.snap` | Action parsing, parameter validation |
+
+**Snapshot Test Workflow**:
+```bash
+# Run tests and generate snapshots
+cargo test --package niri-lua
+
+# Review changes (interactive)
+cargo insta review
+
+# Accept changes
+cargo insta accept
+```
+
+#### Integration Testing
+
+Integration tests verify end-to-end Lua workflows. Key test categories:
+
+| Category | Location | Purpose | Examples |
+|----------|----------|---------|----------|
+| Lua execution | `tests/integration_tests.rs` | Full Lua runtime behavior | Config load, action dispatch, event handling |
+| Error recovery | `tests/integration_tests.rs` | Error handling without crashes | Invalid config, bad parameters, timeouts |
+| Edge cases | `tests/integration_tests.rs` | Boundary conditions | Empty collections, nil values, max integers |
+
+**Example Integration Test**:
+```rust
+#[test]
+fn test_config_load_with_window_rules() {
+    let runtime = setup_runtime();
+    runtime.execute(r#"
+        niri.config.window_rules:add({
+            matches = { { app_id = "firefox" } },
+            open_floating = true,
+            default_column_width = { proportion = 0.7 },
+        })
+        
+        local rules = niri.config.window_rules:list()
+        assert(#rules == 1, "Expected 1 rule")
+        assert(rules[1].open_floating == true, "Expected floating")
+    "#).expect("Script failed");
+}
+```
+
+#### Test Coverage Requirements by Module
+
+| Module | Unit Tests | Snapshot Tests | Integration Tests | Minimum Coverage |
+|--------|------------|----------------|--------------------|-----------------|
+| `config_wrapper.rs` | Required | Required | Required | 70%+ |
+| `action_proxy.rs` | Required | Required | Required | 70%+ |
+| `event_data.rs` | Required | Required | Optional | 60%+ |
+| `extractors.rs` | Required | Required | Optional | 60%+ |
+| `runtime_api.rs` | Required | Optional | Optional | 50%+ |
+| Others | Required | Optional | Optional | 40%+ |
+
+### Regression Prevention Practices
+
+#### API Schema Changes Require Snapshot Review
+
+Whenever the Lua API schema changes (new fields, removed methods, signature changes):
+
+1. **Generate snapshots**: `cargo test --package niri-lua`
+2. **Review changes**: `cargo insta review` (interactive)
+3. **Verify backwards compatibility**: Check if breaking change is intentional
+4. **Update spec**: Document the change in `LUA_SPECIFICATION.md`
+
+Example breaking change:
+```bash
+# Before: niri.config.layout.focus_ring.width
+# After: niri.config.layout.focus_ring.line_width
+# This is a breaking change and requires major version bump
+```
+
+#### New Events Require Snapshot Tests
+
+When adding a new event to the system:
+
+1. **Add event to schema** in `event_data.rs`
+2. **Write snapshot test** for event payload serialization
+3. **Write integration test** verifying event emission
+4. **Update spec** in Event System section
+
+**Snapshot Test Template**:
+```rust
+#[test]
+fn test_new_event_payload_serialization() {
+    let payload = MyNewEventPayload {
+        id: 42,
+        name: "test".to_string(),
+    };
+    let lua_value = payload.to_lua(&lua).unwrap();
+    insta::assert_yaml_snapshot!(lua_value);
+}
+```
+
+#### New Actions Require Snapshot Tests
+
+When adding a new action to `action_proxy.rs`:
+
+1. **Register action** in `register_actions!` macro
+2. **Write snapshot test** for action signature
+3. **Write integration test** for execution behavior
+4. **Update spec** in Action System section
+
+**Checklist**:
+- [ ] Action appears in `niri.action.*` namespace
+- [ ] Action signature matches IPC action type
+- [ ] Error behavior documented and tested
+- [ ] Snapshot tests pass
+- [ ] Integration tests verify execution
+
+#### New Config Options Require Snapshot Tests
+
+When adding a new config field to `config_wrapper.rs`:
+
+1. **Add field to schema** in Config struct
+2. **Write snapshot test** for field serialization and defaults
+3. **Write integration test** for getter/setter behavior
+4. **Update spec** in Configuration API section
+
+**Example**:
+```rust
+#[test]
+fn test_new_config_field_snapshot() {
+    let lua = setup_lua();
+    lua.load(r#"
+        niri.config.layout.new_field = "value"
+        local config = niri.config:serialize()
+    "#).exec().unwrap();
+    
+    let serialized = extract_config(&lua);
+    insta::assert_json_snapshot!(serialized);
+}
+```
+
+### Adding New Features: Checklist
+
+When implementing a new Lua feature, follow this checklist:
+
+1. **[ ] Specification**: Update `LUA_SPECIFICATION.md` with behavior, examples, types
+2. **[ ] Implementation**: Write the feature in Rust
+3. **[ ] Unit Tests**: Add unit tests covering normal cases
+4. **[ ] Snapshot Tests**: Add snapshot tests for schemas (if applicable)
+5. **[ ] Integration Tests**: Add end-to-end test workflow
+6. **[ ] Edge Cases**: Test invalid inputs, boundary conditions, errors
+7. **[ ] Documentation**: Add doc comments to public functions
+8. **[ ] Examples**: Provide at least one usage example in spec
+9. **[ ] Review Snapshots**: Run `cargo insta review` and accept changes
+10. **[ ] Verify**: Ensure `cargo test --package niri-lua` passes
+
+### Test Execution Workflow
+
+```bash
+# Run all tests
+cargo test --package niri-lua
+
+# Run specific test
+cargo test --package niri-lua test_config_field_assignment
+
+# Run with output
+cargo test --package niri-lua -- --nocapture --test-threads=1
+
+# Review snapshot changes (interactive)
+cargo insta review
+
+# Run coverage check
+cargo tarpaulin --package niri-lua --out Html
+
+# Check for test-only code not included in binary
+cargo clippy --package niri-lua --all-targets
+```
 
 ---
 

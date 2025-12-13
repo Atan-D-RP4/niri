@@ -1,0 +1,10 @@
+---
+source: niri-lua/src/config_wrapper.rs
+expression: top_level
+---
+(
+    false,
+    Some(
+        "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png",
+    ),
+)

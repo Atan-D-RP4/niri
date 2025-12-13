@@ -1,0 +1,30 @@
+---
+source: niri-lua/src/api_registry.rs
+expression: stats
+---
+(
+    (
+        "modules",
+        11,
+    ),
+    (
+        "types",
+        7,
+    ),
+    (
+        "aliases",
+        13,
+    ),
+    (
+        "functions",
+        157,
+    ),
+    (
+        "methods",
+        31,
+    ),
+    (
+        "fields",
+        32,
+    ),
+)
