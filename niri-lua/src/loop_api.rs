@@ -43,7 +43,8 @@
 //! - Explicit `timer:close()` is required for cleanup
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -87,6 +88,8 @@ pub struct TimerState {
 pub struct TimerManager {
     /// All registered timers.
     timers: HashMap<u64, TimerState>,
+    /// Min-heap of (fire_time, timer_id) for efficient next-timer lookup.
+    fire_queue: BinaryHeap<Reverse<(Instant, u64)>>,
 }
 
 impl TimerManager {
@@ -94,6 +97,7 @@ impl TimerManager {
     pub fn new() -> Self {
         Self {
             timers: HashMap::new(),
+            fire_queue: BinaryHeap::new(),
         }
     }
 
@@ -120,6 +124,8 @@ impl TimerManager {
                 next_fire: Some(next_fire),
             },
         );
+
+        self.fire_queue.push(Reverse((next_fire, id)));
     }
 
     /// Stop a timer (can be restarted).
@@ -143,6 +149,17 @@ impl TimerManager {
     /// Get time until next timer fires (for event loop sleep).
     pub fn time_until_next(&self) -> Option<Duration> {
         let now = Instant::now();
+        // Peek the heap but validate against current state
+        while let Some(&Reverse((fire_time, id))) = self.fire_queue.peek() {
+            if let Some(timer) = self.timers.get(&id) {
+                if timer.active && timer.next_fire == Some(fire_time) {
+                    return Some(fire_time.saturating_duration_since(now));
+                }
+            }
+            // Stale entry - need to clean up (can't mutate in &self)
+            break;
+        }
+        // Fallback to O(n) scan for correctness
         self.timers
             .values()
             .filter(|t| t.active && t.next_fire.is_some())
@@ -151,13 +168,28 @@ impl TimerManager {
     }
 
     /// Get IDs of timers that are due to fire.
-    pub fn get_due_timers(&self) -> Vec<u64> {
+    pub fn get_due_timers(&mut self) -> Vec<u64> {
         let now = Instant::now();
-        self.timers
-            .values()
-            .filter(|t| t.active && t.next_fire.is_some_and(|nf| now >= nf))
-            .map(|t| t.id)
-            .collect()
+        let mut due = Vec::new();
+
+        // Pop entries from heap that are due
+        while let Some(&Reverse((fire_time, id))) = self.fire_queue.peek() {
+            if fire_time > now {
+                break; // No more due timers
+            }
+
+            self.fire_queue.pop();
+
+            // Validate against current state
+            if let Some(timer) = self.timers.get(&id) {
+                if timer.active && timer.next_fire == Some(fire_time) {
+                    due.push(id);
+                }
+            }
+            // Stale entries are simply discarded
+        }
+
+        due
     }
 
     /// Fire a timer and update its state.
@@ -177,7 +209,9 @@ impl TimerManager {
         if timer.repeat_ms > 0 {
             // Repeating timer
             let now = Instant::now();
-            timer.next_fire = Some(now + Duration::from_millis(timer.repeat_ms));
+            let next_fire = now + Duration::from_millis(timer.repeat_ms);
+            timer.next_fire = Some(next_fire);
+            self.fire_queue.push(Reverse((next_fire, id)));
         } else {
             // One-shot timer
             timer.active = false;
@@ -226,7 +260,7 @@ pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<L
     let mut errors = Vec::new();
 
     // Get due timer IDs
-    let due_ids = manager.borrow().get_due_timers();
+    let due_ids = manager.borrow_mut().get_due_timers();
 
     for id in due_ids {
         // Get callback key (need to borrow mutably to update state)

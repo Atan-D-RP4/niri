@@ -5,6 +5,7 @@
 //! don't crash Niri.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use log::{debug, error, warn};
 use mlua::prelude::*;
@@ -26,7 +27,7 @@ pub struct LuaEventHandler {
 /// Manages all registered event handlers
 pub struct EventHandlers {
     /// Map of event names to their registered handlers
-    handlers: HashMap<String, Vec<LuaEventHandler>>,
+    handlers: HashMap<String, Arc<Vec<LuaEventHandler>>>,
     /// Next handler ID to assign
     next_handler_id: EventHandlerId,
 }
@@ -64,10 +65,13 @@ impl EventHandlers {
             once,
         };
 
-        self.handlers
-            .entry(event_type.to_string())
-            .or_default()
-            .push(handler);
+        // Use Arc::make_mut to get mutable access, cloning only if needed
+        let handlers = Arc::make_mut(
+            self.handlers
+                .entry(event_type.to_string())
+                .or_insert_with(|| Arc::new(Vec::new())),
+        );
+        handlers.push(handler);
 
         debug!(
             "Registered event handler '{}' with ID {} (once={})",
@@ -86,7 +90,9 @@ impl EventHandlers {
     /// # Returns
     /// True if handler was found and removed, false if not found
     pub fn unregister_handler(&mut self, event_type: &str, handler_id: EventHandlerId) -> bool {
-        if let Some(handlers) = self.handlers.get_mut(event_type) {
+        if let Some(arc_handlers) = self.handlers.get_mut(event_type) {
+            // Use Arc::make_mut to get mutable access, cloning only if needed
+            let handlers = Arc::make_mut(arc_handlers);
             if let Some(pos) = handlers.iter().position(|h| h.id == handler_id) {
                 handlers.remove(pos);
                 debug!(
@@ -117,11 +123,12 @@ impl EventHandlers {
     /// # Returns
     /// LuaResult indicating if event emission succeeded at the Lua level
     pub fn emit_event(&mut self, event_type: &str, event_data: LuaValue) -> LuaResult<()> {
-        if let Some(handlers_snapshot) = self.handlers.get(event_type).cloned() {
-            // Clone handler list to avoid borrow issues when modifying during iteration
+        if let Some(handlers_arc) = self.handlers.get(event_type) {
+            // Cheap Arc clone - just increments reference count
+            let handlers_snapshot = Arc::clone(handlers_arc);
             let mut handlers_to_remove = Vec::new();
 
-            for handler in handlers_snapshot {
+            for handler in handlers_snapshot.iter() {
                 // Call handler with error isolation
                 match handler.callback.call::<()>(event_data.clone()) {
                     Ok(_) => {

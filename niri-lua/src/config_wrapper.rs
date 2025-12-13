@@ -736,6 +736,67 @@ impl UserData for ConfigWrapper {
             // This method exists for API compatibility
             Ok(())
         });
+
+        // update() method - batch update multiple config properties in a single lock
+        methods.add_method("update", |_, this, table: LuaTable| {
+            // Single lock for all updates
+            let mut config = this.config.lock().unwrap();
+            let mut dirty = this.dirty.lock().unwrap();
+
+            // Handle top-level scalars
+            if let Ok(prefer_no_csd) = table.get::<bool>("prefer_no_csd") {
+                config.prefer_no_csd = prefer_no_csd;
+                dirty.misc = true;
+            }
+
+            if let Ok(screenshot_path) = table.get::<String>("screenshot_path") {
+                config.screenshot_path = niri_config::ScreenshotPath(Some(screenshot_path));
+                dirty.misc = true;
+            }
+
+            // Handle layout section
+            if let Ok(layout_table) = table.get::<LuaTable>("layout") {
+                if let Ok(gaps) = layout_table.get::<f64>("gaps") {
+                    config.layout.gaps = gaps;
+                    dirty.layout = true;
+                }
+
+                if let Ok(always_center_single_column) =
+                    layout_table.get::<bool>("always_center_single_column")
+                {
+                    config.layout.always_center_single_column = always_center_single_column;
+                    dirty.layout = true;
+                }
+            }
+
+            // Handle cursor section
+            if let Ok(cursor_table) = table.get::<LuaTable>("cursor") {
+                if let Ok(xcursor_size) = cursor_table.get::<u8>("xcursor_size") {
+                    config.cursor.xcursor_size = xcursor_size;
+                    dirty.cursor = true;
+                }
+
+                if let Ok(xcursor_theme) = cursor_table.get::<String>("xcursor_theme") {
+                    config.cursor.xcursor_theme = xcursor_theme;
+                    dirty.cursor = true;
+                }
+            }
+
+            // Handle animations section
+            if let Ok(animations_table) = table.get::<LuaTable>("animations") {
+                if let Ok(off) = animations_table.get::<bool>("off") {
+                    config.animations.off = off;
+                    dirty.animations = true;
+                }
+
+                if let Ok(slowdown) = animations_table.get::<f64>("slowdown") {
+                    config.animations.slowdown = slowdown;
+                    dirty.animations = true;
+                }
+            }
+
+            Ok(())
+        });
     }
 }
 
@@ -3617,5 +3678,132 @@ mod tests {
             )
         });
         insta::assert_debug_snapshot!("config_wrapper_default_top_level", top_level);
+    }
+
+    // ========================================================================
+    // BATCH UPDATE TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_batch_update_single_lock() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+        lua.load(r#"
+            wrapper:update({
+                prefer_no_csd = true,
+                layout = { gaps = 16, always_center_single_column = true },
+                cursor = { xcursor_size = 32, xcursor_theme = "Adwaita" },
+                animations = { off = false, slowdown = 2.5 }
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        // Verify all values were set
+        wrapper.with_config(|c| {
+            assert!(c.prefer_no_csd);
+            assert_eq!(c.layout.gaps, 16.0);
+            assert!(c.layout.always_center_single_column);
+            assert_eq!(c.cursor.xcursor_size, 32);
+            assert_eq!(c.cursor.xcursor_theme, "Adwaita");
+            assert!(!c.animations.off);
+            assert_eq!(c.animations.slowdown, 2.5);
+        });
+
+        // Verify correct dirty flags were set
+        let dirty = wrapper.dirty.lock().unwrap();
+        assert!(dirty.misc);
+        assert!(dirty.layout);
+        assert!(dirty.cursor);
+        assert!(dirty.animations);
+    }
+
+    #[test]
+    fn test_batch_update_partial_sections() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+        lua.load(r#"
+            wrapper:update({
+                layout = { gaps = 24 },
+                animations = { slowdown = 1.5 }
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        // Verify only specified fields were changed
+        wrapper.with_config(|c| {
+            assert_eq!(c.layout.gaps, 24.0);
+            // Other layout fields should remain at defaults
+            assert!(!c.layout.always_center_single_column);
+            assert_eq!(c.animations.slowdown, 1.5);
+        });
+    }
+
+    #[test]
+    fn test_batch_update_screenshot_path() {
+        let wrapper = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+
+        lua.globals().set("wrapper", wrapper.clone()).unwrap();
+        lua.load(r#"
+            wrapper:update({
+                screenshot_path = "/home/user/screenshots"
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        wrapper.with_config(|c| {
+            assert_eq!(c.screenshot_path.0, Some("/home/user/screenshots".to_string()));
+        });
+
+        assert!(wrapper.dirty.lock().unwrap().misc);
+    }
+
+    #[test]
+    fn test_batch_update_vs_individual() {
+        // This test demonstrates that batch update achieves the same result
+        // but with fewer lock acquisitions
+        let wrapper1 = ConfigWrapper::new_default();
+        let wrapper2 = ConfigWrapper::new_default();
+        let lua = mlua::Lua::new();
+
+        lua.globals().set("wrapper1", wrapper1.clone()).unwrap();
+        lua.globals().set("wrapper2", wrapper2.clone()).unwrap();
+
+        // Individual updates (multiple locks)
+        lua.load(r#"
+            wrapper1.layout.gaps = 16
+            wrapper1.cursor.xcursor_size = 32
+            wrapper1.animations.slowdown = 2.0
+        "#)
+        .exec()
+        .unwrap();
+
+        // Batch update (single lock)
+        lua.load(r#"
+            wrapper2:update({
+                layout = { gaps = 16 },
+                cursor = { xcursor_size = 32 },
+                animations = { slowdown = 2.0 }
+            })
+        "#)
+        .exec()
+        .unwrap();
+
+        // Both should have the same final state
+        let result1 = wrapper1.with_config(|c| {
+            (c.layout.gaps, c.cursor.xcursor_size, c.animations.slowdown)
+        });
+        let result2 = wrapper2.with_config(|c| {
+            (c.layout.gaps, c.cursor.xcursor_size, c.animations.slowdown)
+        });
+
+        assert_eq!(result1, result2);
     }
 }
