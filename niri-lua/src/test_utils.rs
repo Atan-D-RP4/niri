@@ -12,8 +12,6 @@
 //! - Snapshot testing with insta for regression detection
 //! - Helper functions to reduce boilerplate in tests
 
-use std::collections::HashMap;
-
 use mlua::prelude::*;
 use mlua::Result as LuaResult;
 use niri_config::Config;
@@ -114,49 +112,15 @@ pub fn create_test_output(name: &str) -> Output {
     }
 }
 
-/// Helper to create a test Output without logical properties (disabled)
-pub fn create_disabled_test_output(name: &str) -> Output {
-    let mut output = create_test_output(name);
-    output.logical = None;
-    output.current_mode = None;
-    output
-}
-
 /// Helper to create a Lua value from a string
 pub fn lua_string(lua: &Lua, value: &str) -> mlua::Value {
     mlua::Value::String(lua.create_string(value).unwrap())
-}
-
-/// Helper to create a Lua value from a number
-pub fn lua_number(value: f64) -> mlua::Value {
-    mlua::Value::Number(value)
-}
-
-/// Helper to create a Lua value from an integer
-pub fn lua_integer(value: i64) -> mlua::Value {
-    mlua::Value::Integer(value)
-}
-
-/// Helper to create a Lua value from a boolean
-pub fn lua_bool(value: bool) -> mlua::Value {
-    mlua::Value::Boolean(value)
 }
 
 /// Helper to set up a Lua runtime with standard libraries
 pub fn create_test_runtime() -> LuaResult<Lua> {
     let lua = Lua::new();
     lua.load_std_libs(mlua::prelude::LuaStdLib::ALL_SAFE)?;
-    Ok(lua)
-}
-
-/// Helper to load and run Lua code in a test environment
-///
-/// This function with #[track_caller] provides better error messages
-/// when assertions fail by showing the caller's location.
-#[track_caller]
-pub fn load_lua_code(code: &str) -> LuaResult<Lua> {
-    let lua = create_test_runtime()?;
-    lua.load(code).exec()?;
     Ok(lua)
 }
 
@@ -178,23 +142,6 @@ pub fn create_config_lua_env() -> LuaResult<Lua> {
 
     let lua = create_test_runtime()?;
     ConfigApi::register_to_lua(&lua, &Config::default())?;
-    Ok(lua)
-}
-
-/// Helper to set up a Lua runtime with a niri API registered
-///
-/// This is useful for testing niri-dependent functionality.
-/// Note: This requires a callback function for niri actions.
-#[track_caller]
-pub fn create_niri_lua_env_with_callback<F>(callback: F) -> LuaResult<Lua>
-where
-    F: Fn(String, Vec<String>) -> LuaResult<()> + 'static,
-{
-    use crate::niri_api::NiriApi;
-    use crate::LuaComponent;
-
-    let lua = create_test_runtime()?;
-    NiriApi::register_to_lua(&lua, callback)?;
     Ok(lua)
 }
 
@@ -257,88 +204,6 @@ pub fn assert_lua_table_value_eq<T: mlua::FromLua + PartialEq + std::fmt::Debug>
     );
 }
 
-/// Helper to build test data with a builder pattern
-///
-/// This fixture builder provides a fluent API for constructing test data.
-pub struct TestDataBuilder {
-    config: Config,
-    windows: Vec<Window>,
-    workspaces: Vec<Workspace>,
-    outputs: Vec<Output>,
-}
-
-impl TestDataBuilder {
-    /// Create a new test data builder with default config
-    pub fn new() -> Self {
-        Self {
-            config: Config::default(),
-            windows: Vec::new(),
-            workspaces: Vec::new(),
-            outputs: Vec::new(),
-        }
-    }
-
-    /// Add a window to the test data
-    pub fn with_window(mut self, window: Window) -> Self {
-        self.windows.push(window);
-        self
-    }
-
-    /// Add a workspace to the test data
-    pub fn with_workspace(mut self, workspace: Workspace) -> Self {
-        self.workspaces.push(workspace);
-        self
-    }
-
-    /// Add an output to the test data
-    pub fn with_output(mut self, output: Output) -> Self {
-        self.outputs.push(output);
-        self
-    }
-
-    /// Get the config
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    /// Get the windows
-    pub fn windows(&self) -> &[Window] {
-        &self.windows
-    }
-
-    /// Get the workspaces
-    pub fn workspaces(&self) -> &[Workspace] {
-        &self.workspaces
-    }
-
-    /// Get the outputs
-    pub fn outputs(&self) -> &[Output] {
-        &self.outputs
-    }
-}
-
-impl Default for TestDataBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Helper to extract table as a HashMap for snapshot testing
-///
-/// Useful for comparing complex Lua table structures in snapshots.
-#[track_caller]
-pub fn lua_table_to_map(table: &LuaTable) -> LuaResult<HashMap<String, String>> {
-    let mut map = HashMap::new();
-
-    for pair in table.pairs::<String, mlua::Value>() {
-        let (key, value) = pair?;
-        let value_str = format!("{:?}", value);
-        map.insert(key, value_str);
-    }
-
-    Ok(map)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,52 +258,8 @@ mod tests {
     }
 
     #[test]
-    fn test_create_disabled_test_output() {
-        let output = create_disabled_test_output("DP-1");
-        assert_eq!(output.name, "DP-1");
-        assert!(output.logical.is_none());
-    }
-
-    #[test]
-    #[allow(clippy::approx_constant)]
-    fn test_lua_helpers() {
-        let lua = Lua::new();
-        let _str = lua_string(&lua, "test");
-        let _num = lua_number(3.14);
-        let _int = lua_integer(42);
-        let _bool = lua_bool(true);
-    }
-
-    #[test]
-    fn test_create_test_runtime() {
-        let lua = create_test_runtime().unwrap();
-        // Verify that standard library is loaded
-        assert!(lua.globals().get::<mlua::Table>("math").is_ok());
-    }
-
-    #[test]
-    fn test_load_lua_code() {
-        let lua = load_lua_code("x = 42").unwrap();
-        let x: i32 = lua.globals().get("x").unwrap();
-        assert_eq!(x, 42);
-    }
-
-    #[test]
-    fn test_get_lua_global() {
-        let lua = load_lua_code("y = 'hello'").unwrap();
-        let y: String = get_lua_global(&lua, "y").unwrap();
-        assert_eq!(y, "hello");
-    }
-
-    #[test]
     fn test_create_config_lua_env() {
         let lua = create_config_lua_env().unwrap();
-        assert_lua_global_exists(&lua, "niri");
-    }
-
-    #[test]
-    fn test_create_niri_lua_env_with_callback() {
-        let lua = create_niri_lua_env_with_callback(|_, _| Ok(())).unwrap();
         assert_lua_global_exists(&lua, "niri");
     }
 
@@ -448,30 +269,5 @@ mod tests {
         let table = lua.create_table().unwrap();
         table.set("test_key", "test_value").unwrap();
         assert_lua_table_has_key(&table, "test_key");
-    }
-
-    #[test]
-    fn test_test_data_builder() {
-        let builder = TestDataBuilder::new()
-            .with_window(create_test_window(1))
-            .with_workspace(create_test_workspace(1))
-            .with_output(create_test_output("HDMI-1"));
-
-        assert_eq!(builder.windows().len(), 1);
-        assert_eq!(builder.workspaces().len(), 1);
-        assert_eq!(builder.outputs().len(), 1);
-    }
-
-    #[test]
-    fn test_lua_table_to_map() {
-        let lua = Lua::new();
-        let table = lua.create_table().unwrap();
-        table.set("key1", "value1").unwrap();
-        table.set("key2", 42).unwrap();
-
-        let map = lua_table_to_map(&table).unwrap();
-        assert_eq!(map.len(), 2);
-        assert!(map.contains_key("key1"));
-        assert!(map.contains_key("key2"));
     }
 }

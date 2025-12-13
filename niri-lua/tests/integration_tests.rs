@@ -6,67 +6,12 @@
 
 use niri_lua::LuaRuntime;
 
-fn create_runtime() -> LuaRuntime {
-    let runtime = LuaRuntime::new().expect("Failed to create runtime");
-    // Register component to get __niri_format_value (required for execute_string)
-    runtime
-        .register_component(|_, _| Ok(()))
-        .expect("Failed to register component");
-    runtime
-}
+mod common;
+use common::create_runtime;
 
 // ========================================================================
 // BASIC LUA EXECUTION TESTS
 // ========================================================================
-
-#[test]
-fn test_basic_arithmetic() {
-    let runtime = create_runtime();
-    let (output, success) = runtime.execute_string("return 10 + 20");
-    assert!(success, "Arithmetic should succeed");
-    assert!(output.contains("30"), "Output: {}", output);
-}
-
-#[test]
-fn test_string_operations() {
-    let runtime = create_runtime();
-    let (output, success) =
-        runtime.execute_string("return string.upper('hello') .. ' ' .. string.lower('WORLD')");
-    assert!(success, "String operations should succeed");
-    assert!(output.contains("HELLO"), "Output: {}", output);
-    assert!(output.contains("world"), "Output: {}", output);
-}
-
-#[test]
-fn test_table_creation_and_access() {
-    let runtime = create_runtime();
-    let code = r#"
-        local t = {a = 1, b = 2, c = 3}
-        local sum = 0
-        for k, v in pairs(t) do
-            sum = sum + v
-        end
-        return sum
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "Table operations should succeed");
-    assert!(output.contains("6"), "Output: {}", output);
-}
-
-#[test]
-fn test_function_definition_and_call() {
-    let runtime = create_runtime();
-    let code = r#"
-        local function factorial(n)
-            if n <= 1 then return 1 end
-            return n * factorial(n - 1)
-        end
-        return factorial(5)
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "Functions should work");
-    assert!(output.contains("120"), "Output: {}", output);
-}
 
 #[test]
 fn test_closure_capture() {
@@ -95,34 +40,6 @@ fn test_closure_capture() {
 // ========================================================================
 
 #[test]
-fn test_syntax_error_recovery() {
-    let runtime = create_runtime();
-
-    // First: syntax error
-    let (_, success1) = runtime.execute_string("return 1 +");
-    assert!(!success1, "Syntax error should fail");
-
-    // Second: runtime should still work
-    let (output2, success2) = runtime.execute_string("return 42");
-    assert!(success2, "Runtime should recover after syntax error");
-    assert!(output2.contains("42"), "Output: {}", output2);
-}
-
-#[test]
-fn test_runtime_error_recovery() {
-    let runtime = create_runtime();
-
-    // First: runtime error
-    let (_, success1) = runtime.execute_string("error('test error')");
-    assert!(!success1, "Runtime error should fail");
-
-    // Second: runtime should still work
-    let (output2, success2) = runtime.execute_string("return 'recovered'");
-    assert!(success2, "Runtime should recover after runtime error");
-    assert!(output2.contains("recovered"), "Output: {}", output2);
-}
-
-#[test]
 fn test_type_error_detection() {
     let runtime = create_runtime();
     let (output, success) = runtime.execute_string("return 'string' + 5");
@@ -132,36 +49,6 @@ fn test_type_error_detection() {
         "Error message should be descriptive: {}",
         output
     );
-}
-
-#[test]
-fn test_nil_indexing_error() {
-    let runtime = create_runtime();
-    let (output, success) = runtime.execute_string("local x = nil; return x.field");
-    assert!(!success, "Nil indexing should fail");
-    assert!(
-        output.contains("nil") || output.contains("Error"),
-        "Error should mention nil: {}",
-        output
-    );
-}
-
-#[test]
-fn test_pcall_error_protection() {
-    let runtime = create_runtime();
-    let code = r#"
-        local ok, err = pcall(function()
-            error("protected error")
-        end)
-        if not ok then
-            return "caught"
-        else
-            return "not caught"
-        end
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "pcall should protect errors");
-    assert!(output.contains("caught"), "Output: {}", output);
 }
 
 // ========================================================================
@@ -205,82 +92,9 @@ fn test_for_loop_numeric() {
     assert!(output.contains("5050"), "Output: {}", output); // Sum of 1..100
 }
 
-#[test]
-fn test_while_loop() {
-    let runtime = create_runtime();
-    let code = r#"
-        local i = 1
-        local sum = 0
-        while i <= 10 do
-            sum = sum + i
-            i = i + 1
-        end
-        return sum
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "While loop should work");
-    assert!(output.contains("55"), "Output: {}", output);
-}
-
-#[test]
-fn test_repeat_until_loop() {
-    let runtime = create_runtime();
-    let code = r#"
-        local i = 0
-        local sum = 0
-        repeat
-            i = i + 1
-            sum = sum + i
-        until i >= 5
-        return sum
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "Repeat-until should work");
-    assert!(output.contains("15"), "Output: {}", output);
-}
-
 // ========================================================================
 // STANDARD LIBRARY TESTS
 // ========================================================================
-
-#[test]
-fn test_math_library_functions() {
-    let runtime = create_runtime();
-    let code = r#"
-        return math.floor(3.7) + math.ceil(2.1) + math.abs(-5)
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "Math library should work");
-    assert!(output.contains("11"), "Output: {}", output); // 3 + 3 + 5
-}
-
-#[test]
-fn test_string_library_operations() {
-    let runtime = create_runtime();
-    let code = r#"
-        local s = "hello world"
-        return string.len(s) .. " " .. string.upper(string.sub(s, 1, 5))
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "String library should work");
-    assert!(output.contains("11"), "Output: {}", output);
-    assert!(output.contains("HELLO"), "Output: {}", output);
-}
-
-#[test]
-fn test_table_library_operations() {
-    let runtime = create_runtime();
-    let code = r#"
-        local t = {}
-        for i = 1, 5 do
-            table.insert(t, i * 2)
-        end
-        return table.concat(t, ",")
-    "#;
-    let (output, success) = runtime.execute_string(code);
-    assert!(success, "Table library should work");
-    assert!(output.contains("2,4,6,8,10"), "Output: {}", output);
-}
 
 // ========================================================================
 // EDGE CASE TESTS: NUMERIC VALUES

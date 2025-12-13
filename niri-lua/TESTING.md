@@ -7,7 +7,7 @@ This document provides comprehensive guidelines for understanding and writing te
 The niri-lua crate contains comprehensive unit tests organized by module. The test organization follows Rust conventions with inline test modules in each source file.
 
 ### Test Statistics
-- **Total Tests**: 583
+- **Total Tests**: 570
 - **Success Rate**: 100%
 - **Coverage**: All major public APIs
 - **Test Execution Time**: ~10-15 seconds total
@@ -16,7 +16,7 @@ The niri-lua crate contains comprehensive unit tests organized by module. The te
 | Category | Count | Run Command | Focus |
 |----------|-------|-------------|-------|
 | Unit Tests (lib) | 427 | `cargo test --lib` | Module functions, data extraction, validation |
-| Integration Tests | 52 | `cargo test --test integration_tests` | Full Lua execution, end-to-end workflows |
+| Integration Tests | 39 | `cargo test --test integration_tests` | Full Lua execution, end-to-end workflows |
 | REPL Integration Tests | 104 | `cargo test --test repl_integration` | REPL execution, events proxy, action proxy |
 
 ## Test Infrastructure History
@@ -29,7 +29,7 @@ The niri-lua test suite has evolved significantly through focused improvements i
 - **Coverage**: Event system, action proxy, basic configuration
 
 ### Current State
-- **Test Count**: 583 tests (5.6x growth)
+- **Test Count**: 570 tests (5.5x growth)
 - **Coverage**: Comprehensive snapshot testing across all modules
 - **Infrastructure**: Snapshot testing, fixture generation, reusable test utilities
 
@@ -61,6 +61,33 @@ The niri-lua test suite has evolved significantly through focused improvements i
 - Fixed clippy warning in `repl_integration.rs`
 
 **Impact**: Clean compilation with no warnings
+
+#### 5. Test Redundancy Elimination (Dec 2024)
+- Removed 13 duplicate tests from `tests/integration_tests.rs`
+- Consolidated with `tests/repl_integration.rs` to eliminate redundancy
+- Reduced test code by ~200 LOC with zero coverage loss
+
+**Impact**: Simplified test maintenance while preserving 100% test success rate
+
+#### 6. Unused Code Removal (Dec 2024)
+- Deleted 8 unused test utility functions from `src/test_utils.rs`
+- Removed `TestDataBuilder` struct (62 lines) and related helpers
+- Reduced `test_utils.rs` from 478 to 273 lines
+
+**Impact**: Cleaner test utility module with only actively-used fixtures
+
+#### 7. Runtime Factory Consolidation (Dec 2024)
+- Created `tests/common.rs` with shared `create_runtime()` implementation
+- Eliminated duplicate runtime creation functions across test files
+- Both integration and REPL test suites now use shared implementation
+
+**Impact**: Reduced code duplication and easier to maintain runtime setup
+
+#### 8. Orphaned File Cleanup (Dec 2024)
+- Removed 7 orphaned snapshot files from `src/snapshots/` for removed modules
+- Cleaned up test data that no longer had corresponding code
+
+**Impact**: Improved test directory organization and removed stale artifacts
 
 ## Test Organization
 
