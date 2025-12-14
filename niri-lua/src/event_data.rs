@@ -401,15 +401,18 @@ mod tests {
         let event = WindowEventData::Open { window };
 
         let table = event.to_lua(&lua).unwrap();
-        
+
         // Snapshot the structure
         let event_type: String = table.get("type").unwrap();
         let window_table: Table = table.get("window").unwrap();
         let window_id: u64 = window_table.get("id").unwrap();
         let has_title = window_table.contains_key("title").unwrap();
         let has_app_id = window_table.contains_key("app_id").unwrap();
-        
-        insta::assert_debug_snapshot!("window_open_event", (event_type, window_id, has_title, has_app_id));
+
+        insta::assert_debug_snapshot!(
+            "window_open_event",
+            (event_type, window_id, has_title, has_app_id)
+        );
     }
 
     #[test]
@@ -431,16 +434,19 @@ mod tests {
         let event = WorkspaceEventData::Activate { workspace, output };
 
         let table = event.to_lua(&lua).unwrap();
-        
+
         let event_type: String = table.get("type").unwrap();
         let workspace_table: Table = table.get("workspace").unwrap();
         let output_table: Table = table.get("output").unwrap();
-        
+
         let workspace_id: u64 = workspace_table.get("id").unwrap();
         let workspace_name: Option<String> = workspace_table.get("name").ok();
         let output_name: String = output_table.get("name").unwrap();
-        
-        insta::assert_debug_snapshot!("workspace_activate_event", (event_type, workspace_id, workspace_name, output_name));
+
+        insta::assert_debug_snapshot!(
+            "workspace_activate_event",
+            (event_type, workspace_id, workspace_name, output_name)
+        );
     }
 
     #[test]
@@ -461,14 +467,17 @@ mod tests {
         let event = MonitorEventData::Connect { output };
 
         let table = event.to_lua(&lua).unwrap();
-        
+
         let event_type: String = table.get("type").unwrap();
         let output_table: Table = table.get("output").unwrap();
         let output_name: String = output_table.get("name").unwrap();
         let output_make: String = output_table.get("make").unwrap();
         let output_model: String = output_table.get("model").unwrap();
-        
-        insta::assert_debug_snapshot!("monitor_connect_event", (event_type, output_name, output_make, output_model));
+
+        insta::assert_debug_snapshot!(
+            "monitor_connect_event",
+            (event_type, output_name, output_make, output_model)
+        );
     }
 
     #[test]
@@ -488,10 +497,10 @@ mod tests {
         let event = LayoutEventData::ModeChanged { is_floating: true };
 
         let table = event.to_lua(&lua).unwrap();
-        
+
         let event_type: String = table.get("type").unwrap();
         let is_floating: bool = table.get("is_floating").unwrap();
-        
+
         insta::assert_debug_snapshot!("layout_mode_changed_event", (event_type, is_floating));
     }
 
@@ -502,11 +511,11 @@ mod tests {
         let event = LayoutEventData::WindowAdded { window };
 
         let table = event.to_lua(&lua).unwrap();
-        
+
         let event_type: String = table.get("type").unwrap();
         let window_table: Table = table.get("window").unwrap();
         let window_id: u64 = window_table.get("id").unwrap();
-        
+
         insta::assert_debug_snapshot!("layout_window_added_event", (event_type, window_id));
     }
 
@@ -516,7 +525,9 @@ mod tests {
         let workspace = create_test_workspace();
         let output = create_test_output();
 
-        let window_event = EventData::Window(WindowEventData::Open { window: window.clone() });
+        let window_event = EventData::Window(WindowEventData::Open {
+            window: window.clone(),
+        });
         let workspace_event = EventData::Workspace(WorkspaceEventData::Deactivate { workspace });
         let monitor_event = EventData::Monitor(MonitorEventData::Connect { output });
         let layout_event = EventData::Layout(LayoutEventData::ModeChanged { is_floating: false });
@@ -536,9 +547,15 @@ mod tests {
         let lua = Lua::new();
         let window = create_test_window();
 
-        let open = WindowEventData::Open { window: window.clone() };
-        let close = WindowEventData::Close { window: window.clone() };
-        let focus = WindowEventData::Focus { window: window.clone() };
+        let open = WindowEventData::Open {
+            window: window.clone(),
+        };
+        let close = WindowEventData::Close {
+            window: window.clone(),
+        };
+        let focus = WindowEventData::Focus {
+            window: window.clone(),
+        };
         let blur = WindowEventData::Blur { window };
 
         let open_type: String = open.to_lua(&lua).unwrap().get("type").unwrap();
@@ -546,7 +563,10 @@ mod tests {
         let focus_type: String = focus.to_lua(&lua).unwrap().get("type").unwrap();
         let blur_type: String = blur.to_lua(&lua).unwrap().get("type").unwrap();
 
-        insta::assert_debug_snapshot!("window_event_types", (open_type, close_type, focus_type, blur_type));
+        insta::assert_debug_snapshot!(
+            "window_event_types",
+            (open_type, close_type, focus_type, blur_type)
+        );
     }
 
     // ========================================================================

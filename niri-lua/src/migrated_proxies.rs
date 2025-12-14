@@ -11,8 +11,11 @@
 //! - [x] HotkeyOverlayConfigProxy - migrated from HotkeyOverlayProxy
 //! - [x] ConfigNotificationConfigProxy - migrated from ConfigNotificationProxy
 //! - [x] XwaylandSatelliteConfigProxy - migrated from XwaylandSatelliteProxy
+//! - [x] TouchpadConfigProxy - migrated from TouchpadProxy
+//! - [x] KeyboardConfigProxy - migrated from KeyboardProxy
 //! - [ ] Other proxies - pending
 
+use niri_config::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap, TrackLayout};
 use niri_config::{Color, FloatOrInt};
 use niri_lua_derive::LuaConfigProxy;
 
@@ -89,7 +92,11 @@ pub struct ClipboardConfig {
 /// config.hotkey_overlay.hide_not_bound = true
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "hotkey_overlay", dirty = "HotkeyOverlay")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "hotkey_overlay",
+    dirty = "HotkeyOverlay"
+)]
 pub struct HotkeyOverlayConfig {
     /// Whether to skip showing the overlay at startup.
     #[lua_proxy(field)]
@@ -109,7 +116,11 @@ pub struct HotkeyOverlayConfig {
 /// config.config_notification.disable_failed = true
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "config_notification", dirty = "ConfigNotification")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "config_notification",
+    dirty = "ConfigNotification"
+)]
 pub struct ConfigNotificationConfig {
     /// Whether to disable notifications when config loading fails.
     #[lua_proxy(field)]
@@ -128,7 +139,11 @@ pub struct ConfigNotificationConfig {
 /// config.xwayland_satellite.path = "/usr/bin/xwayland-satellite"
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "xwayland_satellite", dirty = "XwaylandSatellite")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "xwayland_satellite",
+    dirty = "XwaylandSatellite"
+)]
 pub struct XwaylandSatelliteConfig {
     /// Whether xwayland-satellite is disabled.
     #[lua_proxy(field)]
@@ -215,7 +230,11 @@ pub struct StrutsConfig {
 /// config.input.keyboard.xkb.options = "grp:alt_shift_toggle"
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "input.keyboard.xkb", dirty = "Keyboard")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "input.keyboard.xkb",
+    dirty = "Keyboard"
+)]
 pub struct XkbConfig {
     /// XKB layout name(s).
     #[lua_proxy(field)]
@@ -236,6 +255,41 @@ pub struct XkbConfig {
     /// XKB options.
     #[lua_proxy(field)]
     pub options: Option<String>,
+}
+
+/// Proxy for keyboard input configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.input.keyboard.repeat_delay = 600
+/// config.input.keyboard.repeat_rate = 25
+/// config.input.keyboard.numlock = true
+/// config.input.keyboard.track_layout = "global"  -- or "window"
+/// config.input.keyboard.xkb.layout = "us,ru"
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "input.keyboard", dirty = "Keyboard")]
+pub struct KeyboardConfig {
+    /// Key repeat delay in milliseconds.
+    #[lua_proxy(field)]
+    pub repeat_delay: u16,
+
+    /// Key repeat rate (repeats per second).
+    #[lua_proxy(field)]
+    pub repeat_rate: u8,
+
+    /// Whether to enable numlock on startup.
+    #[lua_proxy(field)]
+    pub numlock: bool,
+
+    /// Keyboard layout tracking mode ("global" or "window").
+    #[lua_proxy(field)]
+    pub track_layout: TrackLayout,
+
+    /// XKB keyboard configuration (layout, variant, options, etc).
+    #[lua_proxy(nested)]
+    pub xkb: XkbConfig,
 }
 
 /// Proxy for mouse input configuration.
@@ -331,7 +385,11 @@ pub struct TouchConfig {
 ///
 /// Controls scroll behavior when dragging windows to screen edges.
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "gestures.dnd_edge_view_scroll", dirty = "Gestures")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "gestures.dnd_edge_view_scroll",
+    dirty = "Gestures"
+)]
 pub struct DndEdgeViewScrollConfig {
     /// Width of the trigger zone at the edge.
     #[lua_proxy(field)]
@@ -350,7 +408,11 @@ pub struct DndEdgeViewScrollConfig {
 ///
 /// Controls workspace switching behavior when dragging windows to screen edges.
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "gestures.dnd_edge_workspace_switch", dirty = "Gestures")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "gestures.dnd_edge_workspace_switch",
+    dirty = "Gestures"
+)]
 pub struct DndEdgeWorkspaceSwitchConfig {
     /// Height of the trigger zone at the edge.
     #[lua_proxy(field)]
@@ -369,7 +431,11 @@ pub struct DndEdgeWorkspaceSwitchConfig {
 ///
 /// Controls hot corner behavior at screen edges.
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "gestures.hot_corners", dirty = "Gestures")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "gestures.hot_corners",
+    dirty = "Gestures"
+)]
 pub struct HotCornersConfig {
     /// Whether hot corners are disabled.
     #[lua_proxy(field)]
@@ -403,7 +469,11 @@ pub struct HotCornersConfig {
 /// config.recent_windows.previews.max_scale = 0.2
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "recent_windows.previews", dirty = "RecentWindows")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "recent_windows.previews",
+    dirty = "RecentWindows"
+)]
 pub struct MruPreviewsConfig {
     /// Maximum height of preview thumbnails.
     #[lua_proxy(field)]
@@ -457,7 +527,11 @@ pub struct InsertHintConfig {
 /// config.recent_windows.highlight.corner_radius = 8.0
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "recent_windows.highlight", dirty = "RecentWindows")]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "recent_windows.highlight",
+    dirty = "RecentWindows"
+)]
 pub struct MruHighlightConfig {
     /// Color of highlight for active windows.
     #[lua_proxy(field)]
@@ -474,4 +548,101 @@ pub struct MruHighlightConfig {
     /// Corner radius of the highlight.
     #[lua_proxy(field)]
     pub corner_radius: f64,
+}
+
+/// Proxy for touchpad input configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Disable touchpad
+/// config.input.touchpad.off = true
+///
+/// -- Enable tap-to-click
+/// config.input.touchpad.tap = true
+///
+/// -- Enable natural scrolling
+/// config.input.touchpad.natural_scroll = true
+///
+/// -- Set acceleration speed
+/// config.input.touchpad.accel_speed = 0.5
+///
+/// -- Configure scroll method
+/// config.input.touchpad.scroll_method = "two-finger"
+///
+/// -- Configure click method
+/// config.input.touchpad.click_method = "clickfinger"
+///
+/// -- Configure tap button map
+/// config.input.touchpad.tap_button_map = "left-right-middle"
+///
+/// -- Configure acceleration profile
+/// config.input.touchpad.accel_profile = "adaptive"
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "input.touchpad", dirty = "Input")]
+pub struct TouchpadConfig {
+    /// Whether the touchpad is disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Whether tap-to-click is enabled.
+    #[lua_proxy(field)]
+    pub tap: bool,
+
+    /// Whether disable-while-typing is enabled.
+    #[lua_proxy(field)]
+    pub dwt: bool,
+
+    /// Whether disable-while-trackpointing is enabled.
+    #[lua_proxy(field)]
+    pub dwtp: bool,
+
+    /// Whether natural scroll is enabled.
+    #[lua_proxy(field)]
+    pub natural_scroll: bool,
+
+    /// Whether left-handed mode is enabled.
+    #[lua_proxy(field)]
+    pub left_handed: bool,
+
+    /// Whether middle button emulation is enabled.
+    #[lua_proxy(field)]
+    pub middle_emulation: bool,
+
+    /// Whether drag lock is enabled.
+    #[lua_proxy(field)]
+    pub drag_lock: bool,
+
+    /// Whether touchpad is disabled when external mouse is connected.
+    #[lua_proxy(field)]
+    pub disabled_on_external_mouse: bool,
+
+    /// Acceleration speed (-1.0 to 1.0).
+    #[lua_proxy(field)]
+    pub accel_speed: FloatOrInt<-1, 1>,
+
+    /// Scroll method configuration.
+    ///
+    /// Valid values: "no-scroll", "two-finger", "edge", "on-button-down", or nil.
+    #[lua_proxy(field)]
+    pub scroll_method: Option<ScrollMethod>,
+
+    /// Click method configuration.
+    ///
+    /// Valid values: "button-areas", "clickfinger", or nil.
+    #[lua_proxy(field)]
+    pub click_method: Option<ClickMethod>,
+
+    /// Tap button map configuration.
+    ///
+    /// Valid values: "left-right-middle", "left-middle-right", or nil.
+    #[lua_proxy(field)]
+    pub tap_button_map: Option<TapButtonMap>,
+
+    /// Acceleration profile configuration.
+    ///
+    /// Valid values: "adaptive", "flat", or nil.
+    #[lua_proxy(field)]
+    pub accel_profile: Option<AccelProfile>,
 }

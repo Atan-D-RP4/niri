@@ -42,9 +42,9 @@ use crate::extractors::{
 use crate::migrated_proxies::{
     ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy, DebugConfigProxy,
     DndEdgeViewScrollConfigProxy, DndEdgeWorkspaceSwitchConfigProxy, HotCornersConfigProxy,
-    HotkeyOverlayConfigProxy, InsertHintConfigProxy, MouseConfigProxy, MruHighlightConfigProxy,
-    MruPreviewsConfigProxy, StrutsConfigProxy, TouchConfigProxy, TrackpointConfigProxy,
-    XkbConfigProxy, XwaylandSatelliteConfigProxy,
+    HotkeyOverlayConfigProxy, InsertHintConfigProxy, KeyboardConfigProxy, MouseConfigProxy,
+    MruHighlightConfigProxy, MruPreviewsConfigProxy, StrutsConfigProxy, TouchConfigProxy,
+    TouchpadConfigProxy, TrackpointConfigProxy, XwaylandSatelliteConfigProxy,
 };
 
 /// Macro to generate simple scalar field getter/setter methods for config proxies.
@@ -68,50 +68,6 @@ macro_rules! config_field_methods {
             });
             $fields.add_field_method_set($name, |_, this, value: $ty| {
                 this.config.lock().unwrap().$($path).+ = value;
-                this.dirty.lock().unwrap().$dirty_flag = true;
-                Ok(())
-            });
-        )*
-    };
-}
-
-/// Macro to generate clone-based field getter/setter methods for config proxies.
-///
-/// Use this for String and Option<String> fields that need .clone() on get.
-///
-/// # Usage
-/// ```ignore
-/// config_field_methods_clone!(fields, dirty_flag,
-///     "field_name" => [config_path.field]: String,
-/// );
-/// ```
-macro_rules! config_field_methods_clone {
-    ($fields:expr, $dirty_flag:ident,
-     $( $name:literal => [ $($path:tt).+ ] : $ty:ty ),* $(,)?) => {
-        $(
-            $fields.add_field_method_get($name, |_, this| {
-                Ok(this.config.lock().unwrap().$($path).+.clone())
-            });
-            $fields.add_field_method_set($name, |_, this, value: $ty| {
-                this.config.lock().unwrap().$($path).+ = value;
-                this.dirty.lock().unwrap().$dirty_flag = true;
-                Ok(())
-            });
-        )*
-    };
-}
-
-/// Macro for FloatOrInt wrapper fields (unwraps .0 on get, wraps in FloatOrInt on set).
-macro_rules! config_field_methods_float_or_int {
-    ($fields:expr, $dirty_flag:ident,
-     $( $name:literal => [ $($path:tt).+ ] ),* $(,)?) => {
-        $(
-            $fields.add_field_method_get($name, |_, this| {
-                Ok(this.config.lock().unwrap().$($path).+.0)
-            });
-            $fields.add_field_method_set($name, |_, this, value: f64| {
-                use niri_config::FloatOrInt;
-                this.config.lock().unwrap().$($path).+ = FloatOrInt(value);
                 this.dirty.lock().unwrap().$dirty_flag = true;
                 Ok(())
             });
@@ -1681,17 +1637,13 @@ impl UserData for InputProxy {
 
         // Nested device proxies
         fields.add_field_method_get("keyboard", |_, this| {
-            Ok(KeyboardProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(KeyboardConfigProxy::new(state))
         });
 
         fields.add_field_method_get("touchpad", |_, this| {
-            Ok(TouchpadProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(TouchpadConfigProxy::new(state))
         });
 
         fields.add_field_method_get("mouse", |_, this| {
@@ -1707,211 +1659,6 @@ impl UserData for InputProxy {
         fields.add_field_method_get("touch", |_, this| {
             let state = ConfigState::new(this.config.clone(), this.dirty.clone());
             Ok(TouchConfigProxy::new(state))
-        });
-    }
-}
-
-/// Proxy for keyboard config section.
-#[derive(Clone)]
-struct KeyboardProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for KeyboardProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("repeat_delay", |_, this| {
-            Ok(this.config.lock().unwrap().input.keyboard.repeat_delay)
-        });
-
-        fields.add_field_method_set("repeat_delay", |_, this, value: u16| {
-            this.config.lock().unwrap().input.keyboard.repeat_delay = value;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        config_field_methods!(fields, keyboard,
-            "repeat_delay" => [input.keyboard.repeat_delay]: u16,
-            "repeat_rate" => [input.keyboard.repeat_rate]: u8,
-            "numlock" => [input.keyboard.numlock]: bool,
-        );
-
-        fields.add_field_method_get("track_layout", |_, this| {
-            use niri_config::input::TrackLayout;
-            let value = match this.config.lock().unwrap().input.keyboard.track_layout {
-                TrackLayout::Global => "global",
-                TrackLayout::Window => "window",
-            };
-            Ok(value.to_string())
-        });
-
-        fields.add_field_method_set("track_layout", |_, this, value: String| {
-            use niri_config::input::TrackLayout;
-            let parsed = match value.as_str() {
-                "global" => TrackLayout::Global,
-                "window" => TrackLayout::Window,
-                _ => {
-                    return Err(mlua::Error::external(format!(
-                        "Invalid track_layout value: {}. Expected 'global' or 'window'",
-                        value
-                    )));
-                }
-            };
-            this.config.lock().unwrap().input.keyboard.track_layout = parsed;
-            this.dirty.lock().unwrap().keyboard = true;
-            Ok(())
-        });
-
-        // XKB nested proxy
-        fields.add_field_method_get("xkb", |_, this| {
-            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
-            Ok(XkbConfigProxy::new(state))
-        });
-    }
-}
-
-/// Proxy for touchpad config section.
-#[derive(Clone)]
-struct TouchpadProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for TouchpadProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, input,
-            "off" => [input.touchpad.off]: bool,
-            "tap" => [input.touchpad.tap]: bool,
-            "dwt" => [input.touchpad.dwt]: bool,
-            "dwtp" => [input.touchpad.dwtp]: bool,
-            "natural_scroll" => [input.touchpad.natural_scroll]: bool,
-            "left_handed" => [input.touchpad.left_handed]: bool,
-            "middle_emulation" => [input.touchpad.middle_emulation]: bool,
-            "drag_lock" => [input.touchpad.drag_lock]: bool,
-            "disabled_on_external_mouse" => [input.touchpad.disabled_on_external_mouse]: bool,
-        );
-        config_field_methods_float_or_int!(fields, input,
-            "accel_speed" => [input.touchpad.accel_speed],
-        );
-
-        // Scroll method (optional enum)
-        fields.add_field_method_get("scroll_method", |_, this| {
-            use niri_config::input::ScrollMethod;
-            let value = match this.config.lock().unwrap().input.touchpad.scroll_method {
-                Some(ScrollMethod::NoScroll) => Some("no-scroll"),
-                Some(ScrollMethod::TwoFinger) => Some("two-finger"),
-                Some(ScrollMethod::Edge) => Some("edge"),
-                Some(ScrollMethod::OnButtonDown) => Some("on-button-down"),
-                None => None,
-            };
-            Ok(value.map(|s| s.to_string()))
-        });
-
-        fields.add_field_method_set("scroll_method", |_, this, value: Option<String>| {
-            use niri_config::input::ScrollMethod;
-            let parsed = match value.as_deref() {
-                Some("no-scroll") => Some(ScrollMethod::NoScroll),
-                Some("two-finger") => Some(ScrollMethod::TwoFinger),
-                Some("edge") => Some(ScrollMethod::Edge),
-                Some("on-button-down") => Some(ScrollMethod::OnButtonDown),
-                None => None,
-                Some(other) => {
-                    return Err(mlua::Error::external(format!(
-                        "Invalid scroll_method: {}. Expected 'no-scroll', 'two-finger', 'edge', or 'on-button-down'",
-                        other
-                    )));
-                }
-            };
-            this.config.lock().unwrap().input.touchpad.scroll_method = parsed;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        // Click method (optional enum)
-        fields.add_field_method_get("click_method", |_, this| {
-            use niri_config::input::ClickMethod;
-            let value = match this.config.lock().unwrap().input.touchpad.click_method {
-                Some(ClickMethod::ButtonAreas) => Some("button-areas"),
-                Some(ClickMethod::Clickfinger) => Some("clickfinger"),
-                None => None,
-            };
-            Ok(value.map(|s| s.to_string()))
-        });
-
-        fields.add_field_method_set("click_method", |_, this, value: Option<String>| {
-            use niri_config::input::ClickMethod;
-            let parsed = match value.as_deref() {
-                Some("button-areas") => Some(ClickMethod::ButtonAreas),
-                Some("clickfinger") => Some(ClickMethod::Clickfinger),
-                None => None,
-                Some(other) => {
-                    return Err(mlua::Error::external(format!(
-                        "Invalid click_method: {}. Expected 'button-areas' or 'clickfinger'",
-                        other
-                    )));
-                }
-            };
-            this.config.lock().unwrap().input.touchpad.click_method = parsed;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        // Tap button map (optional enum)
-        fields.add_field_method_get("tap_button_map", |_, this| {
-            use niri_config::input::TapButtonMap;
-            let value = match this.config.lock().unwrap().input.touchpad.tap_button_map {
-                Some(TapButtonMap::LeftRightMiddle) => Some("left-right-middle"),
-                Some(TapButtonMap::LeftMiddleRight) => Some("left-middle-right"),
-                None => None,
-            };
-            Ok(value.map(|s| s.to_string()))
-        });
-
-        fields.add_field_method_set("tap_button_map", |_, this, value: Option<String>| {
-            use niri_config::input::TapButtonMap;
-            let parsed = match value.as_deref() {
-                Some("left-right-middle") => Some(TapButtonMap::LeftRightMiddle),
-                Some("left-middle-right") => Some(TapButtonMap::LeftMiddleRight),
-                None => None,
-                Some(other) => {
-                    return Err(mlua::Error::external(format!(
-                        "Invalid tap_button_map: {}. Expected 'left-right-middle' or 'left-middle-right'",
-                        other
-                    )));
-                }
-            };
-            this.config.lock().unwrap().input.touchpad.tap_button_map = parsed;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
-        });
-
-        // Accel profile (optional enum)
-        fields.add_field_method_get("accel_profile", |_, this| {
-            use niri_config::input::AccelProfile;
-            let value = match this.config.lock().unwrap().input.touchpad.accel_profile {
-                Some(AccelProfile::Adaptive) => Some("adaptive"),
-                Some(AccelProfile::Flat) => Some("flat"),
-                None => None,
-            };
-            Ok(value.map(|s| s.to_string()))
-        });
-
-        fields.add_field_method_set("accel_profile", |_, this, value: Option<String>| {
-            use niri_config::input::AccelProfile;
-            let parsed = match value.as_deref() {
-                Some("adaptive") => Some(AccelProfile::Adaptive),
-                Some("flat") => Some(AccelProfile::Flat),
-                None => None,
-                Some(other) => {
-                    return Err(mlua::Error::external(format!(
-                        "Invalid accel_profile: {}. Expected 'adaptive' or 'flat'",
-                        other
-                    )));
-                }
-            };
-            this.config.lock().unwrap().input.touchpad.accel_profile = parsed;
-            this.dirty.lock().unwrap().input = true;
-            Ok(())
         });
     }
 }
@@ -2030,7 +1777,6 @@ impl UserData for GesturesProxy {
         });
     }
 }
-
 
 /// Proxy for recent_windows (MRU) config section.
 #[derive(Clone)]

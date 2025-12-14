@@ -405,6 +405,131 @@ impl<const MIN: i32, const MAX: i32> LuaFieldConvert for FloatOrInt<MIN, MAX> {
     }
 }
 
+// ============================================================================
+// Input Device Enum Implementations
+// ============================================================================
+
+use niri_config::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap, TrackLayout};
+
+impl LuaFieldConvert for AccelProfile {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            AccelProfile::Adaptive => "adaptive",
+            AccelProfile::Flat => "flat",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "adaptive" => Ok(AccelProfile::Adaptive),
+            "flat" => Ok(AccelProfile::Flat),
+            _ => Err(LuaError::external(format!(
+                "Invalid accel_profile '{}'. Expected: adaptive, flat",
+                value
+            ))),
+        }
+    }
+}
+
+impl LuaFieldConvert for ClickMethod {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            ClickMethod::ButtonAreas => "button-areas",
+            ClickMethod::Clickfinger => "clickfinger",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "button-areas" => Ok(ClickMethod::ButtonAreas),
+            "clickfinger" => Ok(ClickMethod::Clickfinger),
+            _ => Err(LuaError::external(format!(
+                "Invalid click_method '{}'. Expected: button-areas, clickfinger",
+                value
+            ))),
+        }
+    }
+}
+
+impl LuaFieldConvert for ScrollMethod {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            ScrollMethod::NoScroll => "no-scroll",
+            ScrollMethod::TwoFinger => "two-finger",
+            ScrollMethod::Edge => "edge",
+            ScrollMethod::OnButtonDown => "on-button-down",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "no-scroll" => Ok(ScrollMethod::NoScroll),
+            "two-finger" => Ok(ScrollMethod::TwoFinger),
+            "edge" => Ok(ScrollMethod::Edge),
+            "on-button-down" => Ok(ScrollMethod::OnButtonDown),
+            _ => Err(LuaError::external(format!(
+                "Invalid scroll_method '{}'. Expected: no-scroll, two-finger, edge, on-button-down",
+                value
+            ))),
+        }
+    }
+}
+
+impl LuaFieldConvert for TapButtonMap {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            TapButtonMap::LeftRightMiddle => "left-right-middle",
+            TapButtonMap::LeftMiddleRight => "left-middle-right",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "left-right-middle" => Ok(TapButtonMap::LeftRightMiddle),
+            "left-middle-right" => Ok(TapButtonMap::LeftMiddleRight),
+            _ => Err(LuaError::external(format!(
+                "Invalid tap_button_map '{}'. Expected: left-right-middle, left-middle-right",
+                value
+            ))),
+        }
+    }
+}
+
+impl LuaFieldConvert for TrackLayout {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            TrackLayout::Global => "global",
+            TrackLayout::Window => "window",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "global" => Ok(TrackLayout::Global),
+            "window" => Ok(TrackLayout::Window),
+            _ => Err(LuaError::external(format!(
+                "Invalid track_layout '{}'. Expected: global, window",
+                value
+            ))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,5 +666,129 @@ mod tests {
             <FloatOrInt<0, 100> as LuaFieldConvert>::from_lua(3.14).unwrap(),
             FloatOrInt::<0, 100>(3.14)
         );
+    }
+
+    #[test]
+    fn test_accel_profile_convert() {
+        use niri_config::input::AccelProfile;
+
+        let adaptive = AccelProfile::Adaptive;
+        assert_eq!(LuaFieldConvert::to_lua(&adaptive), "adaptive");
+        assert_eq!(
+            <AccelProfile as LuaFieldConvert>::from_lua("adaptive".to_string()).unwrap(),
+            AccelProfile::Adaptive
+        );
+
+        let flat = AccelProfile::Flat;
+        assert_eq!(LuaFieldConvert::to_lua(&flat), "flat");
+        assert_eq!(
+            <AccelProfile as LuaFieldConvert>::from_lua("flat".to_string()).unwrap(),
+            AccelProfile::Flat
+        );
+
+        assert!(<AccelProfile as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_click_method_convert() {
+        use niri_config::input::ClickMethod;
+
+        let button_areas = ClickMethod::ButtonAreas;
+        assert_eq!(LuaFieldConvert::to_lua(&button_areas), "button-areas");
+        assert_eq!(
+            <ClickMethod as LuaFieldConvert>::from_lua("button-areas".to_string()).unwrap(),
+            ClickMethod::ButtonAreas
+        );
+
+        let clickfinger = ClickMethod::Clickfinger;
+        assert_eq!(LuaFieldConvert::to_lua(&clickfinger), "clickfinger");
+        assert_eq!(
+            <ClickMethod as LuaFieldConvert>::from_lua("clickfinger".to_string()).unwrap(),
+            ClickMethod::Clickfinger
+        );
+
+        assert!(<ClickMethod as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_scroll_method_convert() {
+        use niri_config::input::ScrollMethod;
+
+        assert_eq!(
+            LuaFieldConvert::to_lua(&ScrollMethod::NoScroll),
+            "no-scroll"
+        );
+        assert_eq!(
+            <ScrollMethod as LuaFieldConvert>::from_lua("no-scroll".to_string()).unwrap(),
+            ScrollMethod::NoScroll
+        );
+
+        assert_eq!(
+            LuaFieldConvert::to_lua(&ScrollMethod::TwoFinger),
+            "two-finger"
+        );
+        assert_eq!(
+            <ScrollMethod as LuaFieldConvert>::from_lua("two-finger".to_string()).unwrap(),
+            ScrollMethod::TwoFinger
+        );
+
+        assert_eq!(LuaFieldConvert::to_lua(&ScrollMethod::Edge), "edge");
+        assert_eq!(
+            <ScrollMethod as LuaFieldConvert>::from_lua("edge".to_string()).unwrap(),
+            ScrollMethod::Edge
+        );
+
+        assert_eq!(
+            LuaFieldConvert::to_lua(&ScrollMethod::OnButtonDown),
+            "on-button-down"
+        );
+        assert_eq!(
+            <ScrollMethod as LuaFieldConvert>::from_lua("on-button-down".to_string()).unwrap(),
+            ScrollMethod::OnButtonDown
+        );
+
+        assert!(<ScrollMethod as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_tap_button_map_convert() {
+        use niri_config::input::TapButtonMap;
+
+        let lrm = TapButtonMap::LeftRightMiddle;
+        assert_eq!(LuaFieldConvert::to_lua(&lrm), "left-right-middle");
+        assert_eq!(
+            <TapButtonMap as LuaFieldConvert>::from_lua("left-right-middle".to_string()).unwrap(),
+            TapButtonMap::LeftRightMiddle
+        );
+
+        let lmr = TapButtonMap::LeftMiddleRight;
+        assert_eq!(LuaFieldConvert::to_lua(&lmr), "left-middle-right");
+        assert_eq!(
+            <TapButtonMap as LuaFieldConvert>::from_lua("left-middle-right".to_string()).unwrap(),
+            TapButtonMap::LeftMiddleRight
+        );
+
+        assert!(<TapButtonMap as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_track_layout_convert() {
+        use niri_config::input::TrackLayout;
+
+        let global = TrackLayout::Global;
+        assert_eq!(LuaFieldConvert::to_lua(&global), "global");
+        assert_eq!(
+            <TrackLayout as LuaFieldConvert>::from_lua("global".to_string()).unwrap(),
+            TrackLayout::Global
+        );
+
+        let window = TrackLayout::Window;
+        assert_eq!(LuaFieldConvert::to_lua(&window), "window");
+        assert_eq!(
+            <TrackLayout as LuaFieldConvert>::from_lua("window".to_string()).unwrap(),
+            TrackLayout::Window
+        );
+
+        assert!(<TrackLayout as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
     }
 }

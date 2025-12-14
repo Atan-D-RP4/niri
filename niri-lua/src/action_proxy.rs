@@ -1092,7 +1092,11 @@ mod tests {
     #[test]
     fn snapshot_action_spawn_with_args() {
         let action = Action::Spawn {
-            command: vec!["firefox".into(), "--new-window".into(), "https://example.com".into()],
+            command: vec![
+                "firefox".into(),
+                "--new-window".into(),
+                "https://example.com".into(),
+            ],
         };
         insta::assert_debug_snapshot!("action_proxy_spawn_with_args", action);
     }

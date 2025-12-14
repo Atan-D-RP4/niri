@@ -150,14 +150,13 @@ impl TimerManager {
     pub fn time_until_next(&self) -> Option<Duration> {
         let now = Instant::now();
         // Peek the heap but validate against current state
-        while let Some(&Reverse((fire_time, id))) = self.fire_queue.peek() {
+        if let Some(&Reverse((fire_time, id))) = self.fire_queue.peek() {
             if let Some(timer) = self.timers.get(&id) {
                 if timer.active && timer.next_fire == Some(fire_time) {
                     return Some(fire_time.saturating_duration_since(now));
                 }
             }
-            // Stale entry - need to clean up (can't mutate in &self)
-            break;
+            // Stale entry - fallback to O(n) scan below
         }
         // Fallback to O(n) scan for correctness
         self.timers

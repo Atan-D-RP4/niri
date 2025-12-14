@@ -115,7 +115,11 @@ fn test_float_precision() {
     assert!(success, "Float math should work");
     // Check that output is close to 0.3 (floating point imprecision)
     let value: f64 = output.parse().unwrap();
-    assert!((value - 0.3).abs() < 0.0001, "Float should be ~0.3, got: {}", value);
+    assert!(
+        (value - 0.3).abs() < 0.0001,
+        "Float should be ~0.3, got: {}",
+        value
+    );
 }
 
 #[test]
@@ -464,7 +468,11 @@ fn test_return_nil() {
     let (output, success) = runtime.execute_string("return nil");
     assert!(success, "Return nil should succeed");
     // Nil typically produces empty output
-    assert!(output.is_empty() || output.contains("nil"), "Output: '{}'", output);
+    assert!(
+        output.is_empty() || output.contains("nil"),
+        "Output: '{}'",
+        output
+    );
 }
 
 #[test]
@@ -472,7 +480,11 @@ fn test_undefined_variable_is_nil() {
     let runtime = create_runtime();
     let (output, success) = runtime.execute_string("return undefined_variable");
     assert!(success, "Undefined variable returns nil");
-    assert!(output.is_empty() || output.contains("nil"), "Output: '{}'", output);
+    assert!(
+        output.is_empty() || output.contains("nil"),
+        "Output: '{}'",
+        output
+    );
 }
 
 // ========================================================================

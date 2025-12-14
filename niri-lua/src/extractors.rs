@@ -1694,13 +1694,16 @@ mod tests {
         let color2 = extract_color("#FF0000FF");
         let color3 = extract_color("#ff0000");
         let color4 = extract_color("#F00");
-        
-        insta::assert_debug_snapshot!("extract_color_valid", (
-            color1.is_some(),
-            color2.is_some(),
-            color3.is_some(),
-            color4.is_some(),
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extract_color_valid",
+            (
+                color1.is_some(),
+                color2.is_some(),
+                color3.is_some(),
+                color4.is_some(),
+            )
+        );
     }
 
     #[test]
@@ -1708,12 +1711,11 @@ mod tests {
         let color1 = extract_color("#GGGGGG");
         let color2 = extract_color("invalid");
         let color3 = extract_color("");
-        
-        insta::assert_debug_snapshot!("extract_color_invalid", (
-            color1.is_none(),
-            color2.is_none(),
-            color3.is_none(),
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extract_color_invalid",
+            (color1.is_none(), color2.is_none(), color3.is_none(),)
+        );
     }
 
     #[test]
@@ -1727,13 +1729,16 @@ mod tests {
         let result = extract_xkb(&table).unwrap();
         assert!(result.is_some());
         let xkb = result.unwrap();
-        
-        insta::assert_debug_snapshot!("extract_xkb_complete", (
-            xkb.layout.clone(),
-            xkb.model.clone(),
-            xkb.variant.clone(),
-            xkb.options.clone(),
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extract_xkb_complete",
+            (
+                xkb.layout.clone(),
+                xkb.model.clone(),
+                xkb.variant.clone(),
+                xkb.options.clone(),
+            )
+        );
     }
 
     #[test]
@@ -1747,12 +1752,15 @@ mod tests {
         let result = extract_touchpad(&table).unwrap();
         assert!(result.is_some());
         let touchpad = result.unwrap();
-        
-        insta::assert_debug_snapshot!("extract_touchpad_config", (
-            touchpad.tap,
-            touchpad.natural_scroll,
-            touchpad.accel_speed.0,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extract_touchpad_config",
+            (
+                touchpad.tap,
+                touchpad.natural_scroll,
+                touchpad.accel_speed.0,
+            )
+        );
     }
 
     #[test]
@@ -1766,11 +1774,11 @@ mod tests {
         let result = extract_focus_ring(&table).unwrap();
         assert!(result.is_some());
         let focus_ring = result.unwrap();
-        
-        insta::assert_debug_snapshot!("extract_focus_ring_config", (
-            focus_ring.off,
-            focus_ring.width,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extract_focus_ring_config",
+            (focus_ring.off, focus_ring.width,)
+        );
     }
 
     #[test]
@@ -1782,11 +1790,11 @@ mod tests {
         let result = extract_animations(&table).unwrap();
         assert!(result.is_some());
         let animations = result.unwrap();
-        
-        insta::assert_debug_snapshot!("extract_animations_config", (
-            animations.off,
-            animations.slowdown,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extract_animations_config",
+            (animations.off, animations.slowdown,)
+        );
     }
 
     #[test]
@@ -1798,7 +1806,7 @@ mod tests {
         let result = extract_animations(&table).unwrap();
         assert!(result.is_some());
         let animations = result.unwrap();
-        
+
         // The "on" flag should override "off"
         insta::assert_debug_snapshot!("extract_animations_on_overrides_off", animations.off);
     }
@@ -1813,11 +1821,11 @@ mod tests {
         let result = extract_environment(&table).unwrap();
         assert!(result.is_some());
         let env = result.unwrap();
-        
+
         // Sort for consistent snapshot
         let mut names: Vec<_> = env.0.iter().map(|v| v.name.clone()).collect();
         names.sort();
-        
+
         insta::assert_debug_snapshot!("extract_environment_var_names", names);
     }
 
@@ -1826,12 +1834,11 @@ mod tests {
         let adaptive = parse_accel_profile("adaptive");
         let flat = parse_accel_profile("flat");
         let invalid = parse_accel_profile("invalid");
-        
-        insta::assert_debug_snapshot!("parse_accel_profile_variants", (
-            adaptive.is_some(),
-            flat.is_some(),
-            invalid.is_none(),
-        ));
+
+        insta::assert_debug_snapshot!(
+            "parse_accel_profile_variants",
+            (adaptive.is_some(), flat.is_some(), invalid.is_none(),)
+        );
     }
 
     #[test]
@@ -1841,14 +1848,17 @@ mod tests {
         let on_button = parse_scroll_method("on_button_down");
         let none = parse_scroll_method("no_scroll");
         let invalid = parse_scroll_method("invalid");
-        
-        insta::assert_debug_snapshot!("parse_scroll_method_variants", (
-            two_finger.is_some(),
-            edge.is_some(),
-            on_button.is_some(),
-            none.is_some(),
-            invalid.is_none(),
-        ));
+
+        insta::assert_debug_snapshot!(
+            "parse_scroll_method_variants",
+            (
+                two_finger.is_some(),
+                edge.is_some(),
+                on_button.is_some(),
+                none.is_some(),
+                invalid.is_none(),
+            )
+        );
     }
 
     // ========================================================================
@@ -1864,15 +1874,18 @@ mod tests {
         let no_hash_invalid = extract_color("GGGGGG");
         let empty = extract_color("");
         let rgb_format = extract_color("rgb(255,0,0)");
-        
-        insta::assert_debug_snapshot!("extractors_color_parsing_errors", (
-            invalid_hex,
-            too_short,
-            too_long,
-            no_hash_invalid,
-            empty,
-            rgb_format,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_color_parsing_errors",
+            (
+                invalid_hex,
+                too_short,
+                too_long,
+                no_hash_invalid,
+                empty,
+                rgb_format,
+            )
+        );
     }
 
     #[test]
@@ -1881,13 +1894,11 @@ mod tests {
         let typo = parse_accel_profile("adptive");
         let uppercase = parse_accel_profile("ADAPTIVE");
         let empty = parse_accel_profile("");
-        
-        insta::assert_debug_snapshot!("extractors_enum_invalid_accel_profile", (
-            invalid,
-            typo,
-            uppercase,
-            empty,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_enum_invalid_accel_profile",
+            (invalid, typo, uppercase, empty,)
+        );
     }
 
     #[test]
@@ -1896,13 +1907,11 @@ mod tests {
         let typo = parse_scroll_method("two_fingers");
         let wrong_case = parse_scroll_method("TwoFinger");
         let empty = parse_scroll_method("");
-        
-        insta::assert_debug_snapshot!("extractors_enum_invalid_scroll_method", (
-            invalid,
-            typo,
-            wrong_case,
-            empty,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_enum_invalid_scroll_method",
+            (invalid, typo, wrong_case, empty,)
+        );
     }
 
     #[test]
@@ -1911,13 +1920,11 @@ mod tests {
         let typo = parse_tap_button_map("left_right_midle");
         let wrong_case = parse_tap_button_map("LRM");
         let empty = parse_tap_button_map("");
-        
-        insta::assert_debug_snapshot!("extractors_enum_invalid_tap_button_map", (
-            invalid,
-            typo,
-            wrong_case,
-            empty,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_enum_invalid_tap_button_map",
+            (invalid, typo, wrong_case, empty,)
+        );
     }
 
     #[test]
@@ -1926,86 +1933,86 @@ mod tests {
         let typo = parse_click_method("button_area");
         let wrong_case = parse_click_method("ButtonAreas");
         let empty = parse_click_method("");
-        
-        insta::assert_debug_snapshot!("extractors_enum_invalid_click_method", (
-            invalid,
-            typo,
-            wrong_case,
-            empty,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_enum_invalid_click_method",
+            (invalid, typo, wrong_case, empty,)
+        );
     }
 
     #[test]
     fn snapshot_extractors_size_parsing_valid() {
         let (lua, _) = create_test_table();
-        
+
         // Proportion size
         let proportion_table = lua.create_table().unwrap();
         proportion_table.set("proportion", 0.5).unwrap();
         let proportion_result = extract_size_change(&proportion_table).unwrap();
-        
+
         // Fixed size
         let fixed_table = lua.create_table().unwrap();
         fixed_table.set("fixed", 1920i64).unwrap();
         let fixed_result = extract_size_change(&fixed_table).unwrap();
-        
-        insta::assert_debug_snapshot!("extractors_size_parsing_valid", (
-            proportion_result,
-            fixed_result,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_size_parsing_valid",
+            (proportion_result, fixed_result,)
+        );
     }
 
     #[test]
     fn snapshot_extractors_size_parsing_edge_cases() {
         let (lua, _) = create_test_table();
-        
+
         // Empty table (no proportion or fixed)
         let empty_table = lua.create_table().unwrap();
         let empty_result = extract_size_change(&empty_table).unwrap();
-        
+
         // Both proportion and fixed (proportion takes precedence)
         let both_table = lua.create_table().unwrap();
         both_table.set("proportion", 0.5).unwrap();
         both_table.set("fixed", 100i64).unwrap();
         let both_result = extract_size_change(&both_table).unwrap();
-        
+
         // Zero values
         let zero_proportion_table = lua.create_table().unwrap();
         zero_proportion_table.set("proportion", 0.0).unwrap();
         let zero_proportion_result = extract_size_change(&zero_proportion_table).unwrap();
-        
+
         let zero_fixed_table = lua.create_table().unwrap();
         zero_fixed_table.set("fixed", 0i64).unwrap();
         let zero_fixed_result = extract_size_change(&zero_fixed_table).unwrap();
-        
-        insta::assert_debug_snapshot!("extractors_size_parsing_edge_cases", (
-            empty_result,
-            both_result,
-            zero_proportion_result,
-            zero_fixed_result,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_size_parsing_edge_cases",
+            (
+                empty_result,
+                both_result,
+                zero_proportion_result,
+                zero_fixed_result,
+            )
+        );
     }
 
     #[test]
     fn snapshot_extractors_type_coercion_boundaries() {
         let (_lua, table) = create_test_table();
-        
+
         // Test integer extraction from very large float
         table.set("large_float", 1e10).unwrap();
         let large_int = extract_int_opt(&table, "large_float").unwrap();
-        
+
         // Test integer extraction from negative float
         table.set("neg_float", -123.456).unwrap();
         let neg_int = extract_int_opt(&table, "neg_float").unwrap();
-        
+
         // Test float extraction from large integer
         table.set("large_int", 9007199254740992i64).unwrap();
         let large_float = extract_float_opt(&table, "large_int").unwrap();
-        
-        insta::assert_debug_snapshot!("extractors_type_coercion_boundaries", (
-            large_int,
-            neg_int,
-            large_float,
-        ));
+
+        insta::assert_debug_snapshot!(
+            "extractors_type_coercion_boundaries",
+            (large_int, neg_int, large_float,)
+        );
     }
 }
