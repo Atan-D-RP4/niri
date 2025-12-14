@@ -13,7 +13,7 @@
 //! - [x] XwaylandSatelliteConfigProxy - migrated from XwaylandSatelliteProxy
 //! - [ ] Other proxies - pending
 
-use niri_config::FloatOrInt;
+use niri_config::{Color, FloatOrInt};
 use niri_lua_derive::LuaConfigProxy;
 
 // Re-export ConfigState for internal use
@@ -363,4 +363,115 @@ pub struct DndEdgeWorkspaceSwitchConfig {
     /// Maximum speed of workspace switching.
     #[lua_proxy(field)]
     pub max_speed: f64,
+}
+
+/// Proxy for hot corners configuration.
+///
+/// Controls hot corner behavior at screen edges.
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "gestures.hot_corners", dirty = "Gestures")]
+pub struct HotCornersConfig {
+    /// Whether hot corners are disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Whether top-left corner is active.
+    #[lua_proxy(field)]
+    pub top_left: bool,
+
+    /// Whether top-right corner is active.
+    #[lua_proxy(field)]
+    pub top_right: bool,
+
+    /// Whether bottom-left corner is active.
+    #[lua_proxy(field)]
+    pub bottom_left: bool,
+
+    /// Whether bottom-right corner is active.
+    #[lua_proxy(field)]
+    pub bottom_right: bool,
+}
+
+/// Proxy for MRU previews configuration.
+///
+/// Controls the preview thumbnails in the recent windows UI.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.recent_windows.previews.max_height = 200.0
+/// config.recent_windows.previews.max_scale = 0.2
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "recent_windows.previews", dirty = "RecentWindows")]
+pub struct MruPreviewsConfig {
+    /// Maximum height of preview thumbnails.
+    #[lua_proxy(field)]
+    pub max_height: f64,
+
+    /// Maximum scale factor for previews.
+    #[lua_proxy(field)]
+    pub max_scale: f64,
+}
+
+/// Proxy for layout insert hint configuration.
+///
+/// Controls the visual hint shown when inserting windows into the layout.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Disable insert hint
+/// config.layout.insert_hint.off = true
+///
+/// -- Set insert hint color
+/// config.layout.insert_hint.color = "#ff0000"
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "layout.insert_hint", dirty = "Layout")]
+pub struct InsertHintConfig {
+    /// Whether the insert hint is disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Color of the insert hint.
+    #[lua_proxy(field)]
+    pub color: Color,
+}
+
+/// Proxy for MRU highlight configuration.
+///
+/// Controls the highlight styling in the recent windows UI.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Set active window highlight color
+/// config.recent_windows.highlight.active_color = "#00ff00"
+///
+/// -- Set urgent window highlight color
+/// config.recent_windows.highlight.urgent_color = "#ff0000"
+///
+/// -- Set highlight padding and corner radius
+/// config.recent_windows.highlight.padding = 4.0
+/// config.recent_windows.highlight.corner_radius = 8.0
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "recent_windows.highlight", dirty = "RecentWindows")]
+pub struct MruHighlightConfig {
+    /// Color of highlight for active windows.
+    #[lua_proxy(field)]
+    pub active_color: Color,
+
+    /// Color of highlight for urgent windows.
+    #[lua_proxy(field)]
+    pub urgent_color: Color,
+
+    /// Padding around the highlight.
+    #[lua_proxy(field)]
+    pub padding: f64,
+
+    /// Corner radius of the highlight.
+    #[lua_proxy(field)]
+    pub corner_radius: f64,
 }

@@ -41,9 +41,10 @@ use crate::extractors::{
 };
 use crate::migrated_proxies::{
     ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy, DebugConfigProxy,
-    DndEdgeViewScrollConfigProxy, DndEdgeWorkspaceSwitchConfigProxy, HotkeyOverlayConfigProxy,
-    MouseConfigProxy, StrutsConfigProxy, TouchConfigProxy, TrackpointConfigProxy, XkbConfigProxy,
-    XwaylandSatelliteConfigProxy,
+    DndEdgeViewScrollConfigProxy, DndEdgeWorkspaceSwitchConfigProxy, HotCornersConfigProxy,
+    HotkeyOverlayConfigProxy, InsertHintConfigProxy, MouseConfigProxy, MruHighlightConfigProxy,
+    MruPreviewsConfigProxy, StrutsConfigProxy, TouchConfigProxy, TrackpointConfigProxy,
+    XkbConfigProxy, XwaylandSatelliteConfigProxy,
 };
 
 /// Macro to generate simple scalar field getter/setter methods for config proxies.
@@ -919,10 +920,8 @@ impl UserData for LayoutProxy {
         });
 
         fields.add_field_method_get("insert_hint", |_, this| {
-            Ok(InsertHintProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(InsertHintConfigProxy::new(state))
         });
     }
 }
@@ -1466,42 +1465,6 @@ impl UserData for TabIndicatorProxy {
                 .layout
                 .tab_indicator
                 .urgent_color = color;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-    }
-}
-
-/// Proxy for layout.insert_hint config section.
-#[derive(Clone)]
-struct InsertHintProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for InsertHintProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        // off
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().layout.insert_hint.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().layout.insert_hint.off = value;
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        // color
-        fields.add_field_method_get("color", |_, this| {
-            let config = this.config.lock().unwrap();
-            Ok(color_to_hex(&config.layout.insert_hint.color))
-        });
-
-        fields.add_field_method_set("color", |_, this, value: String| {
-            let color = Color::from_str(&value)
-                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
-            this.config.lock().unwrap().layout.insert_hint.color = color;
             this.dirty.lock().unwrap().layout = true;
             Ok(())
         });
@@ -2062,85 +2025,12 @@ impl UserData for GesturesProxy {
         });
 
         fields.add_field_method_get("hot_corners", |_, this| {
-            Ok(HotCornersProxy {
-                config: Arc::clone(&this.config),
-                dirty: Arc::clone(&this.dirty),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(HotCornersConfigProxy::new(state))
         });
     }
 }
 
-/// Proxy for gestures.hot_corners config section.
-#[derive(Clone)]
-struct HotCornersProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for HotCornersProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("off", |_, this| {
-            Ok(this.config.lock().unwrap().gestures.hot_corners.off)
-        });
-
-        fields.add_field_method_set("off", |_, this, value: bool| {
-            this.config.lock().unwrap().gestures.hot_corners.off = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("top_left", |_, this| {
-            Ok(this.config.lock().unwrap().gestures.hot_corners.top_left)
-        });
-
-        fields.add_field_method_set("top_left", |_, this, value: bool| {
-            this.config.lock().unwrap().gestures.hot_corners.top_left = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("top_right", |_, this| {
-            Ok(this.config.lock().unwrap().gestures.hot_corners.top_right)
-        });
-
-        fields.add_field_method_set("top_right", |_, this, value: bool| {
-            this.config.lock().unwrap().gestures.hot_corners.top_right = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("bottom_left", |_, this| {
-            Ok(this.config.lock().unwrap().gestures.hot_corners.bottom_left)
-        });
-
-        fields.add_field_method_set("bottom_left", |_, this, value: bool| {
-            this.config.lock().unwrap().gestures.hot_corners.bottom_left = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("bottom_right", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .hot_corners
-                .bottom_right)
-        });
-
-        fields.add_field_method_set("bottom_right", |_, this, value: bool| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .hot_corners
-                .bottom_right = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-    }
-}
 
 /// Proxy for recent_windows (MRU) config section.
 #[derive(Clone)]
@@ -2183,155 +2073,14 @@ impl UserData for RecentWindowsProxy {
 
         // Nested proxy: highlight
         fields.add_field_method_get("highlight", |_, this| {
-            Ok(MruHighlightProxy {
-                config: Arc::clone(&this.config),
-                dirty: Arc::clone(&this.dirty),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(MruHighlightConfigProxy::new(state))
         });
 
         // Nested proxy: previews
         fields.add_field_method_get("previews", |_, this| {
-            Ok(MruPreviewsProxy {
-                config: Arc::clone(&this.config),
-                dirty: Arc::clone(&this.dirty),
-            })
-        });
-    }
-}
-
-/// Proxy for recent_windows.highlight config section.
-#[derive(Clone)]
-struct MruHighlightProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for MruHighlightProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        // active_color
-        fields.add_field_method_get("active_color", |_, this| {
-            let config = this.config.lock().unwrap();
-            Ok(color_to_hex(&config.recent_windows.highlight.active_color))
-        });
-
-        fields.add_field_method_set("active_color", |_, this, value: String| {
-            let color = Color::from_str(&value)
-                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
-            this.config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .highlight
-                .active_color = color;
-            this.dirty.lock().unwrap().recent_windows = true;
-            Ok(())
-        });
-
-        // urgent_color
-        fields.add_field_method_get("urgent_color", |_, this| {
-            let config = this.config.lock().unwrap();
-            Ok(color_to_hex(&config.recent_windows.highlight.urgent_color))
-        });
-
-        fields.add_field_method_set("urgent_color", |_, this, value: String| {
-            let color = Color::from_str(&value)
-                .map_err(|e| mlua::Error::external(format!("Invalid color '{}': {}", value, e)))?;
-            this.config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .highlight
-                .urgent_color = color;
-            this.dirty.lock().unwrap().recent_windows = true;
-            Ok(())
-        });
-
-        // padding
-        fields.add_field_method_get("padding", |_, this| {
-            Ok(this.config.lock().unwrap().recent_windows.highlight.padding)
-        });
-
-        fields.add_field_method_set("padding", |_, this, value: f64| {
-            this.config.lock().unwrap().recent_windows.highlight.padding = value;
-            this.dirty.lock().unwrap().recent_windows = true;
-            Ok(())
-        });
-
-        // corner_radius
-        fields.add_field_method_get("corner_radius", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .highlight
-                .corner_radius)
-        });
-
-        fields.add_field_method_set("corner_radius", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .highlight
-                .corner_radius = value;
-            this.dirty.lock().unwrap().recent_windows = true;
-            Ok(())
-        });
-    }
-}
-
-/// Proxy for recent_windows.previews config section.
-#[derive(Clone)]
-struct MruPreviewsProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for MruPreviewsProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        // max_height
-        fields.add_field_method_get("max_height", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .previews
-                .max_height)
-        });
-
-        fields.add_field_method_set("max_height", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .previews
-                .max_height = value;
-            this.dirty.lock().unwrap().recent_windows = true;
-            Ok(())
-        });
-
-        // max_scale
-        fields.add_field_method_get("max_scale", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .previews
-                .max_scale)
-        });
-
-        fields.add_field_method_set("max_scale", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .recent_windows
-                .previews
-                .max_scale = value;
-            this.dirty.lock().unwrap().recent_windows = true;
-            Ok(())
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(MruPreviewsConfigProxy::new(state))
         });
     }
 }
