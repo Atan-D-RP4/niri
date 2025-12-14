@@ -87,8 +87,7 @@ impl StructAttrs {
     pub fn get_crate_path(&self) -> proc_macro2::TokenStream {
         match &self.crate_path {
             Some(path) => {
-                let path_ident = syn::parse_str::<syn::Path>(path)
-                    .expect("Invalid crate path");
+                let path_ident = syn::parse_str::<syn::Path>(path).expect("Invalid crate path");
                 quote::quote! { #path_ident }
             }
             None => quote::quote! { niri_lua },

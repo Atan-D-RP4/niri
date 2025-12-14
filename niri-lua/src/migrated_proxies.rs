@@ -16,7 +16,7 @@
 //! - [ ] Other proxies - pending
 
 use niri_config::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap, TrackLayout};
-use niri_config::{Color, FloatOrInt};
+use niri_config::{Color, FloatOrInt, TabIndicatorPosition};
 use niri_lua_derive::LuaConfigProxy;
 
 // Re-export ConfigState for internal use
@@ -645,4 +645,72 @@ pub struct TouchpadConfig {
     /// Valid values: "adaptive", "flat", or nil.
     #[lua_proxy(field)]
     pub accel_profile: Option<AccelProfile>,
+}
+
+// =============================================================================
+// Appearance Proxies
+// =============================================================================
+
+/// Proxy for tab indicator configuration.
+///
+/// Controls how tab indicators are displayed for windows in a column with
+/// multiple tabs (windows stacked as tabs).
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(
+    crate = "crate",
+    parent_path = "layout.tab_indicator",
+    dirty = "Layout"
+)]
+pub struct TabIndicatorConfig {
+    /// Whether tab indicator is off (disabled).
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Hide the indicator when there's only a single tab.
+    #[lua_proxy(field)]
+    pub hide_when_single_tab: bool,
+
+    /// Place the indicator within the column's visual bounds.
+    #[lua_proxy(field)]
+    pub place_within_column: bool,
+
+    /// Gap between the tab indicator and the window edge.
+    #[lua_proxy(field)]
+    pub gap: f64,
+
+    /// Width of the tab indicator in logical pixels.
+    #[lua_proxy(field)]
+    pub width: f64,
+
+    /// Gaps between individual tab indicators.
+    #[lua_proxy(field)]
+    pub gaps_between_tabs: f64,
+
+    /// Corner radius of the tab indicators.
+    #[lua_proxy(field)]
+    pub corner_radius: f64,
+
+    /// Position of the tab indicator.
+    ///
+    /// Valid values: "left", "right", "top", "bottom".
+    #[lua_proxy(field)]
+    pub position: TabIndicatorPosition,
+
+    /// Color for the active tab indicator.
+    ///
+    /// Use hex string like "#rrggbbaa" or nil to reset to default.
+    #[lua_proxy(field)]
+    pub active_color: Option<Color>,
+
+    /// Color for inactive tab indicators.
+    ///
+    /// Use hex string like "#rrggbbaa" or nil to reset to default.
+    #[lua_proxy(field)]
+    pub inactive_color: Option<Color>,
+
+    /// Color for urgent tab indicators.
+    ///
+    /// Use hex string like "#rrggbbaa" or nil to reset to default.
+    #[lua_proxy(field)]
+    pub urgent_color: Option<Color>,
 }

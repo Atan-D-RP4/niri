@@ -530,6 +530,35 @@ impl LuaFieldConvert for TrackLayout {
     }
 }
 
+use niri_config::TabIndicatorPosition;
+
+impl LuaFieldConvert for TabIndicatorPosition {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            TabIndicatorPosition::Left => "left",
+            TabIndicatorPosition::Right => "right",
+            TabIndicatorPosition::Top => "top",
+            TabIndicatorPosition::Bottom => "bottom",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "left" => Ok(TabIndicatorPosition::Left),
+            "right" => Ok(TabIndicatorPosition::Right),
+            "top" => Ok(TabIndicatorPosition::Top),
+            "bottom" => Ok(TabIndicatorPosition::Bottom),
+            _ => Err(LuaError::external(format!(
+                "Invalid position '{}'. Expected: left, right, top, bottom",
+                value
+            ))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
