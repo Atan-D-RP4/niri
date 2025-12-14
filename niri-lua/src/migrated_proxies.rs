@@ -1,0 +1,366 @@
+//! Migrated proxy implementations using derive macros.
+//!
+//! This module contains proxy implementations that use the `LuaConfigProxy` derive macro
+//! instead of manual implementations. As migration progresses, proxies are moved from
+//! `config_wrapper.rs` to this module.
+//!
+//! ## Migration Status
+//!
+//! - [x] CursorConfigProxy - migrated from CursorProxy
+//! - [x] ClipboardConfigProxy - migrated from ClipboardProxy
+//! - [x] HotkeyOverlayConfigProxy - migrated from HotkeyOverlayProxy
+//! - [x] ConfigNotificationConfigProxy - migrated from ConfigNotificationProxy
+//! - [x] XwaylandSatelliteConfigProxy - migrated from XwaylandSatelliteProxy
+//! - [ ] Other proxies - pending
+
+use niri_config::FloatOrInt;
+use niri_lua_derive::LuaConfigProxy;
+
+// Re-export ConfigState for internal use
+pub use crate::config_state::ConfigState;
+
+// Note: The LuaConfigProxy derive macro generates `{StructName}Proxy` from `{StructName}`
+// which is automatically public because the struct is public. No re-export needed.
+
+/// Proxy for cursor configuration.
+///
+/// This proxy provides access to cursor settings like size, theme,
+/// and hide behavior.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Get cursor size
+/// local size = config.cursor.xcursor_size
+///
+/// -- Set cursor theme
+/// config.cursor.xcursor_theme = "Adwaita"
+///
+/// -- Configure auto-hide
+/// config.cursor.hide_when_typing = true
+/// config.cursor.hide_after_inactive_ms = 5000
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "cursor", dirty = "Cursor")]
+pub struct CursorConfig {
+    /// Cursor size in pixels. Default is 24.
+    #[lua_proxy(field)]
+    pub xcursor_size: u8,
+
+    /// Cursor theme name.
+    #[lua_proxy(field)]
+    pub xcursor_theme: String,
+
+    /// Whether to hide cursor while typing.
+    #[lua_proxy(field)]
+    pub hide_when_typing: bool,
+
+    /// Milliseconds of inactivity before hiding cursor.
+    /// Set to `nil` to disable auto-hide.
+    #[lua_proxy(field)]
+    pub hide_after_inactive_ms: Option<u32>,
+}
+
+/// Proxy for clipboard configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Disable primary selection
+/// config.clipboard.disable_primary = true
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "clipboard", dirty = "Clipboard")]
+pub struct ClipboardConfig {
+    /// Whether to disable primary selection (middle-click paste).
+    #[lua_proxy(field)]
+    pub disable_primary: bool,
+}
+
+/// Proxy for hotkey overlay configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Skip showing overlay at startup
+/// config.hotkey_overlay.skip_at_startup = true
+///
+/// -- Hide unbound keys
+/// config.hotkey_overlay.hide_not_bound = true
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "hotkey_overlay", dirty = "HotkeyOverlay")]
+pub struct HotkeyOverlayConfig {
+    /// Whether to skip showing the overlay at startup.
+    #[lua_proxy(field)]
+    pub skip_at_startup: bool,
+
+    /// Whether to hide keys that are not bound.
+    #[lua_proxy(field)]
+    pub hide_not_bound: bool,
+}
+
+/// Proxy for config notification settings.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Disable error notifications for config failures
+/// config.config_notification.disable_failed = true
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "config_notification", dirty = "ConfigNotification")]
+pub struct ConfigNotificationConfig {
+    /// Whether to disable notifications when config loading fails.
+    #[lua_proxy(field)]
+    pub disable_failed: bool,
+}
+
+/// Proxy for xwayland-satellite configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// -- Disable xwayland-satellite
+/// config.xwayland_satellite.off = true
+///
+/// -- Set custom path
+/// config.xwayland_satellite.path = "/usr/bin/xwayland-satellite"
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "xwayland_satellite", dirty = "XwaylandSatellite")]
+pub struct XwaylandSatelliteConfig {
+    /// Whether xwayland-satellite is disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Path to the xwayland-satellite binary.
+    #[lua_proxy(field)]
+    pub path: String,
+}
+
+/// Proxy for debug configuration.
+///
+/// Contains various debug flags that affect compositor behavior.
+/// These are primarily for development and troubleshooting.
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "debug", dirty = "Debug")]
+pub struct DebugConfig {
+    /// Whether to enable DBus interfaces in non-session instances.
+    #[lua_proxy(field)]
+    pub dbus_interfaces_in_non_session_instances: bool,
+
+    /// Whether to wait for frame completion before queueing the next frame.
+    #[lua_proxy(field)]
+    pub wait_for_frame_completion_before_queueing: bool,
+
+    /// Whether to enable overlay planes.
+    #[lua_proxy(field)]
+    pub enable_overlay_planes: bool,
+
+    /// Whether to disable the cursor plane.
+    #[lua_proxy(field)]
+    pub disable_cursor_plane: bool,
+
+    /// Whether to disable direct scanout.
+    #[lua_proxy(field)]
+    pub disable_direct_scanout: bool,
+
+    /// Whether to keep max BPC unchanged.
+    #[lua_proxy(field)]
+    pub keep_max_bpc_unchanged: bool,
+
+    /// Whether to restrict primary scanout to matching format.
+    #[lua_proxy(field)]
+    pub restrict_primary_scanout_to_matching_format: bool,
+}
+
+/// Proxy for layout struts configuration.
+///
+/// Struts define reserved areas on the edges of the screen that windows
+/// cannot occupy, useful for panels or docks.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.layout.struts.left = 50
+/// config.layout.struts.right = 0
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "layout.struts", dirty = "Layout")]
+pub struct StrutsConfig {
+    /// Left strut size in logical pixels.
+    #[lua_proxy(field)]
+    pub left: FloatOrInt<-65535, 65535>,
+
+    /// Right strut size in logical pixels.
+    #[lua_proxy(field)]
+    pub right: FloatOrInt<-65535, 65535>,
+
+    /// Top strut size in logical pixels.
+    #[lua_proxy(field)]
+    pub top: FloatOrInt<-65535, 65535>,
+
+    /// Bottom strut size in logical pixels.
+    #[lua_proxy(field)]
+    pub bottom: FloatOrInt<-65535, 65535>,
+}
+
+/// Proxy for XKB keyboard configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.input.keyboard.xkb.layout = "us,ru"
+/// config.input.keyboard.xkb.options = "grp:alt_shift_toggle"
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "input.keyboard.xkb", dirty = "Keyboard")]
+pub struct XkbConfig {
+    /// XKB layout name(s).
+    #[lua_proxy(field)]
+    pub layout: String,
+
+    /// XKB variant(s).
+    #[lua_proxy(field)]
+    pub variant: String,
+
+    /// XKB model.
+    #[lua_proxy(field)]
+    pub model: String,
+
+    /// XKB rules.
+    #[lua_proxy(field)]
+    pub rules: String,
+
+    /// XKB options.
+    #[lua_proxy(field)]
+    pub options: Option<String>,
+}
+
+/// Proxy for mouse input configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.input.mouse.natural_scroll = true
+/// config.input.mouse.accel_speed = 0.5
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "input.mouse", dirty = "Input")]
+pub struct MouseConfig {
+    /// Whether the mouse is disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Whether natural scroll is enabled.
+    #[lua_proxy(field)]
+    pub natural_scroll: bool,
+
+    /// Whether left-handed mode is enabled.
+    #[lua_proxy(field)]
+    pub left_handed: bool,
+
+    /// Whether middle button emulation is enabled.
+    #[lua_proxy(field)]
+    pub middle_emulation: bool,
+
+    /// Acceleration speed (-1.0 to 1.0).
+    #[lua_proxy(field)]
+    pub accel_speed: FloatOrInt<-1, 1>,
+}
+
+/// Proxy for trackpoint input configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.input.trackpoint.natural_scroll = true
+/// config.input.trackpoint.accel_speed = 0.5
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "input.trackpoint", dirty = "Input")]
+pub struct TrackpointConfig {
+    /// Whether the trackpoint is disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Whether natural scroll is enabled.
+    #[lua_proxy(field)]
+    pub natural_scroll: bool,
+
+    /// Whether left-handed mode is enabled.
+    #[lua_proxy(field)]
+    pub left_handed: bool,
+
+    /// Whether middle button emulation is enabled.
+    #[lua_proxy(field)]
+    pub middle_emulation: bool,
+
+    /// Acceleration speed (-1.0 to 1.0).
+    #[lua_proxy(field)]
+    pub accel_speed: FloatOrInt<-1, 1>,
+}
+
+/// Proxy for touch input configuration.
+///
+/// ## Lua Usage
+///
+/// ```lua
+/// config.input.touch.off = true
+/// config.input.touch.natural_scroll = true
+/// config.input.touch.map_to_output = "eDP-1"
+/// ```
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "input.touch", dirty = "Input")]
+pub struct TouchConfig {
+    /// Whether touch input is disabled.
+    #[lua_proxy(field)]
+    pub off: bool,
+
+    /// Whether natural scroll is enabled for touch.
+    #[lua_proxy(field)]
+    pub natural_scroll: bool,
+
+    /// Output to map touch input to.
+    #[lua_proxy(field)]
+    pub map_to_output: Option<String>,
+}
+
+/// Proxy for gesture DnD edge view scroll configuration.
+///
+/// Controls scroll behavior when dragging windows to screen edges.
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "gestures.dnd_edge_view_scroll", dirty = "Gestures")]
+pub struct DndEdgeViewScrollConfig {
+    /// Width of the trigger zone at the edge.
+    #[lua_proxy(field)]
+    pub trigger_width: f64,
+
+    /// Delay in milliseconds before scroll starts.
+    #[lua_proxy(field)]
+    pub delay_ms: u16,
+
+    /// Maximum scroll speed.
+    #[lua_proxy(field)]
+    pub max_speed: f64,
+}
+
+/// Proxy for gesture DnD edge workspace switch configuration.
+///
+/// Controls workspace switching behavior when dragging windows to screen edges.
+#[derive(Clone, LuaConfigProxy)]
+#[lua_proxy(crate = "crate", parent_path = "gestures.dnd_edge_workspace_switch", dirty = "Gestures")]
+pub struct DndEdgeWorkspaceSwitchConfig {
+    /// Height of the trigger zone at the edge.
+    #[lua_proxy(field)]
+    pub trigger_height: f64,
+
+    /// Delay in milliseconds before switch starts.
+    #[lua_proxy(field)]
+    pub delay_ms: u16,
+
+    /// Maximum speed of workspace switching.
+    #[lua_proxy(field)]
+    pub max_speed: f64,
+}

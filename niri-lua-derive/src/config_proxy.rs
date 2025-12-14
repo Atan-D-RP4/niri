@@ -112,6 +112,7 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         .collect();
 
     // Generate the proxy struct and implementations
+    let crate_path = struct_attrs.get_crate_path();
     let expanded = quote! {
         // Collection proxy structs
         #(#collection_proxies)*
@@ -119,17 +120,17 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         /// Generated Lua proxy for accessing configuration.
         #[derive(Clone)]
         pub struct #proxy_name {
-            state: niri_lua::config_state::ConfigState,
+            state: #crate_path::config_state::ConfigState,
         }
 
         impl #impl_generics #proxy_name #ty_generics #where_clause {
             /// Create a new proxy with the given config state.
-            pub fn new(state: niri_lua::config_state::ConfigState) -> Self {
+            pub fn new(state: #crate_path::config_state::ConfigState) -> Self {
                 Self { state }
             }
 
             /// Get the underlying config state.
-            pub fn state(&self) -> &niri_lua::config_state::ConfigState {
+            pub fn state(&self) -> &#crate_path::config_state::ConfigState {
                 &self.state
             }
 
@@ -140,6 +141,7 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
         impl #impl_generics ::mlua::UserData for #proxy_name #ty_generics #where_clause {
             fn add_fields<F: ::mlua::UserDataFields<Self>>(fields: &mut F) {
+                use ::mlua::IntoLua;
                 #(#field_registrations)*
             }
         }
@@ -195,6 +197,7 @@ fn generate_getter_method(
     let field_name = &field.name;
     let field_ty = &field.ty;
     let access_path = generate_access_path(struct_attrs);
+    let crate_path = struct_attrs.get_crate_path();
 
     match field.attrs.kind {
         FieldKind::Simple => {
@@ -203,10 +206,11 @@ fn generate_getter_method(
                 Ok(quote! {
                     /// Get the value of this field, returning nil if None.
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
+                        use ::mlua::IntoLua;
                         let config = self.state.borrow_config();
                         match &#access_path.#field_name {
                             Some(v) => {
-                                let lua_val = <#inner_ty as niri_lua::traits::LuaFieldConvert>::to_lua(v);
+                                let lua_val = <#inner_ty as #crate_path::traits::LuaFieldConvert>::to_lua(v);
                                 lua_val.into_lua(lua)
                             }
                             None => Ok(::mlua::Value::Nil),
@@ -217,8 +221,9 @@ fn generate_getter_method(
                 Ok(quote! {
                     /// Get the value of this field.
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
+                        use ::mlua::IntoLua;
                         let config = self.state.borrow_config();
-                        let lua_val = <#field_ty as niri_lua::traits::LuaFieldConvert>::to_lua(&#access_path.#field_name);
+                        let lua_val = <#field_ty as #crate_path::traits::LuaFieldConvert>::to_lua(&#access_path.#field_name);
                         lua_val.into_lua(lua)
                     }
                 })
@@ -266,6 +271,7 @@ fn generate_setter_method(
     let field_name = &field.name;
     let field_ty = &field.ty;
     let access_path = generate_access_path(struct_attrs);
+    let crate_path = struct_attrs.get_crate_path();
 
     // Determine dirty flag
     let dirty_flag = if let Some(ref flag) = field.attrs.dirty_override {
@@ -285,10 +291,10 @@ fn generate_setter_method(
                     None
                 } else {
                     // First convert Lua Value to the intermediate LuaType
-                    let intermediate: <#inner_ty as niri_lua::traits::LuaFieldConvert>::LuaType = 
+                    let intermediate: <#inner_ty as #crate_path::traits::LuaFieldConvert>::LuaType =
                         ::mlua::FromLua::from_lua(value, lua)?;
                     // Then convert to the actual Rust type
-                    Some(<#inner_ty as niri_lua::traits::LuaFieldConvert>::from_lua(intermediate)?)
+                    Some(<#inner_ty as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?)
                 };
 
                 // Explicit scope to release borrow before mark_dirty
@@ -297,15 +303,15 @@ fn generate_setter_method(
                     #access_path.#field_name = new_value;
                 }
 
-                self.state.mark_dirty(niri_lua::config_state::DirtyFlag::#dirty_flag);
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
                 Ok(())
             }
         })
     } else {
         Ok(quote! {
             /// Set the value of this field.
-            pub fn #setter_name(&self, value: <#field_ty as niri_lua::traits::LuaFieldConvert>::LuaType) -> ::mlua::Result<()> {
-                let new_value = <#field_ty as niri_lua::traits::LuaFieldConvert>::from_lua(value)?;
+            pub fn #setter_name(&self, value: <#field_ty as #crate_path::traits::LuaFieldConvert>::LuaType) -> ::mlua::Result<()> {
+                let new_value = <#field_ty as #crate_path::traits::LuaFieldConvert>::from_lua(value)?;
 
                 // Explicit scope to release borrow before mark_dirty
                 {
@@ -313,7 +319,7 @@ fn generate_setter_method(
                     #access_path.#field_name = new_value;
                 }
 
-                self.state.mark_dirty(niri_lua::config_state::DirtyFlag::#dirty_flag);
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
                 Ok(())
             }
         })

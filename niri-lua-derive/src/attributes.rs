@@ -28,6 +28,8 @@ pub struct StructAttrs {
     pub parent_path: Option<String>,
     pub dirty_flag: Option<String>,
     pub generate_dirty_flags: bool,
+    /// Custom crate path for niri_lua (e.g., "crate" when used inside niri-lua)
+    pub crate_path: Option<String>,
 }
 
 /// Parsed attributes for a field
@@ -69,6 +71,9 @@ impl StructAttrs {
                     } else if meta.path.is_ident("dirty") {
                         let value: LitStr = meta.value()?.parse()?;
                         result.dirty_flag = Some(value.value());
+                    } else if meta.path.is_ident("crate") {
+                        let value: LitStr = meta.value()?.parse()?;
+                        result.crate_path = Some(value.value());
                     }
                     Ok(())
                 })?;
@@ -76,6 +81,18 @@ impl StructAttrs {
         }
 
         Ok(result)
+    }
+
+    /// Get the crate path to use for niri_lua types
+    pub fn get_crate_path(&self) -> proc_macro2::TokenStream {
+        match &self.crate_path {
+            Some(path) => {
+                let path_ident = syn::parse_str::<syn::Path>(path)
+                    .expect("Invalid crate path");
+                quote::quote! { #path_ident }
+            }
+            None => quote::quote! { niri_lua },
+        }
     }
 }
 

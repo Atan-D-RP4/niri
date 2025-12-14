@@ -33,10 +33,17 @@ use crate::collections::{
     WindowRulesCollection, WorkspacesCollection,
 };
 use crate::config_dirty::ConfigDirtyFlags;
+use crate::config_state::ConfigState;
 use crate::extractors::{
     extract_animations, extract_clipboard, extract_config_notification, extract_cursor,
     extract_debug, extract_gestures, extract_hotkey_overlay, extract_input, extract_layout,
     extract_overview, extract_recent_windows, extract_xwayland_satellite,
+};
+use crate::migrated_proxies::{
+    ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy, DebugConfigProxy,
+    DndEdgeViewScrollConfigProxy, DndEdgeWorkspaceSwitchConfigProxy, HotkeyOverlayConfigProxy,
+    MouseConfigProxy, StrutsConfigProxy, TouchConfigProxy, TrackpointConfigProxy, XkbConfigProxy,
+    XwaylandSatelliteConfigProxy,
 };
 
 /// Macro to generate simple scalar field getter/setter methods for config proxies.
@@ -492,10 +499,8 @@ impl UserData for ConfigWrapper {
         });
 
         fields.add_field_method_get("cursor", |_, this| {
-            Ok(CursorProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(CursorConfigProxy::new(state))
         });
 
         fields.add_field_method_set("cursor", |_, this, value: LuaTable| {
@@ -552,10 +557,8 @@ impl UserData for ConfigWrapper {
         });
 
         fields.add_field_method_get("hotkey_overlay", |_, this| {
-            Ok(HotkeyOverlayProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(HotkeyOverlayConfigProxy::new(state))
         });
 
         fields.add_field_method_set("hotkey_overlay", |_, this, value: LuaTable| {
@@ -567,10 +570,8 @@ impl UserData for ConfigWrapper {
         });
 
         fields.add_field_method_get("config_notification", |_, this| {
-            Ok(ConfigNotificationProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(ConfigNotificationConfigProxy::new(state))
         });
 
         fields.add_field_method_set("config_notification", |_, this, value: LuaTable| {
@@ -582,10 +583,8 @@ impl UserData for ConfigWrapper {
         });
 
         fields.add_field_method_get("clipboard", |_, this| {
-            Ok(ClipboardProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(ClipboardConfigProxy::new(state))
         });
 
         fields.add_field_method_set("clipboard", |_, this, value: LuaTable| {
@@ -597,10 +596,8 @@ impl UserData for ConfigWrapper {
         });
 
         fields.add_field_method_get("xwayland_satellite", |_, this| {
-            Ok(XwaylandSatelliteProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(XwaylandSatelliteConfigProxy::new(state))
         });
 
         fields.add_field_method_set("xwayland_satellite", |_, this, value: LuaTable| {
@@ -612,10 +609,8 @@ impl UserData for ConfigWrapper {
         });
 
         fields.add_field_method_get("debug", |_, this| {
-            Ok(DebugProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(DebugConfigProxy::new(state))
         });
 
         fields.add_field_method_set("debug", |_, this, value: LuaTable| {
@@ -912,10 +907,8 @@ impl UserData for LayoutProxy {
         });
 
         fields.add_field_method_get("struts", |_, this| {
-            Ok(StrutsProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(StrutsConfigProxy::new(state))
         });
 
         fields.add_field_method_get("tab_indicator", |_, this| {
@@ -1238,61 +1231,6 @@ impl UserData for ShadowProxy {
     }
 }
 
-/// Proxy for layout.struts config section.
-#[derive(Clone)]
-struct StrutsProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for StrutsProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        // left
-        fields.add_field_method_get("left", |_, this| {
-            Ok(this.config.lock().unwrap().layout.struts.left.0)
-        });
-
-        fields.add_field_method_set("left", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.struts.left = niri_config::FloatOrInt(value);
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        // right
-        fields.add_field_method_get("right", |_, this| {
-            Ok(this.config.lock().unwrap().layout.struts.right.0)
-        });
-
-        fields.add_field_method_set("right", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.struts.right = niri_config::FloatOrInt(value);
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        // top
-        fields.add_field_method_get("top", |_, this| {
-            Ok(this.config.lock().unwrap().layout.struts.top.0)
-        });
-
-        fields.add_field_method_set("top", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.struts.top = niri_config::FloatOrInt(value);
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-
-        // bottom
-        fields.add_field_method_get("bottom", |_, this| {
-            Ok(this.config.lock().unwrap().layout.struts.bottom.0)
-        });
-
-        fields.add_field_method_set("bottom", |_, this, value: f64| {
-            this.config.lock().unwrap().layout.struts.bottom = niri_config::FloatOrInt(value);
-            this.dirty.lock().unwrap().layout = true;
-            Ok(())
-        });
-    }
-}
-
 /// Proxy for layout.tab_indicator config section.
 #[derive(Clone)]
 struct TabIndicatorProxy {
@@ -1570,26 +1508,6 @@ impl UserData for InsertHintProxy {
     }
 }
 
-/// Proxy for cursor config section.
-#[derive(Clone)]
-struct CursorProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for CursorProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, cursor,
-            "xcursor_size" => [cursor.xcursor_size]: u8,
-            "hide_when_typing" => [cursor.hide_when_typing]: bool,
-            "hide_after_inactive_ms" => [cursor.hide_after_inactive_ms]: Option<u32>,
-        );
-        config_field_methods_clone!(fields, cursor,
-            "xcursor_theme" => [cursor.xcursor_theme]: String,
-        );
-    }
-}
-
 /// Proxy for animations config section.
 #[derive(Clone)]
 struct AnimationsProxy {
@@ -1814,24 +1732,18 @@ impl UserData for InputProxy {
         });
 
         fields.add_field_method_get("mouse", |_, this| {
-            Ok(MouseProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(MouseConfigProxy::new(state))
         });
 
         fields.add_field_method_get("trackpoint", |_, this| {
-            Ok(TrackpointProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(TrackpointConfigProxy::new(state))
         });
 
         fields.add_field_method_get("touch", |_, this| {
-            Ok(TouchProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(TouchConfigProxy::new(state))
         });
     }
 }
@@ -1889,30 +1801,9 @@ impl UserData for KeyboardProxy {
 
         // XKB nested proxy
         fields.add_field_method_get("xkb", |_, this| {
-            Ok(XkbProxy {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(XkbConfigProxy::new(state))
         });
-    }
-}
-
-/// Proxy for xkb config section.
-#[derive(Clone)]
-struct XkbProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for XkbProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods_clone!(fields, keyboard,
-            "layout" => [input.keyboard.xkb.layout]: String,
-            "variant" => [input.keyboard.xkb.variant]: String,
-            "model" => [input.keyboard.xkb.model]: String,
-            "rules" => [input.keyboard.xkb.rules]: String,
-            "options" => [input.keyboard.xkb.options]: Option<String>,
-        );
     }
 }
 
@@ -2062,67 +1953,6 @@ impl UserData for TouchpadProxy {
     }
 }
 
-/// Proxy for mouse config section.
-#[derive(Clone)]
-struct MouseProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for MouseProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, input,
-            "off" => [input.mouse.off]: bool,
-            "natural_scroll" => [input.mouse.natural_scroll]: bool,
-            "left_handed" => [input.mouse.left_handed]: bool,
-            "middle_emulation" => [input.mouse.middle_emulation]: bool,
-        );
-        config_field_methods_float_or_int!(fields, input,
-            "accel_speed" => [input.mouse.accel_speed],
-        );
-    }
-}
-
-/// Proxy for trackpoint config section.
-#[derive(Clone)]
-struct TrackpointProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for TrackpointProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, input,
-            "off" => [input.trackpoint.off]: bool,
-            "natural_scroll" => [input.trackpoint.natural_scroll]: bool,
-            "left_handed" => [input.trackpoint.left_handed]: bool,
-            "middle_emulation" => [input.trackpoint.middle_emulation]: bool,
-        );
-        config_field_methods_float_or_int!(fields, input,
-            "accel_speed" => [input.trackpoint.accel_speed],
-        );
-    }
-}
-
-/// Proxy for touch config section.
-#[derive(Clone)]
-struct TouchProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for TouchProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, input,
-            "off" => [input.touch.off]: bool,
-            "natural_scroll" => [input.touch.natural_scroll]: bool,
-        );
-        config_field_methods_clone!(fields, input,
-            "map_to_output" => [input.touch.map_to_output]: Option<String>,
-        );
-    }
-}
-
 /// Proxy for overview config section.
 #[derive(Clone)]
 struct OverviewProxy {
@@ -2211,91 +2041,6 @@ impl UserData for OverviewWorkspaceShadowProxy {
     }
 }
 
-/// Proxy for hotkey_overlay config section.
-#[derive(Clone)]
-struct HotkeyOverlayProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for HotkeyOverlayProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, hotkey_overlay,
-            "skip_at_startup" => [hotkey_overlay.skip_at_startup]: bool,
-            "hide_not_bound" => [hotkey_overlay.hide_not_bound]: bool,
-        );
-    }
-}
-
-/// Proxy for config_notification section.
-#[derive(Clone)]
-struct ConfigNotificationProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for ConfigNotificationProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, config_notification,
-            "disable_failed" => [config_notification.disable_failed]: bool,
-        );
-    }
-}
-
-/// Proxy for clipboard config section.
-#[derive(Clone)]
-struct ClipboardProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for ClipboardProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, clipboard,
-            "disable_primary" => [clipboard.disable_primary]: bool,
-        );
-    }
-}
-
-/// Proxy for xwayland_satellite config section.
-#[derive(Clone)]
-struct XwaylandSatelliteProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for XwaylandSatelliteProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, xwayland_satellite,
-            "off" => [xwayland_satellite.off]: bool,
-        );
-        config_field_methods_clone!(fields, xwayland_satellite,
-            "path" => [xwayland_satellite.path]: String,
-        );
-    }
-}
-
-/// Proxy for debug config section.
-#[derive(Clone)]
-struct DebugProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for DebugProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        config_field_methods!(fields, debug,
-            "dbus_interfaces_in_non_session_instances" => [debug.dbus_interfaces_in_non_session_instances]: bool,
-            "wait_for_frame_completion_before_queueing" => [debug.wait_for_frame_completion_before_queueing]: bool,
-            "enable_overlay_planes" => [debug.enable_overlay_planes]: bool,
-            "disable_cursor_plane" => [debug.disable_cursor_plane]: bool,
-            "disable_direct_scanout" => [debug.disable_direct_scanout]: bool,
-            "keep_max_bpc_unchanged" => [debug.keep_max_bpc_unchanged]: bool,
-            "restrict_primary_scanout_to_matching_format" => [debug.restrict_primary_scanout_to_matching_format]: bool,
-        );
-    }
-}
-
 /// Proxy for gestures config section.
 #[derive(Clone)]
 struct GesturesProxy {
@@ -2307,17 +2052,13 @@ impl UserData for GesturesProxy {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
         // Nested proxies for gesture settings
         fields.add_field_method_get("dnd_edge_view_scroll", |_, this| {
-            Ok(DndEdgeViewScrollProxy {
-                config: Arc::clone(&this.config),
-                dirty: Arc::clone(&this.dirty),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(DndEdgeViewScrollConfigProxy::new(state))
         });
 
         fields.add_field_method_get("dnd_edge_workspace_switch", |_, this| {
-            Ok(DndEdgeWorkspaceSwitchProxy {
-                config: Arc::clone(&this.config),
-                dirty: Arc::clone(&this.dirty),
-            })
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok(DndEdgeWorkspaceSwitchConfigProxy::new(state))
         });
 
         fields.add_field_method_get("hot_corners", |_, this| {
@@ -2325,154 +2066,6 @@ impl UserData for GesturesProxy {
                 config: Arc::clone(&this.config),
                 dirty: Arc::clone(&this.dirty),
             })
-        });
-    }
-}
-
-/// Proxy for gestures.dnd_edge_view_scroll config section.
-#[derive(Clone)]
-struct DndEdgeViewScrollProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for DndEdgeViewScrollProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("trigger_width", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_view_scroll
-                .trigger_width)
-        });
-
-        fields.add_field_method_set("trigger_width", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_view_scroll
-                .trigger_width = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("delay_ms", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_view_scroll
-                .delay_ms)
-        });
-
-        fields.add_field_method_set("delay_ms", |_, this, value: u16| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_view_scroll
-                .delay_ms = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("max_speed", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_view_scroll
-                .max_speed)
-        });
-
-        fields.add_field_method_set("max_speed", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_view_scroll
-                .max_speed = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-    }
-}
-
-/// Proxy for gestures.dnd_edge_workspace_switch config section.
-#[derive(Clone)]
-struct DndEdgeWorkspaceSwitchProxy {
-    config: Arc<Mutex<Config>>,
-    dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl UserData for DndEdgeWorkspaceSwitchProxy {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("trigger_height", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_workspace_switch
-                .trigger_height)
-        });
-
-        fields.add_field_method_set("trigger_height", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_workspace_switch
-                .trigger_height = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("delay_ms", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_workspace_switch
-                .delay_ms)
-        });
-
-        fields.add_field_method_set("delay_ms", |_, this, value: u16| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_workspace_switch
-                .delay_ms = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
-        });
-
-        fields.add_field_method_get("max_speed", |_, this| {
-            Ok(this
-                .config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_workspace_switch
-                .max_speed)
-        });
-
-        fields.add_field_method_set("max_speed", |_, this, value: f64| {
-            this.config
-                .lock()
-                .unwrap()
-                .gestures
-                .dnd_edge_workspace_switch
-                .max_speed = value;
-            this.dirty.lock().unwrap().gestures = true;
-            Ok(())
         });
     }
 }
@@ -3305,7 +2898,7 @@ mod tests {
 
         let gaps = wrapper.with_config(|c| c.layout.gaps);
         let dirty = wrapper.dirty.lock().unwrap().layout;
-        
+
         insta::assert_debug_snapshot!("layout_gaps_transformation", (gaps, dirty));
     }
 
@@ -3315,11 +2908,13 @@ mod tests {
         let lua = mlua::Lua::new();
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.cursor.xcursor_theme = "Adwaita"
             wrapper.cursor.xcursor_size = 24
             wrapper.cursor.hide_when_typing = true
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3330,7 +2925,7 @@ mod tests {
                 c.cursor.hide_when_typing,
             )
         });
-        
+
         insta::assert_debug_snapshot!("cursor_config_transformation", (theme, size, hide));
     }
 
@@ -3340,11 +2935,13 @@ mod tests {
         let lua = mlua::Lua::new();
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.input.keyboard.xkb.layout = "us,de,fr"
             wrapper.input.keyboard.xkb.variant = "dvorak"
             wrapper.input.keyboard.xkb.options = "grp:alt_shift_toggle,caps:escape"
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3355,7 +2952,7 @@ mod tests {
                 c.input.keyboard.xkb.options.clone(),
             )
         });
-        
+
         insta::assert_debug_snapshot!("keyboard_xkb_transformation", (layout, variant, options));
     }
 
@@ -3371,7 +2968,7 @@ mod tests {
 
         let slowdown = wrapper.with_config(|c| c.animations.slowdown);
         let off = wrapper.with_config(|c| c.animations.off);
-        
+
         insta::assert_debug_snapshot!("animations_slowdown_transformation", (slowdown, off));
     }
 
@@ -3410,11 +3007,13 @@ mod tests {
         let lua = mlua::Lua::new();
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.input.touchpad.tap = true
             wrapper.input.touchpad.natural_scroll = true
             wrapper.input.touchpad.accel_speed = 0.3
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3425,7 +3024,7 @@ mod tests {
                 c.input.touchpad.accel_speed.0,
             )
         });
-        
+
         insta::assert_debug_snapshot!(
             "touchpad_config_transformation",
             (tap, natural_scroll, accel_speed)
@@ -3439,11 +3038,13 @@ mod tests {
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
         // Add multiple workspaces
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.workspaces:add({ name = "main" })
             wrapper.workspaces:add({ name = "web" })
             wrapper.workspaces:add({ name = "dev" })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3456,7 +3057,7 @@ mod tests {
             .load("return wrapper.workspaces:get(3).name")
             .eval()
             .unwrap();
-        
+
         insta::assert_debug_snapshot!(
             "workspace_collection_operations",
             (len, first_name, third_name)
@@ -3469,7 +3070,8 @@ mod tests {
         let lua = mlua::Lua::new();
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.outputs:add({
                 name = "eDP-1",
                 scale = 2.0,
@@ -3479,7 +3081,8 @@ mod tests {
                 name = "HDMI-A-1",
                 scale = 1.5,
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3492,7 +3095,7 @@ mod tests {
             .load("return wrapper.outputs:get('HDMI-A-1').scale")
             .eval()
             .unwrap();
-        
+
         insta::assert_debug_snapshot!(
             "output_collection_with_scale",
             (len, first_scale, second_scale)
@@ -3505,12 +3108,14 @@ mod tests {
         let lua = mlua::Lua::new();
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.window_rules:add({
                 match = { app_id = "firefox" },
                 open_floating = true,
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3519,7 +3124,7 @@ mod tests {
             .eval()
             .unwrap();
         let dirty = wrapper.dirty.lock().unwrap().window_rules;
-        
+
         insta::assert_debug_snapshot!("window_rule_transformation", (len, dirty));
     }
 
@@ -3530,16 +3135,18 @@ mod tests {
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
         // Add binds using string format
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.binds:add("Mod+Return spawn alacritty")
             wrapper.binds:add("Mod+Q close-window")
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
         let len: usize = lua.load("return wrapper.binds:len()").eval().unwrap();
         let dirty = wrapper.dirty.lock().unwrap().binds;
-        
+
         insta::assert_debug_snapshot!("binds_collection_string_format", (len, dirty));
     }
 
@@ -3550,13 +3157,15 @@ mod tests {
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
         // Add binds using table format
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.binds:add({
                 key = "Mod+T",
                 action = "spawn",
                 args = { "kitty" },
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3570,10 +3179,12 @@ mod tests {
         let lua = mlua::Lua::new();
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.environment:add({ name = "QT_QPA_PLATFORM", value = "wayland" })
             wrapper.environment:add({ name = "MOZ_ENABLE_WAYLAND", value = "1" })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3582,7 +3193,7 @@ mod tests {
             .load("return wrapper.environment:get('QT_QPA_PLATFORM').value")
             .eval()
             .unwrap();
-        
+
         insta::assert_debug_snapshot!("environment_variable_transformation", (len, first_value));
     }
 
@@ -3593,12 +3204,14 @@ mod tests {
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
 
         // Make changes to different subsystems
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper.layout.gaps = 16
             wrapper.cursor.xcursor_size = 32
             wrapper.input.touchpad.tap = true
             wrapper.animations.slowdown = 2.0
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3611,7 +3224,7 @@ mod tests {
             dirty.keyboard,
             dirty.binds,
         );
-        
+
         insta::assert_debug_snapshot!("dirty_flags_after_multiple_changes", flags);
     }
 
@@ -3671,12 +3284,7 @@ mod tests {
     #[test]
     fn snapshot_default_top_level_config() {
         let wrapper = ConfigWrapper::new_default();
-        let top_level = wrapper.with_config(|c| {
-            (
-                c.prefer_no_csd,
-                c.screenshot_path.0.clone(),
-            )
-        });
+        let top_level = wrapper.with_config(|c| (c.prefer_no_csd, c.screenshot_path.0.clone()));
         insta::assert_debug_snapshot!("config_wrapper_default_top_level", top_level);
     }
 
@@ -3690,14 +3298,16 @@ mod tests {
         let lua = mlua::Lua::new();
 
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper:update({
                 prefer_no_csd = true,
                 layout = { gaps = 16, always_center_single_column = true },
                 cursor = { xcursor_size = 32, xcursor_theme = "Adwaita" },
                 animations = { off = false, slowdown = 2.5 }
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3726,12 +3336,14 @@ mod tests {
         let lua = mlua::Lua::new();
 
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper:update({
                 layout = { gaps = 24 },
                 animations = { slowdown = 1.5 }
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
@@ -3750,16 +3362,21 @@ mod tests {
         let lua = mlua::Lua::new();
 
         lua.globals().set("wrapper", wrapper.clone()).unwrap();
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper:update({
                 screenshot_path = "/home/user/screenshots"
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
         wrapper.with_config(|c| {
-            assert_eq!(c.screenshot_path.0, Some("/home/user/screenshots".to_string()));
+            assert_eq!(
+                c.screenshot_path.0,
+                Some("/home/user/screenshots".to_string())
+            );
         });
 
         assert!(wrapper.dirty.lock().unwrap().misc);
@@ -3777,32 +3394,34 @@ mod tests {
         lua.globals().set("wrapper2", wrapper2.clone()).unwrap();
 
         // Individual updates (multiple locks)
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper1.layout.gaps = 16
             wrapper1.cursor.xcursor_size = 32
             wrapper1.animations.slowdown = 2.0
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
         // Batch update (single lock)
-        lua.load(r#"
+        lua.load(
+            r#"
             wrapper2:update({
                 layout = { gaps = 16 },
                 cursor = { xcursor_size = 32 },
                 animations = { slowdown = 2.0 }
             })
-        "#)
+        "#,
+        )
         .exec()
         .unwrap();
 
         // Both should have the same final state
-        let result1 = wrapper1.with_config(|c| {
-            (c.layout.gaps, c.cursor.xcursor_size, c.animations.slowdown)
-        });
-        let result2 = wrapper2.with_config(|c| {
-            (c.layout.gaps, c.cursor.xcursor_size, c.animations.slowdown)
-        });
+        let result1 =
+            wrapper1.with_config(|c| (c.layout.gaps, c.cursor.xcursor_size, c.animations.slowdown));
+        let result2 =
+            wrapper2.with_config(|c| (c.layout.gaps, c.cursor.xcursor_size, c.animations.slowdown));
 
         assert_eq!(result1, result2);
     }

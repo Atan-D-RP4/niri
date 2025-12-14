@@ -31,6 +31,9 @@ pub fn generate_collection_proxy(
     // Generate access path
     let access_path = generate_access_path(struct_attrs, field_name);
 
+    // Get the crate path (either niri_lua or a custom path like crate)
+    let crate_path = struct_attrs.get_crate_path();
+
     quote! {
         /// Collection proxy for accessing Vec<#item_type> configuration.
         ///
@@ -38,12 +41,12 @@ pub fn generate_collection_proxy(
         /// (following Lua conventions). All index parameters from Lua start at 1, not 0.
         #[derive(Clone)]
         pub struct #proxy_name {
-            state: niri_lua::config_state::ConfigState,
+            state: #crate_path::config_state::ConfigState,
         }
 
         impl #proxy_name {
             /// Create a new collection proxy.
-            pub fn new(state: niri_lua::config_state::ConfigState) -> Self {
+            pub fn new(state: #crate_path::config_state::ConfigState) -> Self {
                 Self { state }
             }
 
@@ -60,6 +63,7 @@ pub fn generate_collection_proxy(
 
             /// Get an item by index (0-based internally, 1-based from Lua).
             pub fn get(&self, index: usize, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
+                use ::mlua::IntoLua;
                 let config = self.state.borrow_config();
                 if index >= #access_path.len() {
                     return Err(::mlua::Error::external(format!(
@@ -71,24 +75,24 @@ pub fn generate_collection_proxy(
 
                 // Convert the item to Lua value
                 let item = &#access_path[index];
-                let lua_val = <#item_type as niri_lua::traits::LuaFieldConvert>::to_lua(item);
+                let lua_val = <#item_type as #crate_path::traits::LuaFieldConvert>::to_lua(item);
                 lua_val.into_lua(lua)
             }
 
             /// Append an item to the collection.
             pub fn append(&self, value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<()> {
                 // First convert Lua Value to the intermediate LuaType
-                let intermediate: <#item_type as niri_lua::traits::LuaFieldConvert>::LuaType = 
+                let intermediate: <#item_type as #crate_path::traits::LuaFieldConvert>::LuaType =
                     ::mlua::FromLua::from_lua(value, lua)?;
                 // Then convert to the actual Rust type
-                let new_item = <#item_type as niri_lua::traits::LuaFieldConvert>::from_lua(intermediate)?;
+                let new_item = <#item_type as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?;
 
                 {
                     let mut config = self.state.borrow_config();
                     #access_path.push(new_item);
                 }
 
-                self.state.mark_dirty(niri_lua::config_state::DirtyFlag::#dirty_flag);
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
                 Ok(())
             }
 
@@ -106,7 +110,7 @@ pub fn generate_collection_proxy(
                     #access_path.remove(index - 1);  // Convert to 0-based
                 }
 
-                self.state.mark_dirty(niri_lua::config_state::DirtyFlag::#dirty_flag);
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
                 Ok(())
             }
 
@@ -117,7 +121,7 @@ pub fn generate_collection_proxy(
                     #access_path.clear();
                 }
 
-                self.state.mark_dirty(niri_lua::config_state::DirtyFlag::#dirty_flag);
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
                 Ok(())
             }
         }
@@ -159,11 +163,13 @@ pub fn generate_collection_proxy(
                 // we use __pairs since mlua maps both to MetaMethod::Pairs
                 // The iterator returns (index, value) pairs with 1-based indices
                 methods.add_meta_method(::mlua::MetaMethod::Pairs, |lua, this, ()| {
+                    use ::mlua::IntoLua;
                     let len = this.len();
                     let state = this.state.clone();
 
                     // Create iterator function that returns next (key, value) pair
                     let iter_fn = lua.create_function(move |lua, (_, prev_idx): (::mlua::Value, Option<i64>)| {
+                        use ::mlua::IntoLua;
                         let next_idx = prev_idx.map(|i| i + 1).unwrap_or(1);
 
                         if next_idx as usize > len || next_idx < 1 {
@@ -174,7 +180,7 @@ pub fn generate_collection_proxy(
                         // Get item at 0-based index
                         let config = state.borrow_config();
                         let item = &#access_path[(next_idx as usize) - 1];
-                        let lua_val = <#item_type as niri_lua::traits::LuaFieldConvert>::to_lua(item);
+                        let lua_val = <#item_type as #crate_path::traits::LuaFieldConvert>::to_lua(item);
                         drop(config);
 
                         Ok((::mlua::Value::Integer(next_idx), lua_val.into_lua(lua)?))

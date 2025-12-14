@@ -29,6 +29,7 @@ pub mod config_state;
 pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
+pub mod migrated_proxies;
 pub mod parse_utils;
 pub mod traits;
 
