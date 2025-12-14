@@ -2519,8 +2519,6 @@ dependencies = [
  "niri-config",
  "niri-ipc",
  "regex",
- "serde",
- "serde_json",
  "tempfile",
 ]
 

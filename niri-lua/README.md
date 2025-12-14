@@ -122,11 +122,10 @@ end)
 
 ## Dependencies
 
-- `mlua`: Lua bindings for Rust
+- `mlua`: Lua bindings for Rust (with Luau runtime)
 - `niri-config`: Niri configuration structures
 - `niri-ipc`: Niri IPC types
 - `anyhow`: Error handling
-- `serde_json`: JSON serialization for config changes
 
 ## Future API Improvements
 

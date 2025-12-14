@@ -18,8 +18,6 @@ niri-config = { version = "25.8.0", path = "../niri-config" }
 niri-ipc = { version = "25.8.0", path = "../niri-ipc" }
 
 regex.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

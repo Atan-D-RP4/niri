@@ -8,26 +8,26 @@ Comprehensive specification for niri's Lua scripting system. This document cover
 
 ## Table of Contents
 
-1. [Quick Reference](#quick-reference) *(NEW - single-page cheat sheet)*
+1. [Quick Reference](#quick-reference) *(single-page cheat sheet)*
 2. [Overview](#overview)
-3. [API Patterns](#api-patterns) *(NEW - decision tree for API usage)*
-4. [Schema Reference](#schema-reference) *(NEW - machine-readable types)*
-5. [Configuration API](#configuration-api)
-6. [Runtime State API](#runtime-state-api)
-7. [Event System](#event-system) *(with typed payloads)*
-8. [Action System](#action-system) *(with typed signatures)*
-9. [Timer API](#timer-api)
-10. [Validation Rules](#validation-rules) *(NEW)*
-11. [Error Reference](#error-reference) *(NEW)*
-12. [Cookbook](#cookbook) *(NEW - common recipes)*
-13. [REPL](#repl)
-14. [Plugin System](#plugin-system)
-15. [Review & Testing](#review-and-testing) *(NEW)*
-16. [Appendices](#appendices)
+3. [Vision](#vision)
+4. [Design Decisions](#design-decisions)
+5. [Architecture](#architecture)
+6. [Configuration API](#configuration-api)
+7. [Runtime State API](#runtime-state-api)
+8. [Event System](#event-system)
+9. [Action System](#action-system)
+10. [Timer API](#timer-api)
+11. [API Patterns](#api-patterns) *(decision tree for API usage)*
+12. [Schema Reference](#schema-reference) *(machine-readable types)*
+13. [Module System](#module-system)
+14. [REPL](#repl)
+15. [Appendices](#appendices)
     - [A: Canonical Reference Config](#appendix-a-canonical-reference-config)
     - [B: Version Compatibility Matrix](#appendix-b-version-compatibility-matrix)
     - [C: Test Coverage Matrix](#appendix-c-test-coverage-matrix)
     - [D: Code Review Checklist](#appendix-d-code-review-checklist)
+    - [E: Refactor History](#appendix-e-refactor-history)
 
 ---
 
@@ -110,29 +110,29 @@ niri.events:on({"window:open", "window:close"}, function(ev) end)  -- Same callb
 
 ```lua
 -- Window
-niri.action.close_window()
-niri.action.fullscreen_window()
-niri.action.focus_window(id)              -- id: integer
-niri.action.focus_window_up()
-niri.action.focus_window_down()
+niri.action:close_window()
+niri.action:fullscreen_window()
+niri.action:focus_window(id)              -- id: integer
+niri.action:focus_window_up()
+niri.action:focus_window_down()
 
 -- Workspace
-niri.action.focus_workspace(ref)          -- ref: integer | string
-niri.action.move_window_to_workspace(ref)
+niri.action:focus_workspace(ref)          -- ref: integer | string
+niri.action:move_window_to_workspace(ref)
 
 -- Spawn
-niri.action.spawn({"cmd", "arg1"})        -- array of strings
-niri.action.spawn_sh("shell command")     -- shell string
+niri.action:spawn({"cmd", "arg1"})        -- array of strings
+niri.action:spawn_sh("shell command")     -- shell string
 
 -- Layout
-niri.action.toggle_window_floating()
-niri.action.toggle_column_tabbed()
-niri.action.set_column_width({proportion = 0.5})
+niri.action:toggle_window_floating()
+niri.action:toggle_column_tabbed()
+niri.action:set_column_width({proportion = 0.5})
 
 -- System
-niri.action.quit()
-niri.action.power_off_monitors()
-niri.action.screenshot()
+niri.action:quit()
+niri.action:power_off_monitors()
+niri.action:screenshot()
 ```
 
 ### Timers
@@ -187,17 +187,57 @@ Niri's Lua system is foundational infrastructure for transforming niri from a st
 
 ### The Desktop Environment Framework
 
-The long-term vision comprises two complementary crates:
+The long-term vision comprises three complementary components:
 
-| Crate | Purpose | Status |
-|-------|---------|--------|
-| **niri-lua** | Configuration, runtime state, events, actions | Implemented |
-| **niri-ui** | Smithay-native widget toolkit for shell components | Design phase |
+| Component | Purpose | Status | Documentation |
+|-----------|---------|--------|---------------|
+| **niri-lua** | Configuration, runtime state, events, actions | ✅ Implemented | This document |
+| **OS Utilities** | `niri.os.*` and `niri.fs.*` APIs for system access | 📋 Specified | [NIRI_LUA_OS_UTILITIES_SPEC.md](../docs/NIRI_LUA_OS_UTILITIES_SPEC.md) |
+| **niri-ui** | Smithay-native widget toolkit for shell components | 📋 Design phase | [NIRI_UI_SPECIFICATION.md](../docs/NIRI_UI_SPECIFICATION.md) |
 
 Together, these enable building full desktop shells comparable to:
 - **AwesomeWM**: Lua-configured window manager with built-in widgets
 - **QtQuick/Shell projects**: Noctalia Shell, DankMaterialShell
 - **KDE Plasma**: Full desktop environment with panels, widgets, system integration
+
+### Comparison with Lua-Configured Projects
+
+| Project | Type | Lua Role | Widgets | Wayland | Key Difference |
+|---------|------|----------|---------|---------|----------------|
+| **niri-lua** | Compositor | Config + runtime | Via niri-ui | Native | Scrollable tiling, Smithay-based |
+| **AwesomeWM** | Window Manager | Config + widgets | Built-in | ❌ X11 | Mature ecosystem, X11-only |
+| **Pinnacle** | Compositor | Config + runtime | Via Snowcap (gRPC) | Native | Separate UI process, Iced-based |
+| **WezTerm** | Terminal | Config only | N/A | N/A | Similar API patterns (inspiration) |
+| **Neovim** | Editor | Full scripting | Plugins | N/A | Plugin ecosystem model (inspiration) |
+
+#### AwesomeWM Comparison
+
+AwesomeWM pioneered the "Lua-configured desktop" paradigm. Key lessons:
+
+| AwesomeWM | niri Equivalent | Notes |
+|-----------|-----------------|-------|
+| `rc.lua` | `niri.lua` | Main configuration entry point |
+| `awful.spawn` | `niri.action:spawn()` | Process launching |
+| `gears.filesystem.*` | `niri.fs.*` | Path and file utilities |
+| `awful.widget.*` | `niri.ui.*` (planned) | Built-in widget library |
+| `naughty` | `niri.notifications` (planned) | Notification system |
+| `client.connect_signal()` | `niri.events:connect()` | Event subscription |
+
+**Key architectural difference**: AwesomeWM is X11-only with a synchronous Lua model. Niri is Wayland-native with compositor-integrated widgets and timeout-protected Lua execution.
+
+#### Pinnacle/Snowcap Comparison
+
+Pinnacle (Smithay-based, like niri) uses a **separate UI process** (Snowcap) communicating via gRPC:
+
+| Aspect | Pinnacle/Snowcap | niri/niri-ui |
+|--------|------------------|--------------|
+| **Process model** | Separate processes | Single process |
+| **Communication** | gRPC over Unix socket | Direct function calls |
+| **Widget framework** | Iced (external) | Smithay-native (internal) |
+| **State access** | Serialized over IPC | Direct shared state |
+| **Crash isolation** | UI crash doesn't affect compositor | UI rendered safely via textures |
+
+**Trade-off**: Pinnacle's approach provides stronger crash isolation but adds IPC latency and complexity. Niri's integrated approach enables lower latency and simpler deployment while maintaining stability through compositor-internal rendering (like `hotkey_overlay`).
 
 ### What niri-lua Provides Today
 
@@ -207,6 +247,27 @@ Together, these enable building full desktop shells comparable to:
 4. **Action System**: ~90 actions for controlling the compositor
 5. **Timers**: Deferred and repeating callbacks for dynamic behavior
 6. **REPL**: Interactive Lua console for debugging and exploration
+
+### What OS Utilities Will Add
+
+The planned `niri.os` and `niri.fs` APIs (see [NIRI_LUA_OS_UTILITIES_SPEC.md](../docs/NIRI_LUA_OS_UTILITIES_SPEC.md)) will enable:
+
+- **Conditional configuration**: Enable features only when tools are installed
+- **Multi-machine configs**: Different settings based on hostname
+- **XDG compliance**: Proper path expansion (`~`, `$XDG_CONFIG_HOME`)
+- **File validation**: Check readability before `require()`
+
+```lua
+-- Example: Conditional xwayland-satellite
+if niri.fs.which("xwayland-satellite") then
+    niri.config.xwayland_satellite.off = false
+end
+
+-- Example: Multi-machine configuration
+if niri.os.hostname() == "workstation" then
+    niri.config.layout.gaps = 16
+end
+```
 
 ### What niri-ui Will Add
 
@@ -221,12 +282,13 @@ The planned `niri-ui` crate (see [NIRI_UI_SPECIFICATION.md](../docs/NIRI_UI_SPEC
 
 ### The Neovim Analogy
 
-| Neovim | Niri |
-|--------|------|
-| Base editor | Base compositor |
-| Lua API | niri-lua |
-| UI plugins (telescope, lualine) | niri-ui widgets |
-| Distribution (LazyVim) | Community "niri distros" |
+| Neovim | Niri | Notes |
+|--------|------|-------|
+| Base editor | Base compositor | Core functionality |
+| `vim.api.*` | niri-lua | Configuration and runtime API |
+| `vim.fn.*`, `vim.loop.*` | `niri.os.*`, `niri.fs.*` | OS/filesystem utilities |
+| UI plugins (telescope, lualine) | niri-ui widgets | Visual components |
+| Distribution (LazyVim) | Community "niri distros" | Curated configurations |
 
 Just as Neovim users can build entirely custom editing experiences through Lua, niri users will be able to build entirely custom desktop experiences—without writing any Rust.
 
@@ -252,7 +314,12 @@ Just as Neovim users can build entirely custom editing experiences through Lua, 
   - `src/lua_event_hooks.rs`: Extension traits for event emission
   - Centralized event emission in refresh cycle (not scattered call sites)
 
-- 🔄 **niri-ui**: Design phase
+- 📋 **OS Utilities**: Specified
+  - `niri.os.hostname()`, `niri.os.getenv()`
+  - `niri.fs.which()`, `niri.fs.readable()`, `niri.fs.expand()`
+  - See [NIRI_LUA_OS_UTILITIES_SPEC.md](../docs/NIRI_LUA_OS_UTILITIES_SPEC.md)
+
+- 📋 **niri-ui**: Design phase
   - Specification complete
   - Architecture designed
   - Awaiting implementation
@@ -385,17 +452,34 @@ fn create_state_snapshot(&self) -> StateSnapshot {
 }
 ```
 
-### Config Conversion: JSON Intermediary Format
+### Config Conversion: Direct UserData Proxies
 
-**Decision:** Use `serde_json::Value` as an intermediary when converting Lua tables to Config structs.
+**Decision:** Use native `mlua::UserData` proxy structs for direct Lua-to-Config conversion.
 
 **Rationale:**
-- Simpler implementation than direct Lua-to-Config conversion
-- Leverages existing serde infrastructure
-- Easier debugging (can log JSON)
-- Trade-off: Additional serialization step
+- No serialization overhead (direct field access)
+- Type-safe field assignments with immediate validation
+- Better error messages (field-level rather than post-serialization)
+- Enables lazy/reactive patterns (only modified fields trigger updates)
 
-**Noted as potential optimization:** Direct Lua-to-Config conversion could be more efficient but requires more complex code.
+**Implementation:**
+```rust
+// Each config section has a dedicated proxy struct
+impl UserData for LayoutProxy {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("gaps", |_, this| {
+            Ok(this.config.lock().unwrap().layout.gaps)
+        });
+        fields.add_field_method_set("gaps", |_, this, value: u16| {
+            this.config.lock().unwrap().layout.gaps = value;
+            this.dirty.lock().unwrap().layout = true;
+            Ok(())
+        });
+    }
+}
+```
+
+**Historical note:** An earlier design considered `serde_json::Value` as an intermediary, but this was replaced with direct UserData proxies for better performance and type safety.
 
 ### Type Definitions: EmmyLua over Luau Native Types
 
@@ -444,7 +528,7 @@ let compiler = Compiler::new()
 | Callback flush | Limit 16/cycle | Unlimited | Bound latency |
 | Timer lifetime | Until close() | GC-based | Match Neovim, explicit is clearer |
 | Event state | Snapshots | Live refs | Avoid deadlocks |
-| Config convert | JSON intermediary | Direct | Simpler implementation |
+| Config convert | UserData proxies | JSON intermediary | Better performance, type safety |
 | Type defs | EmmyLua | Luau native | LSP compatibility |
 | Raw keys | Excluded | Included | Security, performance |
 
@@ -462,7 +546,7 @@ The Lua system is organized into tiers of increasing functionality:
 | 2 | Configuration API with full KDL parity | Complete |
 | 3 | Runtime state queries (windows, workspaces, outputs) | Complete |
 | 4 | Event system with compositor integration | Complete |
-| 5 | Module loader (extends package.path for niri directories) | Complete |
+| 5 | Module loader (XDG paths defined, integration pending) | Partial |
 | 6 | Developer experience (REPL, docs, types) | Complete |
 
 ### Core Components
@@ -493,7 +577,7 @@ niri-lua/src/
 ├── extractors.rs       # Value extraction helpers
 ├── parse_utils.rs      # Parsing utilities
 ├── test_utils.rs       # Test helpers
-├── module_loader.rs    # Extends package.path for niri lua directories
+├── module_loader.rs    # XDG path definitions for user Lua modules (not yet integrated)
 └── types/api.lua       # EmmyLua type definitions (generated)
 
 src/
@@ -554,6 +638,447 @@ impl ExecutionLimits {
 
 ---
 
+## Configuration API
+
+The `niri.config` namespace provides complete KDL configuration parity. All niri configuration options are accessible via Lua tables and collection methods.
+
+### Architecture
+
+- **Source files**: `config_wrapper.rs` (~3,200 LOC), `config_api.rs` (~950 LOC)
+- **Pattern**: Hybrid table/collection proxies with dirty tracking
+- **Conversion**: Lua → JSON → Config structs (via serde)
+
+### Configuration Categories
+
+| Category | Type | Access Pattern |
+|----------|------|----------------|
+| `input` | table | `niri.config.input.keyboard.xkb.layout = "us"` |
+| `layout` | table | `niri.config.layout.gaps = 16` |
+| `cursor` | table | `niri.config.cursor.xcursor_size = 24` |
+| `animations` | table | `niri.config.animations.slowdown = 2.0` |
+| `binds` | collection | `niri.config.binds:add("Mod+Q", action)` |
+| `outputs` | collection | `niri.config.outputs:add({name = "eDP-1", ...})` |
+| `window_rules` | collection | `niri.config.window_rules:add({matches = {...}})` |
+| `layer_rules` | collection | `niri.config.layer_rules:add({...})` |
+| `workspaces` | collection | `niri.config.workspaces:add({name = "dev"})` |
+| `environment` | collection | `niri.config.environment:add("KEY", "value")` |
+
+### Table Fields (Direct Assignment)
+
+```lua
+-- Nested table access
+niri.config.input.keyboard.xkb.layout = "us"
+niri.config.input.touchpad.tap = true
+niri.config.layout.gaps = 16
+niri.config.layout.focus_ring.width = 4
+niri.config.layout.focus_ring.active_color = "#7fc8ff"
+
+-- Full table replacement
+niri.config.cursor = {
+    xcursor_theme = "Adwaita",
+    xcursor_size = 24,
+    hide_when_typing = true,
+}
+
+-- Scalar fields
+niri.config.prefer_no_csd = true
+niri.config.screenshot_path = "~/Pictures/%Y-%m-%d_%H-%M-%S.png"
+```
+
+### Collection Fields (Method Access)
+
+Collections use method-based CRUD operations:
+
+```lua
+-- Add items
+niri.config.binds:add("Mod+Q", niri.action:close_window())
+niri.config.binds:add("Mod+Return", {
+    action = niri.action:spawn({"alacritty"}),
+    allow_when_locked = false,
+})
+
+-- List all items
+local all_binds = niri.config.binds:list()
+
+-- Get specific item
+local bind = niri.config.binds:get("Mod+Q")
+
+-- Remove item
+niri.config.binds:remove("Mod+Q")
+
+-- Clear all
+niri.config.binds:clear()
+
+-- Replace entire collection
+niri.config.binds:set({
+    ["Mod+Q"] = niri.action:close_window(),
+    ["Mod+Return"] = niri.action:spawn({"alacritty"}),
+})
+```
+
+### Batch Updates
+
+For performance when making multiple changes:
+
+```lua
+niri.config:update({
+    layout = {
+        gaps = 20,
+        focus_ring = { width = 6 },
+    },
+    cursor = {
+        xcursor_size = 32,
+    },
+})
+```
+
+### Applying Configuration
+
+After making changes, apply them to the compositor:
+
+```lua
+niri.config:apply()  -- Applies all pending changes
+```
+
+---
+
+## Runtime State API
+
+The `niri.state` namespace provides read-only access to compositor runtime state including windows, workspaces, outputs, and keyboard layouts.
+
+### Architecture
+
+- **Source file**: `runtime_api.rs` (910 LOC)
+- **Pattern**: Snapshot-based queries to avoid lock contention
+- **Dual mode**: Event handlers use pre-populated snapshots; normal code uses idle callbacks
+
+### Core Components
+
+```rust
+// Internal structures (from runtime_api.rs)
+pub struct StateSnapshot {
+    pub windows: Vec<WindowData>,
+    pub workspaces: Vec<WorkspaceData>,
+    pub outputs: Vec<OutputData>,
+    pub focused_window: Option<WindowData>,
+}
+
+// Thread-local for event context
+thread_local! {
+    static EVENT_CONTEXT_STATE: RefCell<Option<StateSnapshot>> = RefCell::new(None);
+}
+```
+
+### State Queries
+
+```lua
+-- Get all windows
+local windows = niri.state.windows
+-- Returns: { {id, app_id, title, workspace_id, is_focused, is_floating, ...}, ... }
+
+-- Get all workspaces
+local workspaces = niri.state.workspaces
+-- Returns: { {id, name, output, is_active, idx, ...}, ... }
+
+-- Get all outputs
+local outputs = niri.state.outputs
+-- Returns: { {name, make, model, width, height, refresh, scale, ...}, ... }
+
+-- Get keyboard layouts
+local layouts = niri.state.keyboard_layouts
+-- Returns: { names = {"us", "de"}, current_idx = 0 }
+
+-- Get focused window (may be nil)
+local focused = niri.state.focused_window
+-- Returns: {id, app_id, title} or nil
+```
+
+### Event Context Behavior
+
+Inside event handlers, state queries return a snapshot taken at event emission time:
+
+```lua
+niri.events:on("window:open", function(ev)
+    -- State is consistent with when the event was emitted
+    local windows = niri.state.windows
+    -- This is a snapshot, not live data
+end)
+```
+
+Outside event handlers, state queries schedule idle callbacks to safely access compositor state.
+
+---
+
+## Event System
+
+The event system enables reactive programming by subscribing to compositor events.
+
+### Architecture
+
+- **Source files**: `events_proxy.rs` (790 LOC), `event_data.rs` (200+ LOC), `event_handlers.rs`
+- **Pattern**: Colon-method syntax (`:on()`, `:off()`, etc.)
+- **COW optimization**: `Arc<Vec>` for handlers to avoid cloning during iteration
+
+### EventsProxy Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `on` | `:on(event, callback)` | Subscribe to event(s), returns handler ID(s) |
+| `once` | `:once(event, callback)` | Subscribe once, auto-removes after first fire |
+| `off` | `:off(event, handler_id)` | Unsubscribe specific handler |
+| `emit` | `:emit(event, data)` | Manually emit event (for testing) |
+| `list` | `:list()` | List all registered event names |
+| `clear` | `:clear()` | Remove all handlers |
+
+### Subscription Examples
+
+```lua
+-- Single event subscription
+local handler_id = niri.events:on("window:open", function(ev)
+    print("Window opened: " .. ev.app_id)
+end)
+
+-- Multi-event subscription (same callback)
+local handler_ids = niri.events:on({"window:open", "window:close"}, function(ev)
+    print("Window event: " .. ev.event_type)
+end)
+
+-- One-time subscription
+niri.events:once("config:reload", function(ev)
+    print("Config reloaded!")
+end)
+
+-- Unsubscribe
+niri.events:off("window:open", handler_id)
+niri.events:off(handler_ids)  -- Multi-event unsubscribe
+```
+
+### Available Events
+
+#### Window Events
+| Event | Payload | When |
+|-------|---------|------|
+| `window:open` | `{id, app_id, title, workspace_id}` | Window created |
+| `window:close` | `{id, app_id, title}` | Window destroyed |
+| `window:focus` | `{id, app_id, title}` | Window gained focus |
+| `window:blur` | `{id, app_id, title}` | Window lost focus |
+
+#### Workspace Events
+| Event | Payload | When |
+|-------|---------|------|
+| `workspace:activate` | `{name, idx, output}` | Workspace became active |
+| `workspace:deactivate` | `{name, idx, output}` | Workspace became inactive |
+
+#### Monitor Events
+| Event | Payload | When |
+|-------|---------|------|
+| `monitor:connect` | `{name, connector, make, model}` | Output connected |
+| `monitor:disconnect` | `{name, connector}` | Output disconnected |
+
+#### Layout Events
+| Event | Payload | When |
+|-------|---------|------|
+| `layout:change` | `{keyboard_layouts, current_idx}` | Keyboard layout changed |
+
+#### System Events
+| Event | Payload | When |
+|-------|---------|------|
+| `config:reload` | `{}` | Configuration reloaded |
+| `overview:open` | `{}` | Overview mode opened |
+| `overview:close` | `{}` | Overview mode closed |
+
+### Excluded Events (Security)
+
+The following events are intentionally NOT exposed:
+- `key:press`, `key:release` - Security (keylogging), performance (every keystroke)
+- `idle:start`, `idle:end` - Not exposed via Smithay's IdleNotifierState
+
+---
+
+## Action System
+
+The `niri.action` namespace provides access to ~90 compositor actions.
+
+### Architecture
+
+- **Source file**: `action_proxy.rs` (1,160 LOC)
+- **Pattern**: Method factories that return action objects
+- **Macro**: `register_actions!` for no-argument actions
+
+### Action Categories
+
+#### Window Management
+```lua
+niri.action:close_window()
+niri.action:fullscreen_window()
+niri.action:maximize_column()
+niri.action:toggle_window_floating()
+niri.action:focus_window_up()
+niri.action:focus_window_down()
+niri.action:move_window_up()
+niri.action:move_window_down()
+niri.action:focus_window(id)              -- id: integer
+```
+
+#### Column Management
+```lua
+niri.action:focus_column_left()
+niri.action:focus_column_right()
+niri.action:move_column_left()
+niri.action:move_column_right()
+niri.action:center_column()
+niri.action:toggle_column_tabbed()
+niri.action:set_column_width({proportion = 0.5})
+niri.action:set_column_width({fixed = 800})
+```
+
+#### Workspace Navigation
+```lua
+niri.action:focus_workspace(ref)          -- ref: integer | string
+niri.action:focus_workspace_up()
+niri.action:focus_workspace_down()
+niri.action:move_window_to_workspace(ref)
+niri.action:move_window_to_workspace_up()
+niri.action:move_window_to_workspace_down()
+```
+
+#### Monitor Navigation
+```lua
+niri.action:focus_monitor_left()
+niri.action:focus_monitor_right()
+niri.action:focus_monitor_up()
+niri.action:focus_monitor_down()
+niri.action:move_window_to_monitor_left()
+niri.action:move_window_to_monitor_right()
+```
+
+#### Process Spawning
+```lua
+niri.action:spawn({"cmd", "arg1", "arg2"})  -- Array of strings
+niri.action:spawn_sh("shell command")        -- Shell string (Since 25.05)
+```
+
+#### Screenshots
+```lua
+niri.action:screenshot()
+niri.action:screenshot_window()
+niri.action:screenshot_screen()
+```
+
+#### System
+```lua
+niri.action:quit()
+niri.action:power_off_monitors()
+niri.action:suspend()
+niri.action:toggle_overview()
+niri.action:show_hotkey_overlay()
+```
+
+### Parameterized Actions
+
+Actions with parameters use table arguments:
+
+```lua
+-- Size changes
+niri.action:set_column_width({proportion = 0.5})  -- 50% of screen
+niri.action:set_column_width({fixed = 800})       -- 800 pixels
+niri.action:set_window_height({proportion = 0.333})
+
+-- Workspace reference (string name or integer index)
+niri.action:focus_workspace("browser")
+niri.action:focus_workspace(3)
+
+-- Layout switch
+niri.action:switch_layout("next")
+niri.action:switch_layout("prev")
+niri.action:switch_layout(0)  -- Specific index
+```
+
+### Using Actions in Bindings
+
+Actions are called as factories that return action objects:
+
+```lua
+-- CORRECT: Call the action factory
+niri.config.binds:add("Mod+Q", niri.action:close_window())
+
+-- WRONG: Missing parentheses
+niri.config.binds:add("Mod+Q", niri.action:close_window)  -- Won't work!
+```
+
+---
+
+## Timer API
+
+The `niri.loop` namespace provides Neovim-style timer functionality.
+
+### Architecture
+
+- **Source file**: `loop_api.rs` (200+ LOC)
+- **Pattern**: `TimerManager` with `HashMap` + `BinaryHeap<Reverse<(Instant, u64)>>`
+- **Lifetime**: Timers persist until explicit `close()` (GC doesn't stop them)
+
+### Timer Creation
+
+```lua
+-- One-shot timer (fires once after delay)
+local timer = niri.loop.new_timer()
+timer:start(1000, 0, function()
+    print("Fired after 1 second!")
+end)
+
+-- Repeating timer (fires every interval)
+local timer = niri.loop.new_timer()
+timer:start(1000, 1000, function()
+    print("Fires every 1 second!")
+end)
+
+-- Convenience: create and start in one call
+local timer = niri.loop.new_timer(1000, function()
+    print("One-shot after 1 second")
+end)
+
+local timer = niri.loop.new_timer(1000, function()
+    print("Repeating every 1 second")
+end, true)  -- true = repeat
+```
+
+### Timer Methods
+
+| Method | Description |
+|--------|-------------|
+| `timer:start(delay_ms, repeat_ms, callback)` | Start timer with delay and optional repeat |
+| `timer:stop()` | Stop timer (can be restarted) |
+| `timer:close()` | Permanently destroy timer |
+| `timer:is_active()` | Check if timer is running |
+
+### Current Time
+
+```lua
+local now = niri.loop.now()  -- Monotonic time in milliseconds
+```
+
+### Timer Lifetime
+
+**Important**: Timers continue running even if the Lua handle is garbage collected:
+
+```lua
+-- This timer will still fire even though we don't keep the handle!
+niri.loop.new_timer():start(1000, 0, function()
+    print("Still fires!")
+end)
+
+-- Proper cleanup pattern
+local timer = niri.loop.new_timer()
+timer:start(1000, 0, function()
+    timer:close()  -- Explicit cleanup after firing
+end)
+```
+
+This matches Neovim's `vim.uv` semantics for familiarity.
+
+---
+
 ## API Patterns
 
 > **For LLM Agents**: Use this decision tree to determine which API pattern to use.
@@ -599,22 +1124,22 @@ WHEN accessing niri.config.*:
         niri.config.screenshot_path = "~/Pictures/%Y-%m-%d.png"
 
 
-WHEN using niri.action.*:
+WHEN using niri.action:*:
 │
 ├─ Action takes NO arguments:
-│   niri.action.close_window()
-│   niri.action.quit()
+│   niri.action:close_window()
+│   niri.action:quit()
 │
 ├─ Action takes a SINGLE primitive:
-│   niri.action.focus_window(id)           -- integer
-│   niri.action.focus_workspace(ref)       -- integer | string
+│   niri.action:focus_window(id)           -- integer
+│   niri.action:focus_workspace(ref)       -- integer | string
 │
 ├─ Action takes an ARRAY:
-│   niri.action.spawn({"cmd", "arg1"})     -- string[]
+│   niri.action:spawn({"cmd", "arg1"})     -- string[]
 │
 └─ Action takes a TABLE:
-    niri.action.set_column_width({proportion = 0.5})
-    niri.action.set_window_height({fixed = 600})
+    niri.action:set_column_width({proportion = 0.5})
+    niri.action:set_window_height({fixed = 600})
 
 
 WHEN using niri.events.*:
@@ -651,19 +1176,19 @@ niri.config.layout:add({gaps = 16})  -- ❌ layout is not a collection
 niri.config.layout.gaps = 16  -- ✓
 
 -- WRONG: Calling action without parentheses
-niri.config.binds:add("Mod+Q", niri.action.close_window)  -- ❌ Missing ()
+niri.config.binds:add("Mod+Q", niri.action:close_window)  -- ❌ Missing ()
 
 -- RIGHT: Call the action factory
-niri.config.binds:add("Mod+Q", niri.action.close_window())  -- ✓
+niri.config.binds:add("Mod+Q", niri.action:close_window())  -- ✓
 
 -- WRONG: spawn with string
-niri.action.spawn("alacritty")  -- ❌ Expects array
+niri.action:spawn("alacritty")  -- ❌ Expects array
 
 -- RIGHT: spawn with array
-niri.action.spawn({"alacritty"})  -- ✓
+niri.action:spawn({"alacritty"})  -- ✓
 
 -- RIGHT: spawn_sh with string
-niri.action.spawn_sh("alacritty --working-directory ~")  -- ✓
+niri.action:spawn_sh("alacritty --working-directory ~")  -- ✓
 ```
 
 ---
@@ -1124,8 +1649,8 @@ niri.config.layout.gaps = 16
 niri.config.layout.center_focused_column = "never"
 
 -- Bindings use collection proxies
-niri.config.binds:add("Mod+Return", niri.action.spawn({"alacritty"}))
-niri.config.binds:add("Mod+Q", niri.action.close_window())
+niri.config.binds:add("Mod+Return", niri.action:spawn({"alacritty"}))
+niri.config.binds:add("Mod+Q", niri.action:close_window())
 ```
 
 ### Configuration Fields
@@ -1154,6 +1679,159 @@ niri.config.binds:add("Mod+Q", niri.action.close_window())
 | `clipboard` | table | Clipboard settings (disable_primary) |
 | `xwayland_satellite` | table | XWayland-satellite settings (off, path) |
 | `config_notification` | table | Config notification settings (disable_failed) |
+
+---
+
+## Module System
+
+The module system enables users to organize Lua code into reusable modules following the Neovim pattern.
+
+### Current Status: Partial
+
+The infrastructure is in place but **not yet integrated** into the Lua runtime:
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| `module_loader.rs` | ✅ Implemented | Provides XDG-compliant path definitions (64 LOC) |
+| `package.path` integration | ❌ Not integrated | Paths not added to Lua runtime |
+| `require()` support | ❌ Standard only | Uses Lua's default require, no niri paths |
+
+### XDG Search Paths (Defined but Not Active)
+
+The `module_loader::default_paths()` function returns these directories in priority order:
+
+1. `$XDG_CONFIG_HOME/niri/lua/` (defaults to `~/.config/niri/lua/`)
+2. `$XDG_DATA_HOME/niri/lua/` (defaults to `~/.local/share/niri/lua/`)
+3. `/usr/share/niri/lua/` (system-wide)
+
+### Intended Usage (When Integrated)
+
+```lua
+-- User creates: ~/.config/niri/lua/mymodule.lua
+-- Contains:
+local M = {}
+function M.setup(opts)
+    -- Custom keybindings, window rules, etc.
+end
+return M
+
+-- In niri.lua config:
+local mymodule = require("mymodule")
+mymodule.setup({ option = "value" })
+```
+
+### What's Needed for Integration
+
+To complete Tier 5, the following changes are needed:
+
+1. **In `runtime.rs` or `niri_api.rs`**: Call `module_loader::default_paths()` and append to Lua's `package.path`
+2. **Add path templates**: For each directory, add `?.lua` and `?/init.lua` patterns
+
+```rust
+// Example integration (not yet implemented)
+fn setup_module_paths(lua: &Lua) -> LuaResult<()> {
+    let paths = module_loader::default_paths();
+    let package: LuaTable = lua.globals().get("package")?;
+    let mut lua_path: String = package.get("path")?;
+
+    for path in paths {
+        let path_str = path.to_string_lossy();
+        lua_path.push_str(&format!(";{}/?.lua;{}/init.lua", path_str, path_str));
+    }
+
+    package.set("path", lua_path)?;
+    Ok(())
+}
+```
+
+### Design Decisions
+
+Following the Neovim model:
+
+1. **Extend, don't replace**: Add paths to `package.path`, don't override `require`
+2. **Standard Lua semantics**: `require("foo.bar")` should work exactly as expected
+3. **No plugin manager**: Users load plugins explicitly via `require()` in their config
+4. **No lifecycle management**: No `disable()`, no hot-reload (keep it simple)
+
+---
+
+## REPL
+
+The REPL (Read-Eval-Print Loop) enables interactive Lua execution via IPC for debugging, testing, and exploration.
+
+### Architecture
+
+- **Source file**: `ipc_repl.rs` (78 LOC)
+- **Entry point**: `niri msg lua "<code>"`
+- **Pattern**: IPC command execution with output capture
+
+### Core Components
+
+```rust
+// From ipc_repl.rs
+pub struct IpcLuaExecutor {
+    runtime: Arc<Mutex<Option<LuaRuntime>>>,
+}
+
+impl IpcLuaExecutor {
+    pub fn execute(&self, code: &str) -> (String, bool) {
+        // Returns (output, success)
+    }
+}
+```
+
+### Usage
+
+```bash
+# Execute Lua code
+niri msg lua "print('Hello from REPL!')"
+
+# Query state
+niri msg lua "return niri.state.focused_window"
+
+# Multiple statements
+niri msg lua "local w = niri.state.focused_window; print(w.app_id)"
+
+# Execute action
+niri msg lua "niri.action:close_window()"
+```
+
+### Return Values
+
+The REPL captures and displays return values:
+
+```bash
+$ niri msg lua "return 1 + 2"
+3
+
+$ niri msg lua "return niri.state.windows"
+{
+  { id = 1, app_id = "firefox", title = "Mozilla Firefox" },
+  { id = 2, app_id = "alacritty", title = "Terminal" },
+}
+
+$ niri msg lua "return niri.state.focused_window"
+{ id = 1, app_id = "firefox", title = "Mozilla Firefox" }
+```
+
+### Error Handling
+
+Errors are returned with `success = false`:
+
+```bash
+$ niri msg lua "invalid syntax here"
+[string "..."]:1: syntax error near 'syntax'
+
+$ niri msg lua "error('custom error')"
+[string "..."]:1: custom error
+```
+
+### Use Cases
+
+1. **Debugging**: Inspect runtime state without reloading config
+2. **Testing**: Verify API behavior interactively
+3. **Scripting**: Execute one-off commands from shell scripts
+4. **Exploration**: Discover available APIs and their return values
 
 ---
 
@@ -1296,109 +1974,6 @@ use crate::common::create_runtime;
 - Plugin system implementation will need new snapshot tests
 - Additional edge case tests may be added as new features are implemented
 - Test utilities can remain minimal and focused on shared setup only
-
----
-
-## Appendix: Implementation Status
-
-### Complete
-- [x] Luau runtime with timeout protection
-- [x] Full KDL configuration parity (all sections implemented)
-- [x] Runtime state queries (windows, workspaces, outputs, keyboard layouts)
-- [x] Event system with 14 wired events (5 categories)
-- [x] ~90 actions
-- [x] Timer API (with close() method)
-- [x] Scheduled callbacks
-- [x] REPL
-- [x] Type definitions (EmmyLua)
-- [x] Plugin system architecture (module loader, `require()` support)
-- [x] Collection proxies with CRUD methods (add, list, get, remove, clear, set)
-
-### Partial
-- [ ] Plugin lifecycle management (`disable()`, hot-reload)
-
-### Not Implemented
-- [ ] Utility API (`niri.utils.*`) - spec complete, implementation pending
-- [ ] Custom keybinding actions (`lua-action` in KDL config)
-- [ ] `niri.pack` plugin manager (Git-based, vim.pack-inspired)
-- [ ] Extended window queries (geometry, state)
-- [ ] Custom protocol handlers
-
----
-
-## Appendix: Refactor History
-
-This section documents the major refactoring completed in February 2025 that reduced the crate by ~3,020 LOC (~17%).
-
-### Summary
-
-| Phase | Description | LOC Saved |
-|-------|-------------|-----------|
-| Phase 1.1 | EmmyLua generation refactor | -1,235 |
-| Phase 1.2 | Delete unused `validators.rs` | -868 |
-| Phase 2.1 | `config_field_methods!` macro | -358 |
-| Phase 2.2 | `register_actions!` macro | -387 |
-| Misc | Init helpers, YAGNI cleanup, quick wins | -172 |
-| **Total** | | **-3,020** |
-
-### Key Changes
-
-#### EmmyLua Generation Refactor (Phase 1.1)
-
-The build.rs was rewritten to generate EmmyLua type definitions from a shared schema:
-
-| File | Before | After | Change |
-|------|--------|-------|--------|
-| `build.rs` | 1,779 | 534 | -1,245 |
-| `api_registry.rs` | 2,516 | 348 | -2,168 |
-| `api_data.rs` | 0 | 2,181 | +2,181 |
-| **Net** | | | **-1,235** |
-
-The new architecture:
-- `api_data.rs` contains shared const definitions (NIRI_LUA_API schema)
-- Both `api_registry.rs` and `build.rs` use `include!()` to access the schema
-- EmmyLua generation is now type-safe and maintainable
-
-#### Dead Code Removal (Phase 1.2)
-
-`validators.rs` (868 LOC) was deleted. It contained validation logic that was implemented but never wired into the config loading pipeline. Evidence:
-- Only used by its own `#[cfg(test)]` tests
-- No external imports anywhere in the codebase
-
-#### Macro Systems (Phase 2)
-
-Two declarative macros were added to eliminate repetitive boilerplate:
-
-**`config_field_methods!`** in `config_wrapper.rs`:
-- Generates getter/setter pairs for config fields
-- 25 field definitions now use the macro
-- Saved ~358 LOC
-
-**`register_actions!`** in `action_proxy.rs`:
-- Registers no-argument actions in a single macro call
-- ~90 actions now use the macro (1 line each instead of 3)
-- Saved ~387 LOC
-
-### Deferred Work
-
-The following modules are intentionally kept for future Tier 5 plugin features:
-
-| File | LOC | Purpose |
-|------|-----|---------|
-| `module_loader.rs` | 120 | Extends package.path for niri lua directories |
-
-The module loader is integrated and extends Lua's standard `require()` mechanism.
-
-### Cancelled Phases
-
-Several proposed refactors were cancelled after analysis:
-
-| Phase | Reason |
-|-------|--------|
-| `set_table_fields!` macro | Net LOC increase (macro overhead exceeded savings) |
-| `LuaExtractable` trait | Only 5 primitive extractors; complex extractors are unique |
-| Color conversion dedup | Already well-factored helper functions |
-| Test boilerplate consolidation | Local helpers have specific hardcoded values for assertions |
 
 ---
 
@@ -1671,52 +2246,52 @@ niri.config.window_rules:add({
 -- niri.config.binds:clear()
 
 -- Window management
-niri.config.binds:add("Mod+Q", niri.action.close_window())
-niri.config.binds:add("Mod+Left", niri.action.focus_column_left())
-niri.config.binds:add("Mod+Right", niri.action.focus_column_right())
-niri.config.binds:add("Mod+Up", niri.action.focus_window_up())
-niri.config.binds:add("Mod+Down", niri.action.focus_window_down())
-niri.config.binds:add("Mod+Shift+Left", niri.action.move_column_left())
-niri.config.binds:add("Mod+Shift+Right", niri.action.move_column_right())
-niri.config.binds:add("Mod+Shift+Up", niri.action.move_window_up())
-niri.config.binds:add("Mod+Shift+Down", niri.action.move_window_down())
+niri.config.binds:add("Mod+Q", niri.action:close_window())
+niri.config.binds:add("Mod+Left", niri.action:focus_column_left())
+niri.config.binds:add("Mod+Right", niri.action:focus_column_right())
+niri.config.binds:add("Mod+Up", niri.action:focus_window_up())
+niri.config.binds:add("Mod+Down", niri.action:focus_window_down())
+niri.config.binds:add("Mod+Shift+Left", niri.action:move_column_left())
+niri.config.binds:add("Mod+Shift+Right", niri.action:move_column_right())
+niri.config.binds:add("Mod+Shift+Up", niri.action:move_window_up())
+niri.config.binds:add("Mod+Shift+Down", niri.action:move_window_down())
 
 -- Workspaces
-niri.config.binds:add("Mod+Page_Up", niri.action.focus_workspace_up())
-niri.config.binds:add("Mod+Page_Down", niri.action.focus_workspace_down())
-niri.config.binds:add("Mod+Shift+Page_Up", niri.action.move_window_to_workspace_up())
-niri.config.binds:add("Mod+Shift+Page_Down", niri.action.move_window_to_workspace_down())
+niri.config.binds:add("Mod+Page_Up", niri.action:focus_workspace_up())
+niri.config.binds:add("Mod+Page_Down", niri.action:focus_workspace_down())
+niri.config.binds:add("Mod+Shift+Page_Up", niri.action:move_window_to_workspace_up())
+niri.config.binds:add("Mod+Shift+Page_Down", niri.action:move_window_to_workspace_down())
 
 -- Launchers
-niri.config.binds:add("Mod+Return", niri.action.spawn({"alacritty"}))
-niri.config.binds:add("Mod+D", niri.action.spawn({"fuzzel"}))
+niri.config.binds:add("Mod+Return", niri.action:spawn({"alacritty"}))
+niri.config.binds:add("Mod+D", niri.action:spawn({"fuzzel"}))
 
 -- Layout
-niri.config.binds:add("Mod+F", niri.action.fullscreen_window())
-niri.config.binds:add("Mod+V", niri.action.toggle_window_floating())
-niri.config.binds:add("Mod+C", niri.action.center_column())
-niri.config.binds:add("Mod+W", niri.action.toggle_column_tabbed())
+niri.config.binds:add("Mod+F", niri.action:fullscreen_window())
+niri.config.binds:add("Mod+V", niri.action:toggle_window_floating())
+niri.config.binds:add("Mod+C", niri.action:center_column())
+niri.config.binds:add("Mod+W", niri.action:toggle_column_tabbed())
 
 -- Screenshots
-niri.config.binds:add("Print", niri.action.screenshot())
-niri.config.binds:add("Mod+Print", niri.action.screenshot_window())
+niri.config.binds:add("Print", niri.action:screenshot())
+niri.config.binds:add("Mod+Print", niri.action:screenshot_window())
 
 -- System
-niri.config.binds:add("Mod+Shift+E", niri.action.quit())
-niri.config.binds:add("Mod+Shift+Slash", niri.action.show_hotkey_overlay())
-niri.config.binds:add("Mod+Tab", niri.action.toggle_overview())
+niri.config.binds:add("Mod+Shift+E", niri.action:quit())
+niri.config.binds:add("Mod+Shift+Slash", niri.action:show_hotkey_overlay())
+niri.config.binds:add("Mod+Tab", niri.action:toggle_overview())
 
 -- Media keys (with allow_when_locked)
 niri.config.binds:add("XF86AudioRaiseVolume", {
-    action = niri.action.spawn({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"}),
+    action = niri.action:spawn({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"}),
     allow_when_locked = true,
 })
 niri.config.binds:add("XF86AudioLowerVolume", {
-    action = niri.action.spawn({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"}),
+    action = niri.action:spawn({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"}),
     allow_when_locked = true,
 })
 niri.config.binds:add("XF86AudioMute", {
-    action = niri.action.spawn({"wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"}),
+    action = niri.action:spawn({"wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"}),
     allow_when_locked = true,
 })
 
@@ -1832,19 +2407,6 @@ niri.config:apply()
 - [ ] Fuzz testing (random inputs)
 - [ ] Error message quality
 
-### Running Coverage
-
-```bash
-# Install cargo-llvm-cov
-cargo install cargo-llvm-cov
-
-# Generate coverage report
-cargo llvm-cov --package niri-lua --html
-
-# View report
-open target/llvm-cov/html/index.html
-```
-
 ---
 
 ## Appendix D: Code Review Checklist
@@ -1943,16 +2505,16 @@ The plugin/module system was simplified to follow the Neovim model more closely:
 | Change | Before | After |
 |--------|--------|-------|
 | `plugin_system.rs` | 716 LOC with PluginManager, metadata, lifecycle | Deleted - over-engineered |
-| `module_loader.rs` | 277 LOC with custom require override | 120 LOC extending package.path |
+| `module_loader.rs` | 277 LOC with custom require override | 63 LOC with XDG path definitions (not yet integrated) |
 
-The new approach simply extends Lua's `package.path` with niri directories, allowing standard `require()` to find modules. No custom require override, no plugin metadata, no lifecycle management.
+The intended approach is to extend Lua's `package.path` with niri directories, allowing standard `require()` to find modules. The path definitions are implemented but **integration into the Lua runtime is pending**.
 
 #### Intentionally Kept (Not Dead Code)
 
 | File | LOC | Justification |
 |------|-----|---------------|
-| `module_loader.rs` | 120 | Extends package.path for niri lua directories |
-| `ipc_repl.rs` | 77 | Neovim-style `:lua` command via IPC (`niri msg lua "code"`) |
+| `module_loader.rs` | 63 | XDG path definitions for user Lua modules (integration pending) |
+| `ipc_repl.rs` | 78 | Neovim-style `:lua` command via IPC (`niri msg lua "code"`) |
 | `config_dirty.rs` | 161 | Granular change tracking enables future partial config reload optimization |
 | `lua_types.rs` | 395 | Type definitions required for config/runtime APIs |
 

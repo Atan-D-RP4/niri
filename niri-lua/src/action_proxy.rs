@@ -5,10 +5,10 @@
 //!
 //! Example usage:
 //! ```lua
-//! niri.action.spawn({"kitty"})
-//! niri.action.focus_column_left()
-//! niri.action.set_window_width("+10%")
-//! niri.action.focus_workspace(2)
+//! niri.action:spawn({"kitty"})
+//! niri.action:focus_column_left()
+//! niri.action:set_window_width("+10%")
+//! niri.action:focus_workspace(2)
 //! ```
 
 use std::sync::Arc;
