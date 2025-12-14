@@ -266,7 +266,7 @@ Settings specific to `tablet` and `touch`:
 
 Settings specific to `touch`:
 
-- `natural-scroll`: <sup>Since: next</sup> if set, inverts the scrolling direction for touchscreen gestures (workspace switching and view scrolling). This matches the behavior of `natural-scroll` on touchpads.
+- `natural-scroll`: if set, inverts the scrolling direction for touchscreen gestures (workspace switching and view scrolling).
 
 Tablets and touchscreens are absolute pointing devices that can be mapped to a specific output like so:
 
