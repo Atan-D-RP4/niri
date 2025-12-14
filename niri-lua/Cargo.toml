@@ -16,6 +16,7 @@ log.workspace = true
 mlua.workspace = true
 niri-config = { version = "25.8.0", path = "../niri-config" }
 niri-ipc = { version = "25.8.0", path = "../niri-ipc" }
+niri-lua-derive = { version = "25.11.0", path = "../niri-lua-derive" }
 
 regex.workspace = true
 

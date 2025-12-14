@@ -2518,8 +2518,19 @@ dependencies = [
  "mlua",
  "niri-config",
  "niri-ipc",
+ "niri-lua-derive",
  "regex",
  "tempfile",
+]
+
+[[package]]
+name = "niri-lua-derive"
+version = "25.11.0"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]

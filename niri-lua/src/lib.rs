@@ -25,10 +25,12 @@ pub mod action_proxy;
 pub mod collections;
 pub mod config_api;
 pub mod config_dirty;
+pub mod config_state;
 pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
 pub mod parse_utils;
+pub mod traits;
 
 // Tier 3: Runtime State Access
 pub mod event_data;
@@ -47,10 +49,14 @@ pub mod loop_api;
 #[cfg(test)]
 pub mod test_utils;
 
+#[cfg(test)]
+mod test_derive_macros;
+
 // Tier 2 exports
 pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
 pub use config::LuaConfig;
 pub use config_dirty::ConfigDirtyFlags;
+pub use config_state::{ConfigState, DirtyFlag};
 pub use config_wrapper::{register_config_wrapper, ConfigWrapper};
 // Tier 3 exports
 pub use event_data::{

@@ -1,0 +1,91 @@
+{
+  "project_name": "lua-config-derive-macro",
+  "spec_path": "docs/projects/lua-config-derive-macro/spec/lua-config-derive-macro-spec.md",
+  "started": "2025-12-14T00:00:00Z",
+  "current_phase": 3,
+  "total_phases": 3,
+  "features": [
+    {
+      "id": "F1",
+      "name": "LuaConfigProxy Derive Macro",
+      "phase": 1,
+      "status": "complete",
+      "dependencies": [],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T00:00:00Z"
+    },
+    {
+      "id": "F2",
+      "name": "LuaEnum Derive Macro",
+      "phase": 1,
+      "status": "complete",
+      "dependencies": [],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T00:00:00Z"
+    },
+    {
+      "id": "F3",
+      "name": "LuaFieldConvert Trait Implementations",
+      "phase": 1,
+      "status": "complete",
+      "dependencies": [],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T00:00:00Z"
+    },
+    {
+      "id": "F4",
+      "name": "ConfigState Wrapper",
+      "phase": 1,
+      "status": "complete",
+      "dependencies": [],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T00:00:00Z"
+    },
+    {
+      "id": "F5",
+      "name": "Collection Proxy Generation",
+      "phase": 2,
+      "status": "complete",
+      "dependencies": ["F1"],
+      "attempts": { "test_fix": 0, "review_rework": 1 },
+      "blockers": [],
+      "completed_at": "2025-12-14T12:00:00Z"
+    },
+    {
+      "id": "F6",
+      "name": "ConfigDirtyFlags Generation",
+      "phase": 2,
+      "status": "complete",
+      "dependencies": ["F1"],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T12:00:00Z"
+    },
+    {
+      "id": "F7",
+      "name": "Feature Gate Integration",
+      "phase": 3,
+      "status": "complete",
+      "dependencies": ["F1", "F2", "F3", "F4", "F5", "F6"],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T23:00:00Z"
+    },
+    {
+      "id": "F8",
+      "name": "Migration and Cleanup",
+      "phase": 3,
+      "status": "complete",
+      "dependencies": ["F7"],
+      "attempts": { "test_fix": 0, "review_rework": 0 },
+      "blockers": [],
+      "completed_at": "2025-12-14T23:30:00Z",
+      "notes": "Infrastructure complete. Full migration deferred to follow-up work. Discovered crate path limitation documented in spec."
+    }
+  ],
+  "bugs": []
+}
