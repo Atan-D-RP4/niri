@@ -19,6 +19,14 @@ pub enum FieldKind {
     Nested,
     Collection,
     Skip,
+    /// Gradient field - uses table with from/to/angle/relative_to/in
+    Gradient,
+    /// Offset field - uses table with {x, y}
+    Offset,
+    /// Animation Kind field - uses table with type/easing/spring params
+    AnimKind,
+    /// Inverted boolean field - get returns !value, set stores !value
+    Inverted,
 }
 
 /// Parsed attributes for a struct
@@ -39,6 +47,10 @@ pub struct FieldAttrs {
     pub readonly: bool,
     pub lua_name: Option<String>,
     pub dirty_override: Option<String>,
+    /// Custom path relative to parent_path (e.g., "sibling.child" to access parent.sibling.child)
+    /// When set, this overrides the field name in the access path.
+    /// Use ".." to go up one level, e.g., "../custom_shader" for animations.window_open.anim -> animations.window_open.custom_shader
+    pub custom_path: Option<String>,
 }
 
 /// Parsed attributes for an enum
@@ -110,6 +122,14 @@ impl FieldAttrs {
                         result.kind = FieldKind::Collection;
                     } else if meta.path.is_ident("skip") {
                         result.kind = FieldKind::Skip;
+                    } else if meta.path.is_ident("gradient") {
+                        result.kind = FieldKind::Gradient;
+                    } else if meta.path.is_ident("offset") {
+                        result.kind = FieldKind::Offset;
+                    } else if meta.path.is_ident("anim_kind") {
+                        result.kind = FieldKind::AnimKind;
+                    } else if meta.path.is_ident("inverted") {
+                        result.kind = FieldKind::Inverted;
                     } else if meta.path.is_ident("readonly") {
                         result.readonly = true;
                     } else if meta.path.is_ident("name") {
@@ -118,6 +138,9 @@ impl FieldAttrs {
                     } else if meta.path.is_ident("dirty") {
                         let value: LitStr = meta.value()?.parse()?;
                         result.dirty_override = Some(value.value());
+                    } else if meta.path.is_ident("path") {
+                        let value: LitStr = meta.value()?.parse()?;
+                        result.custom_path = Some(value.value());
                     }
                     Ok(())
                 })?;

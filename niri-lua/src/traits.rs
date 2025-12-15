@@ -559,6 +559,341 @@ impl LuaFieldConvert for TabIndicatorPosition {
     }
 }
 
+// ============================================================================
+// SpawnAtStartup Implementation
+// ============================================================================
+
+use niri_config::SpawnAtStartup;
+
+impl LuaFieldConvert for SpawnAtStartup {
+    /// SpawnAtStartup is represented as a table { command = { "arg1", "arg2", ... } }
+    type LuaType = SpawnAtStartupTable;
+
+    fn to_lua(&self) -> SpawnAtStartupTable {
+        SpawnAtStartupTable {
+            command: self.command.clone(),
+        }
+    }
+
+    fn from_lua(value: SpawnAtStartupTable) -> LuaResult<Self> {
+        Ok(SpawnAtStartup {
+            command: value.command,
+        })
+    }
+}
+
+/// Intermediate struct for SpawnAtStartup Lua representation
+#[derive(Clone)]
+pub struct SpawnAtStartupTable {
+    pub command: Vec<String>,
+}
+
+impl<'lua> IntoLua for SpawnAtStartupTable {
+    fn into_lua(self, lua: &Lua) -> LuaResult<Value> {
+        let table = lua.create_table()?;
+        table.set("command", self.command)?;
+        Ok(Value::Table(table))
+    }
+}
+
+impl<'lua> FromLua for SpawnAtStartupTable {
+    fn from_lua(value: Value, _lua: &Lua) -> LuaResult<Self> {
+        match value {
+            Value::Table(table) => {
+                let command: Vec<String> = table.get("command")?;
+                Ok(SpawnAtStartupTable { command })
+            }
+            _ => Err(LuaError::external(
+                "Expected a table for spawn_at_startup with 'command' field",
+            )),
+        }
+    }
+}
+
+use niri_config::layout::CenterFocusedColumn;
+
+impl LuaFieldConvert for CenterFocusedColumn {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            CenterFocusedColumn::Never => "never",
+            CenterFocusedColumn::Always => "always",
+            CenterFocusedColumn::OnOverflow => "on-overflow",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "never" => Ok(CenterFocusedColumn::Never),
+            "always" => Ok(CenterFocusedColumn::Always),
+            "on-overflow" => Ok(CenterFocusedColumn::OnOverflow),
+            _ => Err(LuaError::external(format!(
+                "Invalid center_focused_column '{}'. Expected: never, always, on-overflow",
+                value
+            ))),
+        }
+    }
+}
+
+use niri_ipc::ColumnDisplay;
+
+impl LuaFieldConvert for ColumnDisplay {
+    type LuaType = String;
+
+    fn to_lua(&self) -> Self::LuaType {
+        match self {
+            ColumnDisplay::Normal => "normal",
+            ColumnDisplay::Tabbed => "tabbed",
+        }
+        .to_string()
+    }
+
+    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
+        match value.as_str() {
+            "normal" => Ok(ColumnDisplay::Normal),
+            "tabbed" => Ok(ColumnDisplay::Tabbed),
+            _ => Err(LuaError::external(format!(
+                "Invalid default_column_display '{}'. Expected: normal, tabbed",
+                value
+            ))),
+        }
+    }
+}
+
+// =============================================================================
+// Helper functions for complex field types
+// =============================================================================
+
+use niri_config::{GradientColorSpace, GradientInterpolation, HueInterpolation, ShadowOffset};
+
+/// Convert a Gradient to a Lua table representation.
+pub fn gradient_to_table(lua: &mlua::Lua, gradient: &Gradient) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table()?;
+    table.set("from", color_to_hex(&gradient.from))?;
+    table.set("to", color_to_hex(&gradient.to))?;
+    table.set("angle", gradient.angle)?;
+    table.set(
+        "relative_to",
+        match gradient.relative_to {
+            GradientRelativeTo::Window => "window",
+            GradientRelativeTo::WorkspaceView => "workspace-view",
+        },
+    )?;
+    // Include interpolation settings
+    let in_table = lua.create_table()?;
+    in_table.set(
+        "color_space",
+        match gradient.in_.color_space {
+            GradientColorSpace::Srgb => "srgb",
+            GradientColorSpace::SrgbLinear => "srgb-linear",
+            GradientColorSpace::Oklab => "oklab",
+            GradientColorSpace::Oklch => "oklch",
+        },
+    )?;
+    in_table.set(
+        "hue_interpolation",
+        match gradient.in_.hue_interpolation {
+            HueInterpolation::Shorter => "shorter",
+            HueInterpolation::Longer => "longer",
+            HueInterpolation::Increasing => "increasing",
+            HueInterpolation::Decreasing => "decreasing",
+        },
+    )?;
+    table.set("in", in_table)?;
+    Ok(table)
+}
+
+/// Parse a Gradient from a Lua table.
+pub fn table_to_gradient(table: mlua::Table) -> mlua::Result<Gradient> {
+    use std::str::FromStr;
+    let from_str: String = table.get("from")?;
+    let to_str: String = table.get("to")?;
+    let angle: i16 = table.get::<Option<i16>>("angle")?.unwrap_or(180);
+    let relative_to_str: Option<String> = table.get("relative_to")?;
+    let in_table: Option<mlua::Table> = table.get("in")?;
+
+    let from = Color::from_str(&from_str)
+        .map_err(|e| mlua::Error::external(format!("Invalid 'from' color: {}", e)))?;
+    let to = Color::from_str(&to_str)
+        .map_err(|e| mlua::Error::external(format!("Invalid 'to' color: {}", e)))?;
+
+    let relative_to = match relative_to_str.as_deref() {
+        Some("window") | None => GradientRelativeTo::Window,
+        Some("workspace-view") => GradientRelativeTo::WorkspaceView,
+        Some(other) => {
+            return Err(mlua::Error::external(format!(
+                "Invalid relative_to: {}. Expected 'window' or 'workspace-view'",
+                other
+            )));
+        }
+    };
+
+    let in_ = if let Some(in_tbl) = in_table {
+        let color_space_str: Option<String> = in_tbl.get("color_space")?;
+        let hue_str: Option<String> = in_tbl.get("hue_interpolation")?;
+
+        let color_space = match color_space_str.as_deref() {
+            Some("srgb") | None => GradientColorSpace::Srgb,
+            Some("srgb-linear") => GradientColorSpace::SrgbLinear,
+            Some("oklab") => GradientColorSpace::Oklab,
+            Some("oklch") => GradientColorSpace::Oklch,
+            Some(other) => {
+                return Err(mlua::Error::external(format!(
+                    "Invalid color_space: {}",
+                    other
+                )));
+            }
+        };
+
+        let hue_interpolation = match hue_str.as_deref() {
+            Some("shorter") | None => HueInterpolation::Shorter,
+            Some("longer") => HueInterpolation::Longer,
+            Some("increasing") => HueInterpolation::Increasing,
+            Some("decreasing") => HueInterpolation::Decreasing,
+            Some(other) => {
+                return Err(mlua::Error::external(format!(
+                    "Invalid hue_interpolation: {}",
+                    other
+                )));
+            }
+        };
+
+        GradientInterpolation {
+            color_space,
+            hue_interpolation,
+        }
+    } else {
+        GradientInterpolation::default()
+    };
+
+    Ok(Gradient {
+        from,
+        to,
+        angle,
+        relative_to,
+        in_,
+    })
+}
+
+/// Convert a ShadowOffset to a Lua {x, y} table.
+pub fn offset_to_table(lua: &mlua::Lua, offset: &ShadowOffset) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table()?;
+    table.set("x", offset.x.0)?;
+    table.set("y", offset.y.0)?;
+    Ok(table)
+}
+
+/// Parse a ShadowOffset from a Lua {x, y} table.
+pub fn table_to_offset(table: mlua::Table) -> mlua::Result<ShadowOffset> {
+    let x: f64 = table.get("x")?;
+    let y: f64 = table.get("y")?;
+    Ok(ShadowOffset {
+        x: FloatOrInt(x),
+        y: FloatOrInt(y),
+    })
+}
+
+use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
+
+/// Convert an animation Kind to a Lua table representation.
+pub fn anim_kind_to_table(lua: &mlua::Lua, kind: &Kind) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table()?;
+
+    match kind {
+        Kind::Easing(params) => {
+            table.set("type", "easing")?;
+            table.set("duration_ms", params.duration_ms)?;
+            let curve_str = match params.curve {
+                Curve::Linear => "linear",
+                Curve::EaseOutQuad => "ease-out-quad",
+                Curve::EaseOutCubic => "ease-out-cubic",
+                Curve::EaseOutExpo => "ease-out-expo",
+                Curve::CubicBezier(x1, y1, x2, y2) => {
+                    // For cubic bezier, include the control points
+                    let points = lua.create_table()?;
+                    points.set("x1", x1)?;
+                    points.set("y1", y1)?;
+                    points.set("x2", x2)?;
+                    points.set("y2", y2)?;
+                    table.set("cubic_bezier", points)?;
+                    "cubic-bezier"
+                }
+            };
+            table.set("curve", curve_str)?;
+        }
+        Kind::Spring(params) => {
+            table.set("type", "spring")?;
+            table.set("damping_ratio", params.damping_ratio)?;
+            table.set("stiffness", params.stiffness)?;
+            table.set("epsilon", params.epsilon)?;
+        }
+    }
+
+    Ok(table)
+}
+
+/// Parse an animation Kind from a Lua table.
+pub fn table_to_anim_kind(table: mlua::Table) -> mlua::Result<Kind> {
+    let kind_type: String = table.get("type")?;
+
+    match kind_type.as_str() {
+        "easing" => {
+            let duration_ms: u32 = table.get::<Option<u32>>("duration_ms")?.unwrap_or(250);
+            let curve_str: Option<String> = table.get("curve")?;
+            let cubic_bezier: Option<mlua::Table> = table.get("cubic_bezier")?;
+
+            let curve = if let Some(cb) = cubic_bezier {
+                let x1: f64 = cb.get("x1")?;
+                let y1: f64 = cb.get("y1")?;
+                let x2: f64 = cb.get("x2")?;
+                let y2: f64 = cb.get("y2")?;
+                Curve::CubicBezier(x1, y1, x2, y2)
+            } else {
+                match curve_str.as_deref() {
+                    Some("linear") => Curve::Linear,
+                    Some("ease-out-quad") => Curve::EaseOutQuad,
+                    Some("ease-out-cubic") | None => Curve::EaseOutCubic,
+                    Some("ease-out-expo") => Curve::EaseOutExpo,
+                    Some(other) => {
+                        return Err(mlua::Error::external(format!(
+                            "Invalid curve: {}. Expected 'linear', 'ease-out-quad', 'ease-out-cubic', 'ease-out-expo', or provide 'cubic_bezier' table",
+                            other
+                        )));
+                    }
+                }
+            };
+
+            Ok(Kind::Easing(EasingParams { duration_ms, curve }))
+        }
+        "spring" => {
+            let damping_ratio: f64 = table.get::<Option<f64>>("damping_ratio")?.unwrap_or(1.0);
+            let stiffness: u32 = table.get::<Option<u32>>("stiffness")?.unwrap_or(800);
+            let epsilon: f64 = table.get::<Option<f64>>("epsilon")?.unwrap_or(0.0001);
+
+            Ok(Kind::Spring(SpringParams {
+                damping_ratio,
+                stiffness,
+                epsilon,
+            }))
+        }
+        other => Err(mlua::Error::external(format!(
+            "Invalid animation type: {}. Expected 'easing' or 'spring'",
+            other
+        ))),
+    }
+}
+
+/// Convert a Color to a hex string with alpha (e.g., "#rrggbbaa").
+fn color_to_hex(color: &Color) -> String {
+    let r = (color.r * 255.0).round() as u8;
+    let g = (color.g * 255.0).round() as u8;
+    let b = (color.b * 255.0).round() as u8;
+    let a = (color.a * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -819,5 +1154,25 @@ mod tests {
         );
 
         assert!(<TrackLayout as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_spawn_at_startup_convert() {
+        use niri_config::SpawnAtStartup;
+
+        let spawn = SpawnAtStartup {
+            command: vec!["kitty".to_string(), "-e".to_string(), "fish".to_string()],
+        };
+
+        // Test to_lua
+        let table = LuaFieldConvert::to_lua(&spawn);
+        assert_eq!(table.command, vec!["kitty", "-e", "fish"]);
+
+        // Test from_lua
+        let spawn_table = SpawnAtStartupTable {
+            command: vec!["alacritty".to_string()],
+        };
+        let result: SpawnAtStartup = LuaFieldConvert::from_lua(spawn_table).unwrap();
+        assert_eq!(result.command, vec!["alacritty"]);
     }
 }

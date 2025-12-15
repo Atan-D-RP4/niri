@@ -158,11 +158,10 @@ pub fn generate_collection_proxy(
                     this.clear()
                 });
 
-                // __pairs metamethod for ipairs() support
-                // In Lua 5.2+, ipairs() uses __ipairs metamethod, but for compatibility
-                // we use __pairs since mlua maps both to MetaMethod::Pairs
+                // __iter metamethod for iteration support
+                // Luau uses __iter instead of __pairs for iteration
                 // The iterator returns (index, value) pairs with 1-based indices
-                methods.add_meta_method(::mlua::MetaMethod::Pairs, |lua, this, ()| {
+                methods.add_meta_method(::mlua::MetaMethod::Iter, |lua, this, ()| {
                     use ::mlua::IntoLua;
                     let len = this.len();
                     let state = this.state.clone();
@@ -199,11 +198,20 @@ fn generate_access_path(struct_attrs: &StructAttrs, field_name: &Ident) -> Token
     if struct_attrs.is_root {
         quote! { config.#field_name }
     } else if let Some(ref parent_path) = struct_attrs.parent_path {
-        let path_parts: Vec<_> = parent_path
-            .split('.')
-            .map(|s| format_ident!("{}", s))
-            .collect();
-        quote! { config.#(#path_parts).*.#field_name }
+        // Build the path dynamically, handling both identifiers and tuple indices
+        let mut path = quote! { config };
+        for part in parent_path.split('.') {
+            if let Ok(index) = part.parse::<usize>() {
+                // Numeric index - use syn::Index for tuple access
+                let idx = syn::Index::from(index);
+                path = quote! { #path.#idx };
+            } else {
+                // Regular identifier
+                let ident = format_ident!("{}", part);
+                path = quote! { #path.#ident };
+            }
+        }
+        quote! { #path.#field_name }
     } else {
         quote! { config.#field_name }
     }

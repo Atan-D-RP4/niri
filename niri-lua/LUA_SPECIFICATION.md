@@ -557,7 +557,8 @@ niri-lua/src/
 ├── runtime.rs          # LuaRuntime core (timeout, scheduler, timer management)
 ├── config.rs           # Config struct definitions
 ├── config_api.rs       # niri.config API entry point
-├── config_wrapper.rs   # Config proxies with section access
+├── config_wrapper.rs   # Config proxies with section access (~1,550 LOC)
+├── migrated_proxies.rs # Derive macro-based proxies (~1,650 LOC)
 ├── config_dirty.rs     # Dirty tracking for config changes
 ├── action_proxy.rs     # niri.action API (~90 actions via macro)
 ├── events_proxy.rs     # niri.events API (on, once, off, emit, list, clear)

@@ -72,7 +72,17 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
     let setter_methods: Vec<TokenStream2> = field_infos
         .iter()
-        .filter(|f| !f.attrs.readonly && matches!(f.attrs.kind, FieldKind::Simple))
+        .filter(|f| {
+            !f.attrs.readonly
+                && matches!(
+                    f.attrs.kind,
+                    FieldKind::Simple
+                        | FieldKind::Gradient
+                        | FieldKind::Offset
+                        | FieldKind::AnimKind
+                        | FieldKind::Inverted
+                )
+        })
         .map(|f| generate_setter_method(f, &struct_attrs))
         .collect::<syn::Result<Vec<_>>>()?;
 
@@ -178,13 +188,97 @@ fn generate_access_path(struct_attrs: &StructAttrs) -> TokenStream2 {
     if struct_attrs.is_root {
         quote! { config }
     } else if let Some(ref parent_path) = struct_attrs.parent_path {
-        let path_parts: Vec<_> = parent_path
-            .split('.')
-            .map(|s| format_ident!("{}", s))
-            .collect();
-        quote! { config.#(#path_parts).* }
+        // Build the path dynamically, handling both identifiers and tuple indices
+        let mut path = quote! { config };
+        for part in parent_path.split('.') {
+            if let Ok(index) = part.parse::<usize>() {
+                // Numeric index - use syn::Index for tuple access
+                let idx = syn::Index::from(index);
+                path = quote! { #path.#idx };
+            } else {
+                // Regular identifier
+                let ident = format_ident!("{}", part);
+                path = quote! { #path.#ident };
+            }
+        }
+        path
     } else {
         quote! { config }
+    }
+}
+
+/// Generate the full field access path, handling custom_path if specified
+///
+/// If field has custom_path, handles:
+/// - ".." to go up one level from parent_path
+/// - Regular path segments to descend
+///
+/// Otherwise uses the default access_path.field_name
+fn generate_field_access_path(
+    field: &FieldInfo,
+    struct_attrs: &StructAttrs,
+) -> TokenStream2 {
+    let base_path = generate_access_path(struct_attrs);
+    let field_name = &field.name;
+
+    if let Some(ref custom_path) = field.attrs.custom_path {
+        // Handle ".." prefix to go up one level
+        if custom_path.starts_with("../") {
+            // We need to rebuild the parent path without the last segment
+            if let Some(ref parent_path) = struct_attrs.parent_path {
+                let segments: Vec<&str> = parent_path.split('.').collect();
+                if segments.len() > 1 {
+                    // Remove last segment and build new path
+                    let mut path = quote! { config };
+                    for part in &segments[..segments.len() - 1] {
+                        if let Ok(index) = part.parse::<usize>() {
+                            let idx = syn::Index::from(index);
+                            path = quote! { #path.#idx };
+                        } else {
+                            let ident = format_ident!("{}", part);
+                            path = quote! { #path.#ident };
+                        }
+                    }
+                    // Now add the rest of the custom path (after "../")
+                    let rest = &custom_path[3..];
+                    for part in rest.split('.') {
+                        if !part.is_empty() {
+                            let ident = format_ident!("{}", part);
+                            path = quote! { #path.#ident };
+                        }
+                    }
+                    return path;
+                }
+            }
+            // Fallback if parent_path is not set or has only one segment
+            let rest = &custom_path[3..];
+            let mut path = quote! { config };
+            for part in rest.split('.') {
+                if !part.is_empty() {
+                    let ident = format_ident!("{}", part);
+                    path = quote! { #path.#ident };
+                }
+            }
+            path
+        } else {
+            // Direct custom path from base
+            let mut path = base_path;
+            for part in custom_path.split('.') {
+                if !part.is_empty() {
+                    if let Ok(index) = part.parse::<usize>() {
+                        let idx = syn::Index::from(index);
+                        path = quote! { #path.#idx };
+                    } else {
+                        let ident = format_ident!("{}", part);
+                        path = quote! { #path.#ident };
+                    }
+                }
+            }
+            path
+        }
+    } else {
+        // Default: access_path.field_name
+        quote! { #base_path.#field_name }
     }
 }
 
@@ -194,9 +288,8 @@ fn generate_getter_method(
     struct_attrs: &StructAttrs,
 ) -> syn::Result<TokenStream2> {
     let getter_name = field.getter_name();
-    let field_name = &field.name;
     let field_ty = &field.ty;
-    let access_path = generate_access_path(struct_attrs);
+    let field_path = generate_field_access_path(field, struct_attrs);
     let crate_path = struct_attrs.get_crate_path();
 
     match field.attrs.kind {
@@ -208,7 +301,7 @@ fn generate_getter_method(
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
                         use ::mlua::IntoLua;
                         let config = self.state.borrow_config();
-                        match &#access_path.#field_name {
+                        match &#field_path {
                             Some(v) => {
                                 let lua_val = <#inner_ty as #crate_path::traits::LuaFieldConvert>::to_lua(v);
                                 lua_val.into_lua(lua)
@@ -223,7 +316,7 @@ fn generate_getter_method(
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
                         use ::mlua::IntoLua;
                         let config = self.state.borrow_config();
-                        let lua_val = <#field_ty as #crate_path::traits::LuaFieldConvert>::to_lua(&#access_path.#field_name);
+                        let lua_val = <#field_ty as #crate_path::traits::LuaFieldConvert>::to_lua(&#field_path);
                         lua_val.into_lua(lua)
                     }
                 })
@@ -259,6 +352,62 @@ fn generate_getter_method(
             })
         }
         FieldKind::Skip => Ok(quote! {}),
+        FieldKind::Gradient => {
+            // Gradient field - uses helper function from traits
+            if is_option_type(field_ty) {
+                Ok(quote! {
+                    /// Get the gradient as a Lua table, or nil if not set.
+                    pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
+                        let config = self.state.borrow_config();
+                        match &#field_path {
+                            Some(g) => {
+                                let table = #crate_path::traits::gradient_to_table(lua, g)?;
+                                Ok(::mlua::Value::Table(table))
+                            }
+                            None => Ok(::mlua::Value::Nil),
+                        }
+                    }
+                })
+            } else {
+                Ok(quote! {
+                    /// Get the gradient as a Lua table.
+                    pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
+                        let config = self.state.borrow_config();
+                        #crate_path::traits::gradient_to_table(lua, &#field_path)
+                    }
+                })
+            }
+        }
+        FieldKind::Offset => {
+            // Offset field - returns {x, y} table
+            Ok(quote! {
+                /// Get the offset as a {x, y} table.
+                pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
+                    let config = self.state.borrow_config();
+                    #crate_path::traits::offset_to_table(lua, &#field_path)
+                }
+            })
+        }
+        FieldKind::AnimKind => {
+            // Animation kind field - returns type/params table
+            Ok(quote! {
+                /// Get the animation kind as a Lua table.
+                pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
+                    let config = self.state.borrow_config();
+                    #crate_path::traits::anim_kind_to_table(lua, &#field_path)
+                }
+            })
+        }
+        FieldKind::Inverted => {
+            // Inverted boolean - returns !value
+            Ok(quote! {
+                /// Get the inverted value of this boolean field.
+                pub fn #getter_name(&self, _lua: &::mlua::Lua) -> ::mlua::Result<bool> {
+                    let config = self.state.borrow_config();
+                    Ok(!#field_path)
+                }
+            })
+        }
     }
 }
 
@@ -268,9 +417,8 @@ fn generate_setter_method(
     struct_attrs: &StructAttrs,
 ) -> syn::Result<TokenStream2> {
     let setter_name = field.setter_name();
-    let field_name = &field.name;
     let field_ty = &field.ty;
-    let access_path = generate_access_path(struct_attrs);
+    let field_path = generate_field_access_path(field, struct_attrs);
     let crate_path = struct_attrs.get_crate_path();
 
     // Determine dirty flag
@@ -282,47 +430,141 @@ fn generate_setter_method(
         format_ident!("Misc")
     };
 
-    if is_option_type(field_ty) {
-        let inner_ty = get_option_inner_type(field_ty);
-        Ok(quote! {
-            /// Set the value of this field. Pass nil to clear.
-            pub fn #setter_name(&self, lua: &::mlua::Lua, value: ::mlua::Value) -> ::mlua::Result<()> {
-                let new_value = if value.is_nil() {
-                    None
-                } else {
-                    // First convert Lua Value to the intermediate LuaType
-                    let intermediate: <#inner_ty as #crate_path::traits::LuaFieldConvert>::LuaType =
-                        ::mlua::FromLua::from_lua(value, lua)?;
-                    // Then convert to the actual Rust type
-                    Some(<#inner_ty as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?)
-                };
+    match field.attrs.kind {
+        FieldKind::Simple => {
+            if is_option_type(field_ty) {
+                let inner_ty = get_option_inner_type(field_ty);
+                Ok(quote! {
+                    /// Set the value of this field. Pass nil to clear.
+                    pub fn #setter_name(&self, lua: &::mlua::Lua, value: ::mlua::Value) -> ::mlua::Result<()> {
+                        let new_value = if value.is_nil() {
+                            None
+                        } else {
+                            // First convert Lua Value to the intermediate LuaType
+                            let intermediate: <#inner_ty as #crate_path::traits::LuaFieldConvert>::LuaType =
+                                ::mlua::FromLua::from_lua(value, lua)?;
+                            // Then convert to the actual Rust type
+                            Some(<#inner_ty as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?)
+                        };
 
-                // Explicit scope to release borrow before mark_dirty
-                {
-                    let mut config = self.state.borrow_config();
-                    #access_path.#field_name = new_value;
-                }
+                        // Explicit scope to release borrow before mark_dirty
+                        {
+                            let mut config = self.state.borrow_config();
+                            #field_path = new_value;
+                        }
 
-                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
-                Ok(())
+                        self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                        Ok(())
+                    }
+                })
+            } else {
+                Ok(quote! {
+                    /// Set the value of this field.
+                    pub fn #setter_name(&self, value: <#field_ty as #crate_path::traits::LuaFieldConvert>::LuaType) -> ::mlua::Result<()> {
+                        let new_value = <#field_ty as #crate_path::traits::LuaFieldConvert>::from_lua(value)?;
+
+                        // Explicit scope to release borrow before mark_dirty
+                        {
+                            let mut config = self.state.borrow_config();
+                            #field_path = new_value;
+                        }
+
+                        self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                        Ok(())
+                    }
+                })
             }
-        })
-    } else {
-        Ok(quote! {
-            /// Set the value of this field.
-            pub fn #setter_name(&self, value: <#field_ty as #crate_path::traits::LuaFieldConvert>::LuaType) -> ::mlua::Result<()> {
-                let new_value = <#field_ty as #crate_path::traits::LuaFieldConvert>::from_lua(value)?;
+        }
+        FieldKind::Gradient => {
+            if is_option_type(field_ty) {
+                Ok(quote! {
+                    /// Set the gradient from a Lua table, or nil to clear.
+                    pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Value) -> ::mlua::Result<()> {
+                        let new_value = if value.is_nil() {
+                            None
+                        } else {
+                            let table = value.as_table().ok_or_else(|| {
+                                ::mlua::Error::external("Expected table or nil for gradient")
+                            })?;
+                            Some(#crate_path::traits::table_to_gradient(table.clone())?)
+                        };
 
-                // Explicit scope to release borrow before mark_dirty
-                {
-                    let mut config = self.state.borrow_config();
-                    #access_path.#field_name = new_value;
-                }
+                        {
+                            let mut config = self.state.borrow_config();
+                            #field_path = new_value;
+                        }
 
-                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
-                Ok(())
+                        self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                        Ok(())
+                    }
+                })
+            } else {
+                Ok(quote! {
+                    /// Set the gradient from a Lua table.
+                    pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
+                        let new_value = #crate_path::traits::table_to_gradient(value)?;
+
+                        {
+                            let mut config = self.state.borrow_config();
+                            #field_path = new_value;
+                        }
+
+                        self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                        Ok(())
+                    }
+                })
             }
-        })
+        }
+        FieldKind::Offset => {
+            Ok(quote! {
+                /// Set the offset from a {x, y} Lua table.
+                pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
+                    let new_value = #crate_path::traits::table_to_offset(value)?;
+
+                    {
+                        let mut config = self.state.borrow_config();
+                        #field_path = new_value;
+                    }
+
+                    self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                    Ok(())
+                }
+            })
+        }
+        FieldKind::AnimKind => {
+            Ok(quote! {
+                /// Set the animation kind from a Lua table.
+                pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
+                    let new_value = #crate_path::traits::table_to_anim_kind(value)?;
+
+                    {
+                        let mut config = self.state.borrow_config();
+                        #field_path = new_value;
+                    }
+
+                    self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                    Ok(())
+                }
+            })
+        }
+        FieldKind::Inverted => {
+            Ok(quote! {
+                /// Set the inverted value of this boolean field.
+                pub fn #setter_name(&self, value: bool) -> ::mlua::Result<()> {
+                    {
+                        let mut config = self.state.borrow_config();
+                        #field_path = !value;
+                    }
+
+                    self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                    Ok(())
+                }
+            })
+        }
+        FieldKind::Nested | FieldKind::Collection | FieldKind::Skip => {
+            // These don't have setters
+            Ok(quote! {})
+        }
     }
 }
 
@@ -384,6 +626,82 @@ fn generate_field_registration(field: &FieldInfo) -> TokenStream2 {
             }
         }
         FieldKind::Skip => quote! {},
+        FieldKind::Gradient => {
+            // Gradient fields use table getter/setter
+            if field.attrs.readonly {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                }
+            } else {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                    fields.add_field_method_set(#lua_name, |lua, this, value| {
+                        this.#setter_name(lua, value)
+                    });
+                }
+            }
+        }
+        FieldKind::Offset => {
+            // Offset fields use table getter/setter
+            if field.attrs.readonly {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                }
+            } else {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                    fields.add_field_method_set(#lua_name, |lua, this, value| {
+                        this.#setter_name(lua, value)
+                    });
+                }
+            }
+        }
+        FieldKind::AnimKind => {
+            // Animation kind fields use table getter/setter
+            if field.attrs.readonly {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                }
+            } else {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                    fields.add_field_method_set(#lua_name, |lua, this, value| {
+                        this.#setter_name(lua, value)
+                    });
+                }
+            }
+        }
+        FieldKind::Inverted => {
+            // Inverted boolean fields
+            if field.attrs.readonly {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                }
+            } else {
+                quote! {
+                    fields.add_field_method_get(#lua_name, |lua, this| {
+                        this.#getter_name(lua)
+                    });
+                    fields.add_field_method_set(#lua_name, |_lua, this, value| {
+                        this.#setter_name(value)
+                    });
+                }
+            }
+        }
     }
 }
 
