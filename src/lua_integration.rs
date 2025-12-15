@@ -5,18 +5,37 @@
 //!
 //! # Overview
 //!
-//! The Lua integration consists of:
-//! 1. **Config Loading**: Loading and applying `niri.lua` or `init.lua` configuration
-//! 2. **Runtime Setup**: Registering APIs and callbacks for runtime Lua access
-//! 3. **Action Channel**: Processing actions triggered by Lua scripts
+//! The Lua integration supports two initialization patterns:
 //!
-//! # Usage
+//! ## Pattern 1: Two-Phase Init (Recommended - Neovim-style)
+//!
+//! This pattern allows Lua config to query compositor State during evaluation:
 //!
 //! ```ignore
-//! // In main.rs:
+//! // Phase 1: Create runtime (before State exists)
+//! let lua_runtime = lua_integration::create_lua_runtime(&config_path);
+//!
+//! // ... create State ...
+//!
+//! // Phase 2: Setup APIs (State now exists)
+//! lua_integration::setup_runtime(&mut state, lua_runtime, &event_loop, action_tx);
+//!
+//! // Phase 3: Evaluate config (niri.state.* queries work)
+//! let eval_result = lua_integration::evaluate_lua_config(&mut state, &config_path);
+//!
+//! // Phase 4: Apply changes and execute pending actions
+//! lua_integration::apply_lua_config(&mut state, &eval_result);
+//! lua_integration::execute_pending_actions(&mut state, eval_result.pending_actions);
+//! ```
+//!
+//! ## Pattern 2: Single-Phase Init (Legacy)
+//!
+//! This pattern loads and evaluates config in one step (State queries not available):
+//!
+//! ```ignore
 //! let lua_result = lua_integration::load_lua_config(&config_path, &mut config);
-//! // ... create state ...
-//! lua_integration::setup_runtime(&mut state, lua_result.runtime, &event_loop);
+//! // ... create State ...
+//! lua_integration::setup_runtime(&mut state, lua_result.runtime, &event_loop, action_tx);
 //! lua_integration::execute_pending_actions(&mut state, lua_result.pending_actions);
 //! ```
 
@@ -24,7 +43,7 @@ use std::path::PathBuf;
 
 use calloop::LoopHandle;
 use niri_config::{Config, ConfigPath};
-use niri_lua::{LuaConfig, LuaRuntime, RuntimeApi};
+use niri_lua::{LuaConfig, LuaEvalResult, LuaRuntime, RuntimeApi};
 use tracing::{info, warn};
 
 use crate::niri::State;
@@ -58,7 +77,213 @@ fn get_lua_config_paths(config_path: &ConfigPath) -> Vec<PathBuf> {
     }
 }
 
-/// Loads Lua configuration and applies it to the config.
+// ============================================================================
+// Two-Phase Initialization API (Neovim-style)
+// ============================================================================
+
+/// Phase 1: Create a Lua runtime without evaluating user config.
+///
+/// This creates the Lua VM and registers base APIs but does NOT load or evaluate
+/// any user config file. Call this BEFORE creating compositor State.
+///
+/// # Arguments
+///
+/// * `config_path` - The config path specification to find Lua config files
+///
+/// # Returns
+///
+/// `Some(LuaConfig)` if a Lua config file exists, `None` otherwise.
+pub fn create_lua_runtime(config_path: &ConfigPath) -> Option<LuaConfig> {
+    let lua_files = get_lua_config_paths(config_path);
+
+    for lua_file in lua_files {
+        if !lua_file.exists() {
+            continue;
+        }
+
+        info!(
+            "Creating Lua runtime for {} (two-phase init)",
+            lua_file.display()
+        );
+
+        match LuaConfig::create_runtime() {
+            Ok(lua_config) => {
+                return Some(lua_config);
+            }
+            Err(e) => {
+                warn!("Failed to create Lua runtime: {}", e);
+                continue;
+            }
+        }
+    }
+
+    info!("No Lua config found, skipping Lua runtime creation");
+    None
+}
+
+/// Phase 2: Setup the Lua runtime with APIs (two-phase version).
+///
+/// This registers RuntimeApi and other APIs to the runtime. Call this AFTER
+/// State is created so that state queries will work.
+///
+/// Note: This does NOT store the runtime in state - the caller should pass
+/// the LuaConfig to `evaluate_lua_config()` next.
+///
+/// # Arguments
+///
+/// * `lua_config` - The LuaConfig created by `create_lua_runtime()`
+/// * `event_loop` - The event loop handle for RuntimeApi
+/// * `action_tx` - Channel sender for Lua actions
+pub fn setup_lua_config_apis(
+    lua_config: &mut LuaConfig,
+    event_loop: &LoopHandle<'static, State>,
+    action_tx: calloop::channel::Sender<niri_ipc::Action>,
+) {
+    let runtime = lua_config.runtime_mut();
+
+    // Register runtime API for state queries
+    let runtime_api = RuntimeApi::new(event_loop.clone());
+    if let Err(e) = runtime.register_runtime_api(runtime_api) {
+        warn!("Failed to register Lua runtime API: {}", e);
+    }
+
+    // Register config wrapper API for reactive config access
+    if let Err(e) = runtime.register_config_wrapper_api(Config::default()) {
+        warn!("Failed to register Lua config wrapper API: {}", e);
+    }
+
+    // Register action callback for IPC Lua execution
+    let action_callback: niri_lua::ActionCallback =
+        std::sync::Arc::new(move |action: niri_ipc::Action| {
+            action_tx
+                .send(action)
+                .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
+        });
+    if let Err(e) = runtime.register_action_proxy(action_callback) {
+        warn!("Failed to register Lua action proxy: {}", e);
+    }
+}
+
+/// Phase 3: Evaluate Lua configuration with State available for queries.
+///
+/// This evaluates the user's Lua config file AFTER State exists and RuntimeApi
+/// has been registered. This allows Lua config scripts to call `niri.state.windows()`,
+/// `niri.state.workspaces()`, etc. during initial configuration.
+///
+/// After evaluation, the LuaConfig is converted to a LuaRuntime and stored in state.
+///
+/// # Arguments
+///
+/// * `state` - The compositor state (runtime will be stored here after evaluation)
+/// * `lua_config` - The LuaConfig to evaluate
+/// * `config_path` - The config path specification to find Lua config files
+///
+/// # Returns
+///
+/// A `LuaEvalResult` containing config changes, pending actions, and any errors.
+pub fn evaluate_lua_config(
+    state: &mut State,
+    mut lua_config: LuaConfig,
+    config_path: &ConfigPath,
+) -> LuaEvalResult {
+    // Skip if already evaluated
+    if lua_config.is_evaluated() {
+        // Store the runtime and return empty
+        state.niri.lua_runtime = Some(lua_config.into_runtime());
+        return LuaEvalResult::empty();
+    }
+
+    let lua_files = get_lua_config_paths(config_path);
+
+    for lua_file in lua_files {
+        if !lua_file.exists() {
+            continue;
+        }
+
+        info!(
+            "Evaluating Lua config from {} (two-phase init)",
+            lua_file.display()
+        );
+
+        match lua_config.evaluate_file(&lua_file) {
+            Ok(result) => {
+                if result.has_errors() {
+                    for error in &result.errors {
+                        warn!("Lua config evaluation error: {}", error);
+                    }
+                    // Show config error notification
+                    state.niri.config_error_notification.show();
+                }
+
+                info!("Lua config evaluated successfully");
+
+                // Store the runtime in state
+                state.niri.lua_runtime = Some(lua_config.into_runtime());
+
+                return result;
+            }
+            Err(e) => {
+                warn!("Failed to evaluate Lua config: {}", e);
+                state.niri.config_error_notification.show();
+                // Store the runtime anyway (evaluation failed but runtime is valid)
+                state.niri.lua_runtime = Some(lua_config.into_runtime());
+                return LuaEvalResult::with_error(e);
+            }
+        }
+    }
+
+    // No Lua file found to evaluate - store the runtime anyway
+    state.niri.lua_runtime = Some(lua_config.into_runtime());
+    LuaEvalResult::empty()
+}
+
+/// Apply Lua config changes to the compositor state.
+///
+/// This extracts configuration changes from the Lua evaluation result and applies
+/// them to the compositor's config.
+///
+/// # Arguments
+///
+/// * `state` - The compositor state to update
+/// * `result` - The evaluation result containing config changes
+pub fn apply_lua_config(state: &mut State, result: &LuaEvalResult) {
+    let Some(ref wrapper) = result.config_wrapper else {
+        info!("No Lua config changes to apply");
+        return;
+    };
+
+    let dirty = wrapper.take_dirty_flags();
+    if !dirty.any() {
+        info!("No Lua config changes to apply (no dirty flags)");
+        return;
+    }
+
+    let lua_config = wrapper.extract_config();
+
+    // Log changes
+    let binds_before = state.niri.config.borrow().binds.0.len();
+    let startup_before = state.niri.config.borrow().spawn_at_startup.len();
+
+    // Replace the config
+    *state.niri.config.borrow_mut() = lua_config;
+
+    let binds_after = state.niri.config.borrow().binds.0.len();
+    let startup_after = state.niri.config.borrow().spawn_at_startup.len();
+
+    info!(
+        "Applied Lua config changes: {} binds (+{}), {} startup commands (+{})",
+        binds_after,
+        binds_after.saturating_sub(binds_before),
+        startup_after,
+        startup_after.saturating_sub(startup_before)
+    );
+}
+
+// ============================================================================
+// Legacy Single-Phase API (backward compatibility)
+// ============================================================================
+
+/// Loads Lua configuration and applies it to the config (legacy single-phase).
 ///
 /// Tries to load Lua config from the appropriate paths based on `config_path`.
 /// If successful, merges the Lua config into `config` and returns the runtime

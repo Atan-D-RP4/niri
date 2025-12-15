@@ -2,11 +2,26 @@
 //!
 //! This module handles loading and executing Lua configuration files.
 //! It integrates with Niri's config system to allow Lua-based scripting.
+//!
+//! # Two-Phase Initialization
+//!
+//! The Lua configuration supports a two-phase initialization pattern similar to Neovim:
+//!
+//! 1. **Phase 1 - Create Runtime**: `LuaConfig::create_runtime()` creates the Lua VM
+//!    and registers base APIs (event system, scheduler, loop API) WITHOUT evaluating
+//!    the user's config file. This allows the compositor to finish initialization first.
+//!
+//! 2. **Phase 2 - Evaluate Config**: `LuaConfig::evaluate_file()` evaluates the user's
+//!    config file AFTER the compositor State exists. This enables Lua config scripts
+//!    to query runtime state (windows, workspaces, outputs) during initial configuration.
+//!
+//! For backward compatibility, `LuaConfig::from_file()` still exists and performs both
+//! phases in one call (without State access during evaluation).
 
 use std::path::Path;
 
 use anyhow::Result;
-use log::{debug, info};
+use log::{debug, info, warn};
 use mlua::prelude::*;
 
 use crate::LuaRuntime;
@@ -19,6 +34,47 @@ pub struct LuaConfig {
     runtime: LuaRuntime,
     /// Actions queued during config loading (e.g., spawn commands)
     pending_actions: std::sync::Arc<std::sync::Mutex<Vec<niri_ipc::Action>>>,
+    /// Whether the config file has been evaluated (for two-phase init)
+    evaluated: bool,
+}
+
+/// Result of evaluating a Lua configuration file.
+///
+/// This is returned by `LuaConfig::evaluate_file()` and contains any errors
+/// that occurred during evaluation, along with the config wrapper if available.
+#[derive(Default)]
+pub struct LuaEvalResult {
+    /// The config wrapper containing any configuration changes made by the script.
+    pub config_wrapper: Option<crate::ConfigWrapper>,
+    /// Actions queued during config evaluation (e.g., spawn commands).
+    pub pending_actions: Vec<niri_ipc::Action>,
+    /// Errors that occurred during evaluation (non-fatal).
+    pub errors: Vec<String>,
+}
+
+impl LuaEvalResult {
+    /// Create an empty result (no config loaded).
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Create a result with an error.
+    pub fn with_error(error: impl ToString) -> Self {
+        Self {
+            errors: vec![error.to_string()],
+            ..Default::default()
+        }
+    }
+
+    /// Check if evaluation produced any errors.
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    /// Check if evaluation produced any config changes.
+    pub fn has_changes(&self) -> bool {
+        self.config_wrapper.is_some()
+    }
 }
 
 /// Common configuration field names for extraction from returned tables.
@@ -50,7 +106,203 @@ const CONFIG_FIELD_NAMES: &[&str] = &[
 ];
 
 impl LuaConfig {
-    /// Initialize the runtime with all standard APIs.
+    /// Initialize the runtime with base APIs that don't require compositor State.
+    ///
+    /// This registers the niri table, event system, scheduler, and loop API.
+    /// These APIs are available immediately and don't depend on compositor state.
+    fn init_base_apis(runtime: &mut LuaRuntime) -> Result<()> {
+        // Register the Niri API component (which creates the niri table)
+        runtime
+            .register_component(|action, args| {
+                info!("Lua action: {} with args {:?}", action, args);
+                Ok(())
+            })
+            .map_err(|e| anyhow::anyhow!("Failed to register Niri API: {}", e))?;
+
+        debug!("Niri API registered successfully");
+
+        // Initialize the event system AFTER the niri table is created
+        runtime
+            .init_event_system()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize event system: {}", e))?;
+
+        debug!("Event system initialized");
+
+        // Initialize the scheduler for niri.schedule() support
+        runtime
+            .init_scheduler()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize scheduler: {}", e))?;
+
+        debug!("Scheduler initialized");
+
+        // Initialize the loop API for niri.loop.new_timer() and niri.loop.now()
+        runtime
+            .init_loop_api()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize loop API: {}", e))?;
+
+        debug!("Loop API initialized");
+
+        // Initialize the new ConfigWrapper API for direct config access
+        // This allows the script to use niri.config.layout.gaps = 16, etc.
+        runtime
+            .init_empty_config_wrapper()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize config wrapper: {}", e))?;
+
+        debug!("Config wrapper initialized");
+
+        Ok(())
+    }
+
+    // ========================================================================
+    // Two-Phase Initialization API (Neovim-style)
+    // ========================================================================
+
+    /// Phase 1: Create a Lua runtime without evaluating user config.
+    ///
+    /// This creates the Lua VM and registers base APIs (event system, scheduler,
+    /// loop API, config wrapper) but does NOT load or evaluate any user config file.
+    ///
+    /// Use this when you need to:
+    /// 1. Create the runtime before compositor State exists
+    /// 2. Register additional APIs (like RuntimeApi) after State is created
+    /// 3. Evaluate the user config later with `evaluate_file()`
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Phase 1: Create runtime (before State exists)
+    /// let mut lua_config = LuaConfig::create_runtime()?;
+    ///
+    /// // ... create compositor State ...
+    ///
+    /// // Register RuntimeApi (requires State)
+    /// runtime.register_runtime_api(RuntimeApi::new(&event_loop));
+    ///
+    /// // Phase 2: Evaluate user config (State now available for queries)
+    /// let result = lua_config.evaluate_file(&config_path)?;
+    /// ```
+    pub fn create_runtime() -> Result<Self> {
+        let mut runtime = LuaRuntime::new()
+            .map_err(|e| anyhow::anyhow!("Failed to create Lua runtime: {}", e))?;
+
+        info!("Creating Lua runtime (two-phase init, phase 1)");
+
+        // Register base APIs that don't require compositor State
+        Self::init_base_apis(&mut runtime)?;
+
+        // Create a shared action queue for actions called during config evaluation
+        let action_queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let action_queue_clone = action_queue.clone();
+
+        // Initialize the action proxy for niri.action:spawn(), etc.
+        // Actions are queued during config loading and executed afterward
+        let action_callback: crate::ActionCallback =
+            std::sync::Arc::new(move |action: niri_ipc::Action| {
+                info!("Lua action queued: {:?}", action);
+                action_queue_clone.lock().unwrap().push(action);
+                Ok(())
+            });
+
+        runtime
+            .register_action_proxy(action_callback)
+            .map_err(|e| anyhow::anyhow!("Failed to register action proxy: {}", e))?;
+
+        debug!("Action proxy initialized (two-phase init)");
+
+        Ok(Self {
+            runtime,
+            pending_actions: action_queue,
+            evaluated: false, // Not evaluated yet - waiting for phase 2
+        })
+    }
+
+    /// Phase 2: Evaluate a Lua configuration file.
+    ///
+    /// This loads and executes the user's config file. Should be called AFTER:
+    /// 1. Compositor State has been created
+    /// 2. RuntimeApi has been registered (so niri.state.* queries work)
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the Lua configuration file
+    ///
+    /// # Returns
+    ///
+    /// A `LuaEvalResult` containing:
+    /// - Config changes made by the script (via niri.config.* or niri.apply_config())
+    /// - Pending actions queued during evaluation (e.g., niri.action:spawn())
+    /// - Any errors that occurred (non-fatal)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if evaluation has already been performed on this instance.
+    pub fn evaluate_file<P: AsRef<Path>>(&mut self, path: P) -> Result<LuaEvalResult> {
+        let path_ref = path.as_ref();
+
+        if self.evaluated {
+            return Err(anyhow::anyhow!(
+                "Config already evaluated - create_runtime() returns a single-use instance"
+            ));
+        }
+
+        info!(
+            "Evaluating Lua config from {} (two-phase init, phase 2)",
+            path_ref.display()
+        );
+
+        // Load and execute the config file
+        let return_val = match self.runtime.load_file(path_ref) {
+            Ok(val) => val,
+            Err(e) => {
+                warn!("Failed to evaluate Lua config: {}", e);
+                return Ok(LuaEvalResult::with_error(format!(
+                    "Failed to load {}: {}",
+                    path_ref.display(),
+                    e
+                )));
+            }
+        };
+
+        // If the script returns a table, extract its fields and set them as globals
+        // This is a fallback for backward compatibility
+        if let LuaValue::Table(config_table) = return_val {
+            debug!("Lua file returned a table, extracting configuration (fallback mode)");
+            Self::extract_config_table(&self.runtime, &config_table);
+        }
+
+        self.evaluated = true;
+
+        // Extract the config wrapper if present
+        let config_wrapper = self.runtime.config_wrapper.take();
+
+        // Get pending actions
+        let pending_actions = std::mem::take(&mut *self.pending_actions.lock().unwrap());
+
+        info!(
+            "Successfully evaluated Lua configuration from {}",
+            path_ref.display()
+        );
+
+        Ok(LuaEvalResult {
+            config_wrapper,
+            pending_actions,
+            errors: vec![],
+        })
+    }
+
+    /// Check if this LuaConfig has been evaluated.
+    ///
+    /// Returns `true` if config evaluation has occurred (either via `from_file()`,
+    /// `from_string()`, or `evaluate_file()`).
+    pub fn is_evaluated(&self) -> bool {
+        self.evaluated
+    }
+
+    // ========================================================================
+    // Legacy Single-Phase API (backward compatibility)
+    // ========================================================================
+
+    /// Initialize the runtime with all standard APIs (legacy method).
     ///
     /// This is called by both `from_file()` and `from_string()` to set up
     /// the Lua environment with the niri API, event system, scheduler, etc.
@@ -193,6 +445,7 @@ impl LuaConfig {
         Ok(Self {
             runtime,
             pending_actions: action_queue,
+            evaluated: true, // from_file() evaluates immediately
         })
     }
 
@@ -227,6 +480,7 @@ impl LuaConfig {
         Ok(Self {
             runtime,
             pending_actions: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            evaluated: true, // from_string() evaluates immediately
         })
     }
 
@@ -235,6 +489,14 @@ impl LuaConfig {
     /// This allows advanced users to access the full mlua API.
     pub fn runtime(&self) -> &LuaRuntime {
         &self.runtime
+    }
+
+    /// Get a mutable reference to the underlying Lua runtime.
+    ///
+    /// This is useful for registering additional APIs after runtime creation
+    /// but before config evaluation (two-phase initialization pattern).
+    pub fn runtime_mut(&mut self) -> &mut LuaRuntime {
+        &mut self.runtime
     }
 
     /// Get the ConfigWrapper from the runtime if one was registered.

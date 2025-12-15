@@ -24,7 +24,7 @@ This vision drives several WIP components that may appear unused but are intenti
 | Event System | ⚠️ Partial | Infrastructure complete, most events not wired |
 | Plugin System | 🚧 WIP | Discovery works, sandbox/lifecycle planned (see Vision) |
 | Module Loader | 🚧 WIP | Foundation for plugin system |
-| Hot Reload | ✅ Complete | Uses polling (not inotify) |
+| Hot Reload | 🚧 Planned | Not yet implemented |
 | Async/Safety | 🚧 Planned | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
 | LSP Support | ✅ Available | EmmyLua type definitions generated in `types/api.lua` |
 

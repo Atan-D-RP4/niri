@@ -55,7 +55,7 @@ mod test_derive_macros;
 
 // Tier 2 exports
 pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
-pub use config::LuaConfig;
+pub use config::{LuaConfig, LuaEvalResult};
 pub use config_dirty::ConfigDirtyFlags;
 pub use config_state::{ConfigState, DirtyFlag};
 pub use config_wrapper::{register_config_wrapper, ConfigWrapper};

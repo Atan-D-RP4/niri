@@ -119,8 +119,8 @@ mod lua_config_tests {
     fn test_lua_startup_commands_reactive_api() {
         // Test that startup commands can be added via the reactive config API
         let lua_code = r#"
-            niri.config.spawn_at_startup:add({ command = { "waybar" } })
-            niri.config.spawn_at_startup:add({ command = { "dunst" } })
+            niri.config.spawn_at_startup:append({ command = { "waybar" } })
+            niri.config.spawn_at_startup:append({ command = { "dunst" } })
         "#;
 
         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");
@@ -135,8 +135,8 @@ mod lua_config_tests {
     fn test_lua_startup_commands_with_args() {
         // Test that startup commands with arguments are extracted
         let lua_code = r#"
-            niri.config.spawn_at_startup:add({ command = { "alacritty", "-e", "bash" } })
-            niri.config.spawn_at_startup:add({ command = { "firefox" } })
+            niri.config.spawn_at_startup:append({ command = { "alacritty", "-e", "bash" } })
+            niri.config.spawn_at_startup:append({ command = { "firefox" } })
         "#;
 
         let lua_config = LuaConfig::from_string(lua_code).expect("Failed to create Lua config");

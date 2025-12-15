@@ -145,23 +145,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("starting version {}", &version());
 
-    // Load the config.
+    // Load the KDL config.
     let config_path = config_path(cli.config);
     env::remove_var("NIRI_CONFIG");
     let (config_created_at, config_load_result) = config_path.load_or_create();
     let config_errored = config_load_result.config.is_err();
-    let mut config = config_load_result.config.unwrap_or_else(|err| {
+    let config = config_load_result.config.unwrap_or_else(|err| {
         warn!("{err:?}");
         Config::load_default()
     });
     let config_includes = config_load_result.includes;
-
-    // Load Lua config if present
-    let lua_result = lua_integration::load_lua_config(&config_path, &mut config);
-
-    let spawn_at_startup = mem::take(&mut config.spawn_at_startup);
-    let spawn_sh_at_startup = mem::take(&mut config.spawn_sh_at_startup);
-    *CHILD_ENV.write().unwrap() = mem::take(&mut config.environment);
 
     store_and_increase_nofile_rlimit();
 
@@ -171,10 +164,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle Ctrl+C and other signals.
     niri::utils::signals::listen(&event_loop.handle());
 
-    // Create the Lua action channel
+    // Create the Lua action channel (needed for both State and Lua setup)
     let lua_action_tx = lua_integration::create_action_channel(&event_loop.handle());
 
-    // Create the compositor.
+    // Create the compositor FIRST (before Lua evaluation).
+    // This enables Lua config to query runtime state during evaluation.
     let display = Display::new().unwrap();
     info!(
         "About to create State with config containing {} binds",
@@ -191,13 +185,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
 
-    // Setup Lua runtime with APIs and action callback
-    lua_integration::setup_runtime(
-        &mut state,
-        lua_result.runtime,
-        &event_loop.handle(),
-        lua_action_tx,
-    );
+    // Two-phase Lua initialization (Neovim-style):
+    // Phase 1: Create Lua runtime (if Lua config exists)
+    // Phase 2: Setup APIs with State access
+    // Phase 3: Evaluate config (can now query niri.state.*)
+    // Phase 4: Apply config changes
+    let lua_pending_actions = if let Some(mut lua_config) =
+        lua_integration::create_lua_runtime(&config_path)
+    {
+        // Phase 2: Setup APIs with State available
+        lua_integration::setup_lua_config_apis(&mut lua_config, &event_loop.handle(), lua_action_tx);
+
+        // Phase 3: Evaluate config (Lua can now query State)
+        let eval_result = lua_integration::evaluate_lua_config(&mut state, lua_config, &config_path);
+
+        // Phase 4: Apply config changes from Lua
+        lua_integration::apply_lua_config(&mut state, &eval_result);
+
+        eval_result.pending_actions
+    } else {
+        Vec::new()
+    };
+
+    // Extract spawn commands AFTER Lua config is applied
+    let spawn_at_startup = mem::take(&mut state.niri.config.borrow_mut().spawn_at_startup);
+    let spawn_sh_at_startup = mem::take(&mut state.niri.config.borrow_mut().spawn_sh_at_startup);
+    *CHILD_ENV.write().unwrap() = mem::take(&mut state.niri.config.borrow_mut().environment);
 
     // Set WAYLAND_DISPLAY for children.
     let socket_name = state.niri.socket_name.as_deref().unwrap();
@@ -260,7 +273,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Only set up the KDL config watcher if Lua config wasn't loaded
-    // Lua config has its own file watching mechanism
     if !lua_integration::is_lua_config_active(&state) {
         watcher::setup(&mut state, &config_path, config_includes);
     }
@@ -276,7 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Execute pending actions from Lua config
-    lua_integration::execute_pending_actions(&mut state, lua_result.pending_actions);
+    lua_integration::execute_pending_actions(&mut state, lua_pending_actions);
 
     // Show the config error notification right away if needed.
     if config_errored {
