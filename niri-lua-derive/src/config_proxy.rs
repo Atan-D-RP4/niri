@@ -7,7 +7,9 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
-use crate::attributes::{to_snake_case, FieldAttrs, FieldKind, StructAttrs};
+use crate::attributes::{
+    infer_field_kind, to_snake_case, FieldAttrs, FieldDetectionMode, FieldKind, StructAttrs,
+};
 use crate::collection_proxy::{generate_collection_proxy, CollectionFieldInfo};
 
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -46,13 +48,73 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     };
 
     // Collect field information
+    // Determine effective detection mode:
+    // - If explicitly set via struct attr, use that
+    // - Otherwise, if any field has explicit annotation, use Explicit mode
+    // - Otherwise, use Auto mode
     let mut field_infos = Vec::new();
+    let mut any_explicit_annotation = false;
+
+    // First pass: parse attributes and check for explicit annotations
+    let mut parsed_fields: Vec<(&syn::Field, FieldAttrs)> = Vec::new();
     for field in fields {
+        let field_attrs = FieldAttrs::from_attrs(&field.attrs)?;
+        if field_attrs.has_explicit_kind {
+            any_explicit_annotation = true;
+        }
+        parsed_fields.push((field, field_attrs));
+    }
+
+    // Determine effective detection mode
+    let detection_mode = struct_attrs
+        .detection_mode
+        .unwrap_or(if any_explicit_annotation {
+            // If any field has explicit annotation, default to explicit mode
+            // (backwards compatibility: existing proxies with annotations keep working)
+            FieldDetectionMode::Explicit
+        } else {
+            // No explicit annotations = auto-detect mode
+            FieldDetectionMode::Auto
+        });
+
+    // Second pass: process fields with the determined mode
+    for (field, mut field_attrs) in parsed_fields {
         let field_name = field.ident.as_ref().unwrap();
         let field_type = &field.ty;
-        let field_attrs = FieldAttrs::from_attrs(&field.attrs)?;
 
         // Skip fields marked with skip
+        if matches!(field_attrs.kind, FieldKind::Skip) && field_attrs.has_explicit_kind {
+            continue;
+        }
+
+        // If field doesn't have explicit kind, try to infer it
+        if !field_attrs.has_explicit_kind {
+            match detection_mode {
+                FieldDetectionMode::Explicit => {
+                    // In explicit mode, unannotated fields default to Simple (backwards compat)
+                    // This preserves the original behavior where FieldKind::default() is Simple
+                }
+                FieldDetectionMode::Auto => {
+                    // In auto mode, try to infer the kind
+                    if let Some(inferred) = infer_field_kind(field_type) {
+                        field_attrs.kind = inferred;
+                    } else {
+                        // Unknown type - emit compile error
+                        return Err(syn::Error::new_spanned(
+                            field_type,
+                            format!(
+                                "Cannot infer field kind for type `{}`. \
+                                 Add an explicit #[lua_proxy(...)] annotation. \
+                                 Supported kinds: field, nested, collection, gradient, offset, anim_kind, skip",
+                                quote::quote!(#field_type)
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Skip fields that were inferred or explicitly set to Skip
         if matches!(field_attrs.kind, FieldKind::Skip) {
             continue;
         }
@@ -214,16 +276,13 @@ fn generate_access_path(struct_attrs: &StructAttrs) -> TokenStream2 {
 /// - Regular path segments to descend
 ///
 /// Otherwise uses the default access_path.field_name
-fn generate_field_access_path(
-    field: &FieldInfo,
-    struct_attrs: &StructAttrs,
-) -> TokenStream2 {
+fn generate_field_access_path(field: &FieldInfo, struct_attrs: &StructAttrs) -> TokenStream2 {
     let base_path = generate_access_path(struct_attrs);
     let field_name = &field.name;
 
     if let Some(ref custom_path) = field.attrs.custom_path {
         // Handle ".." prefix to go up one level
-        if custom_path.starts_with("../") {
+        if let Some(rest) = custom_path.strip_prefix("../") {
             // We need to rebuild the parent path without the last segment
             if let Some(ref parent_path) = struct_attrs.parent_path {
                 let segments: Vec<&str> = parent_path.split('.').collect();
@@ -240,7 +299,6 @@ fn generate_field_access_path(
                         }
                     }
                     // Now add the rest of the custom path (after "../")
-                    let rest = &custom_path[3..];
                     for part in rest.split('.') {
                         if !part.is_empty() {
                             let ident = format_ident!("{}", part);
@@ -251,7 +309,6 @@ fn generate_field_access_path(
                 }
             }
             // Fallback if parent_path is not set or has only one segment
-            let rest = &custom_path[3..];
             let mut path = quote! { config };
             for part in rest.split('.') {
                 if !part.is_empty() {

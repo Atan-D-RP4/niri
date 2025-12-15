@@ -41,8 +41,8 @@ use crate::extractors::{
 use crate::migrated_proxies::{
     AnimationsConfigProxy, ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy,
     DebugConfigProxy, GesturesConfigProxy, HotkeyOverlayConfigProxy, InputConfigProxy,
-    LayoutConfigProxy, OverviewConfigProxy, RecentWindowsConfigProxy,
-    SpawnAtStartupConfigProxy, XwaylandSatelliteConfigProxy,
+    LayoutConfigProxy, OverviewConfigProxy, RecentWindowsConfigProxy, SpawnAtStartupConfigProxy,
+    XwaylandSatelliteConfigProxy,
 };
 
 /// Wrapper around Config that implements UserData for Lua access.
