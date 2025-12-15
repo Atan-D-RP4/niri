@@ -1,9 +1,0 @@
----
-source: niri-lua/src/config_wrapper.rs
-expression: "(never_value, always_value, overflow_value)"
----
-(
-    "Never",
-    "Always",
-    "OnOverflow",
-)

@@ -1,8 +1,0 @@
----
-source: niri-lua/src/config_wrapper.rs
-expression: "(slowdown, off)"
----
-(
-    3.0,
-    false,
-)

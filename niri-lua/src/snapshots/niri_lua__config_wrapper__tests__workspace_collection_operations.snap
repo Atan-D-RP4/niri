@@ -1,9 +1,0 @@
----
-source: niri-lua/src/config_wrapper.rs
-expression: "(len, first_name, third_name)"
----
-(
-    3,
-    "main",
-    "dev",
-)

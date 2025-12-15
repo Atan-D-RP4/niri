@@ -1,5 +1,0 @@
----
-source: niri-lua/src/config_wrapper.rs
-expression: gestures
----
-"Gestures {\n    dnd_edge_view_scroll: DndEdgeViewScroll {\n        trigger_width: 30.0,\n        delay_ms: 100,\n        max_speed: 1500.0,\n    },\n    dnd_edge_workspace_switch: DndEdgeWorkspaceSwitch {\n        trigger_height: 50.0,\n        delay_ms: 100,\n        max_speed: 1500.0,\n    },\n    hot_corners: HotCorners {\n        off: false,\n        top_left: false,\n        top_right: false,\n        bottom_left: false,\n        bottom_right: false,\n    },\n}"
