@@ -5,6 +5,7 @@ use syn::{Attribute, LitStr, Type};
 
 /// Rename conventions for enum variants
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::enum_variant_names)]
 pub enum RenameAll {
     #[default]
     KebabCase,

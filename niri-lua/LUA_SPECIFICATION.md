@@ -83,11 +83,11 @@ niri.config.screenshot_path = "~/Pictures/%Y-%m-%d_%H-%M-%S.png"
 ### Runtime State Queries
 
 ```lua
-local windows = niri.state.windows        -- {id, app_id, title, workspace_id, ...}[]
-local workspaces = niri.state.workspaces  -- {id, name, output, is_active, ...}[]
-local outputs = niri.state.outputs        -- {name, make, model, width, height, ...}[]
-local layouts = niri.state.keyboard_layouts -- {names, current_idx}
-local focused = niri.state.focused_window -- {id, app_id, title} | nil
+local windows = niri.state.windows()        -- {id, app_id, title, workspace_id, ...}[]
+local workspaces = niri.state.workspaces()  -- {id, name, output, is_active, ...}[]
+local outputs = niri.state.outputs()        -- {name, make, model, width, height, ...}[]
+local layouts = niri.state.keyboard_layouts() -- {names, current_idx}
+local focused = niri.state.focused_window() -- {id, app_id, title} | nil
 ```
 
 ### Events (28 integrated, 4 excluded for security)
@@ -138,8 +138,10 @@ niri.action:screenshot()
 ### Timers
 
 ```lua
-local timer = niri.loop.new_timer(1000, function() end)  -- one-shot, ms
-local timer = niri.loop.new_timer(1000, function() end, true)  -- repeating
+local timer = niri.loop.new_timer()
+timer:start(1000, 0, function() end)  -- one-shot after 1000ms
+-- For repeating:
+timer:start(1000, 1000, function() end)  -- repeat every 1000ms
 timer:close()  -- cancel
 ```
 
@@ -1034,14 +1036,11 @@ timer:start(1000, 1000, function()
     print("Fires every 1 second!")
 end)
 
--- Convenience: create and start in one call
-local timer = niri.loop.new_timer(1000, function()
+-- One-shot timer (fires once after delay)
+local timer = niri.loop.new_timer()
+timer:start(1000, 0, function()
     print("One-shot after 1 second")
 end)
-
-local timer = niri.loop.new_timer(1000, function()
-    print("Repeating every 1 second")
-end, true)  -- true = repeat
 ```
 
 ### Timer Methods
@@ -1157,8 +1156,8 @@ WHEN using niri.events.*:
 WHEN using niri.state.*:
 │
 └─ Read-only access:
-    local windows = niri.state.windows         -- array
-    local focused = niri.state.focused_window  -- table | nil
+    local windows = niri.state.windows()         -- array
+    local focused = niri.state.focused_window()  -- table | nil
 ```
 
 ### Common Mistakes (Avoid These)
@@ -1788,10 +1787,10 @@ impl IpcLuaExecutor {
 niri msg lua "print('Hello from REPL!')"
 
 # Query state
-niri msg lua "return niri.state.focused_window"
+niri msg lua "return niri.state.focused_window()"
 
 # Multiple statements
-niri msg lua "local w = niri.state.focused_window; print(w.app_id)"
+niri msg lua "local w = niri.state.focused_window(); print(w.app_id)"
 
 # Execute action
 niri msg lua "niri.action:close_window()"
@@ -1805,13 +1804,13 @@ The REPL captures and displays return values:
 $ niri msg lua "return 1 + 2"
 3
 
-$ niri msg lua "return niri.state.windows"
+$ niri msg lua "return niri.state.windows()"
 {
   { id = 1, app_id = "firefox", title = "Mozilla Firefox" },
   { id = 2, app_id = "alacritty", title = "Terminal" },
 }
 
-$ niri msg lua "return niri.state.focused_window"
+$ niri msg lua "return niri.state.focused_window()"
 { id = 1, app_id = "firefox", title = "Mozilla Firefox" }
 ```
 

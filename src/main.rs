@@ -190,22 +190,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 2: Setup APIs with State access
     // Phase 3: Evaluate config (can now query niri.state.*)
     // Phase 4: Apply config changes
-    let lua_pending_actions = if let Some(mut lua_config) =
-        lua_integration::create_lua_runtime(&config_path)
-    {
-        // Phase 2: Setup APIs with State available
-        lua_integration::setup_lua_config_apis(&mut lua_config, &event_loop.handle(), lua_action_tx);
+    let lua_pending_actions =
+        if let Some(mut lua_config) = lua_integration::create_lua_runtime(&config_path) {
+            // Phase 2: Setup APIs with State available
+            lua_integration::setup_lua_config_apis(
+                &mut lua_config,
+                &event_loop.handle(),
+                lua_action_tx,
+            );
 
-        // Phase 3: Evaluate config (Lua can now query State)
-        let eval_result = lua_integration::evaluate_lua_config(&mut state, lua_config, &config_path);
+            // Phase 3: Evaluate config (Lua can now query State)
+            let eval_result =
+                lua_integration::evaluate_lua_config(&mut state, lua_config, &config_path);
 
-        // Phase 4: Apply config changes from Lua
-        lua_integration::apply_lua_config(&mut state, &eval_result);
+            // Phase 4: Apply config changes from Lua
+            lua_integration::apply_lua_config(&mut state, &eval_result);
 
-        eval_result.pending_actions
-    } else {
-        Vec::new()
-    };
+            eval_result.pending_actions
+        } else {
+            Vec::new()
+        };
 
     // Extract spawn commands AFTER Lua config is applied
     let spawn_at_startup = mem::take(&mut state.niri.config.borrow_mut().spawn_at_startup);

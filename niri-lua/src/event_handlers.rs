@@ -25,6 +25,7 @@ pub struct LuaEventHandler {
 }
 
 /// Manages all registered event handlers
+#[allow(clippy::arc_with_non_send_sync)] // Arc used for copy-on-write, not thread sharing
 pub struct EventHandlers {
     /// Map of event names to their registered handlers
     handlers: HashMap<String, Arc<Vec<LuaEventHandler>>>,
@@ -50,6 +51,7 @@ impl EventHandlers {
     ///
     /// # Returns
     /// The handler ID for later removal
+    #[allow(clippy::arc_with_non_send_sync)] // Arc used for copy-on-write semantics, not threading
     pub fn register_handler(
         &mut self,
         event_type: &str,

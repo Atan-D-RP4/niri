@@ -219,7 +219,7 @@ pub fn parse_color_string(s: &str) -> LuaResult<Color> {
     match hex.len() {
         3 => {
             // #RGB
-            let r = parse_hex_digit(hex.chars().nth(0).unwrap())?;
+            let r = parse_hex_digit(hex.chars().next().unwrap())?;
             let g = parse_hex_digit(hex.chars().nth(1).unwrap())?;
             let b = parse_hex_digit(hex.chars().nth(2).unwrap())?;
             // Convert 4-bit to 8-bit by repeating the nibble (0xF -> 0xFF)
@@ -230,7 +230,7 @@ pub fn parse_color_string(s: &str) -> LuaResult<Color> {
         }
         4 => {
             // #RGBA
-            let r = parse_hex_digit(hex.chars().nth(0).unwrap())?;
+            let r = parse_hex_digit(hex.chars().next().unwrap())?;
             let g = parse_hex_digit(hex.chars().nth(1).unwrap())?;
             let b = parse_hex_digit(hex.chars().nth(2).unwrap())?;
             let a = parse_hex_digit(hex.chars().nth(3).unwrap())?;
@@ -326,7 +326,7 @@ pub struct GradientTable {
     pub relative_to: Option<String>,
 }
 
-impl<'lua> IntoLua for GradientTable {
+impl IntoLua for GradientTable {
     fn into_lua(self, lua: &Lua) -> LuaResult<Value> {
         let table = lua.create_table()?;
         table.set("from", self.from)?;
@@ -339,17 +339,14 @@ impl<'lua> IntoLua for GradientTable {
     }
 }
 
-impl<'lua> FromLua for GradientTable {
+impl FromLua for GradientTable {
     fn from_lua(value: Value, _lua: &Lua) -> LuaResult<Self> {
         match value {
             Value::Table(table) => {
                 let from: String = table.get("from")?;
                 let to: String = table.get("to")?;
                 // Get angle as Option, default to 180
-                let angle: i16 = match table.get::<Option<i16>>("angle")? {
-                    Some(a) => a,
-                    None => 180,
-                };
+                let angle: i16 = (table.get::<Option<i16>>("angle")?).unwrap_or(180);
                 let relative_to: Option<String> = table.get("relative_to")?;
 
                 Ok(GradientTable {
@@ -588,7 +585,7 @@ pub struct SpawnAtStartupTable {
     pub command: Vec<String>,
 }
 
-impl<'lua> IntoLua for SpawnAtStartupTable {
+impl IntoLua for SpawnAtStartupTable {
     fn into_lua(self, lua: &Lua) -> LuaResult<Value> {
         let table = lua.create_table()?;
         table.set("command", self.command)?;
@@ -596,7 +593,7 @@ impl<'lua> IntoLua for SpawnAtStartupTable {
     }
 }
 
-impl<'lua> FromLua for SpawnAtStartupTable {
+impl FromLua for SpawnAtStartupTable {
     fn from_lua(value: Value, _lua: &Lua) -> LuaResult<Self> {
         match value {
             Value::Table(table) => {

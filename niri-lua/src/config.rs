@@ -7,13 +7,13 @@
 //!
 //! The Lua configuration supports a two-phase initialization pattern similar to Neovim:
 //!
-//! 1. **Phase 1 - Create Runtime**: `LuaConfig::create_runtime()` creates the Lua VM
-//!    and registers base APIs (event system, scheduler, loop API) WITHOUT evaluating
-//!    the user's config file. This allows the compositor to finish initialization first.
+//! 1. **Phase 1 - Create Runtime**: `LuaConfig::create_runtime()` creates the Lua VM and registers
+//!    base APIs (event system, scheduler, loop API) WITHOUT evaluating the user's config file. This
+//!    allows the compositor to finish initialization first.
 //!
-//! 2. **Phase 2 - Evaluate Config**: `LuaConfig::evaluate_file()` evaluates the user's
-//!    config file AFTER the compositor State exists. This enables Lua config scripts
-//!    to query runtime state (windows, workspaces, outputs) during initial configuration.
+//! 2. **Phase 2 - Evaluate Config**: `LuaConfig::evaluate_file()` evaluates the user's config file
+//!    AFTER the compositor State exists. This enables Lua config scripts to query runtime state
+//!    (windows, workspaces, outputs) during initial configuration.
 //!
 //! For backward compatibility, `LuaConfig::from_file()` still exists and performs both
 //! phases in one call (without State access during evaluation).

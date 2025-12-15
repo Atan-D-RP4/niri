@@ -6896,4 +6896,10 @@ impl niri_lua::CompositorState for State {
             .cloned()
             .collect()
     }
+
+    fn get_keyboard_layouts(&self) -> Option<niri_ipc::KeyboardLayouts> {
+        let server = self.niri.ipc_server.as_ref()?;
+        let state = server.event_stream_state.borrow();
+        state.keyboard_layouts.keyboard_layouts.clone()
+    }
 }

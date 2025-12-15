@@ -43,7 +43,7 @@ use std::cell::RefCell;
 use async_channel::{bounded, Sender};
 use calloop::LoopHandle;
 use mlua::{Lua, Result, Table, Value};
-use niri_ipc::{Output, Window, Workspace};
+use niri_ipc::{KeyboardLayouts, Output, Window, Workspace};
 
 use crate::ipc_bridge::{output_to_lua, window_to_lua, windows_to_lua, workspaces_to_lua};
 
@@ -65,6 +65,7 @@ pub struct StateSnapshot {
     pub windows: Vec<Window>,
     pub workspaces: Vec<Workspace>,
     pub outputs: Vec<Output>,
+    pub keyboard_layouts: Option<KeyboardLayouts>,
 }
 
 impl StateSnapshot {
@@ -74,6 +75,7 @@ impl StateSnapshot {
             windows: state.get_windows(),
             workspaces: state.get_workspaces(),
             outputs: state.get_outputs(),
+            keyboard_layouts: state.get_keyboard_layouts(),
         }
     }
 
@@ -171,6 +173,9 @@ pub trait CompositorState {
 
     /// Get all outputs (monitors) in the compositor.
     fn get_outputs(&self) -> Vec<Output>;
+
+    /// Get the keyboard layouts configuration.
+    fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts>;
 }
 
 /// Register the runtime state API in a Lua context.
@@ -300,7 +305,7 @@ where
 
     // outputs() -> array of output tables
     {
-        let api = api.event_loop;
+        let api = api.event_loop.clone();
         let outputs_fn = lua.create_function(move |lua, ()| {
             // Check if we're in an event handler context with pre-captured state
             if let Some(snapshot) = get_event_context_state() {
@@ -336,6 +341,57 @@ where
         state_table.set("outputs", outputs_fn)?;
     }
 
+    // keyboard_layouts() -> {names, current_idx} | nil
+    {
+        let api = api.event_loop;
+        let keyboard_layouts_fn = lua.create_function(move |lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                return match &snapshot.keyboard_layouts {
+                    Some(layouts) => {
+                        let table = lua.create_table()?;
+                        let names_table = lua.create_table()?;
+                        for (i, name) in layouts.names.iter().enumerate() {
+                            names_table.set(i + 1, name.as_str())?;
+                        }
+                        table.set("names", names_table)?;
+                        table.set("current_idx", layouts.current_idx)?;
+                        Ok(Value::Table(table))
+                    }
+                    None => Ok(Value::Nil),
+                };
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let layouts: Option<KeyboardLayouts> = runtime_api
+                .query(|state, tx| {
+                    let layouts = state.get_keyboard_layouts();
+                    if let Err(e) = tx.send_blocking(layouts) {
+                        log::warn!("Failed to send keyboard_layouts query result: {}", e);
+                    }
+                })
+                .map_err(mlua::Error::external)?;
+
+            match layouts {
+                Some(layouts) => {
+                    let table = lua.create_table()?;
+                    let names_table = lua.create_table()?;
+                    for (i, name) in layouts.names.iter().enumerate() {
+                        names_table.set(i + 1, name.as_str())?;
+                    }
+                    table.set("names", names_table)?;
+                    table.set("current_idx", layouts.current_idx)?;
+                    Ok(Value::Table(table))
+                }
+                None => Ok(Value::Nil),
+            }
+        })?;
+        state_table.set("keyboard_layouts", keyboard_layouts_fn)?;
+    }
+
     // Set niri.state
     niri.set("state", state_table)?;
 
@@ -358,6 +414,7 @@ mod tests {
         windows: Vec<Window>,
         workspaces: Vec<Workspace>,
         outputs: Vec<Output>,
+        keyboard_layouts: Option<KeyboardLayouts>,
     }
 
     impl CompositorState for MockState {
@@ -375,6 +432,10 @@ mod tests {
 
         fn get_outputs(&self) -> Vec<Output> {
             self.outputs.clone()
+        }
+
+        fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts> {
+            self.keyboard_layouts.clone()
         }
     }
 
@@ -624,6 +685,7 @@ mod tests {
             windows: vec![make_window(1, "Test", "test", true)],
             workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
             outputs: vec![make_output("DP-1", true)],
+            keyboard_layouts: None,
         };
 
         let state2 = state1.clone();
@@ -675,6 +737,7 @@ mod tests {
             windows: vec![make_window(1, "Test Window", "test-app", true)],
             workspaces: vec![make_workspace(1, 1, Some("main"), true)],
             outputs: vec![make_output("DP-1", true)],
+            keyboard_layouts: None,
         };
 
         set_event_context_state(snapshot);
@@ -698,6 +761,7 @@ mod tests {
             windows: vec![make_window(1, "Window", "app", false)],
             workspaces: vec![],
             outputs: vec![],
+            keyboard_layouts: None,
         };
         set_event_context_state(snapshot);
 
@@ -719,6 +783,7 @@ mod tests {
             windows: vec![make_window(42, "Original", "app", true)],
             workspaces: vec![],
             outputs: vec![],
+            keyboard_layouts: None,
         };
         set_event_context_state(snapshot);
 
@@ -745,6 +810,7 @@ mod tests {
             windows: vec![make_window(1, "First", "app1", true)],
             workspaces: vec![],
             outputs: vec![],
+            keyboard_layouts: None,
         };
         set_event_context_state(snapshot1);
 
@@ -758,6 +824,7 @@ mod tests {
             windows: vec![make_window(2, "Second", "app2", false)],
             workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
             outputs: vec![],
+            keyboard_layouts: None,
         };
         set_event_context_state(snapshot2);
 
@@ -780,6 +847,7 @@ mod tests {
             ],
             workspaces: vec![],
             outputs: vec![],
+            keyboard_layouts: None,
         };
 
         let focused = snapshot.get_focused_window();
@@ -799,6 +867,7 @@ mod tests {
             ],
             workspaces: vec![],
             outputs: vec![],
+            keyboard_layouts: None,
         };
 
         assert!(snapshot.get_focused_window().is_none());
@@ -810,6 +879,7 @@ mod tests {
             windows: vec![],
             workspaces: vec![],
             outputs: vec![],
+            keyboard_layouts: None,
         };
 
         assert!(snapshot.get_focused_window().is_none());
@@ -827,6 +897,7 @@ mod tests {
                 make_workspace(2, 2, Some("ws2"), false),
             ],
             outputs: vec![make_output("DP-1", true), make_output("HDMI-1", false)],
+            keyboard_layouts: None,
         };
 
         let snapshot = StateSnapshot::from_compositor_state(&state);
@@ -855,6 +926,7 @@ mod tests {
             windows: vec![make_window(1, "Before Action", "app", true)],
             workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
             outputs: vec![make_output("DP-1", true)],
+            keyboard_layouts: None,
         };
         let snapshot = StateSnapshot::from_compositor_state(&state);
         set_event_context_state(snapshot);
