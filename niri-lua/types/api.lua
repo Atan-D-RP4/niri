@@ -472,16 +472,18 @@ local ConfigSectionProxy = {}
 
 ---Root niri namespace providing access to compositor functionality
 ---@class niri
----@field utils niri_utils Utility functions
----@field config niri_config Configuration API
----@field events niri_events Event system for subscribing to compositor events
----@field action niri_action Compositor actions
----@field state niri_state Runtime state queries
----@field loop niri_loop Event loop and timers
----@field keymap niri_keymap Keybinding configuration
----@field window niri_window Window rules configuration
----@field overview niri_overview Overview mode configuration
----@field screenshot niri_screenshot Screenshot configuration
+---@field utils niri.utils Utility functions
+---@field config niri.config Configuration API
+---@field events niri.events Event system for subscribing to compositor events
+---@field action niri.action Compositor actions
+---@field state niri.state Runtime state queries
+---@field loop niri.loop Event loop and timers
+---@field keymap niri.keymap Keybinding configuration
+---@field window niri.window Window rules configuration
+---@field overview niri.overview Overview mode configuration
+---@field screenshot niri.screenshot Screenshot configuration
+---@field os niri.os Operating system utilities (hostname, getenv)
+---@field fs niri.fs Filesystem utilities (readable, expand, which)
 niri = {}
 
 ---Returns the niri version string
@@ -501,31 +503,31 @@ function niri.apply_config(config) end
 function niri.schedule(callback) end
 
 ---Utility functions for logging and process spawning
----@class niri_utils
-niri_utils = {}
+---@class niri.utils
+niri.utils = {}
 
 ---Log a message at info level
 ---@param ... any Values to log
-function niri_utils.log(...) end
+function niri.utils.log(...) end
 
 ---Log a message at debug level
 ---@param ... any Values to log
-function niri_utils.debug(...) end
+function niri.utils.debug(...) end
 
 ---Log a message at warning level
 ---@param ... any Values to log
-function niri_utils.warn(...) end
+function niri.utils.warn(...) end
 
 ---Log a message at error level
 ---@param ... any Values to log
-function niri_utils.error(...) end
+function niri.utils.error(...) end
 
 ---Spawn a command asynchronously
 ---@param command string[] Command and arguments
-function niri_utils.spawn(command) end
+function niri.utils.spawn(command) end
 
 ---Configuration proxy for reading and modifying compositor settings
----@class niri_config
+---@class niri.config
 ---@field input ConfigSectionProxy Input device configuration (keyboard, mouse, touchpad, etc.)
 ---@field layout ConfigSectionProxy Layout configuration (gaps, focus ring, border, shadow, etc.)
 ---@field cursor ConfigSectionProxy Cursor configuration (size, theme, hide when typing)
@@ -546,548 +548,580 @@ function niri_utils.spawn(command) end
 ---@field window_rules ConfigCollection Window rules
 ---@field layer_rules ConfigCollection Layer shell rules
 ---@field environment ConfigCollection Environment variables
-niri_config = {}
+niri.config = {}
 
 ---Apply all staged configuration changes to the compositor
-function niri_config:apply() end
+function niri.config:apply() end
 
 ---Enable or disable automatic application of config changes
 ---@param enable boolean Whether to auto-apply changes
-function niri_config:auto_apply(enable) end
+function niri.config:auto_apply(enable) end
 
 ---Returns the config API version
 ---@return string # Config API version
-function niri_config.version() end
+function niri.config.version() end
 
 ---Event system for subscribing to compositor events
----@class niri_events
-niri_events = {}
+---@class niri.events
+niri.events = {}
 
 ---Subscribe to event(s) with a callback. Pass a single event name to get a handler ID, or an array of event names to get a table mapping event names to handler IDs.
 ---@param event_spec EventSpec Event name or array of event names (e.g., 'window:open' or {'window:open', 'window:close'})
 ---@param callback fun(event: table) Callback function receiving event data
 ---@return EventHandlerId|HandlerIdMap # Handler ID (single event) or table of handler IDs (multiple events)
-function niri_events:on(event_spec, callback) end
+function niri.events:on(event_spec, callback) end
 
 ---Subscribe to event(s) for a single occurrence. Handler is automatically removed after firing. Pass a single event name to get a handler ID, or an array of event names to get a table mapping event names to handler IDs.
 ---@param event_spec EventSpec Event name or array of event names
 ---@param callback fun(event: table) Callback function
 ---@return EventHandlerId|HandlerIdMap # Handler ID (single event) or table of handler IDs (multiple events)
-function niri_events:once(event_spec, callback) end
+function niri.events:once(event_spec, callback) end
 
 ---Unsubscribe from event(s). Pass (event_name, handler_id) to remove a single handler, or pass a HandlerIdMap table to remove multiple handlers at once.
 ---@param event_or_map string|HandlerIdMap Event name (with handler_id) or handler ID map from on()/once()
 ---@param handler_id? EventHandlerId Handler ID (only when first arg is event name)
 ---@return boolean|table<string, boolean> # True if handler removed (single) or table of results (multiple)
-function niri_events:off(event_or_map, handler_id) end
+function niri.events:off(event_or_map, handler_id) end
 
 ---Emit a custom event (for testing or custom integrations)
 ---@param event_name string Event name
 ---@param data? table? Event data
-function niri_events:emit(event_name, data) end
+function niri.events:emit(event_name, data) end
 
 ---Compositor actions for window management, navigation, and system control
----@class niri_action
-niri_action = {}
+---@class niri.action
+niri.action = {}
 
 ---Quit the compositor
 ---@param skip_confirmation? boolean Skip confirmation dialog
-function niri_action:quit(skip_confirmation) end
+function niri.action:quit(skip_confirmation) end
 
 ---Turn off all monitors
-function niri_action:power_off_monitors() end
+function niri.action:power_off_monitors() end
 
 ---Turn on all monitors
-function niri_action:power_on_monitors() end
+function niri.action:power_on_monitors() end
 
 ---Spawn a command
 ---@param command string[] Command and arguments
-function niri_action:spawn(command) end
+function niri.action:spawn(command) end
 
 ---Spawn a command via shell
 ---@param command string Shell command string
-function niri_action:spawn_sh(command) end
+function niri.action:spawn_sh(command) end
 
 ---Trigger a screen transition animation
 ---@param delay? boolean Whether to delay the transition
-function niri_action:do_screen_transition(delay) end
+function niri.action:do_screen_transition(delay) end
 
 ---Reload configuration from file
-function niri_action:load_config_file() end
+function niri.action:load_config_file() end
 
 ---Take a screenshot (interactive selection)
-function niri_action:screenshot() end
+function niri.action:screenshot() end
 
 ---Screenshot the entire screen
-function niri_action:screenshot_screen() end
+function niri.action:screenshot_screen() end
 
 ---Screenshot the focused window
-function niri_action:screenshot_window() end
+function niri.action:screenshot_window() end
 
 ---Close the focused window
-function niri_action:close_window() end
+function niri.action:close_window() end
 
 ---Toggle fullscreen on the focused window
-function niri_action:fullscreen_window() end
+function niri.action:fullscreen_window() end
 
 ---Toggle windowed fullscreen mode
-function niri_action:toggle_windowed_fullscreen() end
+function niri.action:toggle_windowed_fullscreen() end
 
 ---Focus a specific window by ID
 ---@param window_id integer Window ID
-function niri_action:focus_window(window_id) end
+function niri.action:focus_window(window_id) end
 
 ---Focus the window at index within current column
 ---@param index integer 1-based window index
-function niri_action:focus_window_in_column(index) end
+function niri.action:focus_window_in_column(index) end
 
 ---Focus the previously focused window
-function niri_action:focus_window_previous() end
+function niri.action:focus_window_previous() end
 
 ---Toggle keyboard shortcuts inhibit for focused window
-function niri_action:toggle_keyboard_shortcuts_inhibit() end
+function niri.action:toggle_keyboard_shortcuts_inhibit() end
 
 ---Focus the column to the left
-function niri_action:focus_column_left() end
+function niri.action:focus_column_left() end
 
 ---Focus the column to the right
-function niri_action:focus_column_right() end
+function niri.action:focus_column_right() end
 
 ---Focus the first column
-function niri_action:focus_column_first() end
+function niri.action:focus_column_first() end
 
 ---Focus the last column
-function niri_action:focus_column_last() end
+function niri.action:focus_column_last() end
 
 ---Focus column to the right, wrapping to first
-function niri_action:focus_column_right_or_first() end
+function niri.action:focus_column_right_or_first() end
 
 ---Focus column to the left, wrapping to last
-function niri_action:focus_column_left_or_last() end
+function niri.action:focus_column_left_or_last() end
 
 ---Focus column at specific index
 ---@param index integer 1-based column index
-function niri_action:focus_column(index) end
+function niri.action:focus_column(index) end
 
 ---Focus the window below in the column
-function niri_action:focus_window_down() end
+function niri.action:focus_window_down() end
 
 ---Focus the window above in the column
-function niri_action:focus_window_up() end
+function niri.action:focus_window_up() end
 
 ---Focus window below or column left if at bottom
-function niri_action:focus_window_down_or_column_left() end
+function niri.action:focus_window_down_or_column_left() end
 
 ---Focus window below or column right if at bottom
-function niri_action:focus_window_down_or_column_right() end
+function niri.action:focus_window_down_or_column_right() end
 
 ---Focus window above or column left if at top
-function niri_action:focus_window_up_or_column_left() end
+function niri.action:focus_window_up_or_column_left() end
 
 ---Focus window above or column right if at top
-function niri_action:focus_window_up_or_column_right() end
+function niri.action:focus_window_up_or_column_right() end
 
 ---Focus window above or monitor above
-function niri_action:focus_window_or_monitor_up() end
+function niri.action:focus_window_or_monitor_up() end
 
 ---Focus window below or monitor below
-function niri_action:focus_window_or_monitor_down() end
+function niri.action:focus_window_or_monitor_down() end
 
 ---Focus column left or monitor left
-function niri_action:focus_column_or_monitor_left() end
+function niri.action:focus_column_or_monitor_left() end
 
 ---Focus column right or monitor right
-function niri_action:focus_column_or_monitor_right() end
+function niri.action:focus_column_or_monitor_right() end
 
 ---Move column to the left
-function niri_action:move_column_left() end
+function niri.action:move_column_left() end
 
 ---Move column to the right
-function niri_action:move_column_right() end
+function niri.action:move_column_right() end
 
 ---Move column to first position
-function niri_action:move_column_to_first() end
+function niri.action:move_column_to_first() end
 
 ---Move column to last position
-function niri_action:move_column_to_last() end
+function niri.action:move_column_to_last() end
 
 ---Move column left or to monitor left
-function niri_action:move_column_left_or_to_monitor_left() end
+function niri.action:move_column_left_or_to_monitor_left() end
 
 ---Move column right or to monitor right
-function niri_action:move_column_right_or_to_monitor_right() end
+function niri.action:move_column_right_or_to_monitor_right() end
 
 ---Move column to specific index
 ---@param index integer 1-based target index
-function niri_action:move_column_to_index(index) end
+function niri.action:move_column_to_index(index) end
 
 ---Move window down within column
-function niri_action:move_window_down() end
+function niri.action:move_window_down() end
 
 ---Move window up within column
-function niri_action:move_window_up() end
+function niri.action:move_window_up() end
 
 ---Move window down or to workspace below
-function niri_action:move_window_down_or_to_workspace_down() end
+function niri.action:move_window_down_or_to_workspace_down() end
 
 ---Move window up or to workspace above
-function niri_action:move_window_up_or_to_workspace_up() end
+function niri.action:move_window_up_or_to_workspace_up() end
 
 ---Consume window from left column or expel to left
-function niri_action:consume_or_expel_window_left() end
+function niri.action:consume_or_expel_window_left() end
 
 ---Consume window from right column or expel to right
-function niri_action:consume_or_expel_window_right() end
+function niri.action:consume_or_expel_window_right() end
 
 ---Consume adjacent window into current column
-function niri_action:consume_window_into_column() end
+function niri.action:consume_window_into_column() end
 
 ---Expel focused window from column
-function niri_action:expel_window_from_column() end
+function niri.action:expel_window_from_column() end
 
 ---Swap window with the one to the right
-function niri_action:swap_window_right() end
+function niri.action:swap_window_right() end
 
 ---Swap window with the one to the left
-function niri_action:swap_window_left() end
+function niri.action:swap_window_left() end
 
 ---Toggle tabbed display for column
-function niri_action:toggle_column_tabbed_display() end
+function niri.action:toggle_column_tabbed_display() end
 
 ---Set column display mode
 ---@param mode "normal"|"tabbed" Display mode
-function niri_action:set_column_display(mode) end
+function niri.action:set_column_display(mode) end
 
 ---Center the current column on screen
-function niri_action:center_column() end
+function niri.action:center_column() end
 
 ---Center the focused window on screen
-function niri_action:center_window() end
+function niri.action:center_window() end
 
 ---Center all visible columns
-function niri_action:center_visible_columns() end
+function niri.action:center_visible_columns() end
 
 ---Focus the workspace below
-function niri_action:focus_workspace_down() end
+function niri.action:focus_workspace_down() end
 
 ---Focus the workspace above
-function niri_action:focus_workspace_up() end
+function niri.action:focus_workspace_up() end
 
 ---Focus a specific workspace
 ---@param reference WorkspaceReference Workspace to focus
-function niri_action:focus_workspace(reference) end
+function niri.action:focus_workspace(reference) end
 
 ---Focus the previously active workspace
-function niri_action:focus_workspace_previous() end
+function niri.action:focus_workspace_previous() end
 
 ---Move window to workspace below
-function niri_action:move_window_to_workspace_down() end
+function niri.action:move_window_to_workspace_down() end
 
 ---Move window to workspace above
-function niri_action:move_window_to_workspace_up() end
+function niri.action:move_window_to_workspace_up() end
 
 ---Move window to specific workspace
 ---@param reference WorkspaceReference Target workspace
-function niri_action:move_window_to_workspace(reference) end
+function niri.action:move_window_to_workspace(reference) end
 
 ---Move column to workspace below
-function niri_action:move_column_to_workspace_down() end
+function niri.action:move_column_to_workspace_down() end
 
 ---Move column to workspace above
-function niri_action:move_column_to_workspace_up() end
+function niri.action:move_column_to_workspace_up() end
 
 ---Move column to specific workspace
 ---@param reference WorkspaceReference Target workspace
-function niri_action:move_column_to_workspace(reference) end
+function niri.action:move_column_to_workspace(reference) end
 
 ---Move current workspace down
-function niri_action:move_workspace_down() end
+function niri.action:move_workspace_down() end
 
 ---Move current workspace up
-function niri_action:move_workspace_up() end
+function niri.action:move_workspace_up() end
 
 ---Set the name of current workspace
 ---@param name string Workspace name
-function niri_action:set_workspace_name(name) end
+function niri.action:set_workspace_name(name) end
 
 ---Clear the name of current workspace
-function niri_action:unset_workspace_name() end
+function niri.action:unset_workspace_name() end
 
 ---Focus monitor to the left
-function niri_action:focus_monitor_left() end
+function niri.action:focus_monitor_left() end
 
 ---Focus monitor to the right
-function niri_action:focus_monitor_right() end
+function niri.action:focus_monitor_right() end
 
 ---Focus monitor below
-function niri_action:focus_monitor_down() end
+function niri.action:focus_monitor_down() end
 
 ---Focus monitor above
-function niri_action:focus_monitor_up() end
+function niri.action:focus_monitor_up() end
 
 ---Focus previously active monitor
-function niri_action:focus_monitor_previous() end
+function niri.action:focus_monitor_previous() end
 
 ---Focus next monitor in order
-function niri_action:focus_monitor_next() end
+function niri.action:focus_monitor_next() end
 
 ---Focus specific monitor by name
 ---@param name string Monitor name
-function niri_action:focus_monitor(name) end
+function niri.action:focus_monitor(name) end
 
 ---Move window to monitor on the left
-function niri_action:move_window_to_monitor_left() end
+function niri.action:move_window_to_monitor_left() end
 
 ---Move window to monitor on the right
-function niri_action:move_window_to_monitor_right() end
+function niri.action:move_window_to_monitor_right() end
 
 ---Move window to monitor below
-function niri_action:move_window_to_monitor_down() end
+function niri.action:move_window_to_monitor_down() end
 
 ---Move window to monitor above
-function niri_action:move_window_to_monitor_up() end
+function niri.action:move_window_to_monitor_up() end
 
 ---Move window to previously active monitor
-function niri_action:move_window_to_monitor_previous() end
+function niri.action:move_window_to_monitor_previous() end
 
 ---Move window to next monitor
-function niri_action:move_window_to_monitor_next() end
+function niri.action:move_window_to_monitor_next() end
 
 ---Move window to specific monitor
 ---@param name string Monitor name
-function niri_action:move_window_to_monitor(name) end
+function niri.action:move_window_to_monitor(name) end
 
 ---Move column to monitor on the left
-function niri_action:move_column_to_monitor_left() end
+function niri.action:move_column_to_monitor_left() end
 
 ---Move column to monitor on the right
-function niri_action:move_column_to_monitor_right() end
+function niri.action:move_column_to_monitor_right() end
 
 ---Move column to monitor below
-function niri_action:move_column_to_monitor_down() end
+function niri.action:move_column_to_monitor_down() end
 
 ---Move column to monitor above
-function niri_action:move_column_to_monitor_up() end
+function niri.action:move_column_to_monitor_up() end
 
 ---Move column to previously active monitor
-function niri_action:move_column_to_monitor_previous() end
+function niri.action:move_column_to_monitor_previous() end
 
 ---Move column to next monitor
-function niri_action:move_column_to_monitor_next() end
+function niri.action:move_column_to_monitor_next() end
 
 ---Move column to specific monitor
 ---@param name string Monitor name
-function niri_action:move_column_to_monitor(name) end
+function niri.action:move_column_to_monitor(name) end
 
 ---Move workspace to monitor on the left
-function niri_action:move_workspace_to_monitor_left() end
+function niri.action:move_workspace_to_monitor_left() end
 
 ---Move workspace to monitor on the right
-function niri_action:move_workspace_to_monitor_right() end
+function niri.action:move_workspace_to_monitor_right() end
 
 ---Move workspace to monitor below
-function niri_action:move_workspace_to_monitor_down() end
+function niri.action:move_workspace_to_monitor_down() end
 
 ---Move workspace to monitor above
-function niri_action:move_workspace_to_monitor_up() end
+function niri.action:move_workspace_to_monitor_up() end
 
 ---Move workspace to previously active monitor
-function niri_action:move_workspace_to_monitor_previous() end
+function niri.action:move_workspace_to_monitor_previous() end
 
 ---Move workspace to next monitor
-function niri_action:move_workspace_to_monitor_next() end
+function niri.action:move_workspace_to_monitor_next() end
 
 ---Move workspace to specific monitor
 ---@param name string Monitor name
-function niri_action:move_workspace_to_monitor(name) end
+function niri.action:move_workspace_to_monitor(name) end
 
 ---Set the window width
 ---@param change SizeChange Width change value
-function niri_action:set_window_width(change) end
+function niri.action:set_window_width(change) end
 
 ---Set the window height
 ---@param change SizeChange Height change value
-function niri_action:set_window_height(change) end
+function niri.action:set_window_height(change) end
 
 ---Reset window height to default
-function niri_action:reset_window_height() end
+function niri.action:reset_window_height() end
 
 ---Switch to next preset column width
-function niri_action:switch_preset_column_width() end
+function niri.action:switch_preset_column_width() end
 
 ---Switch to previous preset column width
-function niri_action:switch_preset_column_width_reverse() end
+function niri.action:switch_preset_column_width_reverse() end
 
 ---Switch to next preset window width
-function niri_action:switch_preset_window_width() end
+function niri.action:switch_preset_window_width() end
 
 ---Switch to previous preset window width
-function niri_action:switch_preset_window_width_reverse() end
+function niri.action:switch_preset_window_width_reverse() end
 
 ---Switch to next preset window height
-function niri_action:switch_preset_window_height() end
+function niri.action:switch_preset_window_height() end
 
 ---Switch to previous preset window height
-function niri_action:switch_preset_window_height_reverse() end
+function niri.action:switch_preset_window_height_reverse() end
 
 ---Maximize column to fill workspace
-function niri_action:maximize_column() end
+function niri.action:maximize_column() end
 
 ---Maximize window to edges
-function niri_action:maximize_window_to_edges() end
+function niri.action:maximize_window_to_edges() end
 
 ---Set column width
 ---@param change SizeChange Width change value
-function niri_action:set_column_width(change) end
+function niri.action:set_column_width(change) end
 
 ---Expand column to fill available width
-function niri_action:expand_column_to_available_width() end
+function niri.action:expand_column_to_available_width() end
 
 ---Switch keyboard layout
 ---@param target LayoutSwitchTarget Layout to switch to
-function niri_action:switch_layout(target) end
+function niri.action:switch_layout(target) end
 
 ---Show the hotkey overlay
-function niri_action:show_hotkey_overlay() end
+function niri.action:show_hotkey_overlay() end
 
 ---Toggle debug tint visualization
-function niri_action:toggle_debug_tint() end
+function niri.action:toggle_debug_tint() end
 
 ---Toggle opaque regions debug visualization
-function niri_action:debug_toggle_opaque_regions() end
+function niri.action:debug_toggle_opaque_regions() end
 
 ---Toggle damage debug visualization
-function niri_action:debug_toggle_damage() end
+function niri.action:debug_toggle_damage() end
 
 ---Toggle floating state of focused window
-function niri_action:toggle_window_floating() end
+function niri.action:toggle_window_floating() end
 
 ---Move focused window to floating layer
-function niri_action:move_window_to_floating() end
+function niri.action:move_window_to_floating() end
 
 ---Move focused window to tiling layer
-function niri_action:move_window_to_tiling() end
+function niri.action:move_window_to_tiling() end
 
 ---Focus floating layer
-function niri_action:focus_floating() end
+function niri.action:focus_floating() end
 
 ---Focus tiling layer
-function niri_action:focus_tiling() end
+function niri.action:focus_tiling() end
 
 ---Switch focus between floating and tiling layers
-function niri_action:switch_focus_between_floating_and_tiling() end
+function niri.action:switch_focus_between_floating_and_tiling() end
 
 ---Move floating window by offset
 ---@param x PositionChange X offset
 ---@param y PositionChange Y offset
-function niri_action:move_floating_window(x, y) end
+function niri.action:move_floating_window(x, y) end
 
 ---Toggle opacity rule for focused window
-function niri_action:toggle_window_rule_opacity() end
+function niri.action:toggle_window_rule_opacity() end
 
 ---Set dynamic cast target to window
 ---@param window_id? integer? Window ID or nil for focused
-function niri_action:set_dynamic_cast_window(window_id) end
+function niri.action:set_dynamic_cast_window(window_id) end
 
 ---Set dynamic cast target to monitor
 ---@param monitor? string? Monitor name or nil for focused
-function niri_action:set_dynamic_cast_monitor(monitor) end
+function niri.action:set_dynamic_cast_monitor(monitor) end
 
 ---Clear dynamic cast target
-function niri_action:clear_dynamic_cast_target() end
+function niri.action:clear_dynamic_cast_target() end
 
 ---Toggle overview mode
-function niri_action:toggle_overview() end
+function niri.action:toggle_overview() end
 
 ---Open overview mode
-function niri_action:open_overview() end
+function niri.action:open_overview() end
 
 ---Close overview mode
-function niri_action:close_overview() end
+function niri.action:close_overview() end
 
 ---Toggle urgent state of focused window
-function niri_action:toggle_window_urgent() end
+function niri.action:toggle_window_urgent() end
 
 ---Set focused window as urgent
-function niri_action:set_window_urgent() end
+function niri.action:set_window_urgent() end
 
 ---Clear urgent state of focused window
-function niri_action:unset_window_urgent() end
+function niri.action:unset_window_urgent() end
 
 ---Runtime state queries for windows, workspaces, and outputs
----@class niri_state
-niri_state = {}
+---@class niri.state
+niri.state = {}
 
 ---Get all windows
 ---@return Window[] # Array of window information
-function niri_state.windows() end
+function niri.state.windows() end
 
 ---Get the currently focused window
 ---@return Window? # Focused window or nil
-function niri_state.focused_window() end
+function niri.state.focused_window() end
 
 ---Get all workspaces
 ---@return Workspace[] # Array of workspace information
-function niri_state.workspaces() end
+function niri.state.workspaces() end
 
 ---Get all outputs/monitors with position, scale, and transform info
 ---@return Output[] # Array of output information
-function niri_state.outputs() end
+function niri.state.outputs() end
 
 ---Get keyboard layout information
 ---@return KeyboardLayouts # Keyboard layout names and current index
-function niri_state.keyboard_layouts() end
+function niri.state.keyboard_layouts() end
 
 ---Get current cursor position and output
 ---@return CursorPosition? # Cursor position {x, y, output} or nil if no cursor
-function niri_state.cursor_position() end
+function niri.state.cursor_position() end
 
 ---Get reserved (exclusive) space for an output from layer-shell surfaces
 ---@param output_name string Output name to query
 ---@return ReservedSpace? # Reserved space {top, bottom, left, right} or nil if output not found
-function niri_state.reserved_space(output_name) end
+function niri.state.reserved_space(output_name) end
 
 ---Get current focus mode (normal, overview, layer_shell, or locked)
 ---@return FocusMode # Current focus mode string
-function niri_state.focus_mode() end
+function niri.state.focus_mode() end
 
 ---Event loop and timer functionality
----@class niri_loop
-niri_loop = {}
+---@class niri.loop
+niri.loop = {}
 
 ---Create a new timer
 ---@return Timer # New timer instance
-function niri_loop.new_timer() end
+function niri.loop.new_timer() end
 
 ---Get current time in milliseconds since compositor start
 ---@return integer # Milliseconds since start
-function niri_loop.now() end
+function niri.loop.now() end
 
 ---Keybinding configuration
----@class niri_keymap
-niri_keymap = {}
+---@class niri.keymap
+niri.keymap = {}
 
 ---Set a keybinding
 ---@param mode string Binding mode (e.g., 'normal')
 ---@param key string Key combination (e.g., 'Mod+Return')
 ---@param callback fun() Callback function
-function niri_keymap.set(mode, key, callback) end
+function niri.keymap.set(mode, key, callback) end
 
 ---Window rules configuration
----@class niri_window
-niri_window = {}
+---@class niri.window
+niri.window = {}
 
 ---Define a window rule
 ---@param rule table Window rule definition
-function niri_window.rule(rule) end
+function niri.window.rule(rule) end
 
 ---Overview mode configuration
----@class niri_overview
+---@class niri.overview
 ---@field backdrop_color string? Backdrop color in hex format
-niri_overview = {}
+niri.overview = {}
 
 ---Screenshot configuration
----@class niri_screenshot
+---@class niri.screenshot
 ---@field path string? Screenshot save path
-niri_screenshot = {}
+niri.screenshot = {}
+
+---Operating system utilities for conditional configuration
+---@class niri.os
+niri.os = {}
+
+---Get the system hostname. Throws on invalid UTF-8 (rare); returns empty string on other system errors.
+---@return string # System hostname
+function niri.os.hostname() end
+
+---Get the value of an environment variable. Returns nil if not set, empty string if set to empty.
+---@param name string Environment variable name
+---@return string? # Variable value or nil if not set
+function niri.os.getenv(name) end
+
+---Filesystem utilities for conditional configuration
+---@class niri.fs
+niri.fs = {}
+
+---Check if a file exists and is readable. Follows symlinks; broken symlinks return false. Never throws.
+---@param path string Path to check
+---@return boolean # True if file exists and is readable
+function niri.fs.readable(path) end
+
+---Expand ~, $VAR, and ${VAR} in paths. Unset variables expand to empty string. Never throws.
+---@param path string Path with variables to expand
+---@return string # Expanded path
+function niri.fs.expand(path) end
+
+---Find an executable in PATH. Returns full path or nil if not found. Never throws.
+---@param command string Command name to find
+---@return string? # Full path to executable or nil
+function niri.fs.which(command) end
 

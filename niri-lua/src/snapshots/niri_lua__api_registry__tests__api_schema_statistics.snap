@@ -6,7 +6,7 @@ expression: stats
 (
     (
         "modules",
-        11,
+        13,
     ),
     (
         "types",
@@ -18,7 +18,7 @@ expression: stats
     ),
     (
         "functions",
-        161,
+        166,
     ),
     (
         "methods",
@@ -26,6 +26,6 @@ expression: stats
     ),
     (
         "fields",
-        32,
+        34,
     ),
 )

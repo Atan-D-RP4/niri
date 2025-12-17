@@ -21,6 +21,8 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         NIRI_WINDOW_MODULE,
         NIRI_OVERVIEW_MODULE,
         NIRI_SCREENSHOT_MODULE,
+        NIRI_OS_MODULE,
+        NIRI_FS_MODULE,
     ],
     types: &[
         TIMER_TYPE,
@@ -197,16 +199,18 @@ const NIRI_MODULE: ModuleSchema = ModuleSchema {
         },
     ],
     fields: &[
-        FieldSchema { name: "utils", ty: "niri_utils", description: "Utility functions" },
-        FieldSchema { name: "config", ty: "niri_config", description: "Configuration API" },
-        FieldSchema { name: "events", ty: "niri_events", description: "Event system for subscribing to compositor events" },
-        FieldSchema { name: "action", ty: "niri_action", description: "Compositor actions" },
-        FieldSchema { name: "state", ty: "niri_state", description: "Runtime state queries" },
-        FieldSchema { name: "loop", ty: "niri_loop", description: "Event loop and timers" },
-        FieldSchema { name: "keymap", ty: "niri_keymap", description: "Keybinding configuration" },
-        FieldSchema { name: "window", ty: "niri_window", description: "Window rules configuration" },
-        FieldSchema { name: "overview", ty: "niri_overview", description: "Overview mode configuration" },
-        FieldSchema { name: "screenshot", ty: "niri_screenshot", description: "Screenshot configuration" },
+        FieldSchema { name: "utils", ty: "niri.utils", description: "Utility functions" },
+        FieldSchema { name: "config", ty: "niri.config", description: "Configuration API" },
+        FieldSchema { name: "events", ty: "niri.events", description: "Event system for subscribing to compositor events" },
+        FieldSchema { name: "action", ty: "niri.action", description: "Compositor actions" },
+        FieldSchema { name: "state", ty: "niri.state", description: "Runtime state queries" },
+        FieldSchema { name: "loop", ty: "niri.loop", description: "Event loop and timers" },
+        FieldSchema { name: "keymap", ty: "niri.keymap", description: "Keybinding configuration" },
+        FieldSchema { name: "window", ty: "niri.window", description: "Window rules configuration" },
+        FieldSchema { name: "overview", ty: "niri.overview", description: "Overview mode configuration" },
+        FieldSchema { name: "screenshot", ty: "niri.screenshot", description: "Screenshot configuration" },
+        FieldSchema { name: "os", ty: "niri.os", description: "Operating system utilities (hostname, getenv)" },
+        FieldSchema { name: "fs", ty: "niri.fs", description: "Filesystem utilities (readable, expand, which)" },
     ],
 };
 
@@ -2264,4 +2268,98 @@ const CONFIG_SECTION_PROXY_TYPE: TypeSchema = TypeSchema {
         "Proxy for config sections supporting direct table assignment and nested property access",
     fields: &[],
     methods: &[],
+};
+
+// ============================================================================
+// niri.os
+// ============================================================================
+
+const NIRI_OS_MODULE: ModuleSchema = ModuleSchema {
+    path: "niri.os",
+    description: "Operating system utilities for conditional configuration",
+    functions: &[
+        FunctionSchema {
+            name: "hostname",
+            description: "Get the system hostname. Throws on invalid UTF-8 (rare); returns empty string on other system errors.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "System hostname",
+            }],
+        },
+        FunctionSchema {
+            name: "getenv",
+            description: "Get the value of an environment variable. Returns nil if not set, empty string if set to empty.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "name",
+                ty: "string",
+                description: "Environment variable name",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "Variable value or nil if not set",
+            }],
+        },
+    ],
+    fields: &[],
+};
+
+// ============================================================================
+// niri.fs
+// ============================================================================
+
+const NIRI_FS_MODULE: ModuleSchema = ModuleSchema {
+    path: "niri.fs",
+    description: "Filesystem utilities for conditional configuration",
+    functions: &[
+        FunctionSchema {
+            name: "readable",
+            description: "Check if a file exists and is readable. Follows symlinks; broken symlinks return false. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if file exists and is readable",
+            }],
+        },
+        FunctionSchema {
+            name: "expand",
+            description: "Expand ~, $VAR, and ${VAR} in paths. Unset variables expand to empty string. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path with variables to expand",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Expanded path",
+            }],
+        },
+        FunctionSchema {
+            name: "which",
+            description: "Find an executable in PATH. Returns full path or nil if not found. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "command",
+                ty: "string",
+                description: "Command name to find",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "Full path to executable or nil",
+            }],
+        },
+    ],
+    fields: &[],
 };

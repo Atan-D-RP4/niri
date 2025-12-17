@@ -1,5 +1,6 @@
 ---
 source: niri-lua/src/api_registry.rs
+assertion_line: 26
 expression: paths
 ---
 [
@@ -14,4 +15,6 @@ expression: paths
     "niri.window",
     "niri.overview",
     "niri.screenshot",
+    "niri.os",
+    "niri.fs",
 ]

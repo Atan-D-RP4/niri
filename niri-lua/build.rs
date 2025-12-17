@@ -475,8 +475,8 @@ fn generate_modules(output: &mut String) {
 
     for module in NIRI_LUA_API.modules {
         // Module class definition
-        // Use underscore format for class names to match field type references
-        let class_name = module.path.replace('.', "_");
+        // Use dot format for class names (e.g., niri.fs) for proper LSP resolution
+        let class_name = module.path;
         output.push_str(&format!("---{}\n", module.description));
         output.push_str(&format!("---@class {}\n", class_name));
 
@@ -488,13 +488,12 @@ fn generate_modules(output: &mut String) {
             ));
         }
 
-        // Module variable
-        let var_name = module.path.replace('.', "_");
-        output.push_str(&format!("{} = {{}}\n\n", var_name));
+        // Module variable - use the module path directly
+        output.push_str(&format!("{} = {{}}\n\n", module.path));
 
         // Functions
         for func in module.functions {
-            generate_function(output, &var_name, func, false);
+            generate_function(output, module.path, func, false);
         }
     }
 }
