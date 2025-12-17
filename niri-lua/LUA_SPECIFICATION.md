@@ -45,6 +45,8 @@ Comprehensive specification for niri's Lua scripting system. This document cover
 | `niri.action` | Compositor actions | Methods |
 | `niri.utils` | Logging utilities | Methods |
 | `niri.loop` | Timer/scheduling | Methods |
+| `niri.os` | Operating system utilities (hostname, env) | Methods |
+| `niri.fs` | Filesystem utilities (which, expand, readable) | Methods |
 
 ### Config Collections (use `:add()`, `:remove()`, `:list()`, `:clear()`)
 
@@ -255,25 +257,48 @@ Pinnacle (Smithay-based, like niri) uses a **separate UI process** (Snowcap) com
 
 ### What OS Utilities Will Add
 
-The planned `niri.os` and `niri.fs` APIs (see [NIRI_LUA_OS_UTILITIES_SPEC.md](../docs/NIRI_LUA_OS_UTILITIES_SPEC.md)) will enable:
+The `niri.os` and `niri.fs` APIs (see [NIRI_LUA_OS_UTILITIES_SPEC.md](../docs/NIRI_LUA_OS_UTILITIES_SPEC.md)) provide simple, secure OS and filesystem utilities useful during configuration time.
 
-- **Conditional configuration**: Enable features only when tools are installed
-- **Multi-machine configs**: Different settings based on hostname
-- **XDG compliance**: Proper path expansion (`~`, `$XDG_CONFIG_HOME`)
-- **File validation**: Check readability before `require()`
+- `niri.os.hostname()` → `string`
+  - Returns the system hostname as UTF-8 string
+  - Throws only on invalid UTF-8 (message starts with `niri.os.hostname:`)
+  - On non-UTF8 system errors, returns empty string (no throw)
 
+- `niri.os.getenv(name)` → `string | nil`
+  - Returns the environment variable value or `nil` if unset
+  - Returns empty string `""` if variable is set to an empty string
+
+- `niri.fs.which(cmd)` → `string | nil`
+  - Finds an executable in PATH (respecting `PATHEXT` on Windows)
+  - If `cmd` contains a path separator or is absolute, treats as path and returns it if executable
+  - Returns `nil` for missing or non-executable files
+  - Returns `nil` for empty string argument
+
+- `niri.fs.readable(path)` → `boolean`
+  - Returns `true` if the file exists and is readable
+  - Follows symlinks; broken symlinks return `false`
+  - Never throws on bad paths or IO errors
+
+- `niri.fs.expand(path)` → `string`
+  - Expands `~`, `$VAR`, and `${VAR}` in paths (Neovim-aligned semantics)
+  - Unset environment variables expand to empty string (e.g., `$UNSET/path` -> `/path`)
+  - On failure to expand, returns the original path unchanged
+
+Examples:
 ```lua
--- Example: Conditional xwayland-satellite
+-- Conditional xwayland-satellite
 if niri.fs.which("xwayland-satellite") then
     niri.config.xwayland_satellite.off = false
 end
 
--- Example: Multi-machine configuration
-if niri.os.hostname() == "workstation" then
-    niri.config.layout.gaps = 16
-end
+-- Path expansion and env var usage
+local config_path = niri.fs.expand("$XDG_CONFIG_HOME/niri/init.lua")
+local home = niri.os.getenv("HOME")
 ```
 
+**Notes:**
+- All `niri.fs` check functions never throw; they are designed to be safe during config-time evaluation.
+- No caching is performed; functions re-check each call (config-time usage only).
 ### What niri-ui Will Add
 
 The planned `niri-ui` crate (see [NIRI_UI_SPECIFICATION.md](../docs/NIRI_UI_SPECIFICATION.md)) will enable:

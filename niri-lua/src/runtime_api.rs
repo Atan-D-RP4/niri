@@ -569,42 +569,42 @@ mod tests {
         focus_mode: FocusMode,
     }
 
-impl CompositorState for MockState {
-    fn get_windows(&self) -> Vec<Window> {
-        self.windows.clone()
-    }
+    impl CompositorState for MockState {
+        fn get_windows(&self) -> Vec<Window> {
+            self.windows.clone()
+        }
 
-    fn get_focused_window(&self) -> Option<Window> {
-        self.windows.iter().find(|w| w.is_focused).cloned()
-    }
+        fn get_focused_window(&self) -> Option<Window> {
+            self.windows.iter().find(|w| w.is_focused).cloned()
+        }
 
-    fn get_workspaces(&self) -> Vec<Workspace> {
-        self.workspaces.clone()
-    }
+        fn get_workspaces(&self) -> Vec<Workspace> {
+            self.workspaces.clone()
+        }
 
-    fn get_outputs(&self) -> Vec<Output> {
-        self.outputs.clone()
-    }
+        fn get_outputs(&self) -> Vec<Output> {
+            self.outputs.clone()
+        }
 
-    fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts> {
-        self.keyboard_layouts.clone()
-    }
+        fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts> {
+            self.keyboard_layouts.clone()
+        }
 
-    fn get_cursor_position(&self) -> Option<CursorPosition> {
-        // Mock implementation - return None for simplicity
-        None
-    }
+        fn get_cursor_position(&self) -> Option<CursorPosition> {
+            // Mock implementation - return None for simplicity
+            None
+        }
 
-    fn get_reserved_space(&self, _output_name: &str) -> ReservedSpace {
-        // Mock implementation - return zeros
-        ReservedSpace::default()
-    }
+        fn get_reserved_space(&self, _output_name: &str) -> ReservedSpace {
+            // Mock implementation - return zeros
+            ReservedSpace::default()
+        }
 
-    fn get_focus_mode(&self) -> FocusMode {
-        // Mock implementation - return Normal
-        FocusMode::Normal
+        fn get_focus_mode(&self) -> FocusMode {
+            // Mock implementation - return Normal
+            FocusMode::Normal
+        }
     }
-}
 
     /// Create a test window with the given properties.
     fn make_window(id: u64, title: &str, app_id: &str, is_focused: bool) -> Window {
@@ -1180,5 +1180,4 @@ impl CompositorState for MockState {
 
         clear_event_context_state();
     }
-
 }

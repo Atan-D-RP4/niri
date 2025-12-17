@@ -18,6 +18,7 @@ use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
     WorkspaceReference, Xkb,
 };
+use niri_lua::runtime_api::{CursorPosition, FocusMode, ReservedSpace};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::{Keycode, TouchSlot};
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -177,9 +178,8 @@ use crate::utils::{
     logical_output, make_screenshot_path, output_matches_name, output_size, panel_orientation,
     send_scale_transform, write_png_rgba8, xwayland,
 };
-use niri_lua::runtime_api::{CursorPosition, FocusMode, ReservedSpace};
 use crate::window::mapped::MappedId;
-use crate::window::{Mapped, Unmapped, ResolvedWindowRules, WindowRef, InitialConfigureState};
+use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
 use crate::{lua_event_hooks, niri_render_elements};
 
 const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
@@ -6919,7 +6919,14 @@ impl niri_lua::CompositorState for State {
     fn get_reserved_space(&self, output_name: &str) -> ReservedSpace {
         let output = match self.niri.output_by_name_match(output_name) {
             Some(output) => output,
-            None => return ReservedSpace { top: 0, bottom: 0, left: 0, right: 0 },
+            None => {
+                return ReservedSpace {
+                    top: 0,
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                }
+            }
         };
         let layer_map = layer_map_for_output(output);
 
@@ -6961,7 +6968,12 @@ impl niri_lua::CompositorState for State {
             }
         }
 
-        ReservedSpace { top, bottom, left, right }
+        ReservedSpace {
+            top,
+            bottom,
+            left,
+            right,
+        }
     }
 
     fn get_focus_mode(&self) -> FocusMode {

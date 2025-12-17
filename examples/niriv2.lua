@@ -209,7 +209,7 @@ niri.config.debug = {
 -- ============================================================================
 
 niri.config.xwayland_satellite = {
-	off = true,
+	off = true and niri.fs.which('xwayland-satellite') == nil,
 }
 
 -- ============================================================================
@@ -219,7 +219,7 @@ niri.config.xwayland_satellite = {
 niri.config.screenshot_path = "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 -- ============================================================================
--- PREFER NO CSD
+-- PREFER NO Client Side Decorations (CSD)
 -- ============================================================================
 
 niri.config.prefer_no_csd = true
