@@ -88,6 +88,9 @@ local workspaces = niri.state.workspaces()  -- {id, name, output, is_active, ...
 local outputs = niri.state.outputs()        -- {name, make, model, width, height, ...}[]
 local layouts = niri.state.keyboard_layouts() -- {names, current_idx}
 local focused = niri.state.focused_window() -- {id, app_id, title} | nil
+local cursor = niri.state.cursor_position() -- {x, y, output} | nil (Since 25.XX)
+local reserved = niri.state.reserved_space("eDP-1") -- {top, bottom, left, right} (Since 25.XX)
+local mode = niri.state.focus_mode()        -- "normal"|"overview"|"layer_shell"|"locked" (Since 25.XX)
 ```
 
 ### Events (28 integrated, 4 excluded for security)
@@ -751,7 +754,7 @@ The `niri.state` namespace provides read-only access to compositor runtime state
 
 ### Architecture
 
-- **Source file**: `runtime_api.rs` (910 LOC)
+- **Source file**: `runtime_api.rs` (~1185 LOC)
 - **Pattern**: Snapshot-based queries to avoid lock contention
 - **Dual mode**: Event handlers use pre-populated snapshots; normal code uses idle callbacks
 
@@ -764,6 +767,8 @@ pub struct StateSnapshot {
     pub workspaces: Vec<WorkspaceData>,
     pub outputs: Vec<OutputData>,
     pub focused_window: Option<WindowData>,
+    pub cursor_position: Option<CursorPosition>,  // Since 25.XX
+    pub focus_mode: FocusMode,                    // Since 25.XX
 }
 
 // Thread-local for event context
@@ -776,24 +781,193 @@ thread_local! {
 
 ```lua
 -- Get all windows
-local windows = niri.state.windows
+local windows = niri.state.windows()
 -- Returns: { {id, app_id, title, workspace_id, is_focused, is_floating, ...}, ... }
 
 -- Get all workspaces
-local workspaces = niri.state.workspaces
+local workspaces = niri.state.workspaces()
 -- Returns: { {id, name, output, is_active, idx, ...}, ... }
 
 -- Get all outputs
-local outputs = niri.state.outputs
--- Returns: { {name, make, model, width, height, refresh, scale, ...}, ... }
+local outputs = niri.state.outputs()
+-- Returns: { {name, make, model, width, height, refresh, scale, x, y, transform, ...}, ... }
 
 -- Get keyboard layouts
-local layouts = niri.state.keyboard_layouts
+local layouts = niri.state.keyboard_layouts()
 -- Returns: { names = {"us", "de"}, current_idx = 0 }
 
 -- Get focused window (may be nil)
-local focused = niri.state.focused_window
+local focused = niri.state.focused_window()
 -- Returns: {id, app_id, title} or nil
+
+-- Get cursor position (Since 25.XX)
+local cursor = niri.state.cursor_position()
+-- Returns: {x = number, y = number, output = string} | nil
+-- Returns nil when: no pointing device, during pointer grab, or position undefined
+
+-- Get reserved space from layer-shell exclusive zones (Since 25.XX)
+local reserved = niri.state.reserved_space("eDP-1")
+-- Returns: {top = number, bottom = number, left = number, right = number}
+-- Returns zeros for invalid output or no exclusive zones
+
+-- Get current compositor focus mode (Since 25.XX)
+local mode = niri.state.focus_mode()
+-- Returns: "normal" | "overview" | "layer_shell" | "locked"
+```
+
+### New State API Functions (Since 25.XX)
+
+#### cursor_position()
+
+Returns the current cursor position in global compositor coordinates.
+
+**Returns**: `{x: number, y: number, output: string} | nil`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `x` | number | X coordinate in global space (pixels) |
+| `y` | number | Y coordinate in global space (pixels) |
+| `output` | string | Name of output where cursor is located |
+
+**Returns `nil` when**:
+- No pointing device is connected
+- Cursor is grabbed by a surface (e.g., during window resize or move)
+- Compositor is in a state where cursor position is undefined
+
+**Example**:
+```lua
+-- Position popup at cursor
+local cursor = niri.state.cursor_position()
+if cursor then
+    print(string.format("Cursor at (%d, %d) on %s", cursor.x, cursor.y, cursor.output))
+end
+
+-- Check if cursor is on specific output
+niri.events:on("pointer:move", function()
+    local pos = niri.state.cursor_position()
+    if pos and pos.output == "eDP-1" then
+        -- Cursor is on laptop display
+    end
+end)
+```
+
+#### reserved_space(output_name)
+
+Returns the space reserved by layer-shell surfaces (panels, docks) with exclusive zones on a specific output.
+
+**Parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `output_name` | string | Name of the output to query (e.g., "eDP-1") |
+
+**Returns**: `{top: number, bottom: number, left: number, right: number}`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `top` | number | Pixels reserved at top edge |
+| `bottom` | number | Pixels reserved at bottom edge |
+| `left` | number | Pixels reserved at left edge |
+| `right` | number | Pixels reserved at right edge |
+
+**Returns `{top=0, bottom=0, left=0, right=0}` when**:
+- Output doesn't exist
+- No layer-shell surfaces have exclusive zones on this output
+
+**Note**: When multiple surfaces anchor to the same edge, this returns the **maximum** exclusive zone value (not the sum). For example, if two panels anchor to the top with exclusive_zone=32 and exclusive_zone=48, `reserved_space().top` returns 48.
+
+**Example**:
+```lua
+-- Avoid overlapping with existing panels
+local function create_bottom_panel(output_name)
+    local reserved = niri.state.reserved_space(output_name)
+    
+    if reserved.bottom > 0 then
+        niri.utils.warn("Bottom edge already has " .. reserved.bottom .. "px reserved")
+        return
+    end
+    
+    -- Safe to create panel on bottom edge
+end
+
+-- Calculate usable area for window placement
+local function get_usable_area(output_name)
+    local outputs = niri.state.outputs()
+    local output = nil
+    for _, o in ipairs(outputs) do
+        if o.name == output_name then
+            output = o
+            break
+        end
+    end
+    
+    if not output then return nil end
+    
+    local reserved = niri.state.reserved_space(output_name)
+    
+    return {
+        x = output.x + reserved.left,
+        y = output.y + reserved.top,
+        width = output.width - reserved.left - reserved.right,
+        height = output.height - reserved.top - reserved.bottom,
+    }
+end
+```
+
+#### focus_mode()
+
+Returns the current focus mode of the compositor, indicating which type of surface or UI has keyboard focus.
+
+**Returns**: `string` - One of:
+
+| Value | Description |
+|-------|-------------|
+| `"normal"` | Normal window focus mode (includes Layout, Mru, ScreenshotUi, ExitConfirmDialog) |
+| `"overview"` | Overview mode is active |
+| `"layer_shell"` | A layer-shell surface has keyboard focus |
+| `"locked"` | Screen is locked (highest priority) |
+
+**Mode Priority**: When multiple conditions exist, the following priority order applies:
+1. `"locked"` - Screen lock takes absolute precedence
+2. `"overview"` - Overview mode supersedes normal focus
+3. `"layer_shell"` - Layer-shell surface has focus
+4. `"normal"` - Default state (includes transient UI states)
+
+**Note**: Several KeyboardFocus variants map to `"normal"` because they represent transient UI states rather than persistent mode changes:
+- `Layout` - normal window focus
+- `Mru` - MRU window switcher (transient overlay)
+- `ScreenshotUi` - screenshot selection UI (transient)
+- `ExitConfirmDialog` - exit confirmation dialog (transient)
+
+**Example**:
+```lua
+-- Conditional UI based on focus mode
+niri.events:on("overview:open", function()
+    if niri.state.focus_mode() == "overview" then
+        -- Hide elements that would conflict with overview
+    end
+end)
+
+-- Prevent popup in certain modes
+local function show_context_menu()
+    local mode = niri.state.focus_mode()
+    if mode == "locked" or mode == "overview" then
+        return  -- Don't show menu in these modes
+    end
+    
+    -- Safe to show menu
+end
+
+-- Adjust UI appearance based on mode
+local function get_panel_opacity()
+    local mode = niri.state.focus_mode()
+    if mode == "overview" then
+        return 0.5  -- Dim panel in overview
+    elseif mode == "locked" then
+        return 0.0  -- Hide panel when locked
+    else
+        return 1.0
+    end
+end
 ```
 
 ### Event Context Behavior
@@ -1289,6 +1463,46 @@ enums:
     values: ["left", "right", "top", "bottom"]
     default: "left"
     since: "25.05"
+  
+  focus_mode:
+    values: ["normal", "overview", "layer_shell", "locked"]
+    default: "normal"
+    since: "25.XX"
+    description: "Current compositor focus mode"
+```
+
+### State API Types (Since 25.XX)
+
+```yaml
+cursor_position:
+  type: object
+  nullable: true
+  properties:
+    x: { type: float, description: "X coordinate in global space (pixels)" }
+    y: { type: float, description: "Y coordinate in global space (pixels)" }
+    output: { type: string, description: "Name of output where cursor is located" }
+  returns_nil_when:
+    - "No pointing device connected"
+    - "Cursor grabbed by surface (resize, move)"
+    - "Cursor position undefined"
+  example:
+    x: 1920.5
+    y: 540.0
+    output: "eDP-1"
+
+reserved_space:
+  type: object
+  properties:
+    top: { type: integer, min: 0, description: "Pixels reserved at top edge" }
+    bottom: { type: integer, min: 0, description: "Pixels reserved at bottom edge" }
+    left: { type: integer, min: 0, description: "Pixels reserved at left edge" }
+    right: { type: integer, min: 0, description: "Pixels reserved at right edge" }
+  note: "Returns maximum exclusive zone per edge, not sum"
+  example:
+    top: 32
+    bottom: 0
+    left: 0
+    right: 0
 ```
 
 ### Size Types

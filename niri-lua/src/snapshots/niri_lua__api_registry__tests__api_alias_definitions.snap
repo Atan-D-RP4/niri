@@ -1,11 +1,12 @@
 ---
 source: niri-lua/src/api_registry.rs
+assertion_line: 101
 expression: defs
 ---
 [
     "Window = { id: integer, title: string?, app_id: string?, workspace_id: integer?, is_focused: boolean, is_floating: boolean }",
     "Workspace = { id: integer, idx: integer, name: string?, output: string?, is_active: boolean, is_focused: boolean, active_window_id: integer? }",
-    "Output = { name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean }",
+    "Output = { name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean, x: integer?, y: integer?, scale: number?, logical_width: integer?, logical_height: integer?, transform: integer?, refresh_hz: number? }",
     "SizeChange = integer|string",
     "PositionChange = integer|string",
     "LayoutSwitchTarget = \"next\"|\"prev\"|string",
@@ -16,4 +17,8 @@ expression: defs
     "BindEntry = { key: string, action: string, args: any[]?, cooldown_ms: integer?, allow_when_locked: boolean? }",
     "OutputConfig = { name: string, mode: string?, scale: number?, position: { x: integer, y: integer }?, transform: string?, vrr: boolean? }",
     "WindowRuleConfig = { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number?, draw_border_with_background: boolean?, geometry_corner_radius: table?, clip_to_geometry: boolean?, focus_ring: table?, border: table? }",
+    "CursorPosition = { x: number, y: number, output: string }",
+    "ReservedSpace = { top: integer, bottom: integer, left: integer, right: integer }",
+    "FocusMode = \"normal\"|\"overview\"|\"layer_shell\"|\"locked\"",
+    "KeyboardLayouts = { names: string[], current_idx: integer }",
 ]

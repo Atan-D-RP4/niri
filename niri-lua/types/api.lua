@@ -15,8 +15,8 @@
 ---Workspace information table
 ---@alias Workspace { id: integer, idx: integer, name: string?, output: string?, is_active: boolean, is_focused: boolean, active_window_id: integer? }
 
----Output/monitor information table
----@alias Output { name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean }
+---Output/monitor information table with position, scale, and transform
+---@alias Output { name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean, x: integer?, y: integer?, scale: number?, logical_width: integer?, logical_height: integer?, transform: integer?, refresh_hz: number? }
 
 ---Size change value: integer for absolute, '+N'/'-N' for relative, 'N%' for percentage
 ---@alias SizeChange integer|string
@@ -47,6 +47,18 @@
 
 ---Window rule configuration with match criteria and properties
 ---@alias WindowRuleConfig { match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number?, draw_border_with_background: boolean?, geometry_corner_radius: table?, clip_to_geometry: boolean?, focus_ring: table?, border: table? }
+
+---Cursor position with coordinates and output name
+---@alias CursorPosition { x: number, y: number, output: string }
+
+---Reserved (exclusive) space on each edge from layer-shell surfaces
+---@alias ReservedSpace { top: integer, bottom: integer, left: integer, right: integer }
+
+---Current compositor focus mode
+---@alias FocusMode "normal"|"overview"|"layer_shell"|"locked"
+
+---Keyboard layout names and current active index
+---@alias KeyboardLayouts { names: string[], current_idx: integer }
 
 -- ============================================================================
 -- Input Configuration Types
@@ -1018,9 +1030,26 @@ function niri_state.focused_window() end
 ---@return Workspace[] # Array of workspace information
 function niri_state.workspaces() end
 
----Get all outputs/monitors
+---Get all outputs/monitors with position, scale, and transform info
 ---@return Output[] # Array of output information
 function niri_state.outputs() end
+
+---Get keyboard layout information
+---@return KeyboardLayouts # Keyboard layout names and current index
+function niri_state.keyboard_layouts() end
+
+---Get current cursor position and output
+---@return CursorPosition? # Cursor position {x, y, output} or nil if no cursor
+function niri_state.cursor_position() end
+
+---Get reserved (exclusive) space for an output from layer-shell surfaces
+---@param output_name string Output name to query
+---@return ReservedSpace? # Reserved space {top, bottom, left, right} or nil if output not found
+function niri_state.reserved_space(output_name) end
+
+---Get current focus mode (normal, overview, layer_shell, or locked)
+---@return FocusMode # Current focus mode string
+function niri_state.focus_mode() end
 
 ---Event loop and timer functionality
 ---@class niri_loop

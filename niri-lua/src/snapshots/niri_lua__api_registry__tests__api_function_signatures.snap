@@ -1,5 +1,6 @@
 ---
 source: niri-lua/src/api_registry.rs
+assertion_line: 65
 expression: signatures
 ---
 [
@@ -146,8 +147,12 @@ expression: signatures
     "niri.keymap::set(mode: string, key: string, callback: fun()) -> ()",
     "niri.loop::new_timer() -> (Timer)",
     "niri.loop::now() -> (integer)",
+    "niri.state::cursor_position() -> (CursorPosition?)",
+    "niri.state::focus_mode() -> (FocusMode)",
     "niri.state::focused_window() -> (Window?)",
+    "niri.state::keyboard_layouts() -> (KeyboardLayouts)",
     "niri.state::outputs() -> (Output[])",
+    "niri.state::reserved_space(output_name: string) -> (ReservedSpace?)",
     "niri.state::windows() -> (Window[])",
     "niri.state::workspaces() -> (Workspace[])",
     "niri.utils::debug(...: any) -> ()",

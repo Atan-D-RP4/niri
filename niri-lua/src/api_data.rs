@@ -45,6 +45,10 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         BIND_ENTRY_ALIAS,
         OUTPUT_CONFIG_ALIAS,
         WINDOW_RULE_CONFIG_ALIAS,
+        CURSOR_POSITION_ALIAS,
+        RESERVED_SPACE_ALIAS,
+        FOCUS_MODE_ALIAS,
+        KEYBOARD_LAYOUTS_ALIAS,
     ],
 };
 
@@ -66,8 +70,8 @@ const WORKSPACE_ALIAS: AliasSchema = AliasSchema {
 
 const OUTPUT_ALIAS: AliasSchema = AliasSchema {
     name: "Output",
-    ty: "{ name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean }",
-    description: "Output/monitor information table",
+    ty: "{ name: string, make: string?, model: string?, serial: string?, physical_size: { width: integer, height: integer }?, current_mode: { width: integer, height: integer, refresh: integer }?, vrr_supported: boolean, vrr_enabled: boolean, x: integer?, y: integer?, scale: number?, logical_width: integer?, logical_height: integer?, transform: integer?, refresh_hz: number? }",
+    description: "Output/monitor information table with position, scale, and transform",
 };
 
 const SIZE_CHANGE_ALIAS: AliasSchema = AliasSchema {
@@ -129,6 +133,30 @@ const WINDOW_RULE_CONFIG_ALIAS: AliasSchema = AliasSchema {
     name: "WindowRuleConfig",
     ty: "{ match: { app_id: string?, title: string?, is_floating: boolean?, at_startup: boolean? }?, default_column_width: table?, open_floating: boolean?, open_fullscreen: boolean?, open_maximized: boolean?, block_out_from: string?, opacity: number?, draw_border_with_background: boolean?, geometry_corner_radius: table?, clip_to_geometry: boolean?, focus_ring: table?, border: table? }",
     description: "Window rule configuration with match criteria and properties",
+};
+
+const CURSOR_POSITION_ALIAS: AliasSchema = AliasSchema {
+    name: "CursorPosition",
+    ty: "{ x: number, y: number, output: string }",
+    description: "Cursor position with coordinates and output name",
+};
+
+const RESERVED_SPACE_ALIAS: AliasSchema = AliasSchema {
+    name: "ReservedSpace",
+    ty: "{ top: integer, bottom: integer, left: integer, right: integer }",
+    description: "Reserved (exclusive) space on each edge from layer-shell surfaces",
+};
+
+const FOCUS_MODE_ALIAS: AliasSchema = AliasSchema {
+    name: "FocusMode",
+    ty: "\"normal\"|\"overview\"|\"layer_shell\"|\"locked\"",
+    description: "Current compositor focus mode",
+};
+
+const KEYBOARD_LAYOUTS_ALIAS: AliasSchema = AliasSchema {
+    name: "KeyboardLayouts",
+    ty: "{ names: string[], current_idx: integer }",
+    description: "Keyboard layout names and current active index",
 };
 
 // ============================================================================
@@ -578,12 +606,57 @@ const NIRI_STATE_MODULE: ModuleSchema = ModuleSchema {
         },
         FunctionSchema {
             name: "outputs",
-            description: "Get all outputs/monitors",
+            description: "Get all outputs/monitors with position, scale, and transform info",
             is_method: false,
             params: &[],
             returns: &[ReturnSchema {
                 ty: "Output[]",
                 description: "Array of output information",
+            }],
+        },
+        FunctionSchema {
+            name: "keyboard_layouts",
+            description: "Get keyboard layout information",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "KeyboardLayouts",
+                description: "Keyboard layout names and current index",
+            }],
+        },
+        FunctionSchema {
+            name: "cursor_position",
+            description: "Get current cursor position and output",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "CursorPosition?",
+                description: "Cursor position {x, y, output} or nil if no cursor",
+            }],
+        },
+        FunctionSchema {
+            name: "reserved_space",
+            description: "Get reserved (exclusive) space for an output from layer-shell surfaces",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "output_name",
+                ty: "string",
+                description: "Output name to query",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "ReservedSpace?",
+                description: "Reserved space {top, bottom, left, right} or nil if output not found",
+            }],
+        },
+        FunctionSchema {
+            name: "focus_mode",
+            description: "Get current focus mode (normal, overview, layer_shell, or locked)",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "FocusMode",
+                description: "Current focus mode string",
             }],
         },
     ],
