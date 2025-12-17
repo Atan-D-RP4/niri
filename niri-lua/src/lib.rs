@@ -11,7 +11,9 @@
 //! ```
 
 pub mod config;
+pub mod fs_utils;
 pub mod niri_api;
+pub mod os_utils;
 pub mod runtime;
 
 // Tier 1: Foundation Layer - Core Lua scripting infrastructure

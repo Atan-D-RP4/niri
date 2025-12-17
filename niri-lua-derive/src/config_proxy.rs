@@ -154,6 +154,9 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         .map(generate_field_registration)
         .collect();
 
+    // Generate field name strings for __tostring
+    let tostring_field_names: Vec<String> = field_infos.iter().map(|f| f.lua_name()).collect();
+
     // Generate collection proxy structs for collection fields
     let collection_proxies: Vec<TokenStream2> = field_infos
         .iter()
@@ -215,6 +218,23 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
             fn add_fields<F: ::mlua::UserDataFields<Self>>(fields: &mut F) {
                 use ::mlua::IntoLua;
                 #(#field_registrations)*
+            }
+
+            fn add_methods<M: ::mlua::UserDataMethods<Self>>(methods: &mut M) {
+                // Add __tostring for pretty-printing
+                const FIELD_NAMES: &[&str] = &[#(#tostring_field_names),*];
+                methods.add_meta_method(::mlua::MetaMethod::ToString, |lua, this, ()| {
+                    use ::mlua::ObjectLike;
+                    let table = lua.create_table()?;
+                    let ud = lua.create_userdata(this.clone())?;
+                    for &name in FIELD_NAMES {
+                        if let Ok(val) = ud.get::<::mlua::Value>(name) {
+                            table.set(name, val)?;
+                        }
+                    }
+                    let format_fn: ::mlua::Function = lua.globals().get("__niri_format_value")?;
+                    format_fn.call::<String>(table)
+                });
             }
         }
     };

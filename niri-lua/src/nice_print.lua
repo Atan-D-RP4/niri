@@ -19,6 +19,14 @@ local function format_value(val, indent, seen, compact_limit)
         end
     elseif type(val) == "string" then
         return string.format("%q", val)
+    elseif type(val) == "userdata" then
+        -- Try to use __tostring metamethod if available
+        local mt = getmetatable(val)
+        if mt and mt.__tostring then
+            return tostring(val)
+        else
+            return "<userdata>"
+        end
     elseif type(val) == "table" then
         if seen[val] then
             return "{ ... }"
@@ -110,13 +118,11 @@ end
 
 local function nice_print(...)
     local args = {...}
-    for i, val in ipairs(args) do
-        if i > 1 then
-            io.write("\t")
-        end
-        io.write(format_value(val))
+    local parts = {}
+    for _, val in ipairs(args) do
+        table.insert(parts, format_value(val))
     end
-    io.write("\n")
+    print(table.concat(parts, "\t"))
 end
 
 return nice_print

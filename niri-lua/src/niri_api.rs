@@ -8,7 +8,7 @@ use std::rc::Rc;
 use log::{debug, error, info, warn};
 use mlua::prelude::*;
 
-use crate::LuaComponent;
+use crate::{fs_utils, os_utils, LuaComponent};
 
 /// Niri logging and utility functions for Lua.
 ///
@@ -265,7 +265,11 @@ impl LuaComponent for NiriApi {
         niri.set("print", nice_print_fn)?;
 
         // Register the niri table globally
-        globals.set("niri", niri)?;
+        globals.set("niri", niri.clone())?;
+
+        // Register OS and filesystem utilities
+        os_utils::register(lua, &niri)?;
+        fs_utils::register(lua, &niri)?;
 
         info!("Registered Niri API component to Lua");
 
