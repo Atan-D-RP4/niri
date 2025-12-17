@@ -177,11 +177,53 @@ pub fn output_to_lua(lua: &Lua, output: &Output) -> Result<Table> {
             format!("{:?}", logical.transform).to_lowercase(),
         )?;
         table.set("logical", logical_table)?;
+
+        // NEW: Add convenience fields at top level when logical output exists
+        table.set("x", logical.x)?;
+        table.set("y", logical.y)?;
+        table.set("scale", logical.scale)?;
+        table.set("logical_width", logical.width)?;
+        table.set("logical_height", logical.height)?;
+        table.set("transform", transform_to_int(logical.transform))?;
+
+        // NEW: Refresh rate in Hz (nil if no current mode)
+        if let Some(mode_idx) = output.current_mode {
+            if let Some(mode) = output.modes.get(mode_idx) {
+                table.set("refresh_hz", mode.refresh_rate as f64 / 1000.0)?;
+            } else {
+                table.set("refresh_hz", Value::Nil)?;
+            }
+        } else {
+            table.set("refresh_hz", Value::Nil)?;
+        }
     } else {
         table.set("logical", Value::Nil)?;
+        // NEW: Set default values for disabled outputs (no logical)
+        // Per AC-STATE-15, mode-dependent fields are nil when no mode/logical
+        table.set("x", Value::Nil)?;
+        table.set("y", Value::Nil)?;
+        table.set("scale", Value::Nil)?;
+        table.set("logical_width", Value::Nil)?;
+        table.set("logical_height", Value::Nil)?;
+        table.set("transform", Value::Nil)?;
+        table.set("refresh_hz", Value::Nil)?;
     }
 
     Ok(table)
+}
+
+/// Convert transform enum to integer (Wayland wl_output.transform values).
+fn transform_to_int(transform: niri_ipc::Transform) -> u8 {
+    match transform {
+        niri_ipc::Transform::Normal => 0,
+        niri_ipc::Transform::_90 => 1,
+        niri_ipc::Transform::_180 => 2,
+        niri_ipc::Transform::_270 => 3,
+        niri_ipc::Transform::Flipped => 4,
+        niri_ipc::Transform::Flipped90 => 5,
+        niri_ipc::Transform::Flipped180 => 6,
+        niri_ipc::Transform::Flipped270 => 7,
+    }
 }
 
 /// Convert a Vec of Windows to a Lua array.

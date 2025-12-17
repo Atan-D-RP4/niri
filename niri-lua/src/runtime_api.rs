@@ -66,6 +66,35 @@ pub struct StateSnapshot {
     pub workspaces: Vec<Workspace>,
     pub outputs: Vec<Output>,
     pub keyboard_layouts: Option<KeyboardLayouts>,
+    pub cursor_position: Option<CursorPosition>,
+    pub focus_mode: FocusMode,
+}
+
+/// Cursor position in global compositor coordinates.
+#[derive(Clone, Debug)]
+pub struct CursorPosition {
+    pub x: f64,
+    pub y: f64,
+    pub output: String,
+}
+
+/// Reserved space from layer-shell exclusive zones.
+#[derive(Clone, Debug, Default)]
+pub struct ReservedSpace {
+    pub top: i32,
+    pub bottom: i32,
+    pub left: i32,
+    pub right: i32,
+}
+
+/// Current focus mode of the compositor.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum FocusMode {
+    #[default]
+    Normal,
+    Overview,
+    LayerShell,
+    Locked,
 }
 
 impl StateSnapshot {
@@ -76,6 +105,8 @@ impl StateSnapshot {
             workspaces: state.get_workspaces(),
             outputs: state.get_outputs(),
             keyboard_layouts: state.get_keyboard_layouts(),
+            cursor_position: state.get_cursor_position(),
+            focus_mode: state.get_focus_mode(),
         }
     }
 
@@ -176,6 +207,15 @@ pub trait CompositorState {
 
     /// Get the keyboard layouts configuration.
     fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts>;
+
+    /// Get the current cursor position, if available.
+    fn get_cursor_position(&self) -> Option<CursorPosition>;
+
+    /// Get reserved space (exclusive zones) for an output.
+    fn get_reserved_space(&self, output_name: &str) -> ReservedSpace;
+
+    /// Get the current focus mode.
+    fn get_focus_mode(&self) -> FocusMode;
 }
 
 /// Register the runtime state API in a Lua context.
@@ -343,7 +383,7 @@ where
 
     // keyboard_layouts() -> {names, current_idx} | nil
     {
-        let api = api.event_loop;
+        let api = api.event_loop.clone();
         let keyboard_layouts_fn = lua.create_function(move |lua, ()| {
             // Check if we're in an event handler context with pre-captured state
             if let Some(snapshot) = get_event_context_state() {
@@ -392,6 +432,116 @@ where
         state_table.set("keyboard_layouts", keyboard_layouts_fn)?;
     }
 
+    // cursor_position() -> {x, y, output} | nil
+    {
+        let api = api.event_loop.clone();
+        let cursor_position_fn = lua.create_function(move |lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                return match &snapshot.cursor_position {
+                    Some(pos) => {
+                        let table = lua.create_table()?;
+                        table.set("x", pos.x)?;
+                        table.set("y", pos.y)?;
+                        table.set("output", pos.output.clone())?;
+                        Ok(Value::Table(table))
+                    }
+                    None => Ok(Value::Nil),
+                };
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let position: Option<CursorPosition> = runtime_api
+                .query(|state, tx| {
+                    let position = state.get_cursor_position();
+                    if let Err(e) = tx.send_blocking(position) {
+                        log::warn!("Failed to send cursor_position query result: {}", e);
+                    }
+                })
+                .map_err(mlua::Error::external)?;
+
+            match position {
+                Some(pos) => {
+                    let table = lua.create_table()?;
+                    table.set("x", pos.x)?;
+                    table.set("y", pos.y)?;
+                    table.set("output", pos.output)?;
+                    Ok(Value::Table(table))
+                }
+                None => Ok(Value::Nil),
+            }
+        })?;
+        state_table.set("cursor_position", cursor_position_fn)?;
+    }
+
+    // reserved_space(output_name) -> {top, bottom, left, right}
+    {
+        let api = api.event_loop.clone();
+        let reserved_space_fn = lua.create_function(move |lua, output_name: String| {
+            // Check if we're in an event handler context with pre-captured state
+            // Note: reserved_space is not snapshotted, always query live state
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let reserved: ReservedSpace = runtime_api
+                .query(move |state, tx| {
+                    let reserved = state.get_reserved_space(&output_name);
+                    if let Err(e) = tx.send_blocking(reserved) {
+                        log::warn!("Failed to send reserved_space query result: {}", e);
+                    }
+                })
+                .map_err(mlua::Error::external)?;
+
+            let table = lua.create_table()?;
+            table.set("top", reserved.top)?;
+            table.set("bottom", reserved.bottom)?;
+            table.set("left", reserved.left)?;
+            table.set("right", reserved.right)?;
+            Ok(Value::Table(table))
+        })?;
+        state_table.set("reserved_space", reserved_space_fn)?;
+    }
+
+    // focus_mode() -> string
+    {
+        let api = api.event_loop.clone();
+        let focus_mode_fn = lua.create_function(move |_lua, ()| {
+            // Check if we're in an event handler context with pre-captured state
+            if let Some(snapshot) = get_event_context_state() {
+                return match snapshot.focus_mode {
+                    FocusMode::Normal => Ok("normal".to_string()),
+                    FocusMode::Overview => Ok("overview".to_string()),
+                    FocusMode::LayerShell => Ok("layer_shell".to_string()),
+                    FocusMode::Locked => Ok("locked".to_string()),
+                };
+            }
+
+            // Fall back to idle callback pattern for non-event contexts
+            let runtime_api = RuntimeApi {
+                event_loop: api.clone(),
+            };
+            let mode: FocusMode = runtime_api
+                .query(|state, tx| {
+                    let mode = state.get_focus_mode();
+                    if let Err(e) = tx.send_blocking(mode) {
+                        log::warn!("Failed to send focus_mode query result: {}", e);
+                    }
+                })
+                .map_err(mlua::Error::external)?;
+
+            match mode {
+                FocusMode::Normal => Ok("normal".to_string()),
+                FocusMode::Overview => Ok("overview".to_string()),
+                FocusMode::LayerShell => Ok("layer_shell".to_string()),
+                FocusMode::Locked => Ok("locked".to_string()),
+            }
+        })?;
+        state_table.set("focus_mode", focus_mode_fn)?;
+    }
+
     // Set niri.state
     niri.set("state", state_table)?;
 
@@ -415,29 +565,46 @@ mod tests {
         workspaces: Vec<Workspace>,
         outputs: Vec<Output>,
         keyboard_layouts: Option<KeyboardLayouts>,
+        cursor_position: Option<CursorPosition>,
+        focus_mode: FocusMode,
     }
 
-    impl CompositorState for MockState {
-        fn get_windows(&self) -> Vec<Window> {
-            self.windows.clone()
-        }
-
-        fn get_focused_window(&self) -> Option<Window> {
-            self.windows.iter().find(|w| w.is_focused).cloned()
-        }
-
-        fn get_workspaces(&self) -> Vec<Workspace> {
-            self.workspaces.clone()
-        }
-
-        fn get_outputs(&self) -> Vec<Output> {
-            self.outputs.clone()
-        }
-
-        fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts> {
-            self.keyboard_layouts.clone()
-        }
+impl CompositorState for MockState {
+    fn get_windows(&self) -> Vec<Window> {
+        self.windows.clone()
     }
+
+    fn get_focused_window(&self) -> Option<Window> {
+        self.windows.iter().find(|w| w.is_focused).cloned()
+    }
+
+    fn get_workspaces(&self) -> Vec<Workspace> {
+        self.workspaces.clone()
+    }
+
+    fn get_outputs(&self) -> Vec<Output> {
+        self.outputs.clone()
+    }
+
+    fn get_keyboard_layouts(&self) -> Option<KeyboardLayouts> {
+        self.keyboard_layouts.clone()
+    }
+
+    fn get_cursor_position(&self) -> Option<CursorPosition> {
+        // Mock implementation - return None for simplicity
+        None
+    }
+
+    fn get_reserved_space(&self, _output_name: &str) -> ReservedSpace {
+        // Mock implementation - return zeros
+        ReservedSpace::default()
+    }
+
+    fn get_focus_mode(&self) -> FocusMode {
+        // Mock implementation - return Normal
+        FocusMode::Normal
+    }
+}
 
     /// Create a test window with the given properties.
     fn make_window(id: u64, title: &str, app_id: &str, is_focused: bool) -> Window {
@@ -529,7 +696,12 @@ mod tests {
         fn accepts_compositor_state<S: CompositorState + 'static>(_state: &S) {
             let _ = std::mem::size_of::<RuntimeApi<S>>();
         }
-        accepts_compositor_state(&MockState::default());
+        let mock_state = MockState {
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
+            ..Default::default()
+        };
+        accepts_compositor_state(&mock_state);
     }
 
     // ========================================================================
@@ -548,8 +720,12 @@ mod tests {
 
     #[test]
     fn empty_state_trait_object() {
-        let state = MockState::default();
-        let trait_obj: &dyn CompositorState = &state;
+        let mock_state = MockState {
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
+            ..Default::default()
+        };
+        let trait_obj: &dyn CompositorState = &mock_state;
 
         assert!(trait_obj.get_windows().is_empty());
         assert!(trait_obj.get_focused_window().is_none());
@@ -686,6 +862,8 @@ mod tests {
             workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
             outputs: vec![make_output("DP-1", true)],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
 
         let state2 = state1.clone();
@@ -700,6 +878,8 @@ mod tests {
     fn multiple_state_instances_independent() {
         let state1 = MockState {
             windows: vec![make_window(1, "Win1", "app1", true)],
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
             ..Default::default()
         };
 
@@ -708,6 +888,8 @@ mod tests {
                 make_window(2, "Win2", "app2", false),
                 make_window(3, "Win3", "app3", true),
             ],
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
             ..Default::default()
         };
 
@@ -738,6 +920,8 @@ mod tests {
             workspaces: vec![make_workspace(1, 1, Some("main"), true)],
             outputs: vec![make_output("DP-1", true)],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
 
         set_event_context_state(snapshot);
@@ -762,6 +946,8 @@ mod tests {
             workspaces: vec![],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
         set_event_context_state(snapshot);
 
@@ -784,6 +970,8 @@ mod tests {
             workspaces: vec![],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
         set_event_context_state(snapshot);
 
@@ -811,6 +999,8 @@ mod tests {
             workspaces: vec![],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
         set_event_context_state(snapshot1);
 
@@ -825,6 +1015,8 @@ mod tests {
             workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
         set_event_context_state(snapshot2);
 
@@ -848,6 +1040,8 @@ mod tests {
             workspaces: vec![],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
 
         let focused = snapshot.get_focused_window();
@@ -868,6 +1062,8 @@ mod tests {
             workspaces: vec![],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
 
         assert!(snapshot.get_focused_window().is_none());
@@ -880,6 +1076,8 @@ mod tests {
             workspaces: vec![],
             outputs: vec![],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
 
         assert!(snapshot.get_focused_window().is_none());
@@ -898,6 +1096,8 @@ mod tests {
             ],
             outputs: vec![make_output("DP-1", true), make_output("HDMI-1", false)],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
 
         let snapshot = StateSnapshot::from_compositor_state(&state);
@@ -927,6 +1127,8 @@ mod tests {
             workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
             outputs: vec![make_output("DP-1", true)],
             keyboard_layouts: None,
+            cursor_position: None,
+            focus_mode: FocusMode::Normal,
         };
         let snapshot = StateSnapshot::from_compositor_state(&state);
         set_event_context_state(snapshot);
@@ -978,4 +1180,5 @@ mod tests {
 
         clear_event_context_state();
     }
+
 }

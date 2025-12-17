@@ -97,7 +97,7 @@ use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
 use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState, SessionLocker};
 use smithay::wayland::shell::kde::decoration::KdeDecorationState;
-use smithay::wayland::shell::wlr_layer::{self, Layer, WlrLayerShellState};
+use smithay::wayland::shell::wlr_layer::{self, Anchor, ExclusiveZone, Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
@@ -177,8 +177,9 @@ use crate::utils::{
     logical_output, make_screenshot_path, output_matches_name, output_size, panel_orientation,
     send_scale_transform, write_png_rgba8, xwayland,
 };
+use niri_lua::runtime_api::{CursorPosition, FocusMode, ReservedSpace};
 use crate::window::mapped::MappedId;
-use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
+use crate::window::{Mapped, Unmapped, ResolvedWindowRules, WindowRef, InitialConfigureState};
 use crate::{lua_event_hooks, niri_render_elements};
 
 const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
@@ -6901,5 +6902,78 @@ impl niri_lua::CompositorState for State {
         let server = self.niri.ipc_server.as_ref()?;
         let state = server.event_stream_state.borrow();
         state.keyboard_layouts.keyboard_layouts.clone()
+    }
+
+    fn get_cursor_position(&self) -> Option<CursorPosition> {
+        let pointer = self.niri.seat.get_pointer().unwrap();
+        let pos = pointer.current_location();
+
+        let (output, _) = self.niri.output_under(pos)?;
+        Some(CursorPosition {
+            x: pos.x,
+            y: pos.y,
+            output: output.name().to_string(),
+        })
+    }
+
+    fn get_reserved_space(&self, output_name: &str) -> ReservedSpace {
+        let output = match self.niri.output_by_name_match(output_name) {
+            Some(output) => output,
+            None => return ReservedSpace { top: 0, bottom: 0, left: 0, right: 0 },
+        };
+        let layer_map = layer_map_for_output(output);
+
+        let mut top = 0;
+        let mut bottom = 0;
+        let mut left = 0;
+        let mut right = 0;
+
+        for surface in layer_map.layers() {
+            let Some(mapped) = self.niri.mapped_layer_surfaces.get(surface) else {
+                continue;
+            };
+            if mapped.place_within_backdrop() {
+                continue;
+            }
+
+            let state = surface.cached_state();
+            let zone = match state.exclusive_zone {
+                ExclusiveZone::Exclusive(size) => size as i32,
+                ExclusiveZone::DontCare | ExclusiveZone::Neutral => 0,
+            };
+            if zone > 0 {
+                // A surface reserves space on an edge only if it's anchored to that edge
+                // AND NOT anchored to the opposing edge. For example, a panel anchored
+                // to top+left+right reserves TOP space, but a surface anchored to
+                // top+bottom (spanning vertically) doesn't reserve edge space.
+                if state.anchor.contains(Anchor::TOP) && !state.anchor.contains(Anchor::BOTTOM) {
+                    top = top.max(zone);
+                }
+                if state.anchor.contains(Anchor::BOTTOM) && !state.anchor.contains(Anchor::TOP) {
+                    bottom = bottom.max(zone);
+                }
+                if state.anchor.contains(Anchor::LEFT) && !state.anchor.contains(Anchor::RIGHT) {
+                    left = left.max(zone);
+                }
+                if state.anchor.contains(Anchor::RIGHT) && !state.anchor.contains(Anchor::LEFT) {
+                    right = right.max(zone);
+                }
+            }
+        }
+
+        ReservedSpace { top, bottom, left, right }
+    }
+
+    fn get_focus_mode(&self) -> FocusMode {
+        if self.niri.is_locked() {
+            FocusMode::Locked
+        } else if self.niri.layout.is_overview_open() {
+            FocusMode::Overview
+        } else {
+            match &self.niri.keyboard_focus {
+                KeyboardFocus::LayerShell { .. } => FocusMode::LayerShell,
+                _ => FocusMode::Normal,
+            }
+        }
     }
 }
