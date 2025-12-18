@@ -22,21 +22,7 @@
 //! - The handler collects the data and sends it back through the channel
 //! - The Lua function blocks waiting for the response (from Lua's perspective)
 //!
-//! ## Planned Improvements
 //!
-//! TODO: Add targeted query functions to avoid fetching entire collections:
-//! - `get_window(id: u64)` - Query a specific window by ID
-//! - `get_workspace(reference)` - Query workspace by ID, index, or name
-//! - `get_output(name: &str)` - Query a specific output by name
-//!
-//! TODO: Add reactive state subscription API:
-//! - `subscribe(event_pattern, callback)` - Watch for state changes reactively
-//! - This would enable patterns like monitoring specific window property changes
-//!
-//! TODO: Consider option for fresh state queries within event handlers:
-//! - Currently event handlers see pre-captured snapshots (for deadlock avoidance)
-//! - A `niri.state.refresh()` or similar could re-query live state when needed
-//! - Must be opt-in due to performance implications
 
 use std::cell::RefCell;
 

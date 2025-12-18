@@ -153,7 +153,6 @@ pub fn extract_animations(table: &LuaTable) -> LuaResult<Option<Animations>> {
         if let Some(s) = slowdown {
             animations.slowdown = s;
         }
-        // TODO: Extract individual animation settings
         Ok(Some(animations))
     } else {
         Ok(None)
@@ -1004,13 +1003,7 @@ pub fn extract_xwayland_satellite(table: &LuaTable) -> LuaResult<Option<Xwayland
     }
 }
 
-// TODO: Add more complex extractors for:
-// - Output configuration
-// - Window rules
-// - Layer rules
-// - Workspaces
-// - Switch Events
-// - Named Workspaces
+
 
 #[cfg(test)]
 mod tests {

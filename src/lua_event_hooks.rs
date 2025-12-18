@@ -466,8 +466,6 @@ fn create_overview_event_table(lua: &Lua, is_open: bool) -> LuaResult<LuaValue> 
     Ok(LuaValue::Table(table))
 }
 
-// ===== Additional Events from Roadmap TODO =====
-
 /// Emit a window:resize event
 ///
 /// Call this when a window's size changes
