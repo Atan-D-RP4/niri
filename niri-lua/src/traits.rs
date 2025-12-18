@@ -909,8 +909,8 @@ mod tests {
 
     #[test]
     fn test_float_convert() {
-        assert_eq!(LuaFieldConvert::to_lua(&3.14f64), 3.14);
-        assert_eq!(<f64 as LuaFieldConvert>::from_lua(2.718).unwrap(), 2.718f64);
+        assert_eq!(LuaFieldConvert::to_lua(&1.5f64), 1.5);
+        assert_eq!(<f64 as LuaFieldConvert>::from_lua(2.5).unwrap(), 2.5f64);
     }
 
     #[test]
@@ -1024,8 +1024,8 @@ mod tests {
         let foi: FloatOrInt<0, 100> = FloatOrInt(42.5);
         assert_eq!(LuaFieldConvert::to_lua(&foi), 42.5);
         assert_eq!(
-            <FloatOrInt<0, 100> as LuaFieldConvert>::from_lua(3.14).unwrap(),
-            FloatOrInt::<0, 100>(3.14)
+            <FloatOrInt<0, 100> as LuaFieldConvert>::from_lua(1.75).unwrap(),
+            FloatOrInt::<0, 100>(1.75)
         );
     }
 

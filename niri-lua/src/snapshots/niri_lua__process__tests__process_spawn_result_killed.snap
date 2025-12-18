@@ -1,0 +1,11 @@
+---
+source: niri-lua/src/process.rs
+assertion_line: 1058
+expression: result
+---
+SpawnResult {
+    code: -1,
+    signal: 9,
+    stdout: "partial output",
+    stderr: "",
+}

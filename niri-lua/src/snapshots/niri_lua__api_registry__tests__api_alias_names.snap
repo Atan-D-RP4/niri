@@ -1,6 +1,5 @@
 ---
 source: niri-lua/src/api_registry.rs
-assertion_line: 40
 expression: names
 ---
 [
@@ -21,4 +20,6 @@ expression: names
     "ReservedSpace",
     "FocusMode",
     "KeyboardLayouts",
+    "SpawnOpts",
+    "SpawnResult",
 ]

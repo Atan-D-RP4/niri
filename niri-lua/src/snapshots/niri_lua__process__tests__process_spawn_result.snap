@@ -1,0 +1,11 @@
+---
+source: niri-lua/src/process.rs
+assertion_line: 1036
+expression: result
+---
+SpawnResult {
+    code: 0,
+    signal: 0,
+    stdout: "hello world",
+    stderr: "",
+}

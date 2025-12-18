@@ -1,6 +1,5 @@
 ---
 source: niri-lua/src/api_registry.rs
-assertion_line: 101
 expression: defs
 ---
 [
@@ -21,4 +20,6 @@ expression: defs
     "ReservedSpace = { top: integer, bottom: integer, left: integer, right: integer }",
     "FocusMode = \"normal\"|\"overview\"|\"layer_shell\"|\"locked\"",
     "KeyboardLayouts = { names: string[], current_idx: integer }",
+    "SpawnOpts = { cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean?, stdout: boolean?, stderr: boolean?, text: boolean?, detach: boolean? }",
+    "SpawnResult = { code: integer, signal: integer, stdout: string, stderr: string }",
 ]

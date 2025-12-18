@@ -598,7 +598,7 @@ dependencies = [
  "async-task",
  "bitflags 2.9.4",
  "futures-io",
- "nix",
+ "nix 0.30.1",
  "polling",
  "rustix 1.1.2",
  "slab",
@@ -2178,7 +2178,7 @@ dependencies = [
  "cookie-factory",
  "libc",
  "libspa-sys",
- "nix",
+ "nix 0.30.1",
  "nom 8.0.0",
  "system-deps",
 ]
@@ -2524,12 +2524,14 @@ dependencies = [
  "calloop 0.14.3",
  "dirs",
  "gethostname",
+ "glob",
  "insta",
  "log",
  "mlua",
  "niri-config",
  "niri-ipc",
  "niri-lua-derive",
+ "nix 0.29.0",
  "regex",
  "shellexpand",
  "tempfile",
@@ -2558,6 +2560,18 @@ dependencies = [
  "smithay",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.9.4",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -3082,7 +3096,7 @@ dependencies = [
  "libc",
  "libspa",
  "libspa-sys",
- "nix",
+ "nix 0.30.1",
  "once_cell",
  "pipewire-sys",
  "thiserror 2.0.17",
@@ -5269,7 +5283,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "hex",
- "nix",
+ "nix 0.30.1",
  "ordered-stream",
  "serde",
  "serde_repr",

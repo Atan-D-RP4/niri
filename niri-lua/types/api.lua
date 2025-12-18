@@ -60,6 +60,12 @@
 ---Keyboard layout names and current active index
 ---@alias KeyboardLayouts { names: string[], current_idx: integer }
 
+---Options for spawning a process. If stdin is true, enables :write() method. If detach is true, no ProcessHandle is returned.
+---@alias SpawnOpts { cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean?, stdout: boolean?, stderr: boolean?, text: boolean?, detach: boolean? }
+
+---Result from process execution. code: exit code (0=success, -1 if killed), signal: signal number (0 if not signaled), stdout/stderr: captured output
+---@alias SpawnResult { code: integer, signal: integer, stdout: string, stderr: string }
+
 -- ============================================================================
 -- Input Configuration Types
 -- ============================================================================
@@ -466,6 +472,33 @@ function ConfigCollection:clear() end
 ---@class ConfigSectionProxy
 local ConfigSectionProxy = {}
 
+---Handle for controlling a spawned process with output capture
+---@class ProcessHandle
+---@field pid integer Process ID
+local ProcessHandle = {}
+
+---Wait for the process to complete, optionally with a timeout. If timeout is exceeded, the process is killed.
+---@param timeout_ms? integer? Optional timeout in milliseconds
+---@return SpawnResult # Process result with exit code, signal, stdout, and stderr
+function ProcessHandle:wait(timeout_ms) end
+
+---Kill the process (sends SIGKILL on Unix)
+---@param signal? integer? Optional signal number (currently ignored, always uses SIGKILL)
+---@return boolean # True if kill signal was sent successfully
+function ProcessHandle:kill(signal) end
+
+---Write data to the process stdin (requires stdin=true in spawn opts)
+---@param data string Data to write to stdin
+---@return boolean # True if write succeeded
+function ProcessHandle:write(data) end
+
+---Check if the process is closing or has already exited
+---@return boolean # True if process is closing or has exited
+function ProcessHandle:is_closing() end
+
+---Close the stdin pipe, signaling EOF to the process
+function ProcessHandle:close_stdin() end
+
 -- ============================================================================
 -- Modules
 -- ============================================================================
@@ -602,13 +635,17 @@ function niri.action:power_off_monitors() end
 ---Turn on all monitors
 function niri.action:power_on_monitors() end
 
----Spawn a command
+---Spawn a command. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.
 ---@param command string[] Command and arguments
-function niri.action:spawn(command) end
+---@param opts? SpawnOpts? Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.
+---@return ProcessHandle? # Process handle if opts provided (and detach ~= true), nil otherwise
+function niri.action:spawn(command, opts) end
 
----Spawn a command via shell
+---Spawn a command via shell. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.
 ---@param command string Shell command string
-function niri.action:spawn_sh(command) end
+---@param opts? SpawnOpts? Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.
+---@return ProcessHandle? # Process handle if opts provided (and detach ~= true), nil otherwise
+function niri.action:spawn_sh(command, opts) end
 
 ---Trigger a screen transition animation
 ---@param delay? boolean Whether to delay the transition
@@ -1106,6 +1143,75 @@ function niri.os.hostname() end
 ---@return string? # Variable value or nil if not set
 function niri.os.getenv(name) end
 
+---Get the current username. Returns nil if unavailable.
+---@return string? # Current username or nil
+function niri.os.username() end
+
+---Get the user's home directory path. Returns nil if unavailable.
+---@return string? # Home directory path or nil
+function niri.os.home() end
+
+---Get the system temporary directory path.
+---@return string # Temporary directory path
+function niri.os.tmpdir() end
+
+---Get the operating system name (e.g., 'linux', 'macos', 'windows').
+---@return string # Operating system name
+function niri.os.platform() end
+
+---Get the CPU architecture (e.g., 'x86_64', 'aarch64').
+---@return string # CPU architecture
+function niri.os.arch() end
+
+---Get XDG_CONFIG_HOME (~/.config by default).
+---@return string # Config home directory path
+function niri.os.xdg_config_home() end
+
+---Get XDG_DATA_HOME (~/.local/share by default).
+---@return string # Data home directory path
+function niri.os.xdg_data_home() end
+
+---Get XDG_CACHE_HOME (~/.cache by default).
+---@return string # Cache home directory path
+function niri.os.xdg_cache_home() end
+
+---Get XDG_STATE_HOME (~/.local/state by default).
+---@return string # State home directory path
+function niri.os.xdg_state_home() end
+
+---Get XDG_RUNTIME_DIR. Returns nil if not set (uncommon on modern systems).
+---@return string? # Runtime directory path or nil
+function niri.os.xdg_runtime_dir() end
+
+---Get XDG_DATA_DIRS as an array of paths (/usr/local/share:/usr/share by default).
+---@return string[] # Array of data directory paths
+function niri.os.xdg_data_dirs() end
+
+---Get XDG_CONFIG_DIRS as an array of paths (/etc/xdg by default).
+---@return string[] # Array of config directory paths
+function niri.os.xdg_config_dirs() end
+
+---Get the niri config directory ($XDG_CONFIG_HOME/niri). Creates if needed.
+---@return string # Path to niri config directory
+function niri.os.niri_config_dir() end
+
+---Get the niri data directory ($XDG_DATA_HOME/niri). Creates if needed.
+---@return string # Path to niri data directory
+function niri.os.niri_data_dir() end
+
+---Get the niri cache directory ($XDG_CACHE_HOME/niri). Creates if needed.
+---@return string # Path to niri cache directory
+function niri.os.niri_cache_dir() end
+
+---Get the niri state directory ($XDG_STATE_HOME/niri). Creates if needed.
+---@return string # Path to niri state directory
+function niri.os.niri_state_dir() end
+
+---Set or remove an environment variable. Pass nil as value to remove. Changes only affect current process and children.
+---@param name string Environment variable name
+---@param value? string? Value to set, or nil to remove the variable
+function niri.os.setenv(name, value) end
+
 ---Filesystem utilities for conditional configuration
 ---@class niri.fs
 niri.fs = {}
@@ -1124,4 +1230,163 @@ function niri.fs.expand(path) end
 ---@param command string Command name to find
 ---@return string? # Full path to executable or nil
 function niri.fs.which(command) end
+
+---Check if a path exists (file, directory, or symlink). Never throws.
+---@param path string Path to check
+---@return boolean # True if path exists
+function niri.fs.exists(path) end
+
+---Check if path is a regular file. Follows symlinks. Never throws.
+---@param path string Path to check
+---@return boolean # True if path is a regular file
+function niri.fs.is_file(path) end
+
+---Check if path is a directory. Follows symlinks. Never throws.
+---@param path string Path to check
+---@return boolean # True if path is a directory
+function niri.fs.is_dir(path) end
+
+---Check if path is a symbolic link. Does not follow the link. Never throws.
+---@param path string Path to check
+---@return boolean # True if path is a symlink
+function niri.fs.is_symlink(path) end
+
+---Check if path exists and has executable permission. Follows symlinks. Never throws.
+---@param path string Path to check
+---@return boolean # True if path is executable
+function niri.fs.is_executable(path) end
+
+---Get the filename component of a path. Pure string operation.
+---@param path string Path to extract basename from
+---@return string # Filename component
+function niri.fs.basename(path) end
+
+---Get the directory component of a path. Pure string operation.
+---@param path string Path to extract dirname from
+---@return string # Directory component
+function niri.fs.dirname(path) end
+
+---Get the file extension including the dot. Returns empty string if no extension.
+---@param path string Path to extract extension from
+---@return string # File extension (e.g., '.txt') or empty string
+function niri.fs.extname(path) end
+
+---Join path components intelligently. Handles separators and absolute paths.
+---@param ... string Path components to join
+---@return string # Joined path
+function niri.fs.joinpath(...) end
+
+---List all entries in a directory. Returns sorted basenames. Returns nil, error on failure.
+---@param dir string Directory path
+---@return string[]|nil # Array of entry names or nil on error
+function niri.fs.list(dir) end
+
+---List files only in a directory. Optional Lua pattern filters filenames. Returns sorted basenames.
+---@param dir string Directory path
+---@param pattern? string? Optional Lua pattern to filter filenames
+---@return string[]|nil # Array of filenames or nil on error
+function niri.fs.list_files(dir, pattern) end
+
+---List directories only in a directory. Returns sorted basenames.
+---@param dir string Directory path
+---@return string[]|nil # Array of directory names or nil on error
+function niri.fs.list_dirs(dir) end
+
+---Create a directory. Pass true or {recursive=true} for recursive creation.
+---@param path string Directory path to create
+---@param opts? boolean|table? Options: true or {recursive=true} for recursive creation
+---@return boolean # True on success, nil and error message on failure
+function niri.fs.mkdir(path, opts) end
+
+---Remove an empty directory. Returns nil, error if not empty or on failure.
+---@param path string Directory path to remove
+---@return boolean # True on success, nil and error message on failure
+function niri.fs.rmdir(path) end
+
+---Remove a file or directory. Pass {recursive=true} for recursive removal.
+---@param path string Path to remove
+---@param opts? table? Options: {recursive=true} for recursive removal
+---@return boolean # True on success, nil and error message on failure
+function niri.fs.remove(path, opts) end
+
+---Get absolute path, resolving . and .. and expanding ~/$$VAR. Returns nil, error if path doesn't exist.
+---@param path string Path to resolve
+---@return string|nil # Absolute path or nil if not found
+function niri.fs.abspath(path) end
+
+---Normalize a path by expanding ~/$$VAR and resolving . and .. without requiring existence.
+---@param path string Path to normalize
+---@return string # Normalized path
+function niri.fs.normalize(path) end
+
+---Read entire file as UTF-8 string. Expands ~ in path. Returns nil, error on failure.
+---@param path string Path to file to read
+---@return string? # File contents or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.read(path) end
+
+---Read file and return lines as array (without newlines). Expands ~ in path. Returns nil, error on failure.
+---@param path string Path to file to read
+---@return string[]? # Array of lines or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.readlines(path) end
+
+---Write content to file, creating or overwriting. Expands ~ in path. Does not auto-create parent directories.
+---@param path string Path to file to write
+---@param content string Content to write
+---@return boolean # True on success, false on error
+---@return string? # Error message or nil on success
+function niri.fs.write(path, content) end
+
+---Append content to file, creating if it doesn't exist. Expands ~ in path. Does not auto-create parent directories.
+---@param path string Path to file to append to
+---@param content string Content to append
+---@return boolean # True on success, false on error
+---@return string? # Error message or nil on success
+function niri.fs.append(path, content) end
+
+---Copy a file from src to dst. Only copies files (not directories). Expands ~ in both paths. Overwrites dst if exists.
+---@param src string Source file path
+---@param dst string Destination file path
+---@return boolean # True on success, false on error
+---@return string? # Error message or nil on success
+function niri.fs.copy(src, dst) end
+
+---Rename/move a file or directory. Expands ~ in both paths. May overwrite dst depending on OS.
+---@param src string Source path
+---@param dst string Destination path
+---@return boolean # True on success, false on error
+---@return string? # Error message or nil on success
+function niri.fs.rename(src, dst) end
+
+---Get file/directory metadata. Follows symlinks. Returns table with size, mtime, atime, ctime, mode (unix), type, readonly.
+---@param path string Path to stat
+---@return table? # Metadata table or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.stat(path) end
+
+---Get file modification time as Unix timestamp. Expands ~ in path.
+---@param path string Path to check
+---@return integer? # Unix timestamp or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.mtime(path) end
+
+---Get file size in bytes. Expands ~ in path.
+---@param path string Path to check
+---@return integer? # Size in bytes or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.size(path) end
+
+---Find files matching a shell-style glob pattern. Expands ~ in pattern. Supports *, ?, [abc], [!abc], and ** for recursive matching. Returns sorted array of normalized full paths.
+---@param pattern string Glob pattern (e.g., '*.lua', 'src/**/*.rs', '~/config/*.conf')
+---@return string[]? # Array of matching paths or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.glob(pattern) end
+
+---Find files/directories by name with upward or downward search. Upward search walks toward root (useful for finding project markers like .git). Downward search recurses into subdirectories. Supports simple glob patterns (* and ?) in names for downward search.
+---@param names string|string[] Filename(s) to find. Can include * and ? wildcards for downward search.
+---@param opts? FsFindOpts? Search options: path (starting directory, default: cwd), upward (search toward root, default: false), stop (stop upward search at this directory), type ('file' or 'directory' filter), limit (max results)
+---@return string[]? # Array of matching paths (sorted) or nil on error
+---@return string? # Error message or nil on success
+function niri.fs.find(names, opts) end
 

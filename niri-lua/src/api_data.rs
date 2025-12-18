@@ -32,6 +32,7 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         GESTURE_TYPE,
         CONFIG_COLLECTION_TYPE,
         CONFIG_SECTION_PROXY_TYPE,
+        PROCESS_HANDLE_TYPE,
     ],
     aliases: &[
         WINDOW_ALIAS,
@@ -51,6 +52,8 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         RESERVED_SPACE_ALIAS,
         FOCUS_MODE_ALIAS,
         KEYBOARD_LAYOUTS_ALIAS,
+        SPAWN_OPTS_ALIAS,
+        SPAWN_RESULT_ALIAS,
     ],
 };
 
@@ -159,6 +162,18 @@ const KEYBOARD_LAYOUTS_ALIAS: AliasSchema = AliasSchema {
     name: "KeyboardLayouts",
     ty: "{ names: string[], current_idx: integer }",
     description: "Keyboard layout names and current active index",
+};
+
+const SPAWN_OPTS_ALIAS: AliasSchema = AliasSchema {
+    name: "SpawnOpts",
+    ty: "{ cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean?, stdout: boolean?, stderr: boolean?, text: boolean?, detach: boolean? }",
+    description: "Options for spawning a process. If stdin is true, enables :write() method. If detach is true, no ProcessHandle is returned.",
+};
+
+const SPAWN_RESULT_ALIAS: AliasSchema = AliasSchema {
+    name: "SpawnResult",
+    ty: "{ code: integer, signal: integer, stdout: string, stderr: string }",
+    description: "Result from process execution. code: exit code (0=success, -1 if killed), signal: signal number (0 if not signaled), stdout/stderr: captured output",
 };
 
 // ============================================================================
@@ -736,27 +751,49 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
         },
         FunctionSchema {
             name: "spawn",
-            description: "Spawn a command",
+            description: "Spawn a command. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.",
             is_method: true,
-            params: &[ParamSchema {
-                name: "command",
-                ty: "string[]",
-                description: "Command and arguments",
-                optional: false,
+            params: &[
+                ParamSchema {
+                    name: "command",
+                    ty: "string[]",
+                    description: "Command and arguments",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "SpawnOpts?",
+                    description: "Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "ProcessHandle?",
+                description: "Process handle if opts provided (and detach ~= true), nil otherwise",
             }],
-            returns: &[],
         },
         FunctionSchema {
             name: "spawn_sh",
-            description: "Spawn a command via shell",
+            description: "Spawn a command via shell. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.",
             is_method: true,
-            params: &[ParamSchema {
-                name: "command",
-                ty: "string",
-                description: "Shell command string",
-                optional: false,
+            params: &[
+                ParamSchema {
+                    name: "command",
+                    ty: "string",
+                    description: "Shell command string",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "SpawnOpts?",
+                    description: "Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "ProcessHandle?",
+                description: "Process handle if opts provided (and detach ~= true), nil otherwise",
             }],
-            returns: &[],
         },
         FunctionSchema {
             name: "do_screen_transition",
@@ -2270,6 +2307,80 @@ const CONFIG_SECTION_PROXY_TYPE: TypeSchema = TypeSchema {
     methods: &[],
 };
 
+const PROCESS_HANDLE_TYPE: TypeSchema = TypeSchema {
+    name: "ProcessHandle",
+    description: "Handle for controlling a spawned process with output capture",
+    fields: &[FieldSchema {
+        name: "pid",
+        ty: "integer",
+        description: "Process ID",
+    }],
+    methods: &[
+        FunctionSchema {
+            name: "wait",
+            description: "Wait for the process to complete, optionally with a timeout. If timeout is exceeded, the process is killed.",
+            is_method: true,
+            params: &[ParamSchema {
+                name: "timeout_ms",
+                ty: "integer?",
+                description: "Optional timeout in milliseconds",
+                optional: true,
+            }],
+            returns: &[ReturnSchema {
+                ty: "SpawnResult",
+                description: "Process result with exit code, signal, stdout, and stderr",
+            }],
+        },
+        FunctionSchema {
+            name: "kill",
+            description: "Kill the process (sends SIGKILL on Unix)",
+            is_method: true,
+            params: &[ParamSchema {
+                name: "signal",
+                ty: "integer?",
+                description: "Optional signal number (currently ignored, always uses SIGKILL)",
+                optional: true,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if kill signal was sent successfully",
+            }],
+        },
+        FunctionSchema {
+            name: "write",
+            description: "Write data to the process stdin (requires stdin=true in spawn opts)",
+            is_method: true,
+            params: &[ParamSchema {
+                name: "data",
+                ty: "string",
+                description: "Data to write to stdin",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if write succeeded",
+            }],
+        },
+        FunctionSchema {
+            name: "is_closing",
+            description: "Check if the process is closing or has already exited",
+            is_method: true,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if process is closing or has exited",
+            }],
+        },
+        FunctionSchema {
+            name: "close_stdin",
+            description: "Close the stdin pipe, signaling EOF to the process",
+            is_method: true,
+            params: &[],
+            returns: &[],
+        },
+    ],
+};
+
 // ============================================================================
 // niri.os
 // ============================================================================
@@ -2278,6 +2389,7 @@ const NIRI_OS_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.os",
     description: "Operating system utilities for conditional configuration",
     functions: &[
+        // === System Info (F1.1) ===
         FunctionSchema {
             name: "hostname",
             description: "Get the system hostname. Throws on invalid UTF-8 (rare); returns empty string on other system errors.",
@@ -2303,6 +2415,189 @@ const NIRI_OS_MODULE: ModuleSchema = ModuleSchema {
                 description: "Variable value or nil if not set",
             }],
         },
+        FunctionSchema {
+            name: "username",
+            description: "Get the current username. Returns nil if unavailable.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "Current username or nil",
+            }],
+        },
+        FunctionSchema {
+            name: "home",
+            description: "Get the user's home directory path. Returns nil if unavailable.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "Home directory path or nil",
+            }],
+        },
+        FunctionSchema {
+            name: "tmpdir",
+            description: "Get the system temporary directory path.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Temporary directory path",
+            }],
+        },
+        FunctionSchema {
+            name: "platform",
+            description: "Get the operating system name (e.g., 'linux', 'macos', 'windows').",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Operating system name",
+            }],
+        },
+        FunctionSchema {
+            name: "arch",
+            description: "Get the CPU architecture (e.g., 'x86_64', 'aarch64').",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "CPU architecture",
+            }],
+        },
+        // === XDG Directories (F1.2) ===
+        FunctionSchema {
+            name: "xdg_config_home",
+            description: "Get XDG_CONFIG_HOME (~/.config by default).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Config home directory path",
+            }],
+        },
+        FunctionSchema {
+            name: "xdg_data_home",
+            description: "Get XDG_DATA_HOME (~/.local/share by default).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Data home directory path",
+            }],
+        },
+        FunctionSchema {
+            name: "xdg_cache_home",
+            description: "Get XDG_CACHE_HOME (~/.cache by default).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Cache home directory path",
+            }],
+        },
+        FunctionSchema {
+            name: "xdg_state_home",
+            description: "Get XDG_STATE_HOME (~/.local/state by default).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "State home directory path",
+            }],
+        },
+        FunctionSchema {
+            name: "xdg_runtime_dir",
+            description: "Get XDG_RUNTIME_DIR. Returns nil if not set (uncommon on modern systems).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string?",
+                description: "Runtime directory path or nil",
+            }],
+        },
+        FunctionSchema {
+            name: "xdg_data_dirs",
+            description: "Get XDG_DATA_DIRS as an array of paths (/usr/local/share:/usr/share by default).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string[]",
+                description: "Array of data directory paths",
+            }],
+        },
+        FunctionSchema {
+            name: "xdg_config_dirs",
+            description: "Get XDG_CONFIG_DIRS as an array of paths (/etc/xdg by default).",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string[]",
+                description: "Array of config directory paths",
+            }],
+        },
+        // === Niri-specific Directories (F2.4) ===
+        FunctionSchema {
+            name: "niri_config_dir",
+            description: "Get the niri config directory ($XDG_CONFIG_HOME/niri). Creates if needed.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Path to niri config directory",
+            }],
+        },
+        FunctionSchema {
+            name: "niri_data_dir",
+            description: "Get the niri data directory ($XDG_DATA_HOME/niri). Creates if needed.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Path to niri data directory",
+            }],
+        },
+        FunctionSchema {
+            name: "niri_cache_dir",
+            description: "Get the niri cache directory ($XDG_CACHE_HOME/niri). Creates if needed.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Path to niri cache directory",
+            }],
+        },
+        FunctionSchema {
+            name: "niri_state_dir",
+            description: "Get the niri state directory ($XDG_STATE_HOME/niri). Creates if needed.",
+            is_method: false,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Path to niri state directory",
+            }],
+        },
+        // === Environment Mutation (F3.5) ===
+        FunctionSchema {
+            name: "setenv",
+            description: "Set or remove an environment variable. Pass nil as value to remove. Changes only affect current process and children.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "name",
+                    ty: "string",
+                    description: "Environment variable name",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "value",
+                    ty: "string?",
+                    description: "Value to set, or nil to remove the variable",
+                    optional: true,
+                },
+            ],
+            returns: &[],
+        },
     ],
     fields: &[],
 };
@@ -2315,6 +2610,7 @@ const NIRI_FS_MODULE: ModuleSchema = ModuleSchema {
     path: "niri.fs",
     description: "Filesystem utilities for conditional configuration",
     functions: &[
+        // === Existing Functions ===
         FunctionSchema {
             name: "readable",
             description: "Check if a file exists and is readable. Follows symlinks; broken symlinks return false. Never throws.",
@@ -2359,6 +2655,567 @@ const NIRI_FS_MODULE: ModuleSchema = ModuleSchema {
                 ty: "string?",
                 description: "Full path to executable or nil",
             }],
+        },
+        // === Path Query Functions (F1.3) ===
+        FunctionSchema {
+            name: "exists",
+            description: "Check if a path exists (file, directory, or symlink). Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if path exists",
+            }],
+        },
+        FunctionSchema {
+            name: "is_file",
+            description: "Check if path is a regular file. Follows symlinks. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if path is a regular file",
+            }],
+        },
+        FunctionSchema {
+            name: "is_dir",
+            description: "Check if path is a directory. Follows symlinks. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if path is a directory",
+            }],
+        },
+        FunctionSchema {
+            name: "is_symlink",
+            description: "Check if path is a symbolic link. Does not follow the link. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if path is a symlink",
+            }],
+        },
+        FunctionSchema {
+            name: "is_executable",
+            description: "Check if path exists and has executable permission. Follows symlinks. Never throws.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if path is executable",
+            }],
+        },
+        // === Path Manipulation Functions (F1.4) ===
+        FunctionSchema {
+            name: "basename",
+            description: "Get the filename component of a path. Pure string operation.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to extract basename from",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Filename component",
+            }],
+        },
+        FunctionSchema {
+            name: "dirname",
+            description: "Get the directory component of a path. Pure string operation.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to extract dirname from",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Directory component",
+            }],
+        },
+        FunctionSchema {
+            name: "extname",
+            description: "Get the file extension including the dot. Returns empty string if no extension.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to extract extension from",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "File extension (e.g., '.txt') or empty string",
+            }],
+        },
+        FunctionSchema {
+            name: "joinpath",
+            description: "Join path components intelligently. Handles separators and absolute paths.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "...",
+                ty: "string",
+                description: "Path components to join",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Joined path",
+            }],
+        },
+        // === Directory Listing Functions (F2.1) ===
+        FunctionSchema {
+            name: "list",
+            description: "List all entries in a directory. Returns sorted basenames. Returns nil, error on failure.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "dir",
+                ty: "string",
+                description: "Directory path",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string[]|nil",
+                description: "Array of entry names or nil on error",
+            }],
+        },
+        FunctionSchema {
+            name: "list_files",
+            description: "List files only in a directory. Optional Lua pattern filters filenames. Returns sorted basenames.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "dir",
+                    ty: "string",
+                    description: "Directory path",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "pattern",
+                    ty: "string?",
+                    description: "Optional Lua pattern to filter filenames",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "string[]|nil",
+                description: "Array of filenames or nil on error",
+            }],
+        },
+        FunctionSchema {
+            name: "list_dirs",
+            description: "List directories only in a directory. Returns sorted basenames.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "dir",
+                ty: "string",
+                description: "Directory path",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string[]|nil",
+                description: "Array of directory names or nil on error",
+            }],
+        },
+        // === Directory Mutation Functions (F2.2) ===
+        FunctionSchema {
+            name: "mkdir",
+            description: "Create a directory. Pass true or {recursive=true} for recursive creation.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "path",
+                    ty: "string",
+                    description: "Directory path to create",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "boolean|table?",
+                    description: "Options: true or {recursive=true} for recursive creation",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True on success, nil and error message on failure",
+            }],
+        },
+        FunctionSchema {
+            name: "rmdir",
+            description: "Remove an empty directory. Returns nil, error if not empty or on failure.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Directory path to remove",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True on success, nil and error message on failure",
+            }],
+        },
+        FunctionSchema {
+            name: "remove",
+            description: "Remove a file or directory. Pass {recursive=true} for recursive removal.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "path",
+                    ty: "string",
+                    description: "Path to remove",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "table?",
+                    description: "Options: {recursive=true} for recursive removal",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True on success, nil and error message on failure",
+            }],
+        },
+        // === Path Utility Functions (F2.3) ===
+        FunctionSchema {
+            name: "abspath",
+            description: "Get absolute path, resolving . and .. and expanding ~/$$VAR. Returns nil, error if path doesn't exist.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to resolve",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string|nil",
+                description: "Absolute path or nil if not found",
+            }],
+        },
+        FunctionSchema {
+            name: "normalize",
+            description: "Normalize a path by expanding ~/$$VAR and resolving . and .. without requiring existence.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to normalize",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "string",
+                description: "Normalized path",
+            }],
+        },
+        // === File Reading Functions (F3.1) ===
+        FunctionSchema {
+            name: "read",
+            description: "Read entire file as UTF-8 string. Expands ~ in path. Returns nil, error on failure.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to file to read",
+                optional: false,
+            }],
+            returns: &[
+                ReturnSchema {
+                    ty: "string?",
+                    description: "File contents or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        FunctionSchema {
+            name: "readlines",
+            description: "Read file and return lines as array (without newlines). Expands ~ in path. Returns nil, error on failure.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to file to read",
+                optional: false,
+            }],
+            returns: &[
+                ReturnSchema {
+                    ty: "string[]?",
+                    description: "Array of lines or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        // === File Writing Functions (F3.2) ===
+        FunctionSchema {
+            name: "write",
+            description: "Write content to file, creating or overwriting. Expands ~ in path. Does not auto-create parent directories.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "path",
+                    ty: "string",
+                    description: "Path to file to write",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "content",
+                    ty: "string",
+                    description: "Content to write",
+                    optional: false,
+                },
+            ],
+            returns: &[
+                ReturnSchema {
+                    ty: "boolean",
+                    description: "True on success, false on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        FunctionSchema {
+            name: "append",
+            description: "Append content to file, creating if it doesn't exist. Expands ~ in path. Does not auto-create parent directories.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "path",
+                    ty: "string",
+                    description: "Path to file to append to",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "content",
+                    ty: "string",
+                    description: "Content to append",
+                    optional: false,
+                },
+            ],
+            returns: &[
+                ReturnSchema {
+                    ty: "boolean",
+                    description: "True on success, false on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        // === File Operations (F3.3) ===
+        FunctionSchema {
+            name: "copy",
+            description: "Copy a file from src to dst. Only copies files (not directories). Expands ~ in both paths. Overwrites dst if exists.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "src",
+                    ty: "string",
+                    description: "Source file path",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "dst",
+                    ty: "string",
+                    description: "Destination file path",
+                    optional: false,
+                },
+            ],
+            returns: &[
+                ReturnSchema {
+                    ty: "boolean",
+                    description: "True on success, false on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        FunctionSchema {
+            name: "rename",
+            description: "Rename/move a file or directory. Expands ~ in both paths. May overwrite dst depending on OS.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "src",
+                    ty: "string",
+                    description: "Source path",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "dst",
+                    ty: "string",
+                    description: "Destination path",
+                    optional: false,
+                },
+            ],
+            returns: &[
+                ReturnSchema {
+                    ty: "boolean",
+                    description: "True on success, false on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        // === File Metadata Functions (F3.4) ===
+        FunctionSchema {
+            name: "stat",
+            description: "Get file/directory metadata. Follows symlinks. Returns table with size, mtime, atime, ctime, mode (unix), type, readonly.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to stat",
+                optional: false,
+            }],
+            returns: &[
+                ReturnSchema {
+                    ty: "table?",
+                    description: "Metadata table or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        FunctionSchema {
+            name: "mtime",
+            description: "Get file modification time as Unix timestamp. Expands ~ in path.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[
+                ReturnSchema {
+                    ty: "integer?",
+                    description: "Unix timestamp or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        FunctionSchema {
+            name: "size",
+            description: "Get file size in bytes. Expands ~ in path.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "path",
+                ty: "string",
+                description: "Path to check",
+                optional: false,
+            }],
+            returns: &[
+                ReturnSchema {
+                    ty: "integer?",
+                    description: "Size in bytes or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        // === Glob Function (F4.1 - Pattern-based file matching) ===
+        FunctionSchema {
+            name: "glob",
+            description: "Find files matching a shell-style glob pattern. Expands ~ in pattern. Supports *, ?, [abc], [!abc], and ** for recursive matching. Returns sorted array of normalized full paths.",
+            is_method: false,
+            params: &[ParamSchema {
+                name: "pattern",
+                ty: "string",
+                description: "Glob pattern (e.g., '*.lua', 'src/**/*.rs', '~/config/*.conf')",
+                optional: false,
+            }],
+            returns: &[
+                ReturnSchema {
+                    ty: "string[]?",
+                    description: "Array of matching paths or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
+        },
+        // === Find Function (F4.2 - Upward/downward file search) ===
+        FunctionSchema {
+            name: "find",
+            description: "Find files/directories by name with upward or downward search. Upward search walks toward root (useful for finding project markers like .git). Downward search recurses into subdirectories. Supports simple glob patterns (* and ?) in names for downward search.",
+            is_method: false,
+            params: &[
+                ParamSchema {
+                    name: "names",
+                    ty: "string|string[]",
+                    description: "Filename(s) to find. Can include * and ? wildcards for downward search.",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "FsFindOpts?",
+                    description: "Search options: path (starting directory, default: cwd), upward (search toward root, default: false), stop (stop upward search at this directory), type ('file' or 'directory' filter), limit (max results)",
+                    optional: true,
+                },
+            ],
+            returns: &[
+                ReturnSchema {
+                    ty: "string[]?",
+                    description: "Array of matching paths (sorted) or nil on error",
+                },
+                ReturnSchema {
+                    ty: "string?",
+                    description: "Error message or nil on success",
+                },
+            ],
         },
     ],
     fields: &[],

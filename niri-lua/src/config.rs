@@ -203,8 +203,11 @@ impl LuaConfig {
                 Ok(())
             });
 
+        // Create a process manager for async process spawning
+        let process_manager = crate::process::create_process_manager();
+
         runtime
-            .register_action_proxy(action_callback)
+            .register_action_proxy(action_callback, process_manager)
             .map_err(|e| anyhow::anyhow!("Failed to register action proxy: {}", e))?;
 
         debug!("Action proxy initialized (two-phase init)");
@@ -412,8 +415,11 @@ impl LuaConfig {
                 Ok(())
             });
 
+        // Create a process manager for async process spawning
+        let process_manager = crate::process::create_process_manager();
+
         runtime
-            .register_action_proxy(action_callback)
+            .register_action_proxy(action_callback, process_manager)
             .map_err(|e| anyhow::anyhow!("Failed to register action proxy: {}", e))?;
 
         debug!("Action proxy initialized");

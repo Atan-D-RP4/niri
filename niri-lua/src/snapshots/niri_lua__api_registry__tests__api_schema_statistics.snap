@@ -1,6 +1,5 @@
 ---
 source: niri-lua/src/api_registry.rs
-assertion_line: 136
 expression: stats
 ---
 (
@@ -10,19 +9,19 @@ expression: stats
     ),
     (
         "types",
-        7,
+        8,
     ),
     (
         "aliases",
-        17,
+        19,
     ),
     (
         "functions",
-        166,
+        211,
     ),
     (
         "methods",
-        31,
+        36,
     ),
     (
         "fields",

@@ -10,4 +10,5 @@ expression: names
     "Gesture",
     "ConfigCollection",
     "ConfigSectionProxy",
+    "ProcessHandle",
 ]

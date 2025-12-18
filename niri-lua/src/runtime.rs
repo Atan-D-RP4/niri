@@ -48,6 +48,7 @@ use crate::config_wrapper::{register_config_wrapper, ConfigWrapper};
 use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
+use crate::process::SharedProcessManager;
 use crate::loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
 };
@@ -120,6 +121,8 @@ pub struct LuaRuntime {
     pub config_wrapper: Option<ConfigWrapper>,
     /// Timer manager for niri.loop timers
     pub timer_manager: Option<SharedTimerManager>,
+    /// Process manager for async process spawning
+    process_manager: Option<SharedProcessManager>,
     /// Queue of scheduled callbacks (stored as registry keys)
     scheduled_callbacks: Rc<RefCell<VecDeque<LuaRegistryKey>>>,
     /// Configured execution limits
@@ -184,6 +187,7 @@ impl LuaRuntime {
             event_system: None,
             config_wrapper: None,
             timer_manager: None,
+            process_manager: None,
             scheduled_callbacks,
             limits,
             deadline,
@@ -544,6 +548,7 @@ impl LuaRuntime {
     /// # Arguments
     ///
     /// * `callback` - Callback function that executes actions in the compositor
+    /// * `process_manager` - Process manager for async process spawning
     ///
     /// # Example
     ///
@@ -552,14 +557,16 @@ impl LuaRuntime {
     /// runtime.register_action_proxy(Arc::new(|action| {
     ///     // Handle the action (e.g., send via IPC or execute directly)
     ///     Ok(())
-    /// }))?;
+    /// }), process_manager)?;
     /// ```
     ///
     /// # Errors
     ///
     /// Returns an error if action proxy registration fails.
-    pub fn register_action_proxy(&self, callback: ActionCallback) -> LuaResult<()> {
-        register_action_proxy(&self.lua, callback)
+    pub fn register_action_proxy(&mut self, callback: ActionCallback, process_manager: SharedProcessManager) -> LuaResult<()> {
+        register_action_proxy(&self.lua, callback, process_manager.clone())?;
+        self.process_manager = Some(process_manager);
+        Ok(())
     }
 
     /// Load and execute a Lua script from a file.
