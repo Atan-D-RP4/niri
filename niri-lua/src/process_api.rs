@@ -69,47 +69,50 @@ pub fn register_process_api(lua: &Lua, manager: SharedProcessManager) -> LuaResu
         // first parse functions as LuaFunction and only create registry keys
         // when we decide to spawn asynchronously (i.e., when on_exit or
         // streaming callbacks are present).
-        let (spawn_opts, stdout_fn, stderr_fn): (SpawnOpts, Option<LuaFunction>, Option<LuaFunction>) =
-            match opts_value {
-                Some(LuaValue::Table(t)) => {
-                    let mut sopts = SpawnOpts::from_lua_table(&t)?;
+        let (spawn_opts, stdout_fn, stderr_fn): (
+            SpawnOpts,
+            Option<LuaFunction>,
+            Option<LuaFunction>,
+        ) = match opts_value {
+            Some(LuaValue::Table(t)) => {
+                let mut sopts = SpawnOpts::from_lua_table(&t)?;
 
-                    // stdout: boolean | function | nil
-                    let stdout_val = t.get::<LuaValue>("stdout")?;
-                    let stdout_fn = match stdout_val {
-                        LuaValue::Function(f) => {
-                            // streaming implies we should capture for final result
-                            sopts.capture_stdout = true;
-                            Some(f)
-                        }
-                        LuaValue::Boolean(b) => {
-                            sopts.capture_stdout = b;
-                            None
-                        }
-                        LuaValue::Nil => None,
-                        _ => return Err(LuaError::external("stdout must be boolean or function")),
-                    };
+                // stdout: boolean | function | nil
+                let stdout_val = t.get::<LuaValue>("stdout")?;
+                let stdout_fn = match stdout_val {
+                    LuaValue::Function(f) => {
+                        // streaming implies we should capture for final result
+                        sopts.capture_stdout = true;
+                        Some(f)
+                    }
+                    LuaValue::Boolean(b) => {
+                        sopts.capture_stdout = b;
+                        None
+                    }
+                    LuaValue::Nil => None,
+                    _ => return Err(LuaError::external("stdout must be boolean or function")),
+                };
 
-                    // stderr: boolean | function | nil
-                    let stderr_val = t.get::<LuaValue>("stderr")?;
-                    let stderr_fn = match stderr_val {
-                        LuaValue::Function(f) => {
-                            sopts.capture_stderr = true;
-                            Some(f)
-                        }
-                        LuaValue::Boolean(b) => {
-                            sopts.capture_stderr = b;
-                            None
-                        }
-                        LuaValue::Nil => None,
-                        _ => return Err(LuaError::external("stderr must be boolean or function")),
-                    };
+                // stderr: boolean | function | nil
+                let stderr_val = t.get::<LuaValue>("stderr")?;
+                let stderr_fn = match stderr_val {
+                    LuaValue::Function(f) => {
+                        sopts.capture_stderr = true;
+                        Some(f)
+                    }
+                    LuaValue::Boolean(b) => {
+                        sopts.capture_stderr = b;
+                        None
+                    }
+                    LuaValue::Nil => None,
+                    _ => return Err(LuaError::external("stderr must be boolean or function")),
+                };
 
-                    (sopts, stdout_fn, stderr_fn)
-                }
-                Some(LuaValue::Nil) | None => (SpawnOpts::default(), None, None),
-                _ => return Err(LuaError::external("opts must be a table or nil")),
-            };
+                (sopts, stdout_fn, stderr_fn)
+            }
+            Some(LuaValue::Nil) | None => (SpawnOpts::default(), None, None),
+            _ => return Err(LuaError::external("opts must be a table or nil")),
+        };
 
         // Third argument: on_exit callback (function, optional)
         let on_exit_value = args_iter.next();
@@ -180,6 +183,7 @@ pub fn register_process_api(lua: &Lua, manager: SharedProcessManager) -> LuaResu
             event_tx,
             stream_stdout,
             stream_stderr,
+            ping: manager_clone.borrow().ping(),
         };
 
         match spawn_command_async(command, spawn_opts, callbacks) {
@@ -221,46 +225,49 @@ pub fn register_process_api(lua: &Lua, manager: SharedProcessManager) -> LuaResu
         // Parse options and possible streaming callbacks (stdout/stderr) as
         // either boolean or function. We defer creating registry keys until we
         // know we need async registration.
-        let (spawn_opts, stdout_fn, stderr_fn): (SpawnOpts, Option<LuaFunction>, Option<LuaFunction>) =
-            match opts_value {
-                Some(LuaValue::Table(t)) => {
-                    let mut sopts = SpawnOpts::from_lua_table(&t)?;
+        let (spawn_opts, stdout_fn, stderr_fn): (
+            SpawnOpts,
+            Option<LuaFunction>,
+            Option<LuaFunction>,
+        ) = match opts_value {
+            Some(LuaValue::Table(t)) => {
+                let mut sopts = SpawnOpts::from_lua_table(&t)?;
 
-                    // stdout: boolean | function | nil
-                    let stdout_val = t.get::<LuaValue>("stdout")?;
-                    let stdout_fn = match stdout_val {
-                        LuaValue::Function(f) => {
-                            sopts.capture_stdout = true;
-                            Some(f)
-                        }
-                        LuaValue::Boolean(b) => {
-                            sopts.capture_stdout = b;
-                            None
-                        }
-                        LuaValue::Nil => None,
-                        _ => return Err(LuaError::external("stdout must be boolean or function")),
-                    };
+                // stdout: boolean | function | nil
+                let stdout_val = t.get::<LuaValue>("stdout")?;
+                let stdout_fn = match stdout_val {
+                    LuaValue::Function(f) => {
+                        sopts.capture_stdout = true;
+                        Some(f)
+                    }
+                    LuaValue::Boolean(b) => {
+                        sopts.capture_stdout = b;
+                        None
+                    }
+                    LuaValue::Nil => None,
+                    _ => return Err(LuaError::external("stdout must be boolean or function")),
+                };
 
-                    // stderr: boolean | function | nil
-                    let stderr_val = t.get::<LuaValue>("stderr")?;
-                    let stderr_fn = match stderr_val {
-                        LuaValue::Function(f) => {
-                            sopts.capture_stderr = true;
-                            Some(f)
-                        }
-                        LuaValue::Boolean(b) => {
-                            sopts.capture_stderr = b;
-                            None
-                        }
-                        LuaValue::Nil => None,
-                        _ => return Err(LuaError::external("stderr must be boolean or function")),
-                    };
+                // stderr: boolean | function | nil
+                let stderr_val = t.get::<LuaValue>("stderr")?;
+                let stderr_fn = match stderr_val {
+                    LuaValue::Function(f) => {
+                        sopts.capture_stderr = true;
+                        Some(f)
+                    }
+                    LuaValue::Boolean(b) => {
+                        sopts.capture_stderr = b;
+                        None
+                    }
+                    LuaValue::Nil => None,
+                    _ => return Err(LuaError::external("stderr must be boolean or function")),
+                };
 
-                    (sopts, stdout_fn, stderr_fn)
-                }
-                Some(LuaValue::Nil) | None => (SpawnOpts::default(), None, None),
-                _ => return Err(LuaError::external("opts must be a table or nil")),
-            };
+                (sopts, stdout_fn, stderr_fn)
+            }
+            Some(LuaValue::Nil) | None => (SpawnOpts::default(), None, None),
+            _ => return Err(LuaError::external("opts must be a table or nil")),
+        };
 
         // Third argument: on_exit callback (function, optional)
         let on_exit_value = args_iter.next();
@@ -327,6 +334,7 @@ pub fn register_process_api(lua: &Lua, manager: SharedProcessManager) -> LuaResu
             event_tx,
             stream_stdout,
             stream_stderr,
+            ping: manager_clone2.borrow().ping(),
         };
 
         match spawn_shell_command_async(command, spawn_opts, _callbacks) {
@@ -350,8 +358,11 @@ pub fn register_process_api(lua: &Lua, manager: SharedProcessManager) -> LuaResu
 
     Ok(())
 }
+#[cfg(test)]
 mod tests {
-    use super::*;
+    use mlua::prelude::*;
+
+    use super::register_process_api;
     use crate::process::create_process_manager;
 
     #[test]
@@ -467,8 +478,9 @@ mod tests {
 
     #[test]
     fn test_on_exit_callback_fires() {
-        use crate::process::fire_due_process_events;
         use std::time::Duration;
+
+        use crate::process::fire_due_process_events;
 
         let lua = Lua::new();
         let manager = create_process_manager();
@@ -512,8 +524,9 @@ mod tests {
 
     #[test]
     fn test_on_exit_callback_with_exit_code() {
-        use crate::process::fire_due_process_events;
         use std::time::Duration;
+
+        use crate::process::fire_due_process_events;
 
         let lua = Lua::new();
         let manager = create_process_manager();
@@ -541,8 +554,9 @@ mod tests {
 
     #[test]
     fn test_on_exit_callback_with_stderr() {
-        use crate::process::fire_due_process_events;
         use std::time::Duration;
+
+        use crate::process::fire_due_process_events;
 
         let lua = Lua::new();
         let manager = create_process_manager();
@@ -570,8 +584,9 @@ mod tests {
 
     #[test]
     fn test_stdout_streaming_callback() {
-        use crate::process::fire_due_process_events;
         use std::time::Duration;
+
+        use crate::process::fire_due_process_events;
 
         let lua = Lua::new();
         let manager = create_process_manager();
@@ -620,8 +635,9 @@ mod tests {
 
     #[test]
     fn test_stderr_streaming_callback() {
-        use crate::process::fire_due_process_events;
         use std::time::Duration;
+
+        use crate::process::fire_due_process_events;
 
         let lua = Lua::new();
         let manager = create_process_manager();
@@ -655,14 +671,17 @@ mod tests {
 
     #[test]
     fn test_streaming_with_capture() {
-        use crate::process::fire_due_process_events;
         use std::time::Duration;
+
+        use crate::process::fire_due_process_events;
 
         let lua = Lua::new();
         let manager = create_process_manager();
         register_process_api(&lua, manager.clone()).unwrap();
 
-        lua.load("_G.lines = nil; _G.final_stdout = nil").exec().unwrap();
+        lua.load("_G.lines = nil; _G.final_stdout = nil")
+            .exec()
+            .unwrap();
 
         // Callback signature: function(err, data) as per spec
         lua.load(

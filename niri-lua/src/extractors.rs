@@ -1003,8 +1003,6 @@ pub fn extract_xwayland_satellite(table: &LuaTable) -> LuaResult<Option<Xwayland
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

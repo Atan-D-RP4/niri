@@ -467,18 +467,11 @@ pub fn register(lua: &Lua, niri: &Table) -> Result<()> {
 }
 
 /// Check if a path is executable by the current user.
-#[cfg(unix)]
 fn is_executable(path: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)
         .map(|m| m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &str) -> bool {
-    // On non-Unix, just check if file exists
-    Path::new(path).is_file()
 }
 
 /// Filter for directory listing operations.
@@ -896,24 +889,11 @@ fn stat_impl(lua: &mlua::Lua, path: &str) -> mlua::Result<(Option<mlua::Table>, 
     }
 
     // Creation time (ctime) - platform dependent
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        // On Unix, ctime is status change time (not creation time)
-        table.set("ctime", metadata.ctime() as u64)?;
-        // Unix mode (permissions)
-        table.set("mode", metadata.mode())?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        // On non-Unix, try to get creation time
-        if let Ok(created) = metadata.created() {
-            if let Ok(duration) = created.duration_since(UNIX_EPOCH) {
-                table.set("ctime", duration.as_secs())?;
-            }
-        }
-    }
+    use std::os::unix::fs::MetadataExt;
+    // On Unix, ctime is status change time (not creation time)
+    table.set("ctime", metadata.ctime() as u64)?;
+    // Unix mode (permissions)
+    table.set("mode", metadata.mode())?;
 
     Ok((Some(table), None))
 }
@@ -1268,7 +1248,6 @@ mod tests {
         assert!(!readable.call::<bool>("").unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn symlink_following_and_broken_symlink() {
         use std::os::unix::fs::symlink;
@@ -1353,7 +1332,6 @@ mod tests {
         let bin = dir.path().join("test-exec");
         fs::write(&bin, b"dummy").unwrap();
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = fs::metadata(&bin).unwrap().permissions();
@@ -1399,7 +1377,6 @@ mod tests {
         assert!(res.is_none());
     }
 
-    #[cfg(unix)]
     #[test]
     fn which_with_absolute_path() {
         let dir = tempdir().unwrap();
@@ -1422,7 +1399,6 @@ mod tests {
         assert_eq!(res.map(|p| PathBuf::from(p)), Some(bin));
     }
 
-    #[cfg(unix)]
     #[test]
     fn which_non_executable_returns_none() {
         let dir = tempdir().unwrap();
@@ -1573,7 +1549,6 @@ mod tests {
         assert!(!is_dir_fn.call::<bool>("/nonexistent/path").unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn is_symlink_true_for_symlink() {
         use std::os::unix::fs::symlink;
@@ -1618,7 +1593,6 @@ mod tests {
         assert!(!is_symlink_fn.call::<bool>("/nonexistent/path").unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn is_executable_true_for_executable() {
         use std::os::unix::fs::PermissionsExt;
@@ -1638,7 +1612,6 @@ mod tests {
         assert!(is_exec_fn.call::<bool>(bin.to_str().unwrap()).unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn is_executable_false_for_non_executable() {
         use std::os::unix::fs::PermissionsExt;
@@ -1668,7 +1641,6 @@ mod tests {
         assert!(!is_exec_fn.call::<bool>("/nonexistent/path").unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn is_file_follows_symlink() {
         use std::os::unix::fs::symlink;
@@ -1689,7 +1661,6 @@ mod tests {
         assert!(is_file_fn.call::<bool>(link.to_str().unwrap()).unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn exists_false_for_broken_symlink() {
         use std::os::unix::fs::symlink;
@@ -1711,7 +1682,6 @@ mod tests {
         assert!(!exists_fn.call::<bool>(link.to_str().unwrap()).unwrap());
     }
 
-    #[cfg(unix)]
     #[test]
     fn is_symlink_true_for_broken_symlink() {
         use std::os::unix::fs::symlink;
@@ -2164,7 +2134,6 @@ mod tests {
         assert!(err.is_some());
     }
 
-    #[cfg(unix)]
     #[test]
     fn list_files_follows_symlinks_to_files() {
         use std::os::unix::fs::symlink;
@@ -2196,7 +2165,6 @@ mod tests {
         assert!(!entries.contains(&"dirlink".to_string()));
     }
 
-    #[cfg(unix)]
     #[test]
     fn list_dirs_follows_symlinks_to_dirs() {
         use std::os::unix::fs::symlink;
@@ -3388,7 +3356,6 @@ mod tests {
         assert!(err.unwrap().contains("cannot stat"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn stat_includes_unix_mode() {
         let dir = tempdir().unwrap();

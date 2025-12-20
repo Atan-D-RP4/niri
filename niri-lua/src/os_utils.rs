@@ -328,7 +328,6 @@ mod tests {
         assert!(res.is_none());
     }
 
-    #[cfg(unix)]
     #[test]
     fn hostname_invalid_utf8_throws() {
         use std::ffi::OsString;
@@ -362,7 +361,6 @@ mod tests {
             Some("upper".into())
         );
         // On Unix, lowercase should not find the uppercase variable
-        #[cfg(unix)]
         assert!(getenv
             .call::<Option<String>>("niri_case_test")
             .unwrap()

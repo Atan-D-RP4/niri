@@ -13,7 +13,7 @@ mod tests {
 
     #[test]
     fn test_execute_simple_arithmetic() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 2 + 2");
 
         assert!(success, "Arithmetic should execute successfully");
@@ -22,7 +22,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_print() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print('Hello'); print('World')");
 
         assert!(success, "Code with print should execute successfully");
@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_error() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("error('test error')");
 
         assert!(!success, "Code with error should fail");
@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn test_execute_syntax_error() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print(1 +");
 
         assert!(!success, "Syntax error should fail");
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_variables() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("local x = 10; local y = 20; return x + y");
 
         assert!(success, "Code with variables should execute successfully");
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_table() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) =
             runtime.execute_string("local t = {a = 1, b = 2}; return t.a + t.b");
 
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_function() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = r#"
 local function add(a, b)
     return a + b
@@ -87,7 +87,7 @@ return add(5, 7)
 
     #[test]
     fn test_execute_with_loop() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = r#"
 local sum = 0
 for i = 1, 5 do
@@ -106,7 +106,7 @@ return sum
 
     #[test]
     fn test_execute_with_multiple_prints() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = r#"
 print("Line 1")
 print("Line 2")
@@ -125,7 +125,7 @@ print("Line 3")
 
     #[test]
     fn test_execute_empty_code() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("");
 
         assert!(success, "Empty code should succeed");
@@ -134,7 +134,7 @@ print("Line 3")
 
     #[test]
     fn test_execute_nil_return() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return nil");
 
         assert!(success, "Returning nil should succeed");
@@ -147,7 +147,7 @@ print("Line 3")
 
     #[test]
     fn test_execute_string_with_special_chars() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print('Hello\\nWorld')");
 
         assert!(success, "Code with escaped characters should execute");
@@ -158,7 +158,7 @@ print("Line 3")
     fn test_ipc_executor_integration() {
         use niri_lua::IpcLuaExecutor;
 
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         #[allow(clippy::arc_with_non_send_sync)]
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
 
@@ -171,7 +171,7 @@ print("Line 3")
     fn test_ipc_executor_with_error() {
         use niri_lua::IpcLuaExecutor;
 
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         #[allow(clippy::arc_with_non_send_sync)]
         let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
         let (output, success) = executor.execute("error('test')");
@@ -196,7 +196,7 @@ print("Line 3")
 
     #[test]
     fn test_consecutive_executions() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
 
         // First execution
         let (output1, success1) = runtime.execute_string("return 1");
@@ -216,7 +216,7 @@ print("Line 3")
 
     #[test]
     fn test_multiline_code() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local x = 10\nlocal y = 20\nprint(x + y)";
         let (output, success) = runtime.execute_string(code);
 
@@ -226,7 +226,7 @@ print("Line 3")
 
     #[test]
     fn test_comment_handling() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "-- This is a comment\nprint('Hello') -- inline comment";
         let (output, success) = runtime.execute_string(code);
 
@@ -236,7 +236,7 @@ print("Line 3")
 
     #[test]
     fn test_string_output_with_numbers() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "print(42); print(3.14); print(true); print(false)";
         let (output, success) = runtime.execute_string(code);
 
@@ -251,7 +251,7 @@ print("Line 3")
 
     #[test]
     fn test_return_simple_string() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 'hello'");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "hello", "Simple string should be returned as-is");
@@ -259,7 +259,7 @@ print("Line 3")
 
     #[test]
     fn test_return_number() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 42");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "42", "Number should be converted to string");
@@ -267,7 +267,7 @@ print("Line 3")
 
     #[test]
     fn test_return_float() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 3.14");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "3.14", "Float should be converted to string");
@@ -275,7 +275,7 @@ print("Line 3")
 
     #[test]
     fn test_return_boolean_true() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return true");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "true", "Boolean true should be converted to 'true'");
@@ -283,7 +283,7 @@ print("Line 3")
 
     #[test]
     fn test_return_boolean_false() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return false");
         assert!(success, "Should execute successfully");
         assert_eq!(
@@ -294,7 +294,7 @@ print("Line 3")
 
     #[test]
     fn test_return_nil() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return nil");
         assert!(success, "Should execute successfully");
         assert!(
@@ -306,7 +306,7 @@ print("Line 3")
 
     #[test]
     fn test_return_simple_array_table() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return {1, 2, 3}");
         assert!(success, "Should execute successfully");
         println!("Simple array table output: '{}'", output);
@@ -318,7 +318,7 @@ print("Line 3")
 
     #[test]
     fn test_return_table_with_string_keys() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return {name = 'test', value = 42}");
         assert!(success, "Should execute successfully");
         println!("Table with string keys output: '{}'", output);
@@ -331,7 +331,7 @@ print("Line 3")
 
     #[test]
     fn test_return_nested_table() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) =
             runtime.execute_string("return {{id = 1, name = 'a'}, {id = 2, name = 'b'}}");
         assert!(success, "Should execute successfully");
@@ -343,7 +343,7 @@ print("Line 3")
 
     #[test]
     fn test_return_empty_table() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return {}");
         assert!(success, "Should execute successfully");
         println!("Empty table output: '{}'", output);
@@ -356,7 +356,7 @@ print("Line 3")
 
     #[test]
     fn test_return_large_array() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local t = {} for i=1,100 do t[i] = i end return t";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -368,7 +368,7 @@ print("Line 3")
 
     #[test]
     fn test_return_large_complex_table() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code =
             "local t = {} for i=1,50 do t[i] = {id=i, value='item'..i, active=i%2==0} end return t";
         let (output, success) = runtime.execute_string(code);
@@ -384,7 +384,7 @@ print("Line 3")
 
     #[test]
     fn test_table_representation_includes_structure() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         // Tables are now pretty-printed like vim.print()
         let (output, success) = runtime.execute_string("return {a=1, b={c=2}}");
         assert!(success, "Should execute successfully");
@@ -396,7 +396,7 @@ print("Line 3")
 
     #[test]
     fn test_no_explicit_return() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("local x = 5 + 3");
         assert!(success, "Should execute successfully");
         println!("No explicit return output: '{}'", output);
@@ -409,7 +409,7 @@ print("Line 3")
 
     #[test]
     fn test_print_and_return_value() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "print('First'); print('Second'); return 'value'";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -422,7 +422,7 @@ print("Line 3")
 
     #[test]
     fn test_print_with_multiple_args() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print('hello', 'world', 42, true)");
         assert!(success, "Should execute successfully");
         println!("Print with multiple args: '{}'", output);
@@ -433,7 +433,7 @@ print("Line 3")
 
     #[test]
     fn test_print_numbers_and_types() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = r#"
             print(42)
             print(3.14)
@@ -452,7 +452,7 @@ print("Line 3")
 
     #[test]
     fn test_error_with_message() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("error('custom error message')");
         assert!(!success, "Should fail on error");
         println!("Error output: '{}'", output);
@@ -465,7 +465,7 @@ print("Line 3")
 
     #[test]
     fn test_syntax_error_output() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 1 + + 2");
         assert!(!success, "Should fail on syntax error");
         println!("Syntax error output: '{}'", output);
@@ -474,7 +474,7 @@ print("Line 3")
 
     #[test]
     fn test_runtime_error_output() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 5 + 'string'");
         assert!(!success, "Should fail on runtime type error");
         println!("Runtime error output: '{}'", output);
@@ -483,7 +483,7 @@ print("Line 3")
 
     #[test]
     fn test_consecutive_print_calls() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = r#"
             print("A")
             print("B")
@@ -503,7 +503,7 @@ print("Line 3")
 
     #[test]
     fn test_print_concatenated_strings() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "print('Hello ' .. 'World ' .. '2025')";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -514,7 +514,7 @@ print("Line 3")
 
     #[test]
     fn test_return_long_string() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "return 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -526,7 +526,7 @@ print("Line 3")
 
     #[test]
     fn test_return_multiline_string() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = r#"return "Line 1\nLine 2\nLine 3""#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -540,7 +540,7 @@ print("Line 3")
 
     #[test]
     fn test_return_zero() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 0");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "0", "Zero should format as '0'");
@@ -548,7 +548,7 @@ print("Line 3")
 
     #[test]
     fn test_return_negative_integer() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return -42");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "-42", "Negative integer should format correctly");
@@ -556,7 +556,7 @@ print("Line 3")
 
     #[test]
     fn test_return_large_integer() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 1000000000000");
         assert!(success, "Should execute successfully");
         assert_eq!(
@@ -567,7 +567,7 @@ print("Line 3")
 
     #[test]
     fn test_return_small_float() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 0.5");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "0.5", "Small float should format correctly");
@@ -575,7 +575,7 @@ print("Line 3")
 
     #[test]
     fn test_return_very_small_float() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 0.000001");
         assert!(success, "Should execute successfully");
         // Lua may format as scientific notation or decimal
@@ -588,7 +588,7 @@ print("Line 3")
 
     #[test]
     fn test_return_negative_float() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return -3.14159");
         assert!(success, "Should execute successfully");
         assert!(
@@ -599,7 +599,7 @@ print("Line 3")
 
     #[test]
     fn test_return_infinity() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return math.huge");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "inf", "Infinity should format as 'inf'");
@@ -607,7 +607,7 @@ print("Line 3")
 
     #[test]
     fn test_return_negative_infinity() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return -math.huge");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "-inf", "Negative infinity should format as '-inf'");
@@ -615,7 +615,7 @@ print("Line 3")
 
     #[test]
     fn test_return_nan() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 0/0");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "nan", "NaN should format as 'nan'");
@@ -627,7 +627,7 @@ print("Line 3")
 
     #[test]
     fn test_return_empty_string() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return ''");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "", "Empty string should produce empty output");
@@ -635,7 +635,7 @@ print("Line 3")
 
     #[test]
     fn test_print_empty_string() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print('')");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "", "Print empty string should produce empty output");
@@ -643,7 +643,7 @@ print("Line 3")
 
     #[test]
     fn test_return_string_with_quotes() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string(r#"return "It's a \"quoted\" string""#);
         assert!(success, "Should execute successfully");
         assert!(
@@ -654,7 +654,7 @@ print("Line 3")
 
     #[test]
     fn test_return_unicode_string() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 'Hello 世界 🌍'");
         assert!(success, "Should execute successfully");
         assert_eq!(
@@ -665,7 +665,7 @@ print("Line 3")
 
     #[test]
     fn test_print_unicode_output() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print('emoji: 🚀 ✨ 🔥')");
         assert!(success, "Should execute successfully");
         assert_eq!(
@@ -676,7 +676,7 @@ print("Line 3")
 
     #[test]
     fn test_return_string_with_tabs() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 'Hello\\tWorld'");
         assert!(success, "Should execute successfully");
         assert!(
@@ -687,7 +687,7 @@ print("Line 3")
 
     #[test]
     fn test_return_string_with_newlines() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 'Line1\\nLine2'");
         assert!(success, "Should execute successfully");
         assert!(
@@ -698,7 +698,7 @@ print("Line 3")
 
     #[test]
     fn test_string_with_null_bytes() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (_output, success) = runtime.execute_string("return 'Hello\\0World'");
         assert!(success, "Should handle null bytes without crashing");
     }
@@ -709,7 +709,7 @@ print("Line 3")
 
     #[test]
     fn test_print_boolean_true() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print(true)");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "true", "Boolean true should print as 'true'");
@@ -717,7 +717,7 @@ print("Line 3")
 
     #[test]
     fn test_print_boolean_false() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print(false)");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "false", "Boolean false should print as 'false'");
@@ -725,7 +725,7 @@ print("Line 3")
 
     #[test]
     fn test_print_nil() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("print(nil)");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "nil", "nil should print as 'nil'");
@@ -737,7 +737,7 @@ print("Line 3")
 
     #[test]
     fn test_print_with_all_types() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "print(42, 'string', true, nil, false, 3.14)";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -748,7 +748,7 @@ print("Line 3")
 
     #[test]
     fn test_print_multiple_lines_with_return() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "print('Line 1'); print('Line 2'); return 'Result'";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -765,7 +765,7 @@ print("Line 3")
 
     #[test]
     fn test_math_operations() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return math.sqrt(16)");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "4", "math.sqrt should work");
@@ -773,7 +773,7 @@ print("Line 3")
 
     #[test]
     fn test_table_library() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local t = {}; table.insert(t, 1); return #t";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -782,7 +782,7 @@ print("Line 3")
 
     #[test]
     fn test_string_library() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return string.len('hello')");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "5", "string.len should work");
@@ -790,7 +790,7 @@ print("Line 3")
 
     #[test]
     fn test_string_upper() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return string.upper('hello')");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "HELLO", "string.upper should work");
@@ -798,7 +798,7 @@ print("Line 3")
 
     #[test]
     fn test_string_sub() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return string.sub('hello', 1, 3)");
         assert!(success, "Should execute successfully");
         assert_eq!(output, "hel", "string.sub should work");
@@ -810,7 +810,7 @@ print("Line 3")
 
     #[test]
     fn test_if_statement_true() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "if 1 > 0 then return 'yes' else return 'no' end";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -819,7 +819,7 @@ print("Line 3")
 
     #[test]
     fn test_if_statement_false() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "if 1 > 2 then return 'yes' else return 'no' end";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -828,7 +828,7 @@ print("Line 3")
 
     #[test]
     fn test_for_loop_range() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local sum = 0; for i=1,5 do sum = sum + i end; return sum";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -837,7 +837,7 @@ print("Line 3")
 
     #[test]
     fn test_while_loop() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local i = 0; while i < 5 do i = i + 1 end; return i";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -846,7 +846,7 @@ print("Line 3")
 
     #[test]
     fn test_repeat_until_loop() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local i = 0; repeat i = i + 1 until i >= 3; return i";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -859,7 +859,7 @@ print("Line 3")
 
     #[test]
     fn test_function_return_value() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local function add(a, b) return a + b end; return add(3, 4)";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -868,7 +868,7 @@ print("Line 3")
 
     #[test]
     fn test_recursive_function() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local function fact(n) if n <= 1 then return 1 else return n * fact(n-1) end end; return fact(5)";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -877,7 +877,7 @@ print("Line 3")
 
     #[test]
     fn test_variadic_function() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local function sum(...) local s=0; for _,v in ipairs({...}) do s=s+v end; return s end; return sum(1,2,3,4,5)";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -890,7 +890,7 @@ print("Line 3")
 
     #[test]
     fn test_division_by_zero() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 1 / 0");
         assert!(
             success,
@@ -901,7 +901,7 @@ print("Line 3")
 
     #[test]
     fn test_undefined_variable() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return undefined_var");
         // In Lua, accessing undefined variables returns nil, not an error
         assert!(success, "Should execute successfully");
@@ -913,7 +913,7 @@ print("Line 3")
 
     #[test]
     fn test_type_error() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return 'string' + 5");
         assert!(!success, "Type error should fail");
         assert!(output.contains("Error"), "Should contain error message");
@@ -921,7 +921,7 @@ print("Line 3")
 
     #[test]
     fn test_call_non_function() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("return (42)()");
         assert!(!success, "Calling non-function should fail");
         assert!(output.contains("Error"), "Should contain error message");
@@ -929,7 +929,7 @@ print("Line 3")
 
     #[test]
     fn test_break_outside_loop() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let (output, success) = runtime.execute_string("break");
         assert!(!success, "Break outside loop should fail");
         assert!(output.contains("Error"), "Should contain error message");
@@ -941,7 +941,7 @@ print("Line 3")
 
     #[test]
     fn test_deeply_nested_function_calls() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "return (((((5 + 4) * 3) - 2) / 1) + 0)";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");
@@ -950,7 +950,7 @@ print("Line 3")
 
     #[test]
     fn test_long_string_concatenation() {
-        let mut runtime = create_runtime();
+        let runtime = create_runtime();
         let code = "local s = ''; for i=1,100 do s = s .. 'x' end; return string.len(s)";
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Should execute successfully");

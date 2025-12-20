@@ -7,7 +7,7 @@
 use niri_lua::LuaRuntime;
 
 mod common;
-use common::create_runtime;
+use common::{create_runtime, create_runtime_with_process_api};
 
 // ========================================================================
 // BASIC LUA EXECUTION TESTS
@@ -645,4 +645,100 @@ fn test_metatable_add() {
     let (output, success) = runtime.execute_string(code);
     assert!(success, "Metatable __add should work");
     assert!(output.contains("30"), "Output: {}", output);
+}
+
+// ========================================================================
+// PROCESS CONTROL API TESTS
+// ========================================================================
+
+mod process_integration_tests {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    fn flush_process_events(runtime: &LuaRuntime) {
+        let _ = runtime.process_async();
+    }
+
+    fn wait_for_lua_condition(runtime: &LuaRuntime, script: &str, timeout: Duration) {
+        let start = Instant::now();
+        loop {
+            flush_process_events(runtime);
+            let (output, success) = runtime.execute_string(script);
+            if success && output == "1" {
+                break;
+            }
+            if Instant::now().saturating_duration_since(start) > timeout {
+                panic!("timed out waiting for Lua condition: {}", script);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn test_spawn_wait_returns_stdout_and_exit_code() {
+        let (runtime, _manager) = create_runtime_with_process_api();
+        let (output, success) = runtime.execute_string(
+            r#"
+                local proc = niri.process.spawn({"printf", "ready"}, {})
+                local result = proc:wait()
+                return string.format("%d:%s", result.code, result.stdout)
+            "#,
+        );
+        assert!(success, "spawn should succeed");
+        assert_eq!(
+            output, "0:ready",
+            "wait should capture exit code and stdout"
+        );
+    }
+
+    #[test]
+    fn test_detach_returns_nil_handle() {
+        let (runtime, _manager) = create_runtime_with_process_api();
+        let (output, success) = runtime.execute_string(
+            r#"
+                local handle = niri.process.spawn({"true"}, { detach = true })
+                return handle == nil and "true" or "false"
+            "#,
+        );
+        assert!(success, "detach spawn should succeed");
+        assert_eq!(output, "true", "detach mode must not return a handle");
+    }
+
+    #[test]
+    fn test_spawn_with_stdout_capture() {
+        // Test that spawn with stdout=true captures output via wait()
+        // This tests the synchronous path which is more reliable in unit tests
+        let (runtime, _manager) = create_runtime_with_process_api();
+
+        let (output, success) = runtime.execute_string(
+            r#"
+                local handle = niri.process.spawn({"echo", "hello"}, {
+                    stdout = true
+                })
+                local result = handle:wait(5000)
+                return result.stdout
+            "#,
+        );
+        assert!(success, "spawn with wait should succeed");
+        assert_eq!(output.trim(), "hello", "should capture stdout");
+    }
+
+    #[test]
+    fn test_spawn_respects_env_and_cwd_options() {
+        let (runtime, _manager) = create_runtime_with_process_api();
+        let (output, success) = runtime.execute_string(
+            r#"
+                local proc = niri.process.spawn({"/bin/sh", "-c", "printf '%s:%s' \"$MY_VAR\" \"$(pwd)\""}, {
+                    env = { MY_VAR = "value-123" },
+                    cwd = "/tmp",
+                })
+                local result = proc:wait()
+                return result.stdout
+            "#,
+        );
+        assert!(success, "env/cwd spawn should succeed");
+        assert_eq!(output, "value-123:/tmp", "env var and cwd should propagate");
+    }
 }

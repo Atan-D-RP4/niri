@@ -79,16 +79,16 @@ pub use loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager, TimerManager,
     TimerState,
 };
-// Tier 5 exports
-pub use process::{
-    create_process_manager, fire_due_process_events, next_tracking_id, spawn_command_async,
-    spawn_shell_command_async, ProcessCallbacks, ProcessEvent, ProcessHandle, ProcessManager,
-    SharedProcessManager, SpawnOpts, SpawnResult,
-};
-pub use process_api::register_process_api;
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
 use mlua::prelude::*;
 pub use niri_api::NiriApi;
+// Tier 5 exports
+pub use process::{
+    create_process_event_ping, create_process_manager, fire_due_process_events, next_tracking_id,
+    spawn_command_async, spawn_shell_command_async, ProcessCallbacks, ProcessEvent, ProcessHandle,
+    ProcessManager, SharedProcessManager, SpawnOpts, SpawnResult,
+};
+pub use process_api::register_process_api;
 pub use runtime::LuaRuntime;
 pub use runtime_api::{
     clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,

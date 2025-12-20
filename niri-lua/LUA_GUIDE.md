@@ -18,6 +18,10 @@ Complete reference for Lua configuration in Niri. For a quick introduction, see 
 10. [Startup Commands](#startup-commands)
 11. [Animations](#animations)
 12. [Runtime APIs](#runtime-apis)
+    - [State Queries](#state-queries)
+    - [Action Execution](#action-execution)
+    - [Utility Functions](#utility-functions)
+    - [Process Control](#process-control)
 13. [Event Handling](#event-handling)
 14. [Timers and Scheduling](#timers-and-scheduling)
 15. [KDL vs Lua Migration](#kdl-vs-lua-migration)
@@ -597,6 +601,77 @@ niri.utils.debug("Debug message")
 niri.utils.warn("Warning message")
 niri.utils.error("Error message")
 ```
+
+### Process Control
+
+Spawn and manage child processes with the `niri.spawn()` function.
+
+#### Basic Usage
+
+```lua
+-- Fire-and-forget spawn (no return value)
+niri.spawn("firefox")
+niri.spawn({ "echo", "hello", "world" })
+
+-- Spawn with options (returns ProcessHandle)
+local handle = niri.spawn("my-script.sh", {
+    stdout = true,  -- capture stdout
+    stderr = true,  -- capture stderr
+    on_exit = function(result)
+        print("Exit code:", result.code)
+        print("Stdout:", result.stdout)
+    end
+})
+```
+
+#### SpawnOpts Options
+
+Configure process spawning with these options:
+
+- `cwd` (string) - Working directory for the process
+- `env` (table) - Environment variables as key-value pairs: `{KEY = "value"}`
+- `clear_env` (boolean) - Clear environment before adding `env` variables
+- `stdin` (string) - Data to write to stdin, then close the pipe
+- `stdin_pipe` (boolean) - Keep stdin open for writing via `handle:write()`
+- `stdout` (boolean|function) - `true` to capture output, or function for streaming
+- `stderr` (boolean|function) - `true` to capture output, or function for streaming
+- `text` (boolean) - Strip trailing newlines from output (default `true`)
+- `detach` (boolean) - Detach process (no handle returned, process continues independently)
+- `on_exit` (function) - Callback when process exits, receives exit result table
+
+#### ProcessHandle Methods
+
+When `niri.spawn()` returns a handle, you can control the process:
+
+- `handle:wait(timeout_ms?)` - Wait for process to exit, returns result table. Optional timeout in milliseconds.
+- `handle:kill(signal?)` - Send signal to process (default `"SIGTERM"`). Signal can be a number or string like `"SIGKILL"` or `"SIGTERM"`.
+- `handle:write(data)` - Write data to stdin (requires `stdin_pipe=true`)
+- `handle:close_stdin()` - Close stdin pipe explicitly
+- `handle:is_closing()` - Check if process is currently exiting
+
+#### Streaming Callbacks
+
+Use function callbacks for real-time output processing:
+
+```lua
+niri.spawn("tail -f /var/log/syslog", {
+    stdout = function(line)
+        print("Log:", line)
+    end,
+    on_exit = function(result)
+        print("Tail exited with code:", result.code)
+    end
+})
+```
+
+#### Exit Result Table
+
+The `on_exit` callback and `handle:wait()` return a table with:
+
+- `code` (number|nil) - Exit code if process exited normally
+- `signal` (number|nil) - Signal number if process was killed by a signal
+- `stdout` (string|nil) - Captured stdout if `stdout=true` was set
+- `stderr` (string|nil) - Captured stderr if `stderr=true` was set
 
 ---
 

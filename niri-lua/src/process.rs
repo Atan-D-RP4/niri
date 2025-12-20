@@ -44,6 +44,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use calloop::ping::{make_ping, Ping, PingSource};
 use log::{debug, error, warn};
 use mlua::prelude::*;
 use nix::sys::signal::{kill as nix_kill, Signal};
@@ -191,15 +192,18 @@ pub enum ProcessEvent {
     /// A line was read from stderr.
     StderrLine { tracking_id: u64, line: String },
     /// The process has exited.
-    Exited { tracking_id: u64, result: SpawnResult },
+    Exited {
+        tracking_id: u64,
+        result: SpawnResult,
+    },
 }
 
 /// State for a tracked process in the ProcessManager.
 struct TrackedProcess {
     /// Unique tracking ID for this process.
-    tracking_id: u64,
+    _tracking_id: u64,
     /// OS process ID.
-    pid: u32,
+    _pid: u32,
     /// Registry key for on_exit callback (if any).
     on_exit_key: Option<LuaRegistryKey>,
     /// Registry key for stdout streaming callback (if any).
@@ -207,9 +211,9 @@ struct TrackedProcess {
     /// Registry key for stderr streaming callback (if any).
     stderr_cb_key: Option<LuaRegistryKey>,
     /// Whether we've received the exit event.
-    exited: bool,
+    _exited: bool,
     /// The exit result (populated when exited).
-    exit_result: Option<SpawnResult>,
+    _exit_result: Option<SpawnResult>,
 }
 
 /// Manages tracked processes and their callbacks.
@@ -225,6 +229,8 @@ pub struct ProcessManager {
     event_rx: mpsc::Receiver<ProcessEvent>,
     /// Channel sender (cloned to reader threads).
     event_tx: mpsc::Sender<ProcessEvent>,
+    /// Optional ping sender to wake the event loop when events are available.
+    ping: Option<Ping>,
 }
 
 impl ProcessManager {
@@ -235,12 +241,22 @@ impl ProcessManager {
             processes: HashMap::new(),
             event_rx,
             event_tx,
+            ping: None,
         }
     }
 
     /// Get the event sender for reader threads.
     pub fn event_sender(&self) -> mpsc::Sender<ProcessEvent> {
         self.event_tx.clone()
+    }
+
+    /// Set the ping sender to wake the event loop when events are available.
+    pub fn set_ping(&mut self, ping: Ping) {
+        self.ping = Some(ping);
+    }
+
+    pub fn ping(&self) -> Option<Ping> {
+        self.ping.clone()
     }
 
     /// Register a new tracked process.
@@ -259,13 +275,13 @@ impl ProcessManager {
         self.processes.insert(
             tracking_id,
             TrackedProcess {
-                tracking_id,
-                pid,
+                _tracking_id: tracking_id,
+                _pid: pid,
                 on_exit_key,
                 stdout_cb_key,
                 stderr_cb_key,
-                exited: false,
-                exit_result: None,
+                _exited: false,
+                _exit_result: None,
             },
         );
     }
@@ -328,11 +344,22 @@ pub fn create_process_manager() -> SharedProcessManager {
     Rc::new(RefCell::new(ProcessManager::new()))
 }
 
+/// Create a ping source for process events.
+/// Returns (PingSource, Ping) - register PingSource with calloop,
+/// store Ping in ProcessManager to wake the loop.
+pub fn create_process_event_ping() -> (PingSource, Ping) {
+    let (ping, ping_source) = make_ping().expect("Failed to create process event ping");
+    (ping_source, ping)
+}
+
 /// Fire all pending process events and execute their callbacks.
 ///
 /// This should be called from the compositor's event loop.
 /// Returns the number of events processed and any errors encountered.
-pub fn fire_due_process_events(lua: &Lua, manager: &SharedProcessManager) -> (usize, Vec<LuaError>) {
+pub fn fire_due_process_events(
+    lua: &Lua,
+    manager: &SharedProcessManager,
+) -> (usize, Vec<LuaError>) {
     let mut processed = 0;
     let mut errors = Vec::new();
 
@@ -391,7 +418,10 @@ pub fn fire_due_process_events(lua: &Lua, manager: &SharedProcessManager) -> (us
                     }
                 }
             }
-            ProcessEvent::Exited { tracking_id, result } => {
+            ProcessEvent::Exited {
+                tracking_id,
+                result,
+            } => {
                 // Get on_exit callback if registered
                 let callback_result = {
                     let mgr = manager.borrow();
@@ -560,18 +590,10 @@ impl ProcessInner {
         self.collect_output();
 
         let (code, signal) = if let Some(status) = self.exit_status {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-                let code = status.code().unwrap_or(-1);
-                let signal = status.signal().unwrap_or(0);
-                (code, signal)
-            }
-            #[cfg(not(unix))]
-            {
-                let code = status.code().unwrap_or(-1);
-                (code, 0)
-            }
+            use std::os::unix::process::ExitStatusExt;
+            let code = status.code().unwrap_or(-1);
+            let signal = status.signal().unwrap_or(0);
+            (code, signal)
         } else {
             (-1, 0)
         };
@@ -948,6 +970,8 @@ pub struct ProcessCallbacks {
     pub stream_stdout: bool,
     /// Whether to send stderr line-by-line events.
     pub stream_stderr: bool,
+    /// Optional ping sender to wake the event loop when events are available.
+    pub ping: Option<Ping>,
 }
 
 /// Spawn a command with async callbacks.
@@ -1049,6 +1073,7 @@ pub fn spawn_command_async(
         child.stdout.take().map(|stdout| {
             let event_tx = callbacks.event_tx.clone();
             let stream = callbacks.stream_stdout;
+            let ping = callbacks.ping.clone();
             let buf_clone = Arc::clone(&stdout_buf);
 
             thread::spawn(move || {
@@ -1070,6 +1095,10 @@ pub fn spawn_command_async(
                                     tracking_id,
                                     line: line_trimmed,
                                 });
+                                // Wake the event loop if ping is available
+                                if let Some(ref ping) = ping {
+                                    ping.ping();
+                                }
                             }
                         }
                         Err(e) => {
@@ -1095,6 +1124,7 @@ pub fn spawn_command_async(
         child.stderr.take().map(|stderr| {
             let event_tx = callbacks.event_tx.clone();
             let stream = callbacks.stream_stderr;
+            let ping = callbacks.ping.clone();
             let buf_clone = Arc::clone(&stderr_buf);
 
             thread::spawn(move || {
@@ -1115,6 +1145,10 @@ pub fn spawn_command_async(
                                     tracking_id,
                                     line: line_trimmed,
                                 });
+                                // Wake the event loop if ping is available
+                                if let Some(ref ping) = ping {
+                                    ping.ping();
+                                }
                             }
                         }
                         Err(e) => {
@@ -1136,6 +1170,7 @@ pub fn spawn_command_async(
 
     // Start exit monitor thread
     let event_tx = callbacks.event_tx;
+    let ping = callbacks.ping;
     let stdout_buf_for_exit = Arc::clone(&stdout_buf);
     let stderr_buf_for_exit = Arc::clone(&stderr_buf);
 
@@ -1156,18 +1191,10 @@ pub fn spawn_command_async(
 
         // Build the result
         let (code, signal) = {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-                let code = status.code().unwrap_or(-1);
-                let signal = status.signal().unwrap_or(0);
-                (code, signal)
-            }
-            #[cfg(not(unix))]
-            {
-                let code = status.code().unwrap_or(-1);
-                (code, 0)
-            }
+            use std::os::unix::process::ExitStatusExt;
+            let code = status.code().unwrap_or(-1);
+            let signal = status.signal().unwrap_or(0);
+            (code, signal)
         };
 
         let stdout_data = stdout_buf_for_exit
@@ -1206,7 +1233,14 @@ pub fn spawn_command_async(
         };
 
         // Send the exit event
-        let _ = event_tx.send(ProcessEvent::Exited { tracking_id, result });
+        let _ = event_tx.send(ProcessEvent::Exited {
+            tracking_id,
+            result,
+        });
+        // Wake the event loop if ping is available
+        if let Some(ref ping) = ping {
+            ping.ping();
+        }
     });
 
     // Create the ProcessHandle (without the reader threads since they're managed differently)

@@ -35,13 +35,17 @@ macro_rules! register_actions {
     };
 }
 
+use std::collections::HashMap;
+
 use log::debug;
 use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
-use std::collections::HashMap;
 
 use crate::parse_utils;
-use crate::process::{next_tracking_id, spawn_command, spawn_command_async, spawn_shell_command, ProcessCallbacks, SharedProcessManager, SpawnOpts, create_process_manager};
+use crate::process::{
+    next_tracking_id, spawn_command, spawn_command_async, spawn_shell_command, ProcessCallbacks,
+    SharedProcessManager, SpawnOpts,
+};
 
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.
@@ -62,7 +66,10 @@ pub struct ActionProxy {
 impl ActionProxy {
     /// Create a new action proxy with the given callback and process manager
     pub fn new(callback: ActionCallback, process_manager: SharedProcessManager) -> Self {
-        Self { callback, process_manager }
+        Self {
+            callback,
+            process_manager,
+        }
     }
 
     /// Execute an action via the callback
@@ -405,7 +412,9 @@ impl LuaUserData for ActionProxy {
                             }
                             LuaValue::Nil => {} // default capture is true
                             _ => {
-                                return Err(LuaError::external("stdout must be boolean or function"));
+                                return Err(LuaError::external(
+                                    "stdout must be boolean or function",
+                                ));
                             }
                         }
 
@@ -419,7 +428,9 @@ impl LuaUserData for ActionProxy {
                             }
                             LuaValue::Nil => {} // default capture is true
                             _ => {
-                                return Err(LuaError::external("stderr must be boolean or function"));
+                                return Err(LuaError::external(
+                                    "stderr must be boolean or function",
+                                ));
                             }
                         }
 
@@ -465,6 +476,7 @@ impl LuaUserData for ActionProxy {
                                 event_tx,
                                 stream_stdout,
                                 stream_stderr,
+                                ping: this.process_manager.borrow().ping(),
                             };
 
                             match spawn_command_async(command, spawn_opts, callbacks) {
@@ -474,7 +486,9 @@ impl LuaUserData for ActionProxy {
                                 }
                                 Err(e) => {
                                     // Clean up registration on failure
-                                    if let Some(keys) = this.process_manager.borrow_mut().unregister(tracking_id) {
+                                    if let Some(keys) =
+                                        this.process_manager.borrow_mut().unregister(tracking_id)
+                                    {
                                         for key in keys {
                                             let _ = lua.remove_registry_value(key);
                                         }
@@ -896,7 +910,11 @@ impl LuaUserData for ActionProxy {
 ///
 /// # Returns
 /// LuaResult indicating success or Lua error
-pub fn register_action_proxy(lua: &Lua, callback: ActionCallback, process_manager: SharedProcessManager) -> LuaResult<()> {
+pub fn register_action_proxy(
+    lua: &Lua,
+    callback: ActionCallback,
+    process_manager: SharedProcessManager,
+) -> LuaResult<()> {
     let globals = lua.globals();
 
     // Get or create the niri table
@@ -920,26 +938,27 @@ pub fn register_action_proxy(lua: &Lua, callback: ActionCallback, process_manage
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::create_process_manager;
 
-fn create_test_env() -> (Lua, Arc<std::sync::Mutex<Vec<Action>>>) {
-    let lua = Lua::new();
-    let actions: Arc<std::sync::Mutex<Vec<Action>>> = Arc::new(std::sync::Mutex::new(vec![]));
+    fn create_test_env() -> (Lua, Arc<std::sync::Mutex<Vec<Action>>>) {
+        let lua = Lua::new();
+        let actions: Arc<std::sync::Mutex<Vec<Action>>> = Arc::new(std::sync::Mutex::new(vec![]));
 
-    // Create niri namespace
-    let niri = lua.create_table().unwrap();
-    lua.globals().set("niri", niri).unwrap();
+        // Create niri namespace
+        let niri = lua.create_table().unwrap();
+        lua.globals().set("niri", niri).unwrap();
 
-    let actions_clone = actions.clone();
-    let callback: ActionCallback = Arc::new(move |action| {
-        actions_clone.lock().unwrap().push(action);
-        Ok(())
-    });
+        let actions_clone = actions.clone();
+        let callback: ActionCallback = Arc::new(move |action| {
+            actions_clone.lock().unwrap().push(action);
+            Ok(())
+        });
 
-    let process_manager = create_process_manager();
-    register_action_proxy(&lua, callback, process_manager).unwrap();
+        let process_manager = create_process_manager();
+        register_action_proxy(&lua, callback, process_manager).unwrap();
 
-    (lua, actions)
-}
+        (lua, actions)
+    }
 
     #[test]
     fn test_action_proxy_creation() {

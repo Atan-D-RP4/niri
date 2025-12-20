@@ -48,10 +48,10 @@ use crate::config_wrapper::{register_config_wrapper, ConfigWrapper};
 use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
-use crate::process::SharedProcessManager;
 use crate::loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
 };
+use crate::process::{fire_due_process_events, SharedProcessManager};
 use crate::{LuaComponent, NiriApi};
 
 /// Maximum callbacks to execute per flush cycle.
@@ -122,7 +122,7 @@ pub struct LuaRuntime {
     /// Timer manager for niri.loop timers
     pub timer_manager: Option<SharedTimerManager>,
     /// Process manager for async process spawning
-    process_manager: Option<SharedProcessManager>,
+    pub process_manager: Option<SharedProcessManager>,
     /// Queue of scheduled callbacks (stored as registry keys)
     scheduled_callbacks: Rc<RefCell<VecDeque<LuaRegistryKey>>>,
     /// Configured execution limits
@@ -401,19 +401,34 @@ impl LuaRuntime {
     /// This is the main entry point for the compositor to drive Lua async execution.
     /// Should be called once per frame/refresh cycle.
     ///
-    /// Returns (timers_fired, scheduled_executed, errors).
-    pub fn process_async(&self) -> (usize, usize, Vec<LuaError>) {
+    /// Returns (timers_fired, process_events_fired, scheduled_executed, errors).
+    pub fn process_async(&self) -> (usize, usize, usize, Vec<LuaError>) {
         let mut all_errors = Vec::new();
 
         // Fire due timers first (they may schedule callbacks)
         let (timers_fired, timer_errors) = self.fire_timers();
         all_errors.extend(timer_errors);
 
+        // Fire process events (stdout/stderr lines, exit callbacks)
+        let (process_events, process_errors) = self.fire_process_events();
+        all_errors.extend(process_errors);
+
         // Then flush scheduled callbacks
         let (scheduled_executed, scheduled_errors) = self.flush_scheduled();
         all_errors.extend(scheduled_errors);
 
-        (timers_fired, scheduled_executed, all_errors)
+        (timers_fired, process_events, scheduled_executed, all_errors)
+    }
+
+    /// Fire pending process events (stdout/stderr callbacks, exit callbacks).
+    ///
+    /// Returns (events_processed, errors).
+    fn fire_process_events(&self) -> (usize, Vec<LuaError>) {
+        if let Some(ref manager) = self.process_manager {
+            fire_due_process_events(&self.lua, manager)
+        } else {
+            (0, Vec::new())
+        }
     }
 
     /// Check if there are pending scheduled callbacks.
@@ -563,10 +578,22 @@ impl LuaRuntime {
     /// # Errors
     ///
     /// Returns an error if action proxy registration fails.
-    pub fn register_action_proxy(&mut self, callback: ActionCallback, process_manager: SharedProcessManager) -> LuaResult<()> {
+    pub fn register_action_proxy(
+        &mut self,
+        callback: ActionCallback,
+        process_manager: SharedProcessManager,
+    ) -> LuaResult<()> {
         register_action_proxy(&self.lua, callback, process_manager.clone())?;
         self.process_manager = Some(process_manager);
         Ok(())
+    }
+
+    /// Set the process manager for handling async process events.
+    ///
+    /// This is typically called automatically by `register_action_proxy()`,
+    /// but can be called separately for testing or custom setups.
+    pub fn set_process_manager(&mut self, manager: SharedProcessManager) {
+        self.process_manager = Some(manager);
     }
 
     /// Load and execute a Lua script from a file.
@@ -1289,7 +1316,7 @@ mod tests {
         )
         .unwrap();
 
-        let (timers, scheduled, errors) = rt.process_async();
+        let (timers, _process_events, scheduled, errors) = rt.process_async();
         assert_eq!(timers, 1);
         assert_eq!(scheduled, 2); // original + chained from timer
         assert!(errors.is_empty());
@@ -1316,7 +1343,7 @@ mod tests {
         )
         .unwrap();
 
-        let (timers, scheduled, errors) = rt.process_async();
+        let (timers, _process_events, scheduled, errors) = rt.process_async();
         assert_eq!(timers, 1);
         assert_eq!(scheduled, 1);
         assert_eq!(errors.len(), 2);

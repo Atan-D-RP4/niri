@@ -148,6 +148,8 @@ pub fn setup_lua_config_apis(
     }
 
     // Register config wrapper API for reactive config access
+    // Pass a default config - the wrapper will be updated when apply_config_wrapper_changes is
+    // called
     if let Err(e) = runtime.register_config_wrapper_api(Config::default()) {
         warn!("Failed to register Lua config wrapper API: {}", e);
     }
@@ -159,7 +161,30 @@ pub fn setup_lua_config_apis(
                 .send(action)
                 .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
         });
-    if let Err(e) = runtime.register_action_proxy(action_callback) {
+
+    let process_manager = runtime
+        .process_manager
+        .clone()
+        .expect("Process manager missing in Lua runtime");
+
+    // Create ping source for process events
+    let (ping_source, ping) = niri_lua::create_process_event_ping();
+    process_manager.borrow_mut().set_ping(ping);
+
+    // Register ping source with event loop to fire process events
+    event_loop
+        .insert_source(ping_source, |_, _, state| {
+            // Fire due process events when pinged
+            if let Some(ref runtime) = state.niri.lua_runtime {
+                let _ = niri_lua::fire_due_process_events(
+                    runtime.inner(),
+                    runtime.process_manager.as_ref().unwrap(),
+                );
+            }
+        })
+        .expect("Failed to register process event ping source");
+
+    if let Err(e) = runtime.register_action_proxy(action_callback, process_manager) {
         warn!("Failed to register Lua action proxy: {}", e);
     }
 }
@@ -416,7 +441,13 @@ pub fn setup_runtime(
                     .send(action)
                     .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
             });
-        if let Err(e) = runtime.register_action_proxy(action_callback) {
+
+        let process_manager = runtime
+            .process_manager
+            .clone()
+            .expect("Process manager missing in Lua runtime");
+
+        if let Err(e) = runtime.register_action_proxy(action_callback, process_manager) {
             warn!("Failed to register Lua action proxy: {}", e);
         }
     }

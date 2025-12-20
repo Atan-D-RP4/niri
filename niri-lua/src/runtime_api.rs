@@ -23,6 +23,10 @@
 //! - The Lua function blocks waiting for the response (from Lua's perspective)
 //!
 //!
+//! See `niri-ui/spec/components/niri-lua-extensions.md` for detailed specifications:
+//! - Section 2: `niri.state.watch()` reactive subscription helper
+//! - Section 3: State interface improvements (rich event payloads, `niri.state.refresh()`)
+//! - Section 4: Event system extensions (handler IDs, pattern matching)
 
 use std::cell::RefCell;
 
@@ -34,7 +38,7 @@ use niri_ipc::{KeyboardLayouts, Output, Window, Workspace};
 use crate::ipc_bridge::{output_to_lua, window_to_lua, windows_to_lua, workspaces_to_lua};
 
 // Thread-local storage for state snapshot during event handler execution.
-//
+
 // This allows `niri.state.*` functions to access pre-captured state data
 // when called from within event handlers, avoiding the deadlock that would
 // occur with the idle callback pattern.

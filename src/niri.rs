@@ -770,14 +770,15 @@ impl State {
             .and_then(|r| r.config_wrapper.clone());
 
         if let Some(ref runtime) = self.niri.lua_runtime {
-            let (timers, scheduled, errors) = runtime.process_async();
+            let (timers, process_events, scheduled, errors) = runtime.process_async();
             for error in errors {
                 warn!("Lua async error: {}", error);
             }
-            if timers > 0 || scheduled > 0 {
+            if timers > 0 || process_events > 0 || scheduled > 0 {
                 trace!(
-                    "Lua async: {} timers fired, {} scheduled executed",
+                    "Lua async: {} timers fired, {} process events, {} scheduled executed",
                     timers,
+                    process_events,
                     scheduled
                 );
             }
