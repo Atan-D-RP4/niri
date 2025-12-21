@@ -40,6 +40,8 @@ use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
 
 use crate::parse_utils;
+use crate::process::{parse_spawn_opts, ProcessHandle, SharedProcessManager};
+use crate::SharedCallbackRegistry;
 
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.
@@ -53,12 +55,45 @@ pub type ActionCallback = Arc<dyn Fn(Action) -> LuaResult<()> + Send + Sync>;
 pub struct ActionProxy {
     /// Callback to execute actions
     callback: ActionCallback,
+    /// Process manager for managed spawning (when opts are provided)
+    process_manager: Option<SharedProcessManager>,
+    /// Callback registry for function callbacks
+    callback_registry: Option<SharedCallbackRegistry>,
 }
 
 impl ActionProxy {
     /// Create a new action proxy with the given callback
     pub fn new(callback: ActionCallback) -> Self {
-        Self { callback }
+        Self {
+            callback,
+            process_manager: None,
+            callback_registry: None,
+        }
+    }
+
+    /// Create a new action proxy with process manager support
+    pub fn with_process_manager(
+        callback: ActionCallback,
+        process_manager: SharedProcessManager,
+    ) -> Self {
+        Self {
+            callback,
+            process_manager: Some(process_manager),
+            callback_registry: None,
+        }
+    }
+
+    /// Create a new action proxy with process manager and callback registry support
+    pub fn with_process_manager_and_registry(
+        callback: ActionCallback,
+        process_manager: SharedProcessManager,
+        callback_registry: SharedCallbackRegistry,
+    ) -> Self {
+        Self {
+            callback,
+            process_manager: Some(process_manager),
+            callback_registry: Some(callback_registry),
+        }
     }
 
     /// Execute an action via the callback
@@ -334,7 +369,7 @@ impl LuaUserData for ActionProxy {
         // When opts is provided, returns ProcessHandle; otherwise fire-and-forget
         methods.add_method(
             "spawn",
-            |_lua, this, (command, opts): (Vec<String>, Option<LuaTable>)| {
+            |lua, this, (command, opts): (Vec<String>, Option<LuaTable>)| {
                 match opts {
                     None => {
                         // Fire-and-forget (current behavior)
@@ -342,16 +377,39 @@ impl LuaUserData for ActionProxy {
                         Ok(LuaValue::Nil)
                     }
                     Some(opts_table) => {
-                        // Check if detach=true, otherwise fire-and-forget
-                        if let Ok(detach) = opts_table.get::<Option<bool>>("detach") {
-                            if detach.unwrap_or(false) {
-                                this.execute(Action::Spawn { command })?;
-                                return Ok(LuaValue::Nil);
-                            }
+                        // Parse options
+                        let spawn_opts = parse_spawn_opts(lua, &opts_table, this.callback_registry.as_ref())?;
+
+                        // If detach=true, fire-and-forget via IPC
+                        if spawn_opts.detach {
+                            this.execute(Action::Spawn { command })?;
+                            return Ok(LuaValue::Nil);
                         }
-                        // For now, just fire-and-forget even with opts
-                        this.execute(Action::Spawn { command })?;
-                        Ok(LuaValue::Nil)
+
+                        // Use ProcessManager if available
+                        let process_manager = this.process_manager.clone().ok_or_else(|| {
+                            LuaError::external(
+                                "Process manager not initialized. Managed spawning is not available.",
+                            )
+                        })?;
+
+                        let (handle_id, pid, text_mode) = {
+                            let mut manager = process_manager.lock().unwrap();
+                            let text_mode = spawn_opts.text;
+                            let (id, pid) = manager
+                                .spawn_command(command, spawn_opts)
+                                .map_err(LuaError::external)?;
+                            (id, pid, text_mode)
+                        };
+
+                        let handle = ProcessHandle {
+                            id: handle_id,
+                            pid,
+                            manager: process_manager,
+                            text_mode,
+                        };
+
+                        Ok(LuaValue::UserData(lua.create_userdata(handle)?))
                     }
                 }
             },
@@ -361,7 +419,7 @@ impl LuaUserData for ActionProxy {
         // When opts is provided, returns ProcessHandle; otherwise fire-and-forget
         methods.add_method(
             "spawn_sh",
-            |_lua, this, (command, opts): (String, Option<LuaTable>)| {
+            |lua, this, (command, opts): (String, Option<LuaTable>)| {
                 match opts {
                     None => {
                         // Fire-and-forget (current behavior)
@@ -371,16 +429,39 @@ impl LuaUserData for ActionProxy {
                         Ok(LuaValue::Nil)
                     }
                     Some(opts_table) => {
-                        // Check if detach=true, otherwise fire-and-forget
-                        if let Ok(detach) = opts_table.get::<Option<bool>>("detach") {
-                            if detach.unwrap_or(false) {
-                                this.execute(Action::SpawnSh { command })?;
-                                return Ok(LuaValue::Nil);
-                            }
+                        // Parse options
+                        let spawn_opts = parse_spawn_opts(lua, &opts_table, this.callback_registry.as_ref())?;
+
+                        // If detach=true, fire-and-forget via IPC
+                        if spawn_opts.detach {
+                            this.execute(Action::SpawnSh { command })?;
+                            return Ok(LuaValue::Nil);
                         }
-                        // For now, just fire-and-forget even with opts
-                        this.execute(Action::SpawnSh { command })?;
-                        Ok(LuaValue::Nil)
+
+                        // Use ProcessManager if available
+                        let process_manager = this.process_manager.clone().ok_or_else(|| {
+                            LuaError::external(
+                                "Process manager not initialized. Managed spawning is not available.",
+                            )
+                        })?;
+
+                        let (handle_id, pid, text_mode) = {
+                            let mut manager = process_manager.lock().unwrap();
+                            let text_mode = spawn_opts.text;
+                            let (id, pid) = manager
+                                .spawn_shell_command(command, spawn_opts)
+                                .map_err(LuaError::external)?;
+                            (id, pid, text_mode)
+                        };
+
+                        let handle = ProcessHandle {
+                            id: handle_id,
+                            pid,
+                            manager: process_manager,
+                            text_mode,
+                        };
+
+                        Ok(LuaValue::UserData(lua.create_userdata(handle)?))
                     }
                 }
             },
@@ -756,10 +837,17 @@ impl LuaUserData for ActionProxy {
 /// # Arguments
 /// * `lua` - The Lua runtime
 /// * `callback` - Callback to execute actions
+/// * `process_manager` - Optional process manager for managed spawning
+/// * `callback_registry` - Optional callback registry for function callbacks
 ///
 /// # Returns
 /// LuaResult indicating success or Lua error
-pub fn register_action_proxy(lua: &Lua, callback: ActionCallback) -> LuaResult<()> {
+pub fn register_action_proxy(
+    lua: &Lua,
+    callback: ActionCallback,
+    process_manager: Option<SharedProcessManager>,
+    callback_registry: Option<SharedCallbackRegistry>,
+) -> LuaResult<()> {
     let globals = lua.globals();
 
     // Get or create the niri table
@@ -773,7 +861,11 @@ pub fn register_action_proxy(lua: &Lua, callback: ActionCallback) -> LuaResult<(
         _ => return Err(LuaError::external("niri global is not a table")),
     };
 
-    let proxy = ActionProxy::new(callback);
+    let proxy = match (process_manager, callback_registry) {
+        (Some(pm), Some(cr)) => ActionProxy::with_process_manager_and_registry(callback, pm, cr),
+        (Some(pm), None) => ActionProxy::with_process_manager(callback, pm),
+        (None, _) => ActionProxy::new(callback),
+    };
     niri_table.set("action", proxy)?;
 
     debug!("Registered action proxy to niri.action");
@@ -798,7 +890,7 @@ mod tests {
             Ok(())
         });
 
-        register_action_proxy(&lua, callback).unwrap();
+        register_action_proxy(&lua, callback, None, None).unwrap();
 
         (lua, actions)
     }
