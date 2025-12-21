@@ -63,6 +63,12 @@
 ---Options for niri.fs.find() function. path: starting directory (default cwd), upward: search toward root, stop: stop directory for upward search, type: filter by file/directory, limit: max results
 ---@alias FsFindOpts { path: string?, upward: boolean?, stop: string?, type: "file"|"directory"?, limit: integer? }
 
+---Options for spawn() and spawn_sh(). cwd: working directory, env: environment variables, stdin: input mode, capture_*: buffer output for wait(), text: decode as UTF-8, detach: fire-and-forget, stdout/stderr: streaming callbacks, on_exit: exit callback
+---@alias SpawnOpts { cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean|"pipe"?, stdin_pipe: boolean?, capture_stdout: boolean?, capture_stderr: boolean?, text: boolean?, detach: boolean?, stdout: boolean|fun(err: string?, chunk: string?)?, stderr: boolean|fun(err: string?, chunk: string?)?, on_exit: fun(result: SpawnResult)? }
+
+---Result from ProcessHandle:wait() or on_exit callback. code and signal are mutually exclusive.
+---@alias SpawnResult { code: integer?, signal: integer?, stdout: string, stderr: string }
+
 -- ============================================================================
 -- Input Configuration Types
 -- ============================================================================
@@ -321,6 +327,33 @@ function Timer:close() end
 ---Check if the timer is currently active
 ---@return boolean # True if timer is active
 function Timer:is_active() end
+
+---Handle for a spawned process, returned by spawn()/spawn_sh() when opts are provided
+---@class ProcessHandle
+---@field pid integer Process ID (read-only)
+local ProcessHandle = {}
+
+---Wait for process to exit. With timeout: sends SIGTERM then SIGKILL after grace period.
+---@param timeout_ms? integer Timeout in milliseconds (optional)
+---@return SpawnResult # Process exit result with code/signal and captured output
+function ProcessHandle:wait(timeout_ms) end
+
+---Send signal to process. Default is SIGTERM.
+---@param signal? integer|string Signal number or name (e.g., 15, 'TERM', 'KILL')
+---@return boolean # True if signal was sent successfully
+function ProcessHandle:kill(signal) end
+
+---Write data to process stdin (only works if stdin='pipe')
+---@param data string Data to write
+---@return boolean # True if write succeeded
+function ProcessHandle:write(data) end
+
+---Close the stdin pipe
+function ProcessHandle:close_stdin() end
+
+---Check if stdin has been closed
+---@return boolean # True if stdin is closed
+function ProcessHandle:is_closing() end
 
 ---Animation configuration
 ---@class Animation
@@ -605,13 +638,17 @@ function niri.action:power_off_monitors() end
 ---Turn on all monitors
 function niri.action:power_on_monitors() end
 
----Spawn a command (fire-and-forget).
+---Spawn a command. Without opts: fire-and-forget, returns nil. With opts: returns ProcessHandle for process control.
 ---@param command string[] Command and arguments
-function niri.action:spawn(command) end
+---@param opts? SpawnOpts Spawn options (cwd, env, stdin, capture, callbacks)
+---@return ProcessHandle? # Process handle when opts provided and detach is not true, nil otherwise
+function niri.action:spawn(command, opts) end
 
----Spawn a command via shell (fire-and-forget).
+---Spawn a shell command. Without opts: fire-and-forget, returns nil. With opts: returns ProcessHandle for process control.
 ---@param command string Shell command string
-function niri.action:spawn_sh(command) end
+---@param opts? SpawnOpts Spawn options (cwd, env, stdin, capture, callbacks)
+---@return ProcessHandle? # Process handle when opts provided and detach is not true, nil otherwise
+function niri.action:spawn_sh(command, opts) end
 
 ---Trigger a screen transition animation
 ---@param delay? boolean Whether to delay the transition

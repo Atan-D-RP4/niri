@@ -21,4 +21,6 @@ expression: defs
     "FocusMode = \"normal\"|\"overview\"|\"layer_shell\"|\"locked\"",
     "KeyboardLayouts = { names: string[], current_idx: integer }",
     "FsFindOpts = { path: string?, upward: boolean?, stop: string?, type: \"file\"|\"directory\"?, limit: integer? }",
+    "SpawnOpts = { cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean|\"pipe\"?, stdin_pipe: boolean?, capture_stdout: boolean?, capture_stderr: boolean?, text: boolean?, detach: boolean?, stdout: boolean|fun(err: string?, chunk: string?)?, stderr: boolean|fun(err: string?, chunk: string?)?, on_exit: fun(result: SpawnResult)? }",
+    "SpawnResult = { code: integer?, signal: integer?, stdout: string, stderr: string }",
 ]

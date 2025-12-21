@@ -4,6 +4,7 @@ expression: names
 ---
 [
     "Timer",
+    "ProcessHandle",
     "Animation",
     "Filter",
     "WindowRule",

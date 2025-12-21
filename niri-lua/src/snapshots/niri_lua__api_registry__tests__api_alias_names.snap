@@ -21,4 +21,6 @@ expression: names
     "FocusMode",
     "KeyboardLayouts",
     "FsFindOpts",
+    "SpawnOpts",
+    "SpawnResult",
 ]

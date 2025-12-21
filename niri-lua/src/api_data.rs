@@ -26,6 +26,7 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
     ],
     types: &[
         TIMER_TYPE,
+        PROCESS_HANDLE_TYPE,
         ANIMATION_TYPE,
         FILTER_TYPE,
         WINDOW_RULE_TYPE,
@@ -52,6 +53,8 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         FOCUS_MODE_ALIAS,
         KEYBOARD_LAYOUTS_ALIAS,
         FS_FIND_OPTS_ALIAS,
+        SPAWN_OPTS_ALIAS,
+        SPAWN_RESULT_ALIAS,
     ],
 };
 
@@ -166,6 +169,18 @@ const FS_FIND_OPTS_ALIAS: AliasSchema = AliasSchema {
     name: "FsFindOpts",
     ty: "{ path: string?, upward: boolean?, stop: string?, type: \"file\"|\"directory\"?, limit: integer? }",
     description: "Options for niri.fs.find() function. path: starting directory (default cwd), upward: search toward root, stop: stop directory for upward search, type: filter by file/directory, limit: max results",
+};
+
+const SPAWN_OPTS_ALIAS: AliasSchema = AliasSchema {
+    name: "SpawnOpts",
+    ty: "{ cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean|\"pipe\"?, stdin_pipe: boolean?, capture_stdout: boolean?, capture_stderr: boolean?, text: boolean?, detach: boolean?, stdout: boolean|fun(err: string?, chunk: string?)?, stderr: boolean|fun(err: string?, chunk: string?)?, on_exit: fun(result: SpawnResult)? }",
+    description: "Options for spawn() and spawn_sh(). cwd: working directory, env: environment variables, stdin: input mode, capture_*: buffer output for wait(), text: decode as UTF-8, detach: fire-and-forget, stdout/stderr: streaming callbacks, on_exit: exit callback",
+};
+
+const SPAWN_RESULT_ALIAS: AliasSchema = AliasSchema {
+    name: "SpawnResult",
+    ty: "{ code: integer?, signal: integer?, stdout: string, stderr: string }",
+    description: "Result from ProcessHandle:wait() or on_exit callback. code and signal are mutually exclusive.",
 };
 
 // ============================================================================
@@ -743,27 +758,49 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
         },
         FunctionSchema {
             name: "spawn",
-            description: "Spawn a command (fire-and-forget).",
+            description: "Spawn a command. Without opts: fire-and-forget, returns nil. With opts: returns ProcessHandle for process control.",
             is_method: true,
-            params: &[ParamSchema {
-                name: "command",
-                ty: "string[]",
-                description: "Command and arguments",
-                optional: false,
+            params: &[
+                ParamSchema {
+                    name: "command",
+                    ty: "string[]",
+                    description: "Command and arguments",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "SpawnOpts",
+                    description: "Spawn options (cwd, env, stdin, capture, callbacks)",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "ProcessHandle?",
+                description: "Process handle when opts provided and detach is not true, nil otherwise",
             }],
-            returns: &[],
         },
         FunctionSchema {
             name: "spawn_sh",
-            description: "Spawn a command via shell (fire-and-forget).",
+            description: "Spawn a shell command. Without opts: fire-and-forget, returns nil. With opts: returns ProcessHandle for process control.",
             is_method: true,
-            params: &[ParamSchema {
-                name: "command",
-                ty: "string",
-                description: "Shell command string",
-                optional: false,
+            params: &[
+                ParamSchema {
+                    name: "command",
+                    ty: "string",
+                    description: "Shell command string",
+                    optional: false,
+                },
+                ParamSchema {
+                    name: "opts",
+                    ty: "SpawnOpts",
+                    description: "Spawn options (cwd, env, stdin, capture, callbacks)",
+                    optional: true,
+                },
+            ],
+            returns: &[ReturnSchema {
+                ty: "ProcessHandle?",
+                description: "Process handle when opts provided and detach is not true, nil otherwise",
             }],
-            returns: &[],
         },
         FunctionSchema {
             name: "do_screen_transition",
@@ -1865,6 +1902,80 @@ const TIMER_TYPE: TypeSchema = TypeSchema {
             returns: &[ReturnSchema {
                 ty: "boolean",
                 description: "True if timer is active",
+            }],
+        },
+    ],
+};
+
+const PROCESS_HANDLE_TYPE: TypeSchema = TypeSchema {
+    name: "ProcessHandle",
+    description: "Handle for a spawned process, returned by spawn()/spawn_sh() when opts are provided",
+    fields: &[FieldSchema {
+        name: "pid",
+        ty: "integer",
+        description: "Process ID (read-only)",
+    }],
+    methods: &[
+        FunctionSchema {
+            name: "wait",
+            description: "Wait for process to exit. With timeout: sends SIGTERM then SIGKILL after grace period.",
+            is_method: true,
+            params: &[ParamSchema {
+                name: "timeout_ms",
+                ty: "integer",
+                description: "Timeout in milliseconds (optional)",
+                optional: true,
+            }],
+            returns: &[ReturnSchema {
+                ty: "SpawnResult",
+                description: "Process exit result with code/signal and captured output",
+            }],
+        },
+        FunctionSchema {
+            name: "kill",
+            description: "Send signal to process. Default is SIGTERM.",
+            is_method: true,
+            params: &[ParamSchema {
+                name: "signal",
+                ty: "integer|string",
+                description: "Signal number or name (e.g., 15, 'TERM', 'KILL')",
+                optional: true,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if signal was sent successfully",
+            }],
+        },
+        FunctionSchema {
+            name: "write",
+            description: "Write data to process stdin (only works if stdin='pipe')",
+            is_method: true,
+            params: &[ParamSchema {
+                name: "data",
+                ty: "string",
+                description: "Data to write",
+                optional: false,
+            }],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if write succeeded",
+            }],
+        },
+        FunctionSchema {
+            name: "close_stdin",
+            description: "Close the stdin pipe",
+            is_method: true,
+            params: &[],
+            returns: &[],
+        },
+        FunctionSchema {
+            name: "is_closing",
+            description: "Check if stdin has been closed",
+            is_method: true,
+            params: &[],
+            returns: &[ReturnSchema {
+                ty: "boolean",
+                description: "True if stdin is closed",
             }],
         },
     ],
