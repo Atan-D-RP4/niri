@@ -411,50 +411,9 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
 - `api_registry.rs` (runtime schema access via include!)
 - `build.rs` (EmmyLua generation via include!)
 
-### 5. Plugin and Module System (Future Work - Tier 5)
+### 5. Type System and Lua Types
 
-> **Note**: The plugin system and module loader are intentionally implemented but not yet integrated into the compositor. These are planned for Tier 5 and will enable external Lua plugins.
-
-### 5a. Plugin Manager (`plugin_system.rs`)
-
-Manages loading and initialization of Lua plugins
-
-```text
-pub struct PluginManager {
-    // Plugin registry
-}
-
-impl PluginManager {
-    pub fn load_plugin(&mut self, path: &Path) -> LuaResult<()> {
-        // Load plugin from file
-        // Register with runtime
-    }
-}
-```
-
-**Purpose**: Allows loading of external Lua plugins that extend Niri's functionality.
-
-### 5b. Module Loader (`module_loader.rs`)
-
-Handles `require()` and module resolution for Lua
-
-```text
-pub struct ModuleLoader {
-    search_paths: Vec<PathBuf>,
-}
-
-impl ModuleLoader {
-    pub fn setup_module_paths(&self, lua: &Lua) -> LuaResult<()> {
-        // Configure Lua package.path
-    }
-}
-```
-
-**Purpose**: Provides standard Lua module loading with Niri-specific search paths for plugins and libraries.
-
-### 6. Type System and Lua Types
-
-### 6a. Lua Animation Types (`lua_types.rs`)
+### 5a. Lua Animation Types (`lua_types.rs`)
 
 Wraps animation configuration for Lua
 
@@ -467,7 +426,7 @@ pub struct LuaAnimation {
 
 **Purpose**: Provides type-safe animation configuration that can be passed to Lua and back.
 
-### 6b. Lua Window Rules (`lua_types.rs`)
+### 5b. Lua Window Rules (`lua_types.rs`)
 
 Window matching and configuration in Lua
 
@@ -480,7 +439,7 @@ pub struct LuaWindowRule {
 
 **Purpose**: Allows Lua to define window rules for automatic window configuration.
 
-### 6c. Lua Filters and Gestures (`lua_types.rs`)
+### 5c. Lua Filters and Gestures (`lua_types.rs`)
 
 Gesture and filter definitions in Lua
 
@@ -497,9 +456,9 @@ pub struct LuaFilter {
 
 **Purpose**: Enables Lua-defined gestures and filters for extending input handling.
 
-### 7. Testing Support
+### 6. Testing Support
 
-### 7a. Test Utilities (`test_utils.rs`)
+### 6a. Test Utilities (`test_utils.rs`)
 
 Helpers for testing Lua scripts
 
@@ -514,13 +473,12 @@ pub mod test_utils {
 
 **Purpose**: Provides utilities for writing tests of Lua functionality without a full compositor.
 
-### 8. Architecture Layers Summary
+### 7. Architecture Layers Summary
 
 - **Foundation (Tier 1)**: Runtime creation, component registration, event API
 - **Configuration (Tier 2)**: Read-only access to all KDL-based configuration
 - **Runtime (Tier 3)**: Live state queries, event data, IPC execution
 - **Async Primitives (Tier 4)**: Timers, scheduled callbacks, loop integration
-- **Extensibility (Tier 5 - Future)**: Plugin system, module loading, hot reloading
 
 This tiered architecture allows different levels of Lua integration:
 - **Basic**: Scripts that read configuration and handle events
@@ -870,7 +828,3 @@ These events are defined in `lua_event_hooks.rs` but intentionally NOT called fr
    ```
 
 4. **Document** in this table and in `LUA_SPECIFICATION.md`
-
-#### Intentionally Deferred (Tier 5)
-- Plugin system (`plugin_system.rs`) - infrastructure ready, not integrated
-- Module loader (`module_loader.rs`) - infrastructure ready, not integrated

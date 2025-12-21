@@ -188,9 +188,6 @@ impl LuaRuntime {
                                                                            * error messages */
         ));
 
-        // Register custom require function for module loading
-        crate::module_loader::register_custom_require(&lua, compiler.clone())?;
-
         Ok(Self {
             lua,
             event_system: None,

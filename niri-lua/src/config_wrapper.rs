@@ -38,7 +38,7 @@ use crate::extractors::{
     extract_debug, extract_gestures, extract_hotkey_overlay, extract_input, extract_layout,
     extract_overview, extract_recent_windows, extract_xwayland_satellite,
 };
-use crate::migrated_proxies::{
+use crate::config_proxies::{
     AnimationsConfigProxy, ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy,
     DebugConfigProxy, GesturesConfigProxy, HotkeyOverlayConfigProxy, InputConfigProxy,
     LayoutConfigProxy, OverviewConfigProxy, RecentWindowsConfigProxy, SpawnAtStartupConfigProxy,

@@ -591,7 +591,7 @@ niri-lua/src/
 ├── config.rs           # Config struct definitions
 ├── config_api.rs       # niri.config API entry point
 ├── config_wrapper.rs   # Config proxies with section access (~1,550 LOC)
-├── migrated_proxies.rs # Derive macro-based proxies (~1,650 LOC)
+├── config_proxies.rs   # Derive macro-based proxies (~1,650 LOC)
 ├── config_dirty.rs     # Dirty tracking for config changes
 ├── action_proxy.rs     # niri.action API (~90 actions via macro)
 ├── events_proxy.rs     # niri.events API (on, once, off, emit, list, clear)
@@ -611,7 +611,6 @@ niri-lua/src/
 ├── extractors.rs       # Value extraction helpers
 ├── parse_utils.rs      # Parsing utilities
 ├── test_utils.rs       # Test helpers
-├── module_loader.rs    # XDG path definitions for user Lua modules (not yet integrated)
 └── types/api.lua       # EmmyLua type definitions (generated)
 
 src/
@@ -2077,7 +2076,7 @@ The module system enables users to organize Lua code into reusable modules relat
 
 ### Config-Relative Require
 
-Niri's custom `require()` searcher resolves modules relative to the config file directory. This allows users to organize their configuration with local modules.
+Niri extends `package.path` to include the config file's directory, allowing `require()` to resolve modules relative to the config file. This follows the Neovim model for user modules.
 
 **Search Order:**
 
@@ -2777,7 +2776,6 @@ niri.config:apply()
 | `state_query.rs` | Partial | No | Yes | ~50% | Query return types covered |
 | `repl.rs` | Yes | Yes | No | ~70% | Command execution covered |
 | `timer_api.rs` | Yes | No | No | ~80% | Timer lifecycle tested |
-| `module_loader.rs` | Yes | No | No | ~80% | Simple package.path extension |
 
 ### Test Priorities
 
@@ -2898,15 +2896,14 @@ The plugin/module system was simplified to follow the Neovim model more closely:
 | Change | Before | After |
 |--------|--------|-------|
 | `plugin_system.rs` | 716 LOC with PluginManager, metadata, lifecycle | Deleted - over-engineered |
-| `module_loader.rs` | 277 LOC with custom require override | 63 LOC with XDG path definitions (not yet integrated) |
+| `module_loader.rs` | 277 LOC with custom require override | Deleted - plugins use standard Lua `require()` |
 
-The intended approach is to extend Lua's `package.path` with niri directories, allowing standard `require()` to find modules. The path definitions are implemented but **integration into the Lua runtime is pending**.
+The intended approach is to use Luau's standard `require()` semantics. Users can load modules relative to their config file or via absolute paths.
 
 #### Intentionally Kept (Not Dead Code)
 
 | File | LOC | Justification |
 |------|-----|---------------|
-| `module_loader.rs` | 63 | XDG path definitions for user Lua modules (integration pending) |
 | `ipc_repl.rs` | 78 | Neovim-style `:lua` command via IPC (`niri msg lua "code"`) |
 | `config_dirty.rs` | 161 | Granular change tracking enables future partial config reload optimization |
 | `lua_types.rs` | 395 | Type definitions required for config/runtime APIs |
@@ -2921,12 +2918,12 @@ The `config_dirty.rs` module tracks 21 individual config section flags, though c
 
 #### Design Decision: Simple Module Loading
 
-The module loader follows the Neovim model:
+Plugins follow the Neovim model - pure Lua modules loaded via standard `require()`:
 
-1. **Extend, don't replace**: Adds paths to `package.path`, doesn't override `require`
-2. **Standard Lua semantics**: `require("foo.bar")` works exactly as expected
+1. **Standard Lua semantics**: `require("foo.bar")` works exactly as expected
+2. **Relative requires**: `require("./utils")` loads relative to the current file
 3. **No plugin manager**: Users load plugins explicitly via `require()` in their config
-4. **Simple paths**: `~/.config/niri/lua/`, `~/.local/share/niri/lua/`, `/usr/share/niri/lua/`
+4. **User-managed paths**: Users can set up their own module directories
 
 ### Future Optimization Opportunities
 

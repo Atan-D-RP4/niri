@@ -20,7 +20,6 @@ pub mod runtime;
 pub mod event_handlers;
 pub mod event_system;
 pub mod events_proxy;
-pub mod module_loader;
 
 // Tier 2: Configuration API
 pub mod action_proxy;
@@ -31,7 +30,7 @@ pub mod config_state;
 pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
-pub mod migrated_proxies;
+pub mod config_proxies;
 pub mod parse_utils;
 pub mod traits;
 

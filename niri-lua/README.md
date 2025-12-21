@@ -9,10 +9,8 @@ This crate provides Lua scripting capabilities to Niri, allowing users to config
 The niri-lua crate is the foundation for a **Neovim-like extensibility model** for the Niri compositor. Combined with the [niri-ui specification](../docs/NIRI_UI_SPECIFICATION.md), this enables:
 
 - **Full Desktop Environment Creation**: Build complete desktop shells (panels, launchers, notification centers) entirely in Lua
-- **Plugin Ecosystem**: Discover, load, and manage user plugins with proper sandboxing and lifecycle management
+- **Plugin Ecosystem**: Load user modules via standard Lua `require()` from config-relative paths (Neovim model)
 - **IDE-like Extensibility**: Similar to how Neovim can be extended into a full IDE, Niri can be extended into a full DE
-
-This vision drives several WIP components that may appear unused but are intentionally scaffolded for future integration.
 
 ## Implementation Status
 
@@ -23,20 +21,10 @@ This vision drives several WIP components that may appear unused but are intenti
 | Process API | ✅ Complete | spawn() with opts, ProcessHandle, streaming callbacks |
 | State Queries | ✅ Partial | 4 queries (windows, focused_window, workspaces, outputs) |
 | Event System | ⚠️ Partial | Infrastructure complete, most events not wired |
-| Plugin System | 🚧 WIP | Discovery works, sandbox/lifecycle planned (see Vision) |
-| Module Loader | 🚧 WIP | Foundation for plugin system |
+| Module System | ✅ Complete | Standard Lua `require()` with config-relative paths |
 | Hot Reload | 🚧 Planned | Not yet implemented |
 | Async/Safety | 🚧 Planned | No execution timeouts yet (see LUA_ASYNC_IMPLEMENTATION.md) |
 | LSP Support | ✅ Available | EmmyLua type definitions generated in `types/api.lua` |
-
-### Work-In-Progress Components
-
-The following components are **intentionally scaffolded** for the plugin ecosystem vision:
-
-- **`plugin_system.rs`**: Plugin discovery, registration, and lifecycle management. Will integrate with niri-ui for widget plugins.
-- **`module_loader.rs`**: Module loading infrastructure for plugins. Supports sandboxed module resolution.
-
-These are NOT dead code - they are foundations for the extensibility vision described above.
 
 ## Features
 

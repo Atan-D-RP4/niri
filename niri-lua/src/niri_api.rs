@@ -43,7 +43,7 @@ impl LuaComponent for NiriApi {
                 parts.push(formatted);
             }
             let message = parts.join("\t");
-            info!("Lua API Info: {}", message);
+            info!("Lua Info: {}", message);
             Ok(())
         })?;
         utils.set("log", log_fn)?;

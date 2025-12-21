@@ -1,27 +1,24 @@
-//! Migrated proxy implementations using derive macros.
+//! Configuration proxy implementations using derive macros.
 //!
-//! This module contains proxy implementations that use the `LuaConfigProxy` derive macro
-//! instead of manual implementations. As migration progresses, proxies are moved from
-//! `config_wrapper.rs` to this module.
+//! This module contains proxy structs that provide Lua access to niri_config types.
+//! Each proxy uses the `#[derive(LuaConfigProxy)]` macro to generate getter/setter
+//! implementations for the Lua VM.
 //!
-//! ## Migration Status
+//! ## Architecture
 //!
-//! - [x] CursorConfigProxy - migrated from CursorProxy
-//! - [x] ClipboardConfigProxy - migrated from ClipboardProxy
-//! - [x] HotkeyOverlayConfigProxy - migrated from HotkeyOverlayProxy
-//! - [x] ConfigNotificationConfigProxy - migrated from ConfigNotificationProxy
-//! - [x] XwaylandSatelliteConfigProxy - migrated from XwaylandSatelliteProxy
-//! - [x] InputConfigProxy - migrated from InputProxy
-//! - [x] TouchpadConfigProxy - migrated from TouchpadProxy
-//! - [x] KeyboardConfigProxy - migrated from KeyboardProxy
-//! - [x] FocusRingConfigProxy - migrated from FocusRingProxy
-//! - [x] BorderConfigProxy - migrated from BorderProxy
-//! - [x] ShadowConfigProxy - migrated from ShadowProxy
-//! - [x] OverviewWorkspaceShadowConfigProxy - migrated from OverviewWorkspaceShadowProxy
-//! - [x] OverviewConfigProxy - migrated from OverviewProxy
-//! - [x] RecentWindowsConfigProxy - migrated from RecentWindowsProxy
+//! - Each config section has a corresponding `*ConfigProxy` struct
+//! - Proxies wrap fields from `niri_config::Config` with type conversions for Lua
+//! - The `LuaConfigProxy` derive macro generates `UserData` implementations
+//! - Nested sections (e.g., `layout.focus_ring`) have their own proxy types
 //!
-//! Migration complete - all manual proxies have been migrated to derive macros.
+//! ## Usage from Lua
+//!
+//! ```lua
+//! -- Access config through proxies
+//! niri.config.cursor.xcursor_size = 32
+//! niri.config.layout.gaps = 16
+//! niri.config.input.keyboard.repeat_rate = 25
+//! ```
 
 use niri_config::animations::Kind;
 use niri_config::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap, TrackLayout};
