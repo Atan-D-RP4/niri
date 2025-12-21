@@ -538,6 +538,238 @@ This tiered architecture allows different levels of Lua integration:
 - State queries: `niri.state.windows()`, `focused_window()`, `workspaces()`, `outputs()`
 - REPL: `niri msg lua -- 'code'` executes Lua with full state access
 - API registry with LSP type generation (`types/api.lua`)
+- Process API: `niri.action:spawn()` with opts, streaming callbacks, ProcessHandle
+
+### 10. Process API Architecture
+
+The Process API (`process.rs`) provides async subprocess management with streaming I/O, matching Neovim's `vim.system()` design philosophy.
+
+#### 10a. Core Components
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                        ProcessManager                           │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
+│  │ processes:       │  │ event_queue:     │  │ callback_reg: │ │
+│  │ HashMap<u32,     │  │ Arc<Mutex<       │  │ Arc<Callback  │ │
+│  │   ProcessState>  │  │   VecDeque<      │  │   Registry>   │ │
+│  │                  │  │   CallbackEvent>>│  │               │ │
+│  └──────────────────┘  └──────────────────┘  └───────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+         │                       ▲                    │
+         │ spawn()               │ push events        │ get callback
+         ▼                       │                    ▼
+┌─────────────────┐      ┌───────────────┐    ┌─────────────────┐
+│  Worker Thread  │─────▶│ Event Queue   │    │ CallbackRegistry│
+│  (per process)  │      │ (thread-safe) │    │ (ID → LuaFunc)  │
+└─────────────────┘      └───────────────┘    └─────────────────┘
+```
+
+**ProcessManager** (`process.rs:47`): Central coordinator holding all process state.
+
+```rust
+pub struct ProcessManager {
+    processes: HashMap<u32, ProcessState>,
+    event_queue: Arc<Mutex<VecDeque<CallbackEvent>>>,
+    callback_registry: Arc<CallbackRegistry>,
+}
+```
+
+**ProcessState** (`process.rs:62`): Per-process tracking with worker thread handle.
+
+```rust
+struct ProcessState {
+    child: Option<Child>,
+    stdin_tx: Option<Sender<StdinCommand>>,
+    worker_handle: Option<JoinHandle<()>>,
+    is_closing: Arc<AtomicBool>,
+}
+```
+
+#### 10b. Spawn Flow
+
+```text
+Lua: niri.action:spawn({"cmd"}, opts)
+         │
+         ▼
+┌─────────────────────────────────────┐
+│ ActionProxy::spawn_with_opts()      │
+│ - Parse SpawnOpts from Lua table    │
+│ - Extract callbacks, store in       │
+│   CallbackRegistry                  │
+│ - Call ProcessManager::spawn()      │
+└─────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│ ProcessManager::spawn()             │
+│ - Configure Command (cwd, env)      │
+│ - Set up stdio pipes if needed      │
+│ - Spawn child process               │
+│ - Create worker thread for I/O      │
+│ - Return ProcessHandle to Lua       │
+└─────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│ Worker Thread (process_worker)      │
+│ - Read stdout/stderr in loop        │
+│ - Push StreamingCallback events     │
+│ - Wait for process exit             │
+│ - Push OnExit callback event        │
+└─────────────────────────────────────┘
+```
+
+#### 10c. Callback Dispatch Architecture
+
+The Process API uses an event queue pattern for thread-safe callback invocation:
+
+```text
+Worker Thread                    Main Thread (Lua)
+     │                                │
+     │ StreamingCallback {            │
+     │   callback_id: 42,             │
+     │   data: "output line"          │
+     │ }                              │
+     │                                │
+     └────────▶ event_queue ──────────┘
+                    │
+                    ▼
+         process_events() called
+         in compositor refresh cycle
+                    │
+                    ▼
+         CallbackRegistry::get(42)
+         → LuaFunction
+                    │
+                    ▼
+         callback.call(data)
+```
+
+**CallbackRegistry** (`callback_registry.rs`): Thread-safe mapping of callback IDs to Lua functions.
+
+```rust
+pub struct CallbackRegistry {
+    callbacks: Mutex<HashMap<u64, RegistryKey>>,
+    next_id: AtomicU64,
+}
+```
+
+**CallbackEvent** variants (`process.rs:85`):
+- `StreamingStdout { callback_id, data, is_complete }`
+- `StreamingStderr { callback_id, data, is_complete }`
+- `OnExit { callback_id, result }`
+
+#### 10d. ProcessHandle Lua Interface
+
+The `ProcessHandle` userdata exposed to Lua:
+
+```lua
+local handle = niri.action:spawn({"long-running"}, {capture_stdout = true})
+
+handle:pid()         -- Returns OS process ID
+handle:is_closing()  -- Check if termination started
+handle:write("input\n")  -- Write to stdin (if stdin = "pipe")
+handle:close_stdin() -- Signal EOF to child
+handle:kill()        -- SIGKILL immediate termination
+handle:wait(timeout_ms) -- Block until exit with optional timeout
+```
+
+**Timeout Escalation** (`process.rs:420`):
+```text
+wait(timeout) called
+     │
+     ▼
+Wait up to timeout_ms
+     │
+     ├─ Process exits → return result
+     │
+     └─ Timeout expires
+            │
+            ▼
+       Send SIGTERM
+            │
+            ▼
+       Wait 1000ms grace period
+            │
+            ├─ Process exits → return result
+            │
+            └─ Grace period expires
+                   │
+                   ▼
+              Send SIGKILL
+                   │
+                   ▼
+              Return result (code = -9)
+```
+
+#### 10e. Stdin Handling
+
+Three stdin modes supported:
+
+| Mode | Lua Value | Behavior |
+|------|-----------|----------|
+| Closed | `"closed"` or `nil` | No stdin pipe created |
+| Data | `"data string"` | Write string, close stdin |
+| Pipe | `"pipe"` | Keep stdin open for `handle:write()` |
+
+Stdin commands sent via channel to worker thread:
+```rust
+enum StdinCommand {
+    Write(Vec<u8>),
+    Close,
+}
+```
+
+#### 10f. Text vs Binary Mode
+
+```lua
+-- Text mode (default): line-buffered streaming
+spawn(cmd, {text = true, stdout = function(line) end})
+
+-- Binary mode: 4KB chunk streaming
+spawn(cmd, {text = false, stdout = function(chunk) end})
+```
+
+Text mode splits on newlines; binary mode streams raw 4KB chunks.
+
+#### 10g. Thread Safety Model
+
+- **ProcessManager**: Protected by `Arc<Mutex<ProcessManager>>` in ActionProxy
+- **Event Queue**: `Arc<Mutex<VecDeque<CallbackEvent>>>` shared with workers
+- **CallbackRegistry**: Internal `Mutex<HashMap>` with atomic ID generation
+- **ProcessState.is_closing**: `Arc<AtomicBool>` for lock-free status checks
+
+#### 10h. GC Behavior
+
+**Critical Design Decision**: ProcessHandle garbage collection does NOT kill the OS process.
+
+```lua
+local handle = spawn({"daemon"}, {detach = true})
+handle = nil  -- GC collects handle, but daemon keeps running
+```
+
+This matches Neovim's `vim.system()` behavior and avoids surprising process termination.
+
+#### 10i. Integration Points
+
+**ActionProxy** (`action_proxy.rs`): Entry point from Lua
+```rust
+impl ActionProxy {
+    pub fn spawn_with_opts(&self, cmd: Vec<String>, opts: SpawnOpts) -> LuaResult<ProcessHandle>
+}
+```
+
+**Compositor Integration** (planned for `src/lua_integration.rs`):
+```rust
+// In compositor refresh cycle:
+if let Some(ref process_manager) = state.lua_process_manager {
+    let events = process_manager.lock().unwrap().process_events();
+    for event in events {
+        // Dispatch to Lua callbacks via CallbackRegistry
+    }
+}
+```
 
 #### Compositor Integration (`src/lua_integration.rs`)
 The Lua setup logic is consolidated in `src/lua_integration.rs`:

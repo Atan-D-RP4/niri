@@ -759,6 +759,190 @@ end)
 
 ---
 
+## Process Spawning
+
+The spawn API enables launching and controlling external processes with optional output capture, stdin writing, and streaming callbacks.
+
+### Fire-and-Forget Spawning
+
+For simple process launching without needing to track the process:
+
+```lua
+-- Simple command
+niri.action:spawn({"alacritty"})
+
+-- Command with arguments
+niri.action:spawn({"notify-send", "Hello", "World"})
+
+-- Shell command (for pipes, redirects, etc.)
+niri.action:spawn_sh("echo 'Hello' | wc -c")
+```
+
+### Capturing Output
+
+To capture process output, pass an options table as the second argument:
+
+```lua
+-- Capture stdout and stderr
+local handle = niri.action:spawn({"ls", "-la"}, {
+    capture_stdout = true,
+    capture_stderr = true,
+})
+
+-- Wait for process to complete and get result
+local result = handle:wait()
+print("Exit code:", result.code)
+print("Output:", result.stdout)
+print("Errors:", result.stderr)
+```
+
+### Streaming Callbacks
+
+For long-running processes, use streaming callbacks to receive output in real-time:
+
+```lua
+-- Stream output line-by-line
+local handle = niri.action:spawn({"tail", "-f", "/var/log/syslog"}, {
+    stdout = function(err, line)
+        if err then
+            niri.utils.error("Error: " .. err)
+        elseif line then
+            niri.utils.log("Log: " .. line)
+        end
+    end,
+    on_exit = function(result)
+        niri.utils.log("Process exited with code: " .. tostring(result.code))
+    end
+})
+
+-- Later, stop the process
+handle:kill()
+```
+
+### Writing to stdin
+
+For processes that read from stdin:
+
+```lua
+-- Enable stdin pipe
+local handle = niri.action:spawn({"cat"}, {
+    stdin = true,  -- or stdin = "pipe"
+    capture_stdout = true,
+})
+
+-- Write data to the process
+handle:write("Hello from Lua!\n")
+handle:write("Another line\n")
+
+-- Close stdin to signal EOF
+handle:close_stdin()
+
+-- Wait for result
+local result = handle:wait()
+print(result.stdout)  -- "Hello from Lua!\nAnother line\n"
+```
+
+Or pass initial data directly:
+
+```lua
+-- Pass data string directly (stdin closes after writing)
+local handle = niri.action:spawn({"wc", "-l"}, {
+    stdin = "line1\nline2\nline3\n",
+    capture_stdout = true,
+})
+local result = handle:wait()
+print(result.stdout)  -- "3"
+```
+
+### Process Environment
+
+Customize the process environment and working directory:
+
+```lua
+local handle = niri.action:spawn({"./my-script.sh"}, {
+    cwd = "/path/to/project",
+    env = {
+        MY_VAR = "value",
+        PATH = "/custom/bin:" .. os.getenv("PATH"),
+    },
+    capture_stdout = true,
+})
+```
+
+### Timeout Handling
+
+The `wait()` method supports timeouts with automatic signal escalation:
+
+```lua
+local handle = niri.action:spawn({"long-running-task"}, {})
+
+-- Wait up to 5 seconds
+local result = handle:wait(5000)
+
+if result.signal then
+    -- Process was killed (SIGTERM or SIGKILL)
+    print("Process killed with signal:", result.signal)
+else
+    print("Process completed with code:", result.code)
+end
+```
+
+Timeout behavior:
+1. Wait for `timeout_ms` milliseconds
+2. If timeout expires, send SIGTERM
+3. Wait 1 second grace period
+4. If still running, send SIGKILL
+
+### ProcessHandle Reference
+
+| Property/Method | Description |
+|-----------------|-------------|
+| `handle.pid` | Process ID (read-only) |
+| `handle:wait(timeout_ms?)` | Wait for exit, returns result table |
+| `handle:kill(signal?)` | Send signal (default: "TERM") |
+| `handle:write(data)` | Write to stdin pipe |
+| `handle:close_stdin()` | Close stdin pipe |
+| `handle:is_closing()` | Check if stdin is closed |
+
+### Practical Examples
+
+**Run a command and notify on completion:**
+
+```lua
+niri.action:spawn({"make", "build"}, {
+    cwd = "~/projects/myapp",
+    on_exit = function(result)
+        if result.code == 0 then
+            niri.action:spawn({"notify-send", "Build succeeded!"})
+        else
+            niri.action:spawn({"notify-send", "Build failed!", "Exit code: " .. result.code})
+        end
+    end
+})
+```
+
+**Interactive process control:**
+
+```lua
+-- Start a REPL process
+local repl = niri.action:spawn({"python3"}, {
+    stdin = true,
+    stdout = function(err, line)
+        if line then print("Python:", line) end
+    end,
+})
+
+-- Send commands
+repl:write("print('Hello from Python')\n")
+repl:write("2 + 2\n")
+
+-- Clean shutdown
+repl:write("exit()\n")
+repl:wait(1000)
+```
+
+---
+
 ## KDL vs Lua Migration
 
 ### Syntax Mapping

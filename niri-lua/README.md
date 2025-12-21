@@ -20,6 +20,7 @@ This vision drives several WIP components that may appear unused but are intenti
 |---------|--------|-------|
 | Configuration API | ✅ Complete | Full KDL parity |
 | Action System | ✅ Complete | ~90 actions implemented |
+| Process API | ✅ Complete | spawn() with opts, ProcessHandle, streaming callbacks |
 | State Queries | ✅ Partial | 4 queries (windows, focused_window, workspaces, outputs) |
 | Event System | ⚠️ Partial | Infrastructure complete, most events not wired |
 | Plugin System | 🚧 WIP | Discovery works, sandbox/lifecycle planned (see Vision) |
@@ -116,6 +117,7 @@ end)
 |-----------|---------|---------|
 | `niri.config` | Configuration proxy | `niri.config.layout.gaps = 16` |
 | `niri.action` | Compositor actions | `niri.action:spawn({"kitty"})` |
+| `niri.action` | Process spawning | `niri.action:spawn({"cmd"}, {capture_stdout=true})` |
 | `niri.events` | Event system | `niri.events:on("window:open", fn)` |
 | `niri.state` | Query compositor state | `niri.state.windows()` |
 | `niri.utils` | Logging and utilities | `niri.utils.log("msg")` |

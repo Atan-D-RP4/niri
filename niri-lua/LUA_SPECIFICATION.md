@@ -1159,6 +1159,8 @@ niri.action:move_window_to_monitor_right()
 
 #### Process Spawning
 
+The spawn API provides two modes: fire-and-forget for simple process launching, and managed mode with a ProcessHandle for controlling and monitoring processes.
+
 **Basic usage (fire-and-forget):**
 ```lua
 niri.action:spawn({"cmd", "arg1", "arg2"})  -- Array of strings, returns nil
@@ -1172,13 +1174,120 @@ niri.action:spawn({"kitty"})  -- Returns nil, spawns immediately
 
 -- Two-argument form with options (returns ProcessHandle)
 local handle = niri.action:spawn({"kitty"}, {
-    stdout = true,
+    stdout = function(err, data)
+        if data then niri.utils.log("stdout: " .. data) end
+    end,
+    stderr = function(err, data)
+        if data then niri.utils.log("stderr: " .. data) end
+    end,
     on_exit = function(result)
         niri.utils.log("Process exited with code: " .. tostring(result.code))
-        niri.utils.log("Output: " .. result.stdout)
     end
 })
+
+-- Capture output without streaming (wait for process to complete)
+local handle = niri.action:spawn({"echo", "hello"}, {
+    capture_stdout = true,  -- Capture stdout for wait() result
+    capture_stderr = true,  -- Capture stderr for wait() result
+})
+local result = handle:wait()
+print("stdout: " .. result.stdout)
+print("stderr: " .. result.stderr)
+
+-- Writing to stdin
+local handle = niri.action:spawn({"cat"}, {
+    stdin = true,  -- Enable stdin pipe (or stdin = "pipe")
+    capture_stdout = true,
+})
+handle:write("Hello from Lua!\n")
+handle:close_stdin()  -- Close stdin to signal EOF
+local result = handle:wait()
+print(result.stdout)  -- "Hello from Lua!"
+
+-- Pass initial data to stdin (closes automatically after writing)
+local handle = niri.action:spawn({"wc", "-l"}, {
+    stdin = "line1\nline2\nline3\n",  -- Data string sent to stdin
+    capture_stdout = true,
+})
+local result = handle:wait()
+print(result.stdout)  -- "3"
 ```
+
+**SpawnOpts fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cwd` | `string?` | `nil` | Working directory for the process |
+| `env` | `table<string, string>?` | `nil` | Environment variables to set (merged with parent) |
+| `clear_env` | `boolean` | `false` | If `true`, start with empty environment (only use `env` table) |
+| `stdin` | `boolean \| string` | `false` | `false`=closed, `true`/`"pipe"`=pipe for writing, `"data"`=send string then close |
+| `capture_stdout` | `boolean` | `false` | Capture stdout for `wait()` result |
+| `capture_stderr` | `boolean` | `false` | Capture stderr for `wait()` result |
+| `stdout` | `boolean \| function` | `nil` | `true` to capture, or callback `function(err, data)` for streaming |
+| `stderr` | `boolean \| function` | `nil` | `true` to capture, or callback `function(err, data)` for streaming |
+| `on_exit` | `function(result)` | `nil` | Called when process exits with `{code, signal, stdout?, stderr?}` |
+| `text` | `boolean` | `true` | If `true`, data is UTF-8 string; if `false`, data is raw bytes |
+| `detach` | `boolean` | `false` | If `true`, returns `nil` (fire-and-forget mode) |
+
+**Stdin modes:**
+
+| Value | Behavior |
+|-------|----------|
+| `false` or `nil` | Stdin is closed (default) |
+| `true` or `"pipe"` | Stdin is a pipe; use `handle:write()` and `handle:close_stdin()` |
+| `"any other string"` | String is written to stdin, then stdin closes automatically |
+
+**ProcessHandle methods:**
+
+| Method | Description |
+|--------|-------------|
+| `handle:wait(timeout_ms?)` | Block until exit; returns result table. With timeout, sends SIGTERM then SIGKILL after 1s grace period |
+| `handle:kill(signal?)` | Send signal to process. Default: SIGTERM. Accepts integer or string ("TERM", "KILL", "INT", "HUP", "QUIT", "USR1", "USR2") |
+| `handle:write(data)` | Write data to stdin pipe. Requires `stdin = true` or `stdin = "pipe"` |
+| `handle:close_stdin()` | Close the stdin pipe (signals EOF to the process) |
+| `handle:is_closing()` | Returns `true` if stdin has been closed |
+| `handle.pid` | Process ID (read-only integer) |
+
+**Result table (from `wait()` or `on_exit` callback):**
+
+```lua
+{
+    code = 0,           -- Exit code (integer, or nil if killed by signal)
+    signal = nil,       -- Signal number (integer, or nil if normal exit)
+    stdout = "output",  -- Captured stdout (if capture_stdout=true or stdout=true)
+    stderr = "",        -- Captured stderr (if capture_stderr=true or stderr=true)
+}
+```
+
+**Streaming callback signature:**
+
+```lua
+-- stdout/stderr callbacks receive (err, data)
+function(err, data)
+    if err then
+        niri.utils.error("Stream error: " .. err)
+    elseif data then
+        -- data is a string (text mode) or bytes (binary mode)
+        -- In text mode, each callback receives one line (without newline)
+        niri.utils.log("Received: " .. data)
+    end
+end
+```
+
+**Timeout escalation behavior:**
+
+When `wait(timeout_ms)` is called with a timeout:
+1. Wait for process to exit within `timeout_ms` milliseconds
+2. If timeout expires, send SIGTERM to the process
+3. Wait up to 1000ms (grace period) for graceful termination
+4. If process still running, send SIGKILL (cannot be ignored)
+5. Return the result (signal will be 15 for SIGTERM or 9 for SIGKILL)
+
+**Important notes:**
+
+- **GC behavior**: ProcessHandle garbage collection does NOT kill the OS process (matches Neovim behavior). Processes continue running independently.
+- **Callback invocation**: All callbacks (stdout, stderr, on_exit) are invoked on the main compositor thread via an event queue.
+- **Return value logic**: `spawn()` returns `nil` if called without opts, with `detach = true`, or if spawn fails. Otherwise returns ProcessHandle.
 
 **Spawning at Startup:**
 
@@ -1200,8 +1309,6 @@ niri.loop.new_timer():start(100, 0, function()
     niri.action:spawn({"swaybg", "-i", "wallpaper.png"})
 end)
 ```
-
-For more control over process spawning, including capturing output and handling process lifecycle, use the [`niri.process` API](#process-control-api) instead.
 
 #### Screenshots
 ```lua
