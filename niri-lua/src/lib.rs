@@ -20,6 +20,7 @@ pub mod runtime;
 pub mod event_handlers;
 pub mod event_system;
 pub mod events_proxy;
+pub mod module_loader;
 
 // Tier 2: Configuration API
 pub mod action_proxy;

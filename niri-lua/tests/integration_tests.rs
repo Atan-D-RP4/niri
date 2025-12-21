@@ -692,11 +692,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "spawn should return handle: {}",
-            output
-        );
+        assert!(output.contains("true"), "spawn should return handle: {}", output);
     }
 
     #[test]
@@ -709,11 +705,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "spawn without opts returns nil: {}",
-            output
-        );
+        assert!(output.contains("true"), "spawn without opts returns nil: {}", output);
     }
 
     #[test]
@@ -742,11 +734,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "pid access should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "pid should be positive number: {}",
-            output
-        );
+        assert!(output.contains("true"), "pid should be positive number: {}", output);
     }
 
     #[test]
@@ -764,11 +752,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "is_closing() test should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "is_closing should track stdin state: {}",
-            output
-        );
+        assert!(output.contains("true"), "is_closing should track stdin state: {}", output);
     }
 
     #[test]
@@ -783,11 +767,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "kill should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "killed process should have signal 9: {}",
-            output
-        );
+        assert!(output.contains("true"), "killed process should have signal 9: {}", output);
     }
 
     #[test]
@@ -800,11 +780,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "wait should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "wait should return result table: {}",
-            output
-        );
+        assert!(output.contains("true"), "wait should return result table: {}", output);
     }
 
     #[test]
@@ -823,11 +799,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "wait with capture should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "should return result table: {}",
-            output
-        );
+        assert!(output.contains("true"), "should return result table: {}", output);
     }
 
     #[test]
@@ -840,16 +812,8 @@ mod process_integration_tests {
             return type(result) == "table" and result.code == 0
         "#;
         let (output, success) = runtime.execute_string(code);
-        assert!(
-            success,
-            "wait with stderr capture should succeed: {}",
-            output
-        );
-        assert!(
-            output.contains("true"),
-            "should return result table: {}",
-            output
-        );
+        assert!(success, "wait with stderr capture should succeed: {}", output);
+        assert!(output.contains("true"), "should return result table: {}", output);
     }
 
     #[test]
@@ -862,11 +826,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "wait with timeout should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "fast process should complete: {}",
-            output
-        );
+        assert!(output.contains("true"), "fast process should complete: {}", output);
     }
 
     // ------------------------------------------------------------------------
@@ -884,11 +844,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn with cwd should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "process should exit cleanly: {}",
-            output
-        );
+        assert!(output.contains("true"), "process should exit cleanly: {}", output);
     }
 
     #[test]
@@ -922,11 +878,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn with stdin data should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "stdin should be passed to process: {}",
-            output
-        );
+        assert!(output.contains("true"), "stdin should be passed to process: {}", output);
     }
 
     #[test]
@@ -945,11 +897,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn with stdin pipe should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "piped input should reach process: {}",
-            output
-        );
+        assert!(output.contains("true"), "piped input should reach process: {}", output);
     }
 
     // ------------------------------------------------------------------------
@@ -966,11 +914,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "nonzero exit should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "exit code should be 42: {}",
-            output
-        );
+        assert!(output.contains("true"), "exit code should be 42: {}", output);
     }
 
     #[test]
@@ -986,11 +930,7 @@ mod process_integration_tests {
         let (output, success) = runtime.execute_string(code);
         assert!(success, "pcall should succeed: {}", output);
         // Either pcall catches error or we get an error result
-        assert!(
-            output.contains("true"),
-            "should handle nonexistent command: {}",
-            output
-        );
+        assert!(output.contains("true"), "should handle nonexistent command: {}", output);
     }
 
     // ------------------------------------------------------------------------
@@ -1008,11 +948,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "text mode should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "process should exit cleanly: {}",
-            output
-        );
+        assert!(output.contains("true"), "process should exit cleanly: {}", output);
     }
 
     #[test]
@@ -1026,11 +962,7 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "binary mode should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "process should exit cleanly: {}",
-            output
-        );
+        assert!(output.contains("true"), "process should exit cleanly: {}", output);
     }
 
     // ------------------------------------------------------------------------
@@ -1083,11 +1015,7 @@ mod process_integration_tests {
             return handle ~= nil
         "#;
         let (output, success) = runtime.execute_string(code);
-        assert!(
-            success,
-            "spawn with stderr callback should succeed: {}",
-            output
-        );
+        assert!(success, "spawn with stderr callback should succeed: {}", output);
         assert!(output.contains("true"), "should return handle: {}", output);
     }
 
@@ -1106,11 +1034,7 @@ mod process_integration_tests {
             return handle ~= nil
         "#;
         let (output, success) = runtime.execute_string(code);
-        assert!(
-            success,
-            "spawn with all callbacks should succeed: {}",
-            output
-        );
+        assert!(success, "spawn with all callbacks should succeed: {}", output);
         assert!(output.contains("true"), "should return handle: {}", output);
     }
 
@@ -1197,14 +1121,21 @@ mod process_integration_tests {
         assert!(success, "setup should succeed: {}", output);
 
         // Process events until callback fires
-        let condition_met =
-            wait_for_lua_condition(&runtime, "return _G.exit_called", Duration::from_secs(5));
+        let condition_met = wait_for_lua_condition(
+            &runtime,
+            "return _G.exit_called",
+            Duration::from_secs(5),
+        );
         assert!(condition_met, "on_exit callback should fire within timeout");
 
         // Verify exit code
         let (output, success) = runtime.execute_string("return _G.exit_code == 7");
         assert!(success, "verify should succeed: {}", output);
-        assert!(output.contains("true"), "exit code should be 7: {}", output);
+        assert!(
+            output.contains("true"),
+            "exit code should be 7: {}",
+            output
+        );
     }
 
     #[test]
@@ -1231,8 +1162,11 @@ mod process_integration_tests {
         let (output, success) = runtime.execute_string(setup);
         assert!(success, "setup should succeed: {}", output);
 
-        let condition_met =
-            wait_for_lua_condition(&runtime, "return _G.stderr_called", Duration::from_secs(5));
+        let condition_met = wait_for_lua_condition(
+            &runtime,
+            "return _G.stderr_called",
+            Duration::from_secs(5),
+        );
         assert!(condition_met, "stderr callback should be called");
 
         let verify = r#"
@@ -1326,15 +1260,92 @@ mod process_integration_tests {
 // ========================================================================
 // REQUIRE / MODULE LOADING TESTS
 // ========================================================================
-//
-// Note: The custom module_loader.rs (XDG-based require with relative paths)
-// was deleted as YAGNI. Plugins follow the Neovim model - standard Lua
-// require() with extended package.path. These tests verify basic behavior.
 
 mod require_tests {
-    use std::fs;
+    use std::path::PathBuf;
+    use std::{env, fs};
 
     use super::*;
+
+    /// Get the test fixtures directory path
+    #[allow(dead_code)]
+    fn fixtures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_fixtures")
+    }
+
+    /// Get the lua modules directory within fixtures
+    #[allow(dead_code)]
+    fn lua_modules_dir() -> PathBuf {
+        fixtures_dir().join("lua")
+    }
+
+    #[test]
+    fn test_require_caches_modules() {
+        let runtime = create_runtime();
+
+        // First, set up a module in the cache to simulate a loaded module
+        let code = r#"
+            -- Manually populate the cache to test caching behavior
+            __niri_loaded["cached_module"] = { value = 42 }
+            
+            -- Now require should return the cached value
+            local m1 = require("cached_module")
+            local m2 = require("cached_module")
+            
+            -- Both should be the same table reference
+            return m1 == m2 and m1.value == 42
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "Cache test should succeed");
+        assert!(
+            output.contains("true"),
+            "Modules should be cached: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_require_not_found_lists_paths() {
+        let runtime = create_runtime();
+
+        let code = r#"
+            local ok, err = pcall(function()
+                require("nonexistent_module_xyz")
+            end)
+            return tostring(err)
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "pcall should succeed");
+        assert!(
+            output.contains("not found"),
+            "Error should mention 'not found': {}",
+            output
+        );
+        assert!(
+            output.contains("no file"),
+            "Error should list searched paths: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_relative_require_without_context_fails() {
+        let runtime = create_runtime();
+
+        // In execute_string, there's no current file context, so relative require should fail
+        let code = r#"
+            local ok, err = pcall(function()
+                require("./relative_module")
+            end)
+            return ok and "succeeded" or "failed"
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "pcall should succeed");
+        assert_eq!(
+            output, "failed",
+            "Relative require without file context should fail"
+        );
+    }
 
     #[test]
     fn test_load_file_sets_current_file_context() {
@@ -1358,21 +1369,241 @@ mod require_tests {
     }
 
     #[test]
-    fn test_require_uses_standard_lua_behavior() {
+    fn test_require_from_file_with_relative_path() {
+        // Create a temp directory structure:
+        // temp/
+        //   main.lua       - requires ./helper
+        //   helper.lua     - returns { name = "helper" }
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let helper_file = temp_dir.path().join("helper.lua");
+        fs::write(&helper_file, r#"return { name = "helper", value = 123 }"#)
+            .expect("Failed to write helper file");
+
+        let main_file = temp_dir.path().join("main.lua");
+        fs::write(
+            &main_file,
+            r#"
+            local helper = require("./helper")
+            return helper.name .. ":" .. tostring(helper.value)
+        "#,
+        )
+        .expect("Failed to write main file");
+
+        let runtime = create_runtime();
+        let result = runtime.load_file(&main_file);
+
+        assert!(result.is_ok(), "load_file should succeed: {:?}", result);
+        let value = result.unwrap();
+        let output = value.to_string().expect("Should be a string");
+        assert_eq!(output, "helper:123", "Should load relative module");
+    }
+
+    #[test]
+    fn test_require_with_dot_notation() {
+        // Test that dot notation in module names is properly converted to path separators
+        // We test this via the resolve_module function's behavior, since setting up
+        // XDG_CONFIG_HOME for a full integration test is complex.
+        //
+        // The key behavior: require("foo.bar") should search for foo/bar.lua
+
+        // Create a temp directory structure simulating XDG_CONFIG_HOME:
+        // temp/
+        //   niri/
+        //     lua/
+        //       nested/
+        //         module.lua  - returns { deep = true }
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let lua_dir = temp_dir.path().join("niri").join("lua");
+        let nested_dir = lua_dir.join("nested");
+        fs::create_dir_all(&nested_dir).expect("Failed to create nested dir");
+
+        let module_file = nested_dir.join("module.lua");
+        fs::write(
+            &module_file,
+            r#"return { deep = true, name = "nested.module" }"#,
+        )
+        .expect("Failed to write module file");
+
+        // Set XDG_CONFIG_HOME to temp_dir so the custom require finds our module
+        // Note: This affects the global environment, but tests run in separate processes
+        env::set_var("XDG_CONFIG_HOME", temp_dir.path());
+
+        // Create a fresh runtime after setting env var
         let runtime = create_runtime();
 
-        // Standard Lua require should fail for nonexistent modules
+        // Now require("nested.module") should find temp/niri/lua/nested/module.lua
         let code = r#"
-            local ok, err = pcall(function()
-                require("nonexistent_module_xyz")
-            end)
-            return ok and "succeeded" or "failed"
+            local mod = require("nested.module")
+            return mod.deep and mod.name == "nested.module" and "success" or "wrong_content"
         "#;
+
         let (output, success) = runtime.execute_string(code);
-        assert!(success, "pcall should succeed");
-        assert_eq!(
-            output, "failed",
-            "Require for nonexistent module should fail"
+        assert!(
+            success,
+            "Dot notation require should succeed: output={}",
+            output
         );
+        assert_eq!(output, "success", "Module should load with dot notation");
+
+        // Clean up env var
+        env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    fn test_require_init_lua_convention() {
+        // Create a temp directory structure:
+        // temp/
+        //   mypackage/
+        //     init.lua  - returns { type = "package" }
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let pkg_dir = temp_dir.path().join("mypackage");
+        fs::create_dir_all(&pkg_dir).expect("Failed to create package dir");
+
+        let init_file = pkg_dir.join("init.lua");
+        fs::write(&init_file, r#"return { type = "package", version = 1 }"#)
+            .expect("Failed to write init.lua");
+
+        // Test that init.lua is found when requiring a directory name
+        let main_file = temp_dir.path().join("main.lua");
+        fs::write(
+            &main_file,
+            r#"
+            local pkg = require("./mypackage")
+            return pkg.type .. ":" .. tostring(pkg.version)
+        "#,
+        )
+        .expect("Failed to write main file");
+
+        let runtime = create_runtime();
+        let result = runtime.load_file(&main_file);
+
+        assert!(result.is_ok(), "load_file should succeed: {:?}", result);
+        let value = result.unwrap();
+        let output = value.to_string().expect("Should be a string");
+        assert_eq!(output, "package:1", "Should load init.lua from directory");
+    }
+
+    #[test]
+    fn test_nested_require_preserves_context() {
+        // Create a temp directory structure:
+        // temp/
+        //   main.lua    - requires ./level1
+        //   level1.lua  - requires ./level2, returns combined
+        //   level2.lua  - returns { level = 2 }
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let level2_file = temp_dir.path().join("level2.lua");
+        fs::write(&level2_file, r#"return { level = 2 }"#).expect("Failed to write level2");
+
+        let level1_file = temp_dir.path().join("level1.lua");
+        fs::write(
+            &level1_file,
+            r#"
+            local l2 = require("./level2")
+            return { level = 1, nested = l2 }
+        "#,
+        )
+        .expect("Failed to write level1");
+
+        let main_file = temp_dir.path().join("main.lua");
+        fs::write(
+            &main_file,
+            r#"
+            local l1 = require("./level1")
+            return l1.level .. ":" .. l1.nested.level
+        "#,
+        )
+        .expect("Failed to write main file");
+
+        let runtime = create_runtime();
+        let result = runtime.load_file(&main_file);
+
+        assert!(
+            result.is_ok(),
+            "Nested require should succeed: {:?}",
+            result
+        );
+        let value = result.unwrap();
+        let output = value.to_string().expect("Should be a string");
+        assert_eq!(output, "1:2", "Nested modules should work");
+    }
+
+    #[test]
+    fn test_module_returns_nil_becomes_true() {
+        // Lua convention: if a module returns nil, require returns true
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let nil_module = temp_dir.path().join("nil_module.lua");
+        fs::write(
+            &nil_module,
+            r#"
+            -- Module that doesn't return anything (returns nil)
+            local x = 1 + 1
+        "#,
+        )
+        .expect("Failed to write nil_module");
+
+        let main_file = temp_dir.path().join("main.lua");
+        fs::write(
+            &main_file,
+            r#"
+            local result = require("./nil_module")
+            return type(result) == "boolean" and result == true
+        "#,
+        )
+        .expect("Failed to write main file");
+
+        let runtime = create_runtime();
+        let result = runtime.load_file(&main_file);
+
+        assert!(result.is_ok(), "load_file should succeed: {:?}", result);
+        let value = result.unwrap();
+        let output = value.to_string().expect("Should be a string");
+        assert!(
+            output.contains("true"),
+            "Module returning nil should become true: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_require_parent_directory() {
+        // Create a temp directory structure:
+        // temp/
+        //   shared.lua        - returns { shared = true }
+        //   subdir/
+        //     child.lua       - requires ../shared
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let shared_file = temp_dir.path().join("shared.lua");
+        fs::write(&shared_file, r#"return { shared = true }"#).expect("Failed to write shared");
+
+        let subdir = temp_dir.path().join("subdir");
+        fs::create_dir_all(&subdir).expect("Failed to create subdir");
+
+        let child_file = subdir.join("child.lua");
+        fs::write(
+            &child_file,
+            r#"
+            local shared = require("../shared")
+            return shared.shared and "yes" or "no"
+        "#,
+        )
+        .expect("Failed to write child");
+
+        let runtime = create_runtime();
+        let result = runtime.load_file(&child_file);
+
+        assert!(
+            result.is_ok(),
+            "Parent directory require should succeed: {:?}",
+            result
+        );
+        let value = result.unwrap();
+        let output = value.to_string().expect("Should be a string");
+        assert_eq!(output, "yes", "Should load module from parent directory");
     }
 }
