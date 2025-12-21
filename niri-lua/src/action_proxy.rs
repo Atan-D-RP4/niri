@@ -39,9 +39,8 @@ use log::debug;
 use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
 
-use crate::parse_utils;
 use crate::process::{parse_spawn_opts, ProcessHandle, SharedProcessManager};
-use crate::SharedCallbackRegistry;
+use crate::{parse_utils, SharedCallbackRegistry};
 
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.

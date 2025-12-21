@@ -118,21 +118,32 @@ impl EventHandlers {
     /// isolation - if one handler errors, others still execute. One-time
     /// handlers are automatically removed after execution.
     ///
+    /// Callbacks are executed with timeout protection to prevent runaway
+    /// scripts from freezing the compositor.
+    ///
     /// # Arguments
+    /// * `lua` - The Lua context (for timeout protection)
     /// * `event_type` - The event name
     /// * `event_data` - Lua value containing event data
     ///
     /// # Returns
     /// LuaResult indicating if event emission succeeded at the Lua level
-    pub fn emit_event(&mut self, event_type: &str, event_data: LuaValue) -> LuaResult<()> {
+    pub fn emit_event(
+        &mut self,
+        lua: &Lua,
+        event_type: &str,
+        event_data: LuaValue,
+    ) -> LuaResult<()> {
+        use crate::runtime::call_with_lua_timeout;
+
         if let Some(handlers_arc) = self.handlers.get(event_type) {
             // Cheap Arc clone - just increments reference count
             let handlers_snapshot = Arc::clone(handlers_arc);
             let mut handlers_to_remove = Vec::new();
 
             for handler in handlers_snapshot.iter() {
-                // Call handler with error isolation
-                match handler.callback.call::<()>(event_data.clone()) {
+                // Call handler with error isolation and timeout protection
+                match call_with_lua_timeout::<()>(lua, &handler.callback, event_data.clone()) {
                     Ok(_) => {
                         debug!(
                             "Handler {} executed successfully for event '{}'",
@@ -263,7 +274,9 @@ mod tests {
         handlers.register_handler("test", callback, false);
 
         let data = lua.create_table().unwrap();
-        handlers.emit_event("test", LuaValue::Table(data)).ok();
+        handlers
+            .emit_event(&lua, "test", LuaValue::Table(data))
+            .ok();
 
         let value: bool = called.get("value").unwrap();
         assert!(value);
@@ -281,7 +294,7 @@ mod tests {
 
         let data = lua.create_table().unwrap();
         handlers
-            .emit_event("once_event", LuaValue::Table(data))
+            .emit_event(&lua, "once_event", LuaValue::Table(data))
             .ok();
 
         // Handler should be removed after execution

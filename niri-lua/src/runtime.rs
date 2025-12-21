@@ -26,6 +26,14 @@
 //!
 //! # Async Primitives
 //!
+//! The timeout mechanism is accessible via helper functions that work with any `&Lua`:
+//! - `set_lua_deadline(lua)` - Activates timeout protection
+//! - `clear_lua_deadline(lua)` - Deactivates timeout protection
+//! - `call_with_lua_timeout(lua, callback, args)` - Executes a callback with timeout
+//!
+//! These helpers allow timeout protection in code paths that don't have access to
+//! `LuaRuntime`, such as timer callbacks and event handlers.
+//!
 //! In addition to timeout protection, we provide:
 //! - `niri.schedule(fn)` - defer work to next event loop iteration
 //! - Worker threads (Phase 4) - offload heavy computation
@@ -53,7 +61,6 @@ use crate::loop_api::{
 };
 use crate::process::{create_process_manager, CallbackPayload, SharedProcessManager};
 use crate::{CallbackRegistry, LuaComponent, NiriApi, SharedCallbackRegistry};
-
 
 /// Maximum callbacks to execute per flush cycle.
 /// This bounds latency while allowing some callback chaining.
@@ -97,6 +104,76 @@ impl ExecutionLimits {
     pub fn with_timeout(timeout: Duration) -> Self {
         Self { timeout }
     }
+}
+
+/// Timeout state stored in Lua's app data for access by helper functions.
+///
+/// This allows timeout protection in code paths that don't have access to
+/// `LuaRuntime`, such as `fire_due_timers` and event emission.
+#[derive(Clone)]
+pub struct TimeoutState {
+    /// The timeout duration (Duration::ZERO = disabled)
+    pub timeout: Duration,
+    /// Shared deadline cell (same as used by interrupt callback)
+    pub deadline: Rc<Cell<Option<Instant>>>,
+}
+
+/// Set the deadline for Lua execution timeout.
+///
+/// This activates timeout protection for subsequent Lua calls.
+/// The deadline is automatically checked by the interrupt callback.
+///
+/// # Arguments
+///
+/// * `lua` - The Lua context (must have been created with timeout support)
+///
+/// # Example
+///
+/// ```ignore
+/// set_lua_deadline(lua);
+/// let result = callback.call::<()>(());
+/// clear_lua_deadline(lua);
+/// ```
+pub fn set_lua_deadline(lua: &Lua) {
+    if let Some(state) = lua.app_data_ref::<TimeoutState>() {
+        if state.timeout > Duration::ZERO {
+            state.deadline.set(Some(Instant::now() + state.timeout));
+        }
+    }
+}
+
+/// Clear the deadline after Lua execution completes.
+///
+/// This should be called after every Lua call to reset the timeout state.
+pub fn clear_lua_deadline(lua: &Lua) {
+    if let Some(state) = lua.app_data_ref::<TimeoutState>() {
+        state.deadline.set(None);
+    }
+}
+
+/// Execute a Lua callback with timeout protection.
+///
+/// This is a convenience function that sets the deadline, calls the callback,
+/// and clears the deadline afterward.
+///
+/// # Arguments
+///
+/// * `lua` - The Lua context
+/// * `callback` - The function to call
+/// * `args` - Arguments to pass to the function
+///
+/// # Returns
+///
+/// The result of calling the callback, or a timeout error.
+pub fn call_with_lua_timeout<R: mlua::FromLuaMulti>(
+    lua: &Lua,
+    callback: &LuaFunction,
+    args: impl mlua::IntoLuaMulti,
+) -> LuaResult<R> {
+    set_lua_deadline(lua);
+    let result = callback.call::<R>(args);
+    clear_lua_deadline(lua);
+    result
 }
 
 /// Manages a Lua runtime for Niri.
@@ -166,6 +243,13 @@ impl LuaRuntime {
 
         let scheduled_callbacks = Rc::new(RefCell::new(VecDeque::new()));
         let deadline = Rc::new(Cell::new(None::<Instant>));
+
+        // Store timeout state in app data for access by helper functions
+        // (fire_due_timers, emit_event, etc.)
+        lua.set_app_data(TimeoutState {
+            timeout: limits.timeout,
+            deadline: deadline.clone(),
+        });
 
         // Set up Luau interrupt callback for timeout protection
         if limits.timeout > Duration::ZERO {
@@ -424,11 +508,15 @@ impl LuaRuntime {
                                         let text = String::from_utf8_lossy(data);
                                         self.call_with_timeout(&callback, (LuaValue::Nil, text))
                                     } else {
-                                        self.call_with_timeout(&callback, (LuaValue::Nil, self.lua.create_string(data).unwrap()))
+                                        self.call_with_timeout(
+                                            &callback,
+                                            (LuaValue::Nil, self.lua.create_string(data).unwrap()),
+                                        )
                                     }
                                 }
                                 CallbackPayload::Exit(result) => {
-                                    let table = result.to_lua_table(&self.lua, event.text_mode).unwrap();
+                                    let table =
+                                        result.to_lua_table(&self.lua, event.text_mode).unwrap();
                                     self.call_with_timeout(&callback, (table, LuaValue::Nil))
                                 }
                             };
@@ -444,7 +532,9 @@ impl LuaRuntime {
 
                             // For exit events, clean up callbacks
                             if let CallbackPayload::Exit(_) = &event.payload {
-                                if let Some((stdout_id, stderr_id, exit_id)) = manager.lock().unwrap().get_callback_ids(event.handle_id) {
+                                if let Some((stdout_id, stderr_id, exit_id)) =
+                                    manager.lock().unwrap().get_callback_ids(event.handle_id)
+                                {
                                     if let Some(id) = stdout_id {
                                         let _ = registry.unregister(id);
                                     }
@@ -493,7 +583,12 @@ impl LuaRuntime {
         let (process_executed, process_errors) = self.fire_process_events();
         all_errors.extend(process_errors);
 
-        (timers_fired, scheduled_executed, process_executed, all_errors)
+        (
+            timers_fired,
+            scheduled_executed,
+            process_executed,
+            all_errors,
+        )
     }
 
     /// Check if there are pending scheduled callbacks.
@@ -643,7 +738,12 @@ impl LuaRuntime {
     ///
     /// Returns an error if action proxy registration fails.
     pub fn register_action_proxy(&mut self, callback: ActionCallback) -> LuaResult<()> {
-        register_action_proxy(&self.lua, callback, self.process_manager.clone(), self.callback_registry.clone())?;
+        register_action_proxy(
+            &self.lua,
+            callback,
+            self.process_manager.clone(),
+            self.callback_registry.clone(),
+        )?;
         Ok(())
     }
 

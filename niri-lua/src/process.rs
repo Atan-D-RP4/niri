@@ -66,9 +66,6 @@ use nix::libc;
 
 use crate::CallbackRegistry;
 
-
-
-
 /// Grace period after SIGTERM before sending SIGKILL (configurable).
 pub const SIGTERM_GRACE_MS: u64 = 1000;
 
@@ -394,7 +391,14 @@ impl ProcessManager {
 
         // We need to wait in a separate thread
         thread::spawn(move || {
-            wait_for_exit(waiter_child, id, exit_sender, exit_tx, capture_stdout, capture_stderr);
+            wait_for_exit(
+                waiter_child,
+                id,
+                exit_sender,
+                exit_tx,
+                capture_stdout,
+                capture_stderr,
+            );
         });
 
         // Store process state
@@ -706,10 +710,8 @@ fn read_stream<R: Read>(
                     }
                 }
                 Err(e) => {
-                    let _ = sender.send(ProcessEvent::Error(
-                        handle_id,
-                        format!("Read error: {}", e),
-                    ));
+                    let _ =
+                        sender.send(ProcessEvent::Error(handle_id, format!("Read error: {}", e)));
                     break;
                 }
             }
@@ -733,10 +735,8 @@ fn read_stream<R: Read>(
                     }
                 }
                 Err(e) => {
-                    let _ = sender.send(ProcessEvent::Error(
-                        handle_id,
-                        format!("Read error: {}", e),
-                    ));
+                    let _ =
+                        sender.send(ProcessEvent::Error(handle_id, format!("Read error: {}", e)));
                     break;
                 }
             }
@@ -757,10 +757,7 @@ fn wait_for_exit(
     let status = match child.wait() {
         Ok(status) => status,
         Err(e) => {
-            let _ = event_sender.send(ProcessEvent::Error(
-                handle_id,
-                format!("Wait error: {}", e),
-            ));
+            let _ = event_sender.send(ProcessEvent::Error(handle_id, format!("Wait error: {}", e)));
             return;
         }
     };
@@ -805,7 +802,11 @@ pub fn create_process_manager() -> SharedProcessManager {
 }
 
 /// Parse spawn options from a Lua table.
-pub fn parse_spawn_opts(lua: &Lua, table: &LuaTable, registry: Option<&Arc<CallbackRegistry>>) -> LuaResult<SpawnOpts> {
+pub fn parse_spawn_opts(
+    lua: &Lua,
+    table: &LuaTable,
+    registry: Option<&Arc<CallbackRegistry>>,
+) -> LuaResult<SpawnOpts> {
     let mut opts = SpawnOpts::default();
 
     // cwd: string?
@@ -883,11 +884,7 @@ pub fn parse_spawn_opts(lua: &Lua, table: &LuaTable, registry: Option<&Arc<Callb
                 }
             }
             LuaValue::Nil | LuaValue::Boolean(false) => {}
-            _ => {
-                return Err(LuaError::external(
-                    "stdout must be boolean or function",
-                ))
-            }
+            _ => return Err(LuaError::external("stdout must be boolean or function")),
         }
     }
 
@@ -907,11 +904,7 @@ pub fn parse_spawn_opts(lua: &Lua, table: &LuaTable, registry: Option<&Arc<Callb
                 }
             }
             LuaValue::Nil | LuaValue::Boolean(false) => {}
-            _ => {
-                return Err(LuaError::external(
-                    "stderr must be boolean or function",
-                ))
-            }
+            _ => return Err(LuaError::external("stderr must be boolean or function")),
         }
     }
 
@@ -987,19 +980,10 @@ impl LuaUserData for ProcessHandle {
                         "QUIT" | "SIGQUIT" => libc::SIGQUIT,
                         "USR1" | "SIGUSR1" => libc::SIGUSR1,
                         "USR2" | "SIGUSR2" => libc::SIGUSR2,
-                        _ => {
-                            return Err(LuaError::external(format!(
-                                "Unknown signal: {}",
-                                s
-                            )))
-                        }
+                        _ => return Err(LuaError::external(format!("Unknown signal: {}", s))),
                     }
                 }
-                _ => {
-                    return Err(LuaError::external(
-                        "signal must be an integer or string",
-                    ))
-                }
+                _ => return Err(LuaError::external("signal must be an integer or string")),
             };
 
             let result = {
@@ -1050,11 +1034,13 @@ impl LuaUserData for ProcessHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use mlua::prelude::{Lua, LuaFunction, LuaTable, LuaValue};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+
+    use mlua::prelude::{Lua, LuaFunction, LuaTable, LuaValue};
+
+    use super::*;
 
     #[test]
     fn test_spawn_opts_default() {
@@ -1211,8 +1197,9 @@ mod tests {
             capture_stdout: true,
             ..Default::default()
         };
-        let (handle_id, _) =
-            manager.spawn_command(vec!["true".to_string()], opts).unwrap();
+        let (handle_id, _) = manager
+            .spawn_command(vec!["true".to_string()], opts)
+            .unwrap();
 
         let result = manager.wait(handle_id, None).unwrap();
         assert_eq!(result.code, Some(0));
@@ -1223,8 +1210,9 @@ mod tests {
     fn test_process_manager_wait_with_exit_code() {
         let mut manager = ProcessManager::new();
         let opts = SpawnOpts::default();
-        let (handle_id, _) =
-            manager.spawn_command(vec!["false".to_string()], opts).unwrap();
+        let (handle_id, _) = manager
+            .spawn_command(vec!["false".to_string()], opts)
+            .unwrap();
 
         let result = manager.wait(handle_id, None).unwrap();
         assert_eq!(result.code, Some(1));
@@ -1259,7 +1247,9 @@ mod tests {
         let table = lua.create_table().unwrap();
 
         // Create a function and set it as stderr callback
-        let func: LuaFunction = lua.create_function(|_, ()| Ok("stderr".to_string())).unwrap();
+        let func: LuaFunction = lua
+            .create_function(|_, ()| Ok("stderr".to_string()))
+            .unwrap();
         table.set("stderr", func).unwrap();
 
         let opts = parse_spawn_opts(&lua, &table, Some(&registry)).unwrap();
@@ -1341,10 +1331,9 @@ mod tests {
         let result = parse_spawn_opts(&lua, &table, None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("callback functions require a callback registry")
-        );
+        assert!(err
+            .to_string()
+            .contains("callback functions require a callback registry"));
     }
 
     #[test]
@@ -1361,7 +1350,9 @@ mod tests {
         table.set("on_exit", on_exit_func).unwrap();
 
         let opts = parse_spawn_opts(&lua, &table, Some(&registry)).unwrap();
-        let (handle_id, _) = manager.spawn_command(vec!["echo".to_string(), "test".to_string()], opts).unwrap();
+        let (handle_id, _) = manager
+            .spawn_command(vec!["echo".to_string(), "test".to_string()], opts)
+            .unwrap();
 
         // Wait for the process to finish and produce events
         // Use a small sleep loop to allow background threads to enqueue events
@@ -1425,10 +1416,7 @@ mod tests {
         let opts = parse_spawn_opts(&lua, &table, Some(&registry)).unwrap();
         let _handle = manager
             .spawn_command(
-                vec![
-                    "printf".to_string(),
-                    "line1\nline2\nline3\n".to_string(),
-                ],
+                vec!["printf".to_string(), "line1\nline2\nline3\n".to_string()],
                 opts,
             )
             .unwrap();
@@ -1850,9 +1838,7 @@ mod tests {
         let lua = Lua::new();
 
         // Create stdout callback
-        let stdout_func: LuaFunction = lua
-            .create_function(|_, ()| Ok(()))
-            .unwrap();
+        let stdout_func: LuaFunction = lua.create_function(|_, ()| Ok(())).unwrap();
 
         let table = lua.create_table().unwrap();
         table.set("stdout", stdout_func).unwrap();
@@ -2107,10 +2093,7 @@ mod tests {
         let mut manager = ProcessManager::new();
         let opts = SpawnOpts::default();
 
-        let result = manager.spawn_command(
-            vec!["nonexistent_xyz_command_12345".to_string()],
-            opts,
-        );
+        let result = manager.spawn_command(vec!["nonexistent_xyz_command_12345".to_string()], opts);
         assert!(result.is_err(), "Expected error for nonexistent command");
     }
 
@@ -2161,4 +2144,3 @@ mod tests {
         assert!(opts.detach);
     }
 }
-

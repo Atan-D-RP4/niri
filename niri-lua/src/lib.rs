@@ -26,11 +26,11 @@ pub mod action_proxy;
 pub mod collections;
 pub mod config_api;
 pub mod config_dirty;
+pub mod config_proxies;
 pub mod config_state;
 pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
-pub mod config_proxies;
 pub mod parse_utils;
 pub mod traits;
 
@@ -58,6 +58,8 @@ mod test_derive_macros;
 
 // Tier 2 exports
 pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
+// Tier 4 exports
+pub use callback_registry::{CallbackRegistry, SharedCallbackRegistry};
 pub use config::{LuaConfig, LuaEvalResult};
 pub use config_dirty::ConfigDirtyFlags;
 pub use config_state::{ConfigState, DirtyFlag};
@@ -71,19 +73,17 @@ pub use event_handlers::EventHandlers;
 pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};
 pub use ipc_repl::IpcLuaExecutor;
-// Tier 4 exports
-pub use callback_registry::{CallbackRegistry, SharedCallbackRegistry};
 pub use loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager, TimerManager,
     TimerState,
 };
+pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
+use mlua::prelude::*;
+pub use niri_api::NiriApi;
 pub use process::{
     create_process_manager, parse_spawn_opts, ProcessHandle, ProcessManager, SharedProcessManager,
     SpawnOpts,
 };
-pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
-use mlua::prelude::*;
-pub use niri_api::NiriApi;
 pub use runtime::LuaRuntime;
 pub use runtime_api::{
     clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,

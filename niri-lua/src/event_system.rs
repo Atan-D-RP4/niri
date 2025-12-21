@@ -25,15 +25,19 @@ impl EventSystem {
 
     /// Emit an event to all registered handlers
     ///
+    /// Callbacks are executed with timeout protection to prevent runaway
+    /// scripts from freezing the compositor.
+    ///
     /// # Arguments
+    /// * `lua` - The Lua context (for timeout protection)
     /// * `event_type` - The event name (e.g., "window:open")
     /// * `event_data` - Lua value containing event data
     ///
     /// # Returns
     /// LuaResult indicating success or Lua error
-    pub fn emit(&self, event_type: &str, event_data: LuaValue) -> LuaResult<()> {
+    pub fn emit(&self, lua: &Lua, event_type: &str, event_data: LuaValue) -> LuaResult<()> {
         let mut h = self.handlers.lock().unwrap();
-        h.emit_event(event_type, event_data)
+        h.emit_event(lua, event_type, event_data)
     }
 
     /// Get statistics about registered handlers
@@ -77,7 +81,7 @@ mod tests {
         let (lua, event_system) = create_test_system();
         let data = lua.create_table().unwrap();
         // Should not error even with no handlers
-        let result = event_system.emit("test_event", LuaValue::Table(data));
+        let result = event_system.emit(&lua, "test_event", LuaValue::Table(data));
         assert!(result.is_ok());
     }
 

@@ -254,7 +254,12 @@ pub fn create_timer_manager() -> SharedTimerManager {
 ///
 /// This should be called from the compositor's event loop.
 /// Returns the number of timers fired and any errors encountered.
+///
+/// Timer callbacks are executed with timeout protection to prevent
+/// runaway scripts from freezing the compositor.
 pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<LuaError>) {
+    use crate::runtime::call_with_lua_timeout;
+
     let mut fired = 0;
     let mut errors = Vec::new();
 
@@ -274,7 +279,7 @@ pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<L
 
         if let Some(callback_result) = callback_result {
             match callback_result {
-                Ok(callback) => match callback.call::<()>(()) {
+                Ok(callback) => match call_with_lua_timeout::<()>(lua, &callback, ()) {
                     Ok(()) => fired += 1,
                     Err(e) => {
                         log::error!("Timer callback error: {}", e);

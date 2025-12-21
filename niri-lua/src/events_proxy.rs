@@ -212,7 +212,7 @@ impl LuaUserData for EventsProxy {
                     }
                 };
 
-                h.emit_event(&event_type, event_data)?;
+                h.emit_event(lua, &event_type, event_data)?;
                 Ok(())
             },
         );

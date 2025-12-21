@@ -26,9 +26,9 @@ where
             let snapshot = StateSnapshot::from_compositor_state(state);
             set_event_context_state(snapshot);
 
-            // Create event data and emit
-            let result =
-                create_data(lua).and_then(|lua_value| event_system.emit(event_name, lua_value));
+            // Create event data and emit (with timeout protection via lua parameter)
+            let result = create_data(lua)
+                .and_then(|lua_value| event_system.emit(lua, event_name, lua_value));
 
             // Always clear the context, even on error
             clear_event_context_state();
@@ -54,9 +54,9 @@ where
             let snapshot = StateSnapshot::default();
             set_event_context_state(snapshot);
 
-            // Create event data and emit
-            let result =
-                create_data(lua).and_then(|lua_value| event_system.emit(event_name, lua_value));
+            // Create event data and emit (with timeout protection via lua parameter)
+            let result = create_data(lua)
+                .and_then(|lua_value| event_system.emit(lua, event_name, lua_value));
 
             // Always clear the context, even on error
             clear_event_context_state();

@@ -121,7 +121,9 @@ mod tests {
         let registry = CallbackRegistry::new();
 
         // Create and register a function
-        let func: LuaFunction = lua.create_function(|_, ()| Ok("hello".to_string())).unwrap();
+        let func: LuaFunction = lua
+            .create_function(|_, ()| Ok("hello".to_string()))
+            .unwrap();
         let id = registry.register(&lua, func).unwrap();
 
         // Get it back
