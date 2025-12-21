@@ -1,6 +1,5 @@
 ---
 source: niri-lua/src/api_registry.rs
-assertion_line: 26
 expression: paths
 ---
 [

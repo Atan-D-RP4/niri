@@ -20,6 +20,5 @@ expression: names
     "ReservedSpace",
     "FocusMode",
     "KeyboardLayouts",
-    "SpawnOpts",
-    "SpawnResult",
+    "FsFindOpts",
 ]

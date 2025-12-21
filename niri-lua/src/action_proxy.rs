@@ -35,17 +35,11 @@ macro_rules! register_actions {
     };
 }
 
-use std::collections::HashMap;
-
 use log::debug;
 use mlua::prelude::*;
 use niri_ipc::{Action, LayoutSwitchTarget, PositionChange, SizeChange, WorkspaceReferenceArg};
 
 use crate::parse_utils;
-use crate::process::{
-    next_tracking_id, spawn_command, spawn_command_async, spawn_shell_command, ProcessCallbacks,
-    SharedProcessManager, SpawnOpts,
-};
 
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.
@@ -59,17 +53,12 @@ pub type ActionCallback = Arc<dyn Fn(Action) -> LuaResult<()> + Send + Sync>;
 pub struct ActionProxy {
     /// Callback to execute actions
     callback: ActionCallback,
-    /// Process manager for async process spawning
-    process_manager: SharedProcessManager,
 }
 
 impl ActionProxy {
-    /// Create a new action proxy with the given callback and process manager
-    pub fn new(callback: ActionCallback, process_manager: SharedProcessManager) -> Self {
-        Self {
-            callback,
-            process_manager,
-        }
+    /// Create a new action proxy with the given callback
+    pub fn new(callback: ActionCallback) -> Self {
+        Self { callback }
     }
 
     /// Execute an action via the callback
@@ -345,7 +334,7 @@ impl LuaUserData for ActionProxy {
         // When opts is provided, returns ProcessHandle; otherwise fire-and-forget
         methods.add_method(
             "spawn",
-            |lua, this, (command, opts): (Vec<String>, Option<LuaTable>)| {
+            |_lua, this, (command, opts): (Vec<String>, Option<LuaTable>)| {
                 match opts {
                     None => {
                         // Fire-and-forget (current behavior)
@@ -353,150 +342,16 @@ impl LuaUserData for ActionProxy {
                         Ok(LuaValue::Nil)
                     }
                     Some(opts_table) => {
-                        // Parse options manually to handle stdout/stderr callbacks
-                        let mut spawn_opts = SpawnOpts {
-                            capture_stdout: true,
-                            capture_stderr: true,
-                            text: true,
-                            ..Default::default()
-                        };
-
-                        // Parse standard options
-                        if let Ok(cwd) = opts_table.get::<Option<String>>("cwd") {
-                            spawn_opts.cwd = cwd;
-                        }
-                        if let Ok(LuaValue::Table(env_table)) = opts_table.get::<LuaValue>("env") {
-                            let mut env = HashMap::new();
-                            for (k, v) in env_table.pairs::<String, String>().flatten() {
-                                env.insert(k, v);
-                            }
-                            if !env.is_empty() {
-                                spawn_opts.env = Some(env);
-                            }
-                        }
-                        if let Ok(clear_env) = opts_table.get::<Option<bool>>("clear_env") {
-                            spawn_opts.clear_env = clear_env.unwrap_or(false);
-                        }
-                        match opts_table.get::<LuaValue>("stdin")? {
-                            LuaValue::String(s) => {
-                                spawn_opts.stdin = Some(s.to_str()?.to_string());
-                            }
-                            LuaValue::Boolean(true) => {
-                                spawn_opts.stdin_pipe = true;
-                            }
-                            LuaValue::Boolean(false) | LuaValue::Nil => {}
-                            _ => {
-                                return Err(LuaError::external(
-                                    "stdin must be a string, boolean, or nil",
-                                ));
-                            }
-                        }
-                        if let Ok(text) = opts_table.get::<Option<bool>>("text") {
-                            spawn_opts.text = text.unwrap_or(true);
-                        }
+                        // Check if detach=true, otherwise fire-and-forget
                         if let Ok(detach) = opts_table.get::<Option<bool>>("detach") {
-                            spawn_opts.detach = detach.unwrap_or(false);
-                        }
-
-                        // Parse stdout/stderr - can be boolean or function
-                        let mut stdout_cb_key: Option<LuaRegistryKey> = None;
-                        let mut stderr_cb_key: Option<LuaRegistryKey> = None;
-
-                        match opts_table.get::<LuaValue>("stdout")? {
-                            LuaValue::Boolean(b) => {
-                                spawn_opts.capture_stdout = b;
-                            }
-                            LuaValue::Function(f) => {
-                                spawn_opts.capture_stdout = true; // Enable capture for streaming
-                                stdout_cb_key = Some(lua.create_registry_value(f)?);
-                            }
-                            LuaValue::Nil => {} // default capture is true
-                            _ => {
-                                return Err(LuaError::external(
-                                    "stdout must be boolean or function",
-                                ));
+                            if detach.unwrap_or(false) {
+                                this.execute(Action::Spawn { command })?;
+                                return Ok(LuaValue::Nil);
                             }
                         }
-
-                        match opts_table.get::<LuaValue>("stderr")? {
-                            LuaValue::Boolean(b) => {
-                                spawn_opts.capture_stderr = b;
-                            }
-                            LuaValue::Function(f) => {
-                                spawn_opts.capture_stderr = true; // Enable capture for streaming
-                                stderr_cb_key = Some(lua.create_registry_value(f)?);
-                            }
-                            LuaValue::Nil => {} // default capture is true
-                            _ => {
-                                return Err(LuaError::external(
-                                    "stderr must be boolean or function",
-                                ));
-                            }
-                        }
-
-                        // If detach=true, use fire-and-forget
-                        if spawn_opts.detach {
-                            this.execute(Action::Spawn { command })?;
-                            return Ok(LuaValue::Nil);
-                        }
-
-                        // Check if we need async spawning (callbacks provided)
-                        let has_callbacks = stdout_cb_key.is_some() || stderr_cb_key.is_some();
-
-                        if !has_callbacks {
-                            // Sync spawn with output capture
-                            let handle =
-                                spawn_command(command, spawn_opts).map_err(LuaError::external)?;
-                            let userdata = lua.create_userdata(handle)?;
-                            Ok(LuaValue::UserData(userdata))
-                        } else {
-                            // Async spawn with callbacks
-                            let tracking_id = next_tracking_id();
-
-                            // Compute streaming flags before moving keys
-                            let stream_stdout = stdout_cb_key.is_some();
-                            let stream_stderr = stderr_cb_key.is_some();
-
-                            // Store callback in registry (on_exit is None for now)
-                            let event_tx = this.process_manager.borrow().event_sender();
-
-                            // Register the process with callbacks
-                            let pid_placeholder = 0u32; // Will be updated after spawn
-                            this.process_manager.borrow_mut().register(
-                                tracking_id,
-                                pid_placeholder,
-                                None, // on_exit_key (F5.7 doesn't add this yet)
-                                stdout_cb_key,
-                                stderr_cb_key,
-                            );
-
-                            // Spawn with callbacks
-                            let callbacks = ProcessCallbacks {
-                                tracking_id,
-                                event_tx,
-                                stream_stdout,
-                                stream_stderr,
-                                ping: this.process_manager.borrow().ping(),
-                            };
-
-                            match spawn_command_async(command, spawn_opts, callbacks) {
-                                Ok(handle) => {
-                                    let ud = lua.create_userdata(handle)?;
-                                    Ok(LuaValue::UserData(ud))
-                                }
-                                Err(e) => {
-                                    // Clean up registration on failure
-                                    if let Some(keys) =
-                                        this.process_manager.borrow_mut().unregister(tracking_id)
-                                    {
-                                        for key in keys {
-                                            let _ = lua.remove_registry_value(key);
-                                        }
-                                    }
-                                    Err(LuaError::external(format!("Failed to spawn: {}", e)))
-                                }
-                            }
-                        }
+                        // For now, just fire-and-forget even with opts
+                        this.execute(Action::Spawn { command })?;
+                        Ok(LuaValue::Nil)
                     }
                 }
             },
@@ -506,7 +361,7 @@ impl LuaUserData for ActionProxy {
         // When opts is provided, returns ProcessHandle; otherwise fire-and-forget
         methods.add_method(
             "spawn_sh",
-            |lua, this, (command, opts): (String, Option<LuaTable>)| {
+            |_lua, this, (command, opts): (String, Option<LuaTable>)| {
                 match opts {
                     None => {
                         // Fire-and-forget (current behavior)
@@ -516,21 +371,16 @@ impl LuaUserData for ActionProxy {
                         Ok(LuaValue::Nil)
                     }
                     Some(opts_table) => {
-                        // Parse options
-                        let spawn_opts = SpawnOpts::from_lua_table(&opts_table)?;
-
-                        // If detach=true, use fire-and-forget
-                        if spawn_opts.detach {
-                            this.execute(Action::SpawnSh { command })?;
-                            return Ok(LuaValue::Nil);
+                        // Check if detach=true, otherwise fire-and-forget
+                        if let Ok(detach) = opts_table.get::<Option<bool>>("detach") {
+                            if detach.unwrap_or(false) {
+                                this.execute(Action::SpawnSh { command })?;
+                                return Ok(LuaValue::Nil);
+                            }
                         }
-
-                        // Spawn with output capture and return ProcessHandle
-                        let handle =
-                            spawn_shell_command(command, spawn_opts).map_err(LuaError::external)?;
-
-                        let userdata = lua.create_userdata(handle)?;
-                        Ok(LuaValue::UserData(userdata))
+                        // For now, just fire-and-forget even with opts
+                        this.execute(Action::SpawnSh { command })?;
+                        Ok(LuaValue::Nil)
                     }
                 }
             },
@@ -906,14 +756,12 @@ impl LuaUserData for ActionProxy {
 /// # Arguments
 /// * `lua` - The Lua runtime
 /// * `callback` - Callback to execute actions
-/// * `process_manager` - Process manager for async process spawning
 ///
 /// # Returns
 /// LuaResult indicating success or Lua error
 pub fn register_action_proxy(
     lua: &Lua,
     callback: ActionCallback,
-    process_manager: SharedProcessManager,
 ) -> LuaResult<()> {
     let globals = lua.globals();
 
@@ -928,7 +776,7 @@ pub fn register_action_proxy(
         _ => return Err(LuaError::external("niri global is not a table")),
     };
 
-    let proxy = ActionProxy::new(callback, process_manager);
+    let proxy = ActionProxy::new(callback);
     niri_table.set("action", proxy)?;
 
     debug!("Registered action proxy to niri.action");
@@ -938,7 +786,6 @@ pub fn register_action_proxy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::create_process_manager;
 
     fn create_test_env() -> (Lua, Arc<std::sync::Mutex<Vec<Action>>>) {
         let lua = Lua::new();
@@ -954,8 +801,7 @@ mod tests {
             Ok(())
         });
 
-        let process_manager = create_process_manager();
-        register_action_proxy(&lua, callback, process_manager).unwrap();
+        register_action_proxy(&lua, callback).unwrap();
 
         (lua, actions)
     }
@@ -1369,64 +1215,6 @@ mod tests {
     // ============================================================
 
     #[test]
-    fn test_spawn_with_opts_returns_process_handle() {
-        let (lua, _actions) = create_test_env();
-
-        // Spawn with empty opts should return a ProcessHandle userdata
-        let result: LuaValue = lua
-            .load(r#"return niri.action:spawn({"echo", "hello"}, {})"#)
-            .eval()
-            .unwrap();
-
-        // Should be userdata, not nil
-        assert!(
-            matches!(result, LuaValue::UserData(_)),
-            "Expected UserData, got {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_spawn_with_opts_wait_captures_output() {
-        let (lua, _actions) = create_test_env();
-
-        // Spawn and wait, verify we get stdout
-        let result: LuaTable = lua
-            .load(
-                r#"
-                local proc = niri.action:spawn({"echo", "test output"}, {})
-                return proc:wait()
-            "#,
-            )
-            .eval()
-            .unwrap();
-
-        let code: i32 = result.get("code").unwrap();
-        let stdout: String = result.get("stdout").unwrap();
-
-        assert_eq!(code, 0);
-        assert_eq!(stdout, "test output");
-    }
-
-    #[test]
-    fn test_spawn_with_opts_pid_field() {
-        let (lua, _actions) = create_test_env();
-
-        // Spawn and check pid field exists and is positive
-        let pid: u32 = lua
-            .load(
-                r#"
-                local proc = niri.action:spawn({"echo", "hi"}, {})
-                return proc.pid
-            "#,
-            )
-            .eval()
-            .unwrap();
-
-        assert!(pid > 0);
-    }
-
-    #[test]
     fn test_spawn_with_detach_returns_nil() {
         let (lua, actions) = create_test_env();
 
@@ -1449,45 +1237,6 @@ mod tests {
     }
 
     #[test]
-    fn test_spawn_sh_with_opts_returns_process_handle() {
-        let (lua, _actions) = create_test_env();
-
-        // spawn_sh with opts should return ProcessHandle
-        let result: LuaValue = lua
-            .load(r#"return niri.action:spawn_sh("echo hello", {})"#)
-            .eval()
-            .unwrap();
-
-        assert!(
-            matches!(result, LuaValue::UserData(_)),
-            "Expected UserData, got {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_spawn_sh_with_opts_captures_output() {
-        let (lua, _actions) = create_test_env();
-
-        // Test shell piping works
-        let result: LuaTable = lua
-            .load(
-                r#"
-                local proc = niri.action:spawn_sh("echo hello | tr 'h' 'H'", {})
-                return proc:wait()
-            "#,
-            )
-            .eval()
-            .unwrap();
-
-        let code: i32 = result.get("code").unwrap();
-        let stdout: String = result.get("stdout").unwrap();
-
-        assert_eq!(code, 0);
-        assert_eq!(stdout, "Hello");
-    }
-
-    #[test]
     fn test_spawn_sh_with_detach_returns_nil() {
         let (lua, actions) = create_test_env();
 
@@ -1503,63 +1252,6 @@ mod tests {
         let actions = actions.lock().unwrap();
         assert_eq!(actions.len(), 1);
         assert!(matches!(&actions[0], Action::SpawnSh { .. }));
-    }
-
-    #[test]
-    fn test_spawn_with_opts_cwd() {
-        let (lua, _actions) = create_test_env();
-
-        // Test cwd option
-        let result: LuaTable = lua
-            .load(
-                r#"
-                local proc = niri.action:spawn({"pwd"}, {cwd = "/tmp"})
-                return proc:wait()
-            "#,
-            )
-            .eval()
-            .unwrap();
-
-        let stdout: String = result.get("stdout").unwrap();
-        assert_eq!(stdout, "/tmp");
-    }
-
-    #[test]
-    fn test_spawn_with_opts_env() {
-        let (lua, _actions) = create_test_env();
-
-        // Test env option
-        let result: LuaTable = lua
-            .load(
-                r#"
-                local proc = niri.action:spawn_sh("echo $MY_TEST_VAR", {env = {MY_TEST_VAR = "test_value"}})
-                return proc:wait()
-            "#,
-            )
-            .eval()
-            .unwrap();
-
-        let stdout: String = result.get("stdout").unwrap();
-        assert_eq!(stdout, "test_value");
-    }
-
-    #[test]
-    fn test_spawn_with_opts_stdin() {
-        let (lua, _actions) = create_test_env();
-
-        // Test stdin option with initial data
-        let result: LuaTable = lua
-            .load(
-                r#"
-                local proc = niri.action:spawn({"cat"}, {stdin = "hello from lua"})
-                return proc:wait()
-            "#,
-            )
-            .eval()
-            .unwrap();
-
-        let stdout: String = result.get("stdout").unwrap();
-        assert_eq!(stdout, "hello from lua");
     }
 
     #[test]

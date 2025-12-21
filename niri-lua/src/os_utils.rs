@@ -276,6 +276,7 @@ pub fn decode_hostname_for_test(
 #[cfg(test)]
 mod tests {
     use mlua::{Function, Lua, Table};
+    use serial_test::serial;
 
     use super::*;
 
@@ -683,6 +684,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn niri_dirs_env_behavior_and_directory_creation() {
         // Test all niri-specific dirs in a single test to avoid race conditions
         // with parallel test execution (they all use XDG_* env vars)
@@ -771,6 +773,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn niri_dirs_idempotent_when_dir_exists() {
         // Test that calling the functions multiple times is safe when dirs already exist
         let tmpdir = tempfile::tempdir().unwrap();
@@ -808,6 +811,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[serial]
     fn setenv_sets_variable() {
         // Save and ensure clean state
         let old_val = std::env::var("NIRI_SETENV_TEST").ok();

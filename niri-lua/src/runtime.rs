@@ -51,7 +51,6 @@ use crate::events_proxy::register_events_proxy;
 use crate::loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
 };
-use crate::process::{fire_due_process_events, SharedProcessManager};
 use crate::{LuaComponent, NiriApi};
 
 /// Maximum callbacks to execute per flush cycle.
@@ -121,16 +120,14 @@ pub struct LuaRuntime {
     pub config_wrapper: Option<ConfigWrapper>,
     /// Timer manager for niri.loop timers
     pub timer_manager: Option<SharedTimerManager>,
-    /// Process manager for async process spawning
-    pub process_manager: Option<SharedProcessManager>,
     /// Queue of scheduled callbacks (stored as registry keys)
     scheduled_callbacks: Rc<RefCell<VecDeque<LuaRegistryKey>>>,
     /// Configured execution limits
     limits: ExecutionLimits,
     /// Shared deadline for interrupt callback (None = no active timeout)
     deadline: Rc<Cell<Option<Instant>>>,
-    /// Luau compiler with optimization enabled
-    compiler: Compiler,
+    /// Luau compiler with optimization enabled (shared with require function)
+    compiler: Rc<RefCell<Compiler>>,
 }
 
 impl LuaRuntime {
@@ -180,14 +177,18 @@ impl LuaRuntime {
 
         // Create optimized compiler for Luau
         // Level 2 enables function inlining, loop unrolling, constant folding
-        let compiler = Compiler::new().set_optimization_level(2).set_debug_level(1); // Keep line info for error messages
+        let compiler = Rc::new(RefCell::new(
+            Compiler::new().set_optimization_level(2).set_debug_level(1), // Keep line info for error messages
+        ));
+
+        // Register custom require function for module loading
+        crate::module_loader::register_custom_require(&lua, compiler.clone())?;
 
         Ok(Self {
             lua,
             event_system: None,
             config_wrapper: None,
             timer_manager: None,
-            process_manager: None,
             scheduled_callbacks,
             limits,
             deadline,
@@ -253,7 +254,7 @@ impl LuaRuntime {
     /// The result of evaluating the code, or an error if it times out.
     pub fn eval_with_timeout<R: mlua::FromLua>(&self, code: &str) -> LuaResult<R> {
         // Compile with optimizations
-        let bytecode = self.compiler.compile(code)?;
+        let bytecode = self.compiler.borrow().compile(code)?;
 
         self.set_deadline();
         let result = self.lua.load(bytecode).eval::<R>();
@@ -401,35 +402,22 @@ impl LuaRuntime {
     /// This is the main entry point for the compositor to drive Lua async execution.
     /// Should be called once per frame/refresh cycle.
     ///
-    /// Returns (timers_fired, process_events_fired, scheduled_executed, errors).
-    pub fn process_async(&self) -> (usize, usize, usize, Vec<LuaError>) {
+    /// Returns (timers_fired, scheduled_executed, errors).
+    pub fn process_async(&self) -> (usize, usize, Vec<LuaError>) {
         let mut all_errors = Vec::new();
 
         // Fire due timers first (they may schedule callbacks)
         let (timers_fired, timer_errors) = self.fire_timers();
         all_errors.extend(timer_errors);
 
-        // Fire process events (stdout/stderr lines, exit callbacks)
-        let (process_events, process_errors) = self.fire_process_events();
-        all_errors.extend(process_errors);
-
         // Then flush scheduled callbacks
         let (scheduled_executed, scheduled_errors) = self.flush_scheduled();
         all_errors.extend(scheduled_errors);
 
-        (timers_fired, process_events, scheduled_executed, all_errors)
+        (timers_fired, scheduled_executed, all_errors)
     }
 
-    /// Fire pending process events (stdout/stderr callbacks, exit callbacks).
-    ///
-    /// Returns (events_processed, errors).
-    fn fire_process_events(&self) -> (usize, Vec<LuaError>) {
-        if let Some(ref manager) = self.process_manager {
-            fire_due_process_events(&self.lua, manager)
-        } else {
-            (0, Vec::new())
-        }
-    }
+
 
     /// Check if there are pending scheduled callbacks.
     pub fn has_scheduled(&self) -> bool {
@@ -563,7 +551,6 @@ impl LuaRuntime {
     /// # Arguments
     ///
     /// * `callback` - Callback function that executes actions in the compositor
-    /// * `process_manager` - Process manager for async process spawning
     ///
     /// # Example
     ///
@@ -572,7 +559,7 @@ impl LuaRuntime {
     /// runtime.register_action_proxy(Arc::new(|action| {
     ///     // Handle the action (e.g., send via IPC or execute directly)
     ///     Ok(())
-    /// }), process_manager)?;
+    /// }))?;
     /// ```
     ///
     /// # Errors
@@ -581,38 +568,46 @@ impl LuaRuntime {
     pub fn register_action_proxy(
         &mut self,
         callback: ActionCallback,
-        process_manager: SharedProcessManager,
     ) -> LuaResult<()> {
-        register_action_proxy(&self.lua, callback, process_manager.clone())?;
-        self.process_manager = Some(process_manager);
+        register_action_proxy(&self.lua, callback)?;
         Ok(())
-    }
-
-    /// Set the process manager for handling async process events.
-    ///
-    /// This is typically called automatically by `register_action_proxy()`,
-    /// but can be called separately for testing or custom setups.
-    pub fn set_process_manager(&mut self, manager: SharedProcessManager) {
-        self.process_manager = Some(manager);
     }
 
     /// Load and execute a Lua script from a file.
     ///
     /// Uses the optimized compiler for better performance.
+    /// Sets the chunk name to the file's absolute path for proper error messages
+    /// and enables relative `require()` resolution.
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, the script fails to execute,
     /// or the script exceeds the execution timeout.
     pub fn load_file<P: AsRef<Path>>(&self, path: P) -> LuaResult<LuaValue> {
+        let path = path.as_ref();
         let code = std::fs::read_to_string(path)
             .map_err(|e| LuaError::external(format!("Failed to read Lua file: {}", e)))?;
 
+        // Get absolute path for chunk name and current file context
+        let absolute_path = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf());
+        let path_str = absolute_path.to_string_lossy().to_string();
+
+        // Set current file context for relative requires
+        self.lua
+            .globals()
+            .set("__niri_current_file", path_str.as_str())?;
+
         // Compile with optimizations
-        let bytecode = self.compiler.compile(&code)?;
+        let bytecode = self.compiler.borrow().compile(&code)?;
 
         self.set_deadline();
-        let result = self.lua.load(bytecode).eval();
+        let result = self
+            .lua
+            .load(bytecode)
+            .set_name(&path_str)
+            .eval();
         self.clear_deadline();
         result
     }
@@ -627,7 +622,7 @@ impl LuaRuntime {
     /// or exceeds the execution timeout.
     pub fn load_string(&self, code: &str) -> LuaResult<LuaValue> {
         // Compile with optimizations
-        let bytecode = self.compiler.compile(code)?;
+        let bytecode = self.compiler.borrow().compile(code)?;
 
         self.set_deadline();
         let result = self.lua.load(bytecode).eval();
@@ -671,7 +666,7 @@ impl LuaRuntime {
         }
 
         // Compile with optimizations
-        let bytecode = match self.compiler.compile(code) {
+        let bytecode = match self.compiler.borrow().compile(code) {
             Ok(bc) => bc,
             Err(e) => {
                 // Restore original print before returning
@@ -1316,7 +1311,7 @@ mod tests {
         )
         .unwrap();
 
-        let (timers, _process_events, scheduled, errors) = rt.process_async();
+        let (timers, scheduled, errors) = rt.process_async();
         assert_eq!(timers, 1);
         assert_eq!(scheduled, 2); // original + chained from timer
         assert!(errors.is_empty());
@@ -1343,7 +1338,7 @@ mod tests {
         )
         .unwrap();
 
-        let (timers, _process_events, scheduled, errors) = rt.process_async();
+        let (timers, scheduled, errors) = rt.process_async();
         assert_eq!(timers, 1);
         assert_eq!(scheduled, 1);
         assert_eq!(errors.len(), 2);

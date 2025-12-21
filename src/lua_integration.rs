@@ -162,29 +162,7 @@ pub fn setup_lua_config_apis(
                 .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
         });
 
-    let process_manager = runtime
-        .process_manager
-        .clone()
-        .expect("Process manager missing in Lua runtime");
-
-    // Create ping source for process events
-    let (ping_source, ping) = niri_lua::create_process_event_ping();
-    process_manager.borrow_mut().set_ping(ping);
-
-    // Register ping source with event loop to fire process events
-    event_loop
-        .insert_source(ping_source, |_, _, state| {
-            // Fire due process events when pinged
-            if let Some(ref runtime) = state.niri.lua_runtime {
-                let _ = niri_lua::fire_due_process_events(
-                    runtime.inner(),
-                    runtime.process_manager.as_ref().unwrap(),
-                );
-            }
-        })
-        .expect("Failed to register process event ping source");
-
-    if let Err(e) = runtime.register_action_proxy(action_callback, process_manager) {
+    if let Err(e) = runtime.register_action_proxy(action_callback) {
         warn!("Failed to register Lua action proxy: {}", e);
     }
 }
@@ -442,12 +420,7 @@ pub fn setup_runtime(
                     .map_err(|e| mlua::Error::runtime(format!("Failed to send action: {}", e)))
             });
 
-        let process_manager = runtime
-            .process_manager
-            .clone()
-            .expect("Process manager missing in Lua runtime");
-
-        if let Err(e) = runtime.register_action_proxy(action_callback, process_manager) {
+        if let Err(e) = runtime.register_action_proxy(action_callback) {
             warn!("Failed to register Lua action proxy: {}", e);
         }
     }

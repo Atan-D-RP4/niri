@@ -32,7 +32,6 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         GESTURE_TYPE,
         CONFIG_COLLECTION_TYPE,
         CONFIG_SECTION_PROXY_TYPE,
-        PROCESS_HANDLE_TYPE,
     ],
     aliases: &[
         WINDOW_ALIAS,
@@ -52,8 +51,7 @@ pub const NIRI_LUA_API: LuaApiSchema = LuaApiSchema {
         RESERVED_SPACE_ALIAS,
         FOCUS_MODE_ALIAS,
         KEYBOARD_LAYOUTS_ALIAS,
-        SPAWN_OPTS_ALIAS,
-        SPAWN_RESULT_ALIAS,
+        FS_FIND_OPTS_ALIAS,
     ],
 };
 
@@ -164,16 +162,10 @@ const KEYBOARD_LAYOUTS_ALIAS: AliasSchema = AliasSchema {
     description: "Keyboard layout names and current active index",
 };
 
-const SPAWN_OPTS_ALIAS: AliasSchema = AliasSchema {
-    name: "SpawnOpts",
-    ty: "{ cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean?, stdout: boolean?, stderr: boolean?, text: boolean?, detach: boolean? }",
-    description: "Options for spawning a process. If stdin is true, enables :write() method. If detach is true, no ProcessHandle is returned.",
-};
-
-const SPAWN_RESULT_ALIAS: AliasSchema = AliasSchema {
-    name: "SpawnResult",
-    ty: "{ code: integer, signal: integer, stdout: string, stderr: string }",
-    description: "Result from process execution. code: exit code (0=success, -1 if killed), signal: signal number (0 if not signaled), stdout/stderr: captured output",
+const FS_FIND_OPTS_ALIAS: AliasSchema = AliasSchema {
+    name: "FsFindOpts",
+    ty: "{ path: string?, upward: boolean?, stop: string?, type: \"file\"|\"directory\"?, limit: integer? }",
+    description: "Options for niri.fs.find() function. path: starting directory (default cwd), upward: search toward root, stop: stop directory for upward search, type: filter by file/directory, limit: max results",
 };
 
 // ============================================================================
@@ -751,49 +743,27 @@ const NIRI_ACTION_MODULE: ModuleSchema = ModuleSchema {
         },
         FunctionSchema {
             name: "spawn",
-            description: "Spawn a command. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.",
+            description: "Spawn a command (fire-and-forget).",
             is_method: true,
-            params: &[
-                ParamSchema {
-                    name: "command",
-                    ty: "string[]",
-                    description: "Command and arguments",
-                    optional: false,
-                },
-                ParamSchema {
-                    name: "opts",
-                    ty: "SpawnOpts?",
-                    description: "Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.",
-                    optional: true,
-                },
-            ],
-            returns: &[ReturnSchema {
-                ty: "ProcessHandle?",
-                description: "Process handle if opts provided (and detach ~= true), nil otherwise",
+            params: &[ParamSchema {
+                name: "command",
+                ty: "string[]",
+                description: "Command and arguments",
+                optional: false,
             }],
+            returns: &[],
         },
         FunctionSchema {
             name: "spawn_sh",
-            description: "Spawn a command via shell. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.",
+            description: "Spawn a command via shell (fire-and-forget).",
             is_method: true,
-            params: &[
-                ParamSchema {
-                    name: "command",
-                    ty: "string",
-                    description: "Shell command string",
-                    optional: false,
-                },
-                ParamSchema {
-                    name: "opts",
-                    ty: "SpawnOpts?",
-                    description: "Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.",
-                    optional: true,
-                },
-            ],
-            returns: &[ReturnSchema {
-                ty: "ProcessHandle?",
-                description: "Process handle if opts provided (and detach ~= true), nil otherwise",
+            params: &[ParamSchema {
+                name: "command",
+                ty: "string",
+                description: "Shell command string",
+                optional: false,
             }],
+            returns: &[],
         },
         FunctionSchema {
             name: "do_screen_transition",
@@ -2307,79 +2277,7 @@ const CONFIG_SECTION_PROXY_TYPE: TypeSchema = TypeSchema {
     methods: &[],
 };
 
-const PROCESS_HANDLE_TYPE: TypeSchema = TypeSchema {
-    name: "ProcessHandle",
-    description: "Handle for controlling a spawned process with output capture",
-    fields: &[FieldSchema {
-        name: "pid",
-        ty: "integer",
-        description: "Process ID",
-    }],
-    methods: &[
-        FunctionSchema {
-            name: "wait",
-            description: "Wait for the process to complete, optionally with a timeout. If timeout is exceeded, the process is killed.",
-            is_method: true,
-            params: &[ParamSchema {
-                name: "timeout_ms",
-                ty: "integer?",
-                description: "Optional timeout in milliseconds",
-                optional: true,
-            }],
-            returns: &[ReturnSchema {
-                ty: "SpawnResult",
-                description: "Process result with exit code, signal, stdout, and stderr",
-            }],
-        },
-        FunctionSchema {
-            name: "kill",
-            description: "Kill the process (sends SIGKILL on Unix)",
-            is_method: true,
-            params: &[ParamSchema {
-                name: "signal",
-                ty: "integer?",
-                description: "Optional signal number (currently ignored, always uses SIGKILL)",
-                optional: true,
-            }],
-            returns: &[ReturnSchema {
-                ty: "boolean",
-                description: "True if kill signal was sent successfully",
-            }],
-        },
-        FunctionSchema {
-            name: "write",
-            description: "Write data to the process stdin (requires stdin=true in spawn opts)",
-            is_method: true,
-            params: &[ParamSchema {
-                name: "data",
-                ty: "string",
-                description: "Data to write to stdin",
-                optional: false,
-            }],
-            returns: &[ReturnSchema {
-                ty: "boolean",
-                description: "True if write succeeded",
-            }],
-        },
-        FunctionSchema {
-            name: "is_closing",
-            description: "Check if the process is closing or has already exited",
-            is_method: true,
-            params: &[],
-            returns: &[ReturnSchema {
-                ty: "boolean",
-                description: "True if process is closing or has exited",
-            }],
-        },
-        FunctionSchema {
-            name: "close_stdin",
-            description: "Close the stdin pipe, signaling EOF to the process",
-            is_method: true,
-            params: &[],
-            returns: &[],
-        },
-    ],
-};
+
 
 // ============================================================================
 // niri.os
@@ -2601,6 +2499,16 @@ const NIRI_OS_MODULE: ModuleSchema = ModuleSchema {
     ],
     fields: &[],
 };
+
+// ============================================================================
+// niri.fs
+// ============================================================================
+
+// ============================================================================
+// niri.process
+// ============================================================================
+
+
 
 // ============================================================================
 // niri.fs

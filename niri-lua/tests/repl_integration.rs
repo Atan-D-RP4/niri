@@ -1164,7 +1164,7 @@ print("Line 3")
         // Register action proxy with a no-op callback
         let callback: niri_lua::ActionCallback = Arc::new(|_action| Ok(()));
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let (output, success) = runtime.execute_string("return type(niri.action)");
@@ -1188,7 +1188,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let (_, success) = runtime.execute_string(r#"niri.action:spawn({"echo", "hello"})"#);
@@ -1219,7 +1219,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1255,7 +1255,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1301,7 +1301,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1363,7 +1363,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1397,7 +1397,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1440,7 +1440,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1474,7 +1474,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"
@@ -1510,7 +1510,7 @@ print("Line 3")
         });
 
         runtime
-            .register_action_proxy(callback, niri_lua::create_process_manager())
+            .register_action_proxy(callback)
             .expect("Failed to register action proxy");
 
         let code = r#"

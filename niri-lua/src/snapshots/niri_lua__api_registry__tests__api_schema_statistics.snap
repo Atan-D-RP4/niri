@@ -9,11 +9,11 @@ expression: stats
     ),
     (
         "types",
-        8,
+        7,
     ),
     (
         "aliases",
-        19,
+        18,
     ),
     (
         "functions",
@@ -21,7 +21,7 @@ expression: stats
     ),
     (
         "methods",
-        36,
+        31,
     ),
     (
         "fields",

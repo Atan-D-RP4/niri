@@ -60,11 +60,8 @@
 ---Keyboard layout names and current active index
 ---@alias KeyboardLayouts { names: string[], current_idx: integer }
 
----Options for spawning a process. If stdin is true, enables :write() method. If detach is true, no ProcessHandle is returned.
----@alias SpawnOpts { cwd: string?, env: table<string, string>?, clear_env: boolean?, stdin: string|boolean?, stdout: boolean?, stderr: boolean?, text: boolean?, detach: boolean? }
-
----Result from process execution. code: exit code (0=success, -1 if killed), signal: signal number (0 if not signaled), stdout/stderr: captured output
----@alias SpawnResult { code: integer, signal: integer, stdout: string, stderr: string }
+---Options for niri.fs.find() function. path: starting directory (default cwd), upward: search toward root, stop: stop directory for upward search, type: filter by file/directory, limit: max results
+---@alias FsFindOpts { path: string?, upward: boolean?, stop: string?, type: "file"|"directory"?, limit: integer? }
 
 -- ============================================================================
 -- Input Configuration Types
@@ -472,33 +469,6 @@ function ConfigCollection:clear() end
 ---@class ConfigSectionProxy
 local ConfigSectionProxy = {}
 
----Handle for controlling a spawned process with output capture
----@class ProcessHandle
----@field pid integer Process ID
-local ProcessHandle = {}
-
----Wait for the process to complete, optionally with a timeout. If timeout is exceeded, the process is killed.
----@param timeout_ms? integer? Optional timeout in milliseconds
----@return SpawnResult # Process result with exit code, signal, stdout, and stderr
-function ProcessHandle:wait(timeout_ms) end
-
----Kill the process (sends SIGKILL on Unix)
----@param signal? integer? Optional signal number (currently ignored, always uses SIGKILL)
----@return boolean # True if kill signal was sent successfully
-function ProcessHandle:kill(signal) end
-
----Write data to the process stdin (requires stdin=true in spawn opts)
----@param data string Data to write to stdin
----@return boolean # True if write succeeded
-function ProcessHandle:write(data) end
-
----Check if the process is closing or has already exited
----@return boolean # True if process is closing or has exited
-function ProcessHandle:is_closing() end
-
----Close the stdin pipe, signaling EOF to the process
-function ProcessHandle:close_stdin() end
-
 -- ============================================================================
 -- Modules
 -- ============================================================================
@@ -635,17 +605,13 @@ function niri.action:power_off_monitors() end
 ---Turn on all monitors
 function niri.action:power_on_monitors() end
 
----Spawn a command. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.
+---Spawn a command (fire-and-forget).
 ---@param command string[] Command and arguments
----@param opts? SpawnOpts? Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.
----@return ProcessHandle? # Process handle if opts provided (and detach ~= true), nil otherwise
-function niri.action:spawn(command, opts) end
+function niri.action:spawn(command) end
 
----Spawn a command via shell. Without opts: fire-and-forget. With opts: returns ProcessHandle for output capture and process control.
+---Spawn a command via shell (fire-and-forget).
 ---@param command string Shell command string
----@param opts? SpawnOpts? Options: {cwd?, env?, stdin?, detach?}. If provided, enables output capture.
----@return ProcessHandle? # Process handle if opts provided (and detach ~= true), nil otherwise
-function niri.action:spawn_sh(command, opts) end
+function niri.action:spawn_sh(command) end
 
 ---Trigger a screen transition animation
 ---@param delay? boolean Whether to delay the transition
