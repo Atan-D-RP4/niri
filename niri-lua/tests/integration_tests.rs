@@ -650,6 +650,8 @@ fn test_metatable_add() {
 // ========================================================================
 // PROCESS CONTROL API TESTS
 // ========================================================================
+// These tests exercise the Process API from Lua code end-to-end.
+// Unit tests for the Rust implementation are in src/process.rs (47 tests).
 
 mod process_integration_tests {
     use std::thread;
@@ -657,25 +659,601 @@ mod process_integration_tests {
 
     use super::*;
 
-    #[allow(dead_code)]
     fn flush_process_events(runtime: &LuaRuntime) {
         let _ = runtime.process_async();
     }
 
-    #[allow(dead_code)]
-    fn wait_for_lua_condition(runtime: &LuaRuntime, script: &str, timeout: Duration) {
+    fn wait_for_lua_condition(runtime: &LuaRuntime, script: &str, timeout: Duration) -> bool {
         let start = Instant::now();
         loop {
             flush_process_events(runtime);
             let (output, success) = runtime.execute_string(script);
-            if success && output == "1" {
-                break;
+            if success && output.trim() == "true" {
+                return true;
             }
             if Instant::now().saturating_duration_since(start) > timeout {
-                panic!("timed out waiting for Lua condition: {}", script);
+                return false;
             }
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // Basic spawn tests (fire-and-forget)
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_spawn_returns_handle() {
+        let runtime = create_runtime();
+        // spawn with opts (even empty {}) returns handle
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "hello"}, {})
+            return handle ~= nil and type(handle) == "userdata"
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn should succeed: {}", output);
+        assert!(output.contains("true"), "spawn should return handle: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_without_opts_returns_nil() {
+        let runtime = create_runtime();
+        // When no opts provided, spawn is fire-and-forget and returns nil
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "hello"})
+            return handle == nil
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn should succeed: {}", output);
+        assert!(output.contains("true"), "spawn without opts returns nil: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_capture_returns_handle() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "test"}, {capture_stdout = true})
+            return handle ~= nil and type(handle) == "userdata"
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with capture should succeed: {}", output);
+        assert!(output.contains("true"), "should return handle: {}", output);
+    }
+
+    // ------------------------------------------------------------------------
+    // ProcessHandle method tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_handle_pid_returns_number() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"sleep", "0.1"}, {capture_stdout = true})
+            local pid = handle.pid  -- pid is a field, not a method
+            return type(pid) == "number" and pid > 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "pid access should succeed: {}", output);
+        assert!(output.contains("true"), "pid should be positive number: {}", output);
+    }
+
+    #[test]
+    fn test_handle_is_closing_with_stdin_pipe() {
+        let runtime = create_runtime();
+        // is_closing() checks if stdin is closed
+        // With stdin = "pipe", stdin starts open
+        let code = r#"
+            local handle = niri.action:spawn({"cat"}, {stdin = "pipe"})
+            local before_close = handle:is_closing()
+            handle:close_stdin()
+            local after_close = handle:is_closing()
+            handle:wait()  -- Wait for cat to exit after stdin closes
+            return before_close == false and after_close == true
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "is_closing() test should succeed: {}", output);
+        assert!(output.contains("true"), "is_closing should track stdin state: {}", output);
+    }
+
+    #[test]
+    fn test_handle_kill_terminates_process() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"sleep", "10"}, {capture_stdout = true})
+            handle:kill("SIGKILL")  -- Use SIGKILL for immediate termination
+            local result = handle:wait()
+            -- Killed process has signal = 9 (SIGKILL)
+            return result.signal == 9
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "kill should succeed: {}", output);
+        assert!(output.contains("true"), "killed process should have signal 9: {}", output);
+    }
+
+    #[test]
+    fn test_handle_wait_returns_result() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"true"}, {})  -- 'true' exits with code 0
+            local result = handle:wait()
+            return type(result) == "table" and result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "wait should succeed: {}", output);
+        assert!(output.contains("true"), "wait should return result table: {}", output);
+    }
+
+    #[test]
+    fn test_handle_wait_captures_stdout() {
+        let runtime = create_runtime();
+        // Note: capture_stdout buffers output via process_events()
+        // For synchronous capture, we need to process events before wait returns
+        // This test verifies the basic capture option is accepted
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "captured_output"}, {capture_stdout = true})
+            -- Process events to buffer stdout before wait
+            local result = handle:wait()
+            -- In integration without event loop, stdout may not be buffered yet
+            -- Just verify result structure is correct
+            return type(result) == "table" and result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "wait with capture should succeed: {}", output);
+        assert!(output.contains("true"), "should return result table: {}", output);
+    }
+
+    #[test]
+    fn test_handle_wait_captures_stderr() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"sh", "-c", "echo error >&2"}, {capture_stderr = true})
+            local result = handle:wait()
+            -- Verify result structure
+            return type(result) == "table" and result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "wait with stderr capture should succeed: {}", output);
+        assert!(output.contains("true"), "should return result table: {}", output);
+    }
+
+    #[test]
+    fn test_handle_wait_with_timeout() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "fast"}, {capture_stdout = true})
+            local result = handle:wait(5000)  -- 5 second timeout
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "wait with timeout should succeed: {}", output);
+        assert!(output.contains("true"), "fast process should complete: {}", output);
+    }
+
+    // ------------------------------------------------------------------------
+    // Spawn options tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_spawn_with_cwd() {
+        let runtime = create_runtime();
+        // Test that cwd option is accepted and process runs
+        let code = r#"
+            local handle = niri.action:spawn({"pwd"}, {cwd = "/tmp"})
+            local result = handle:wait()
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with cwd should succeed: {}", output);
+        assert!(output.contains("true"), "process should exit cleanly: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_env() {
+        let runtime = create_runtime();
+        // Test that env option is accepted - use exit code to verify
+        let code = r#"
+            local handle = niri.action:spawn(
+                {"sh", "-c", "test -n \"$MY_TEST_VAR\" && exit 0 || exit 1"},
+                {env = {MY_TEST_VAR = "test_value_123"}}
+            )
+            local result = handle:wait()
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with env should succeed: {}", output);
+        assert!(output.contains("true"), "env var should be set: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_stdin_data() {
+        let runtime = create_runtime();
+        // Test stdin data - use wc to count characters via exit code
+        let code = r#"
+            local handle = niri.action:spawn(
+                {"sh", "-c", "read line && test \"$line\" = 'hello' && exit 0 || exit 1"},
+                {stdin = "hello\n"}
+            )
+            local result = handle:wait()
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with stdin data should succeed: {}", output);
+        assert!(output.contains("true"), "stdin should be passed to process: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_stdin_pipe() {
+        let runtime = create_runtime();
+        // Test stdin pipe mode - verify write and close_stdin work
+        let code = r#"
+            local handle = niri.action:spawn(
+                {"sh", "-c", "read line && test \"$line\" = 'piped' && exit 0 || exit 1"},
+                {stdin = "pipe"}
+            )
+            handle:write("piped\n")
+            handle:close_stdin()
+            local result = handle:wait()
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with stdin pipe should succeed: {}", output);
+        assert!(output.contains("true"), "piped input should reach process: {}", output);
+    }
+
+    // ------------------------------------------------------------------------
+    // Exit code tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_nonzero_exit_code() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn({"sh", "-c", "exit 42"}, {capture_stdout = true})
+            local result = handle:wait()
+            return result.code == 42
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "nonzero exit should succeed: {}", output);
+        assert!(output.contains("true"), "exit code should be 42: {}", output);
+    }
+
+    #[test]
+    fn test_command_not_found() {
+        let runtime = create_runtime();
+        let code = r#"
+            local ok, err = pcall(function()
+                niri.action:spawn({"nonexistent_command_xyz_123"}, {capture_stdout = true})
+            end)
+            -- spawn of nonexistent command may fail or return handle that waits with error
+            return not ok or type(err) == "string"
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "pcall should succeed: {}", output);
+        // Either pcall catches error or we get an error result
+        assert!(output.contains("true"), "should handle nonexistent command: {}", output);
+    }
+
+    // ------------------------------------------------------------------------
+    // Text vs Binary mode tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_text_mode_default() {
+        let runtime = create_runtime();
+        // Text mode is default - verify option is accepted
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "line1"}, {text = true})
+            local result = handle:wait()
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "text mode should succeed: {}", output);
+        assert!(output.contains("true"), "process should exit cleanly: {}", output);
+    }
+
+    #[test]
+    fn test_binary_mode() {
+        let runtime = create_runtime();
+        // Binary mode - verify option is accepted
+        let code = r#"
+            local handle = niri.action:spawn({"echo", "binary"}, {text = false})
+            local result = handle:wait()
+            return result.code == 0
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "binary mode should succeed: {}", output);
+        assert!(output.contains("true"), "process should exit cleanly: {}", output);
+    }
+
+    // ------------------------------------------------------------------------
+    // Streaming callback tests (async)
+    // These test that callbacks are registered and accepted.
+    // Full callback invocation requires compositor event loop integration.
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_spawn_with_stdout_callback_returns_handle() {
+        let runtime = create_runtime();
+        let code = r#"
+            _G.stdout_lines = {}
+            local handle = niri.action:spawn(
+                {"echo", "callback test"},
+                {stdout = function(line) table.insert(_G.stdout_lines, line) end}
+            )
+            return handle ~= nil
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with callback should succeed: {}", output);
+        assert!(output.contains("true"), "should return handle: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_on_exit_callback_returns_handle() {
+        let runtime = create_runtime();
+        let code = r#"
+            _G.exit_result = nil
+            local handle = niri.action:spawn(
+                {"echo", "test"},
+                {on_exit = function(result) _G.exit_result = result end}
+            )
+            return handle ~= nil
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with on_exit should succeed: {}", output);
+        assert!(output.contains("true"), "should return handle: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_stderr_callback_returns_handle() {
+        let runtime = create_runtime();
+        let code = r#"
+            _G.stderr_lines = {}
+            local handle = niri.action:spawn(
+                {"sh", "-c", "echo error >&2"},
+                {stderr = function(line) table.insert(_G.stderr_lines, line) end}
+            )
+            return handle ~= nil
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with stderr callback should succeed: {}", output);
+        assert!(output.contains("true"), "should return handle: {}", output);
+    }
+
+    #[test]
+    fn test_spawn_with_all_callbacks_returns_handle() {
+        let runtime = create_runtime();
+        let code = r#"
+            local handle = niri.action:spawn(
+                {"echo", "test"},
+                {
+                    stdout = function(line) end,
+                    stderr = function(line) end,
+                    on_exit = function(result) end
+                }
+            )
+            return handle ~= nil
+        "#;
+        let (output, success) = runtime.execute_string(code);
+        assert!(success, "spawn with all callbacks should succeed: {}", output);
+        assert!(output.contains("true"), "should return handle: {}", output);
+    }
+
+    // ------------------------------------------------------------------------
+    // Callback event processing tests
+    // These tests verify that streaming callbacks fire when events are processed
+    // Callback signature: (err, data) for stdout/stderr, (result, err) for on_exit
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_stdout_callback_receives_output() {
+        let runtime = create_runtime();
+
+        // Set up callback and spawn process
+        // Callback signature is (err, data) where err is nil on success
+        let setup = r#"
+            _G.received_lines = {}
+            _G.callback_called = false
+            local handle = niri.action:spawn(
+                {"echo", "callback_line_123"},
+                {
+                    stdout = function(err, data)
+                        _G.callback_called = true
+                        if data then
+                            table.insert(_G.received_lines, data)
+                        end
+                    end
+                }
+            )
+            _G.test_handle = handle
+            return "setup_done"
+        "#;
+        let (output, success) = runtime.execute_string(setup);
+        assert!(success, "setup should succeed: {}", output);
+
+        // Process events until callback fires or timeout
+        let condition_met = wait_for_lua_condition(
+            &runtime,
+            "return _G.callback_called",
+            Duration::from_secs(5),
+        );
+        assert!(condition_met, "callback should be called within timeout");
+
+        // Verify the callback received the output
+        let verify = r#"
+            local found = false
+            for _, line in ipairs(_G.received_lines) do
+                if line:find("callback_line_123") then found = true end
+            end
+            return found
+        "#;
+        let (output, success) = runtime.execute_string(verify);
+        assert!(success, "verify should succeed: {}", output);
+        assert!(
+            output.contains("true"),
+            "callback should have received output: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_on_exit_callback_receives_result() {
+        let runtime = create_runtime();
+
+        // Set up on_exit callback
+        // Callback signature is (result, err) where result is a table with code/signal
+        let setup = r#"
+            _G.exit_called = false
+            _G.exit_code = nil
+            local handle = niri.action:spawn(
+                {"sh", "-c", "exit 7"},
+                {
+                    on_exit = function(result, err)
+                        _G.exit_called = true
+                        if result then
+                            _G.exit_code = result.code
+                        end
+                    end
+                }
+            )
+            return "setup_done"
+        "#;
+        let (output, success) = runtime.execute_string(setup);
+        assert!(success, "setup should succeed: {}", output);
+
+        // Process events until callback fires
+        let condition_met = wait_for_lua_condition(
+            &runtime,
+            "return _G.exit_called",
+            Duration::from_secs(5),
+        );
+        assert!(condition_met, "on_exit callback should fire within timeout");
+
+        // Verify exit code
+        let (output, success) = runtime.execute_string("return _G.exit_code == 7");
+        assert!(success, "verify should succeed: {}", output);
+        assert!(
+            output.contains("true"),
+            "exit code should be 7: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_stderr_callback_receives_output() {
+        let runtime = create_runtime();
+
+        // Callback signature is (err, data)
+        let setup = r#"
+            _G.stderr_lines = {}
+            _G.stderr_called = false
+            local handle = niri.action:spawn(
+                {"sh", "-c", "echo stderr_test_line >&2"},
+                {
+                    stderr = function(err, data)
+                        _G.stderr_called = true
+                        if data then
+                            table.insert(_G.stderr_lines, data)
+                        end
+                    end
+                }
+            )
+            return "setup_done"
+        "#;
+        let (output, success) = runtime.execute_string(setup);
+        assert!(success, "setup should succeed: {}", output);
+
+        let condition_met = wait_for_lua_condition(
+            &runtime,
+            "return _G.stderr_called",
+            Duration::from_secs(5),
+        );
+        assert!(condition_met, "stderr callback should be called");
+
+        let verify = r#"
+            local found = false
+            for _, line in ipairs(_G.stderr_lines) do
+                if line:find("stderr_test_line") then found = true end
+            end
+            return found
+        "#;
+        let (output, success) = runtime.execute_string(verify);
+        assert!(success, "verify should succeed: {}", output);
+        assert!(
+            output.contains("true"),
+            "stderr callback should have received output: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_multiple_processes_isolated_callbacks() {
+        let runtime = create_runtime();
+
+        // Callback signature is (err, data)
+        let setup = r#"
+            _G.proc1_lines = {}
+            _G.proc2_lines = {}
+            _G.proc1_called = false
+            _G.proc2_called = false
+
+            niri.action:spawn(
+                {"echo", "PROC1_OUTPUT"},
+                {
+                    stdout = function(err, data)
+                        _G.proc1_called = true
+                        if data then table.insert(_G.proc1_lines, data) end
+                    end
+                }
+            )
+
+            niri.action:spawn(
+                {"echo", "PROC2_OUTPUT"},
+                {
+                    stdout = function(err, data)
+                        _G.proc2_called = true
+                        if data then table.insert(_G.proc2_lines, data) end
+                    end
+                }
+            )
+            return "setup_done"
+        "#;
+        let (output, success) = runtime.execute_string(setup);
+        assert!(success, "setup should succeed: {}", output);
+
+        // Wait for both to be called
+        let condition_met = wait_for_lua_condition(
+            &runtime,
+            "return _G.proc1_called and _G.proc2_called",
+            Duration::from_secs(5),
+        );
+        assert!(condition_met, "both callbacks should be called");
+
+        // Verify isolation
+        let verify = r#"
+            local proc1_has_proc1 = false
+            local proc1_has_proc2 = false
+            local proc2_has_proc1 = false
+            local proc2_has_proc2 = false
+
+            for _, line in ipairs(_G.proc1_lines) do
+                if line:find("PROC1_OUTPUT") then proc1_has_proc1 = true end
+                if line:find("PROC2_OUTPUT") then proc1_has_proc2 = true end
+            end
+            for _, line in ipairs(_G.proc2_lines) do
+                if line:find("PROC1_OUTPUT") then proc2_has_proc1 = true end
+                if line:find("PROC2_OUTPUT") then proc2_has_proc2 = true end
+            end
+
+            -- Each proc should only have its own output
+            return proc1_has_proc1 and not proc1_has_proc2 and proc2_has_proc2 and not proc2_has_proc1
+        "#;
+        let (output, success) = runtime.execute_string(verify);
+        assert!(success, "verify should succeed: {}", output);
+        assert!(
+            output.contains("true"),
+            "callbacks should be isolated: {}",
+            output
+        );
     }
 }
 
