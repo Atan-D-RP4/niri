@@ -46,7 +46,9 @@ pub mod api_registry;
 pub mod lua_api_schema;
 
 // Tier 4: Async Primitives
+pub mod callback_registry;
 pub mod loop_api;
+pub mod process;
 
 // Testing utilities (only available in tests)
 #[cfg(test)]
@@ -71,9 +73,14 @@ pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};
 pub use ipc_repl::IpcLuaExecutor;
 // Tier 4 exports
+pub use callback_registry::{CallbackRegistry, SharedCallbackRegistry};
 pub use loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager, TimerManager,
     TimerState,
+};
+pub use process::{
+    create_process_manager, parse_spawn_opts, ProcessHandle, ProcessManager, SharedProcessManager,
+    SpawnOpts,
 };
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
 use mlua::prelude::*;
