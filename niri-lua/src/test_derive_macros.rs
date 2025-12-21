@@ -5,7 +5,7 @@
 // Allow the macro to reference niri_lua::traits when testing within the crate
 extern crate self as niri_lua;
 
-use niri_lua_derive::{DirtyFlags, LuaEnum};
+use niri_lua_derive::LuaEnum;
 
 use crate::traits::{LuaEnumConvert, LuaFieldConvert};
 
@@ -584,7 +584,7 @@ mod dirty_flags_tests {
         assert_ne!(flag1, flag3);
 
         // Test Clone
-        let cloned = flag1.clone();
+        let cloned = flag1;
         assert_eq!(flag1, cloned);
 
         // Test Copy (implicit)

@@ -178,7 +178,8 @@ impl LuaRuntime {
         // Create optimized compiler for Luau
         // Level 2 enables function inlining, loop unrolling, constant folding
         let compiler = Rc::new(RefCell::new(
-            Compiler::new().set_optimization_level(2).set_debug_level(1), // Keep line info for error messages
+            Compiler::new().set_optimization_level(2).set_debug_level(1), /* Keep line info for
+                                                                           * error messages */
         ));
 
         // Register custom require function for module loading
@@ -417,8 +418,6 @@ impl LuaRuntime {
         (timers_fired, scheduled_executed, all_errors)
     }
 
-
-
     /// Check if there are pending scheduled callbacks.
     pub fn has_scheduled(&self) -> bool {
         !self.scheduled_callbacks.borrow().is_empty()
@@ -565,10 +564,7 @@ impl LuaRuntime {
     /// # Errors
     ///
     /// Returns an error if action proxy registration fails.
-    pub fn register_action_proxy(
-        &mut self,
-        callback: ActionCallback,
-    ) -> LuaResult<()> {
+    pub fn register_action_proxy(&mut self, callback: ActionCallback) -> LuaResult<()> {
         register_action_proxy(&self.lua, callback)?;
         Ok(())
     }
@@ -589,9 +585,7 @@ impl LuaRuntime {
             .map_err(|e| LuaError::external(format!("Failed to read Lua file: {}", e)))?;
 
         // Get absolute path for chunk name and current file context
-        let absolute_path = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let absolute_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = absolute_path.to_string_lossy().to_string();
 
         // Set current file context for relative requires
@@ -603,11 +597,7 @@ impl LuaRuntime {
         let bytecode = self.compiler.borrow().compile(&code)?;
 
         self.set_deadline();
-        let result = self
-            .lua
-            .load(bytecode)
-            .set_name(&path_str)
-            .eval();
+        let result = self.lua.load(bytecode).set_name(&path_str).eval();
         self.clear_deadline();
         result
     }

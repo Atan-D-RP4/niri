@@ -209,7 +209,7 @@ niri.config.debug = {
 -- ============================================================================
 
 niri.config.xwayland_satellite = {
-	off = true and niri.fs.which('xwayland-satellite') == nil,
+	off = false or niri.fs.which("xwayland-satellite") == nil,
 }
 
 -- ============================================================================
@@ -459,9 +459,10 @@ niri.config:apply()
 
 niri.action:spawn({ "waybar" })
 niri.action:spawn({ "swaync" })
-niri.action:spawn({ "kitty" })
-niri.action:spawn({ "kitty", "nvim" })
-niri.action:spawn_sh("kitty nvim")
+niri.schedule(function()
+	local kitty = niri.action:spawn({ "kitty" }, {})
+	niri.utils.log(kitty)
+end)
 
 -- Shell commands with pipes/variables:
 -- niri.action:spawn_sh("dbus-update-activation-environment --systemd WAYLAND_DISPLAY")
@@ -675,7 +676,7 @@ niri.schedule(function()
 		niri.action:focus_window(ev.id)
 		niri.action:fullscreen_window()
 	end)
-	niri.action:spawn_sh("kitty nvim")
+	-- niri.action:spawn_sh("kitty nvim")
 	-- set_timeout(1000, function()
 	-- 	niri.action:fullscreen_window()
 	-- 	niri.utils.log("Fullscreened the window after 1 second")

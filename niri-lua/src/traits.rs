@@ -897,8 +897,8 @@ mod tests {
 
     #[test]
     fn test_bool_convert() {
-        assert_eq!(LuaFieldConvert::to_lua(&true), true);
-        assert_eq!(<bool as LuaFieldConvert>::from_lua(false).unwrap(), false);
+        assert!(<bool as LuaFieldConvert>::to_lua(&true));
+        assert!(!<bool as LuaFieldConvert>::from_lua(false).unwrap());
     }
 
     #[test]

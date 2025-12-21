@@ -43,7 +43,7 @@ impl LuaComponent for NiriApi {
                 parts.push(formatted);
             }
             let message = parts.join("\t");
-            info!("Lua: {}", message);
+            info!("Lua API Info: {}", message);
             Ok(())
         })?;
         utils.set("log", log_fn)?;
@@ -408,13 +408,13 @@ mod tests {
             local focused = niri.state.focused_window()
             local workspaces = niri.state.workspaces()
             local outputs = niri.state.outputs()
-            
+
             -- Stubs should return empty tables or nil
             assert(type(windows) == "table", "windows should be a table")
             assert(focused == nil, "focused_window should be nil")
             assert(type(workspaces) == "table", "workspaces should be a table")
             assert(type(outputs) == "table", "outputs should be a table")
-            
+
             -- Empty tables should have length 0
             assert(#windows == 0, "windows should be empty")
             assert(#workspaces == 0, "workspaces should be empty")

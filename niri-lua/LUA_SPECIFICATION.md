@@ -43,7 +43,7 @@ Comprehensive specification for niri's Lua scripting system. This document cover
 | `niri.state` | Runtime queries (read-only) | Table |
 | `niri.events` | Event subscriptions | Methods |
 | `niri.action` | Compositor actions | Methods |
-| `niri.utils` | Logging utilities | Methods |
+| `niri.utils` | Logging and spawn utilities | Methods |
 | `niri.loop` | Timer/scheduling | Methods |
 | `niri.os` | Operating system utilities (hostname, env) | Methods |
 | `niri.fs` | Filesystem utilities (which, expand, readable) | Methods |
@@ -150,13 +150,16 @@ timer:start(1000, 1000, function() end)  -- repeat every 1000ms
 timer:close()  -- cancel
 ```
 
-### Logging
+### Logging and Spawning
 
 ```lua
 niri.utils.log("info message")
 niri.utils.debug("debug message")
 niri.utils.warn("warning message")
 niri.utils.error("error message")
+
+-- Fire-and-forget spawn
+niri.utils.spawn({"notify-send", "Hello"})
 ```
 
 ---
@@ -1155,10 +1158,50 @@ niri.action:move_window_to_monitor_right()
 ```
 
 #### Process Spawning
+
+**Basic usage (fire-and-forget):**
 ```lua
-niri.action:spawn({"cmd", "arg1", "arg2"})  -- Array of strings
-niri.action:spawn_sh("shell command")        -- Shell string (Since 25.05)
+niri.action:spawn({"cmd", "arg1", "arg2"})  -- Array of strings, returns nil
+niri.action:spawn_sh("shell command")        -- Shell string (Since 25.05), returns nil
 ```
+
+**Advanced usage (with options and callbacks):**
+```lua
+-- Single-argument form (fire-and-forget)
+niri.action:spawn({"kitty"})  -- Returns nil, spawns immediately
+
+-- Two-argument form with options (returns ProcessHandle)
+local handle = niri.action:spawn({"kitty"}, {
+    stdout = true,
+    on_exit = function(result)
+        niri.utils.log("Process exited with code: " .. tostring(result.code))
+        niri.utils.log("Output: " .. result.stdout)
+    end
+})
+```
+
+**Spawning at Startup:**
+
+> ⚠️ **WARNING**: When `niri.action:spawn()` is called during config load (synchronously), spawned processes may not work correctly. To spawn processes at startup, use one of these approaches instead:
+
+```lua
+-- Option 1: Use startup event
+niri.events:on("startup", function()
+    niri.action:spawn({"waybar"})
+end)
+
+-- Option 2: Use niri.schedule()
+niri.schedule(function()
+    niri.action:spawn({"mako"})
+end)
+
+-- Option 3: Use timer with delay
+niri.loop.new_timer():start(100, 0, function()
+    niri.action:spawn({"swaybg", "-i", "wallpaper.png"})
+end)
+```
+
+For more control over process spawning, including capturing output and handling process lifecycle, use the [`niri.process` API](#process-control-api) instead.
 
 #### Screenshots
 ```lua
@@ -1923,72 +1966,76 @@ niri.config.binds:add("Mod+Q", niri.action:close_window())
 
 ## Module System
 
-The module system enables users to organize Lua code into reusable modules following the Neovim pattern.
+The module system enables users to organize Lua code into reusable modules relative to their config file.
 
-### Current Status: Partial
+### Config-Relative Require
 
-The infrastructure is in place but **not yet integrated** into the Lua runtime:
+Niri's custom `require()` searcher resolves modules relative to the config file directory. This allows users to organize their configuration with local modules.
 
-| Component | Status | Description |
-|-----------|--------|-------------|
-| `module_loader.rs` | ✅ Implemented | Provides XDG-compliant path definitions (64 LOC) |
-| `package.path` integration | ❌ Not integrated | Paths not added to Lua runtime |
-| `require()` support | ❌ Standard only | Uses Lua's default require, no niri paths |
+**Search Order:**
 
-### XDG Search Paths (Defined but Not Active)
+1. Config file directory (e.g., `~/.config/niri/`)
+2. Standard Lua paths (`package.path`)
 
-The `module_loader::default_paths()` function returns these directories in priority order:
+**Supported Patterns:**
 
-1. `$XDG_CONFIG_HOME/niri/lua/` (defaults to `~/.config/niri/lua/`)
-2. `$XDG_DATA_HOME/niri/lua/` (defaults to `~/.local/share/niri/lua/`)
-3. `/usr/share/niri/lua/` (system-wide)
+| Pattern | Resolves To |
+|---------|-------------|
+| `require("mymodule")` | `<config_dir>/mymodule.lua` |
+| `require("mymodule")` | `<config_dir>/mymodule/init.lua` |
+| `require("utils.helpers")` | `<config_dir>/utils/helpers.lua` |
+| `require("utils.helpers")` | `<config_dir>/utils/helpers/init.lua` |
 
-### Intended Usage (When Integrated)
+### Usage Example
 
 ```lua
--- User creates: ~/.config/niri/lua/mymodule.lua
--- Contains:
+-- User creates: ~/.config/niri/mymodule.lua
 local M = {}
 function M.setup(opts)
     -- Custom keybindings, window rules, etc.
+    niri.config.layout.gaps = opts.gaps or 16
 end
 return M
 
--- In niri.lua config:
+-- In ~/.config/niri/config.lua:
 local mymodule = require("mymodule")
-mymodule.setup({ option = "value" })
+mymodule.setup({ gaps = 20 })
 ```
 
-### What's Needed for Integration
+### Nested Modules
 
-To complete Tier 5, the following changes are needed:
+```lua
+-- ~/.config/niri/utils/keybinds.lua
+local M = {}
+function M.add_workspace_binds()
+    for i = 1, 9 do
+        niri.config.binds:add("Mod+" .. i, niri.action:focus_workspace(i))
+    end
+end
+return M
 
-1. **In `runtime.rs` or `niri_api.rs`**: Call `module_loader::default_paths()` and append to Lua's `package.path`
-2. **Add path templates**: For each directory, add `?.lua` and `?/init.lua` patterns
+-- In config.lua:
+local keybinds = require("utils.keybinds")
+keybinds.add_workspace_binds()
+```
 
-```rust
-// Example integration (not yet implemented)
-fn setup_module_paths(lua: &Lua) -> LuaResult<()> {
-    let paths = module_loader::default_paths();
-    let package: LuaTable = lua.globals().get("package")?;
-    let mut lua_path: String = package.get("path")?;
+### init.lua Convention
 
-    for path in paths {
-        let path_str = path.to_string_lossy();
-        lua_path.push_str(&format!(";{}/?.lua;{}/init.lua", path_str, path_str));
-    }
+Directories can contain an `init.lua` file that is loaded when requiring the directory name:
 
-    package.set("path", lua_path)?;
-    Ok(())
-}
+```
+~/.config/niri/
+├── config.lua
+└── themes/
+    └── init.lua    -- require("themes") loads this
 ```
 
 ### Design Decisions
 
 Following the Neovim model:
 
-1. **Extend, don't replace**: Add paths to `package.path`, don't override `require`
-2. **Standard Lua semantics**: `require("foo.bar")` should work exactly as expected
+1. **Config-relative first**: Modules are resolved relative to the config file, making configurations portable
+2. **Standard Lua semantics**: `require("foo.bar")` works exactly as expected
 3. **No plugin manager**: Users load plugins explicitly via `require()` in their config
 4. **No lifecycle management**: No `disable()`, no hot-reload (keep it simple)
 

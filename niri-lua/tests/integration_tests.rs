@@ -657,10 +657,12 @@ mod process_integration_tests {
 
     use super::*;
 
+    #[allow(dead_code)]
     fn flush_process_events(runtime: &LuaRuntime) {
         let _ = runtime.process_async();
     }
 
+    #[allow(dead_code)]
     fn wait_for_lua_condition(runtime: &LuaRuntime, script: &str, timeout: Duration) {
         let start = Instant::now();
         loop {
@@ -675,7 +677,6 @@ mod process_integration_tests {
             thread::sleep(Duration::from_millis(10));
         }
     }
-
 }
 
 // ========================================================================
@@ -683,18 +684,19 @@ mod process_integration_tests {
 // ========================================================================
 
 mod require_tests {
-    use std::env;
-    use std::fs;
     use std::path::PathBuf;
+    use std::{env, fs};
 
     use super::*;
 
     /// Get the test fixtures directory path
+    #[allow(dead_code)]
     fn fixtures_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_fixtures")
     }
 
     /// Get the lua modules directory within fixtures
+    #[allow(dead_code)]
     fn lua_modules_dir() -> PathBuf {
         fixtures_dir().join("lua")
     }
@@ -717,7 +719,11 @@ mod require_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "Cache test should succeed");
-        assert!(output.contains("true"), "Modules should be cached: {}", output);
+        assert!(
+            output.contains("true"),
+            "Modules should be cached: {}",
+            output
+        );
     }
 
     #[test]
@@ -836,8 +842,11 @@ mod require_tests {
         fs::create_dir_all(&nested_dir).expect("Failed to create nested dir");
 
         let module_file = nested_dir.join("module.lua");
-        fs::write(&module_file, r#"return { deep = true, name = "nested.module" }"#)
-            .expect("Failed to write module file");
+        fs::write(
+            &module_file,
+            r#"return { deep = true, name = "nested.module" }"#,
+        )
+        .expect("Failed to write module file");
 
         // Set XDG_CONFIG_HOME to temp_dir so the custom require finds our module
         // Note: This affects the global environment, but tests run in separate processes

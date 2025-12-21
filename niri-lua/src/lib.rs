@@ -48,8 +48,6 @@ pub mod lua_api_schema;
 // Tier 4: Async Primitives
 pub mod loop_api;
 
-
-
 // Testing utilities (only available in tests)
 #[cfg(test)]
 pub mod test_utils;
@@ -80,7 +78,6 @@ pub use loop_api::{
 pub use lua_types::{LuaAnimation, LuaFilter, LuaGesture, LuaWindowRule};
 use mlua::prelude::*;
 pub use niri_api::NiriApi;
-
 pub use runtime::LuaRuntime;
 pub use runtime_api::{
     clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,

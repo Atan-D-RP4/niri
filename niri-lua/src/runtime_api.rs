@@ -555,7 +555,9 @@ mod tests {
         workspaces: Vec<Workspace>,
         outputs: Vec<Output>,
         keyboard_layouts: Option<KeyboardLayouts>,
+        #[allow(dead_code)]
         cursor_position: Option<CursorPosition>,
+        #[allow(dead_code)]
         focus_mode: FocusMode,
     }
 

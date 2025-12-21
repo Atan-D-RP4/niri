@@ -1350,7 +1350,7 @@ mod tests {
         let fs_table: Table = niri.get("fs").unwrap();
         let which_fn: Function = fs_table.get("which").unwrap();
         let res: Option<String> = which_fn.call("test-exec").unwrap();
-        assert_eq!(res.map(|p| PathBuf::from(p)), Some(bin));
+        assert_eq!(res.map(PathBuf::from), Some(bin));
 
         std::env::set_var("PATH", &old_path);
     }
@@ -1396,7 +1396,7 @@ mod tests {
 
         // which with absolute path should return the same path if executable
         let res: Option<String> = which_fn.call(bin.to_str().unwrap()).unwrap();
-        assert_eq!(res.map(|p| PathBuf::from(p)), Some(bin));
+        assert_eq!(res.map(PathBuf::from), Some(bin));
     }
 
     #[test]
@@ -2283,9 +2283,6 @@ mod tests {
         let lua = Lua::new();
         let niri = lua.create_table().unwrap();
         register(&lua, &niri).unwrap();
-        let fs_table: Table = niri.get("fs").unwrap();
-        let mkdir_fn: Function = fs_table.get("mkdir").unwrap();
-
         // Pass table with recursive = true
         let result: (bool, Option<String>) = lua
             .load(format!(
@@ -2704,7 +2701,7 @@ mod tests {
     fn read_expands_tilde() {
         // Create a file in a temp location and test tilde expansion conceptually
         // We test that tilde expansion works by checking it doesn't fail on valid home paths
-        if let Some(home) = dirs::home_dir() {
+        if dirs::home_dir().is_some() {
             // We can't write to home, but we can verify tilde expansion by reading a nonexistent
             // file and checking the error message doesn't contain the literal ~
             let lua = Lua::new();

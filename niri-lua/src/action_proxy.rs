@@ -759,10 +759,7 @@ impl LuaUserData for ActionProxy {
 ///
 /// # Returns
 /// LuaResult indicating success or Lua error
-pub fn register_action_proxy(
-    lua: &Lua,
-    callback: ActionCallback,
-) -> LuaResult<()> {
+pub fn register_action_proxy(lua: &Lua, callback: ActionCallback) -> LuaResult<()> {
     let globals = lua.globals();
 
     // Get or create the niri table
