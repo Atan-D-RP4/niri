@@ -45,10 +45,12 @@ use niri_config::gestures::Gestures;
 use niri_config::input::*;
 use niri_config::layout::*;
 use niri_config::misc::*;
+use niri_config::output::{Mode as OutputMode, Modeline, Output, Position as OutputPosition, Vrr};
 use niri_config::recent_windows::{MruHighlight, MruPreviews, RecentWindows};
 use niri_config::utils::RegexEq;
 use niri_config::window_rule::{Match as WindowMatch, WindowRule};
 use niri_config::{ConfigNotification, FloatOrInt, XwaylandSatellite};
+use niri_ipc::{ConfiguredMode, HSyncPolarity, Transform, VSyncPolarity};
 use regex::Regex;
 
 /// Types that can be constructed from a Lua table.
@@ -241,24 +243,378 @@ impl FromLuaTable for Cursor {
     }
 }
 
+fn default_easing_params() -> EasingParams {
+    EasingParams {
+        duration_ms: 250,
+        curve: Curve::EaseOutCubic,
+    }
+}
+
+fn default_spring_params() -> SpringParams {
+    SpringParams {
+        damping_ratio: 1.0,
+        stiffness: 800,
+        epsilon: 0.0001,
+    }
+}
+
+fn parse_curve_value(value: LuaValue) -> LuaResult<Option<Curve>> {
+    match value {
+        LuaValue::String(s) => {
+            let curve_str = s.to_string_lossy().to_lowercase();
+            let curve = match curve_str.as_str() {
+                "linear" => Some(Curve::Linear),
+                "ease-out-quad" | "ease_out_quad" => Some(Curve::EaseOutQuad),
+                "ease-out-cubic" | "ease_out_cubic" => Some(Curve::EaseOutCubic),
+                "ease-out-expo" | "ease_out_expo" => Some(Curve::EaseOutExpo),
+                _ => None,
+            };
+            Ok(curve)
+        }
+        LuaValue::Table(t) => {
+            // Support cubic-bezier specified as an array of four numbers or named fields.
+            let get_coord = |key: &str| -> LuaResult<Option<f64>> {
+                match t.get::<LuaValue>(key) {
+                    Ok(LuaValue::Number(n)) => Ok(Some(n)),
+                    Ok(LuaValue::Integer(i)) => Ok(Some(i as f64)),
+                    _ => Ok(None),
+                }
+            };
+
+            let coords = if let Some(x1) = get_coord("x1")? {
+                let y1 = get_coord("y1")?.unwrap_or(0.0);
+                let x2 = get_coord("x2")?.unwrap_or(0.0);
+                let y2 = get_coord("y2")?.unwrap_or(0.0);
+                Some((x1, y1, x2, y2))
+            } else if t.len()? >= 4 {
+                Some((
+                    t.get::<f64>(1)?,
+                    t.get::<f64>(2)?,
+                    t.get::<f64>(3)?,
+                    t.get::<f64>(4)?,
+                ))
+            } else {
+                None
+            };
+
+            Ok(coords.map(|(x1, y1, x2, y2)| Curve::CubicBezier(x1, y1, x2, y2)))
+        }
+        _ => Ok(None),
+    }
+}
+
+impl FromLuaTable for SpringParams {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let damping_ratio = extract_float_opt(table, "damping_ratio")?;
+        let stiffness = extract_int_opt(table, "stiffness")?.map(|v| v as u32);
+        let epsilon = extract_float_opt(table, "epsilon")?;
+
+        if damping_ratio.is_none() && stiffness.is_none() && epsilon.is_none() {
+            return Ok(None);
+        }
+
+        let mut params = default_spring_params();
+        if let Some(d) = damping_ratio {
+            params.damping_ratio = d;
+        }
+        if let Some(s) = stiffness {
+            params.stiffness = s;
+        }
+        if let Some(e) = epsilon {
+            params.epsilon = e;
+        }
+
+        if !(0.1..=10.0).contains(&params.damping_ratio) {
+            return Err(LuaError::external("damping_ratio must be between 0.1 and 10.0"));
+        }
+        if params.stiffness < 1 {
+            return Err(LuaError::external("stiffness must be >= 1"));
+        }
+        if !(0.00001..=0.1).contains(&params.epsilon) {
+            return Err(LuaError::external("epsilon must be between 0.00001 and 0.1"));
+        }
+
+        Ok(Some(params))
+    }
+}
+
+impl FromLuaTable for EasingParams {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let duration_ms = extract_int_opt(table, "duration_ms")?.map(|v| v as u32);
+        let curve = match table.get::<LuaValue>("curve") {
+            Ok(v) => parse_curve_value(v)?,
+            Err(_) => None,
+        };
+
+        if duration_ms.is_none() && curve.is_none() {
+            return Ok(None);
+        }
+
+        let mut params = default_easing_params();
+        if let Some(d) = duration_ms {
+            params.duration_ms = d;
+        }
+        if let Some(c) = curve {
+            params.curve = c;
+        }
+
+        Ok(Some(params))
+    }
+}
+
+impl FromLuaTable for Kind {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let spring = if let Some(spring_table) = extract_table_opt(table, "spring")? {
+            SpringParams::from_lua_table(&spring_table)?
+        } else {
+            None
+        };
+        let easing = if let Some(easing_table) = extract_table_opt(table, "easing")? {
+            EasingParams::from_lua_table(&easing_table)?
+        } else {
+            None
+        };
+
+        if spring.is_some() && easing.is_some() {
+            return Err(LuaError::external(
+                "cannot set both spring and easing parameters at once",
+            ));
+        }
+
+        if let Some(s) = spring {
+            return Ok(Some(Kind::Spring(s)));
+        }
+        if let Some(e) = easing {
+            return Ok(Some(Kind::Easing(e)));
+        }
+
+        Ok(None)
+    }
+}
+
+fn apply_animation_overrides(table: &LuaTable, mut base: Animation) -> LuaResult<Option<Animation>> {
+    let off = extract_bool_opt(table, "off")?;
+
+    // Accept either nested `kind` table or inline spring/easing tables.
+    let kind = if let Some(kind_table) = extract_table_opt(table, "kind")? {
+        Kind::from_lua_table(&kind_table)?
+    } else {
+        Kind::from_lua_table(table)?
+    };
+
+    if off.is_none() && kind.is_none() {
+        return Ok(None);
+    }
+
+    if let Some(v) = off {
+        base.off = v;
+    }
+    if let Some(k) = kind {
+        base.kind = k;
+    }
+
+    Ok(Some(base))
+}
+
+impl FromLuaTable for Animation {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Animation {
+            off: false,
+            kind: Kind::Easing(default_easing_params()),
+        })
+    }
+}
+
+impl FromLuaTable for WorkspaceSwitchAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for HorizontalViewMovementAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for WindowMovementAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for ConfigNotificationOpenCloseAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for ExitConfirmationOpenCloseAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for ScreenshotUiOpenAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for OverviewOpenCloseAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for RecentWindowsCloseAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        apply_animation_overrides(table, Self::default().0).map(|opt| opt.map(Self))
+    }
+}
+
+impl FromLuaTable for WindowOpenAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let mut has_any = false;
+        let custom_shader = extract_string_opt(table, "custom_shader")?;
+        if custom_shader.is_some() {
+            has_any = true;
+        }
+
+        if let Some(anim) = apply_animation_overrides(table, Self::default().anim)? {
+            Ok(Some(Self { anim, custom_shader }))
+        } else if has_any {
+            Ok(Some(Self {
+                anim: Self::default().anim,
+                custom_shader,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl FromLuaTable for WindowCloseAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let mut has_any = false;
+        let custom_shader = extract_string_opt(table, "custom_shader")?;
+        if custom_shader.is_some() {
+            has_any = true;
+        }
+
+        if let Some(anim) = apply_animation_overrides(table, Self::default().anim)? {
+            Ok(Some(Self { anim, custom_shader }))
+        } else if has_any {
+            Ok(Some(Self {
+                anim: Self::default().anim,
+                custom_shader,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl FromLuaTable for WindowResizeAnim {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let mut has_any = false;
+        let custom_shader = extract_string_opt(table, "custom_shader")?;
+        if custom_shader.is_some() {
+            has_any = true;
+        }
+
+        if let Some(anim) = apply_animation_overrides(table, Self::default().anim)? {
+            Ok(Some(Self { anim, custom_shader }))
+        } else if has_any {
+            Ok(Some(Self {
+                anim: Self::default().anim,
+                custom_shader,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 /// Extract animations configuration from Lua table.
 pub fn extract_animations(table: &LuaTable) -> LuaResult<Option<Animations>> {
     let off = extract_bool_opt(table, "off")?.unwrap_or(false);
     let on = extract_bool_opt(table, "on")?.unwrap_or(false);
     let slowdown = extract_float_opt(table, "slowdown")?;
 
-    if off || on || slowdown.is_some() {
-        let mut animations = Animations {
-            off: off && !on, // on overrides off
-            ..Default::default()
-        };
-        if let Some(s) = slowdown {
-            animations.slowdown = s;
-        }
-        Ok(Some(animations))
-    } else {
-        Ok(None)
+    let workspace_switch = table.extract_field("workspace_switch")?;
+    let window_open = table.extract_field("window_open")?;
+    let window_close = table.extract_field("window_close")?;
+    let horizontal_view_movement = table.extract_field("horizontal_view_movement")?;
+    let window_movement = table.extract_field("window_movement")?;
+    let window_resize = table.extract_field("window_resize")?;
+    let config_notification_open_close = table.extract_field("config_notification_open_close")?;
+    let exit_confirmation_open_close = table.extract_field("exit_confirmation_open_close")?;
+    let screenshot_ui_open = table.extract_field("screenshot_ui_open")?;
+    let overview_open_close = table.extract_field("overview_open_close")?;
+    let recent_windows_close = table.extract_field("recent_windows_close")?;
+
+    let has_any = off
+        || on
+        || slowdown.is_some()
+        || workspace_switch.is_some()
+        || window_open.is_some()
+        || window_close.is_some()
+        || horizontal_view_movement.is_some()
+        || window_movement.is_some()
+        || window_resize.is_some()
+        || config_notification_open_close.is_some()
+        || exit_confirmation_open_close.is_some()
+        || screenshot_ui_open.is_some()
+        || overview_open_close.is_some()
+        || recent_windows_close.is_some();
+
+    if !has_any {
+        return Ok(None);
     }
+
+    let mut animations = Animations {
+        off: off && !on,
+        ..Animations::default()
+    };
+    if let Some(s) = slowdown {
+        animations.slowdown = s;
+    }
+    if let Some(v) = workspace_switch {
+        animations.workspace_switch = v;
+    }
+    if let Some(v) = window_open {
+        animations.window_open = v;
+    }
+    if let Some(v) = window_close {
+        animations.window_close = v;
+    }
+    if let Some(v) = horizontal_view_movement {
+        animations.horizontal_view_movement = v;
+    }
+    if let Some(v) = window_movement {
+        animations.window_movement = v;
+    }
+    if let Some(v) = window_resize {
+        animations.window_resize = v;
+    }
+    if let Some(v) = config_notification_open_close {
+        animations.config_notification_open_close = v;
+    }
+    if let Some(v) = exit_confirmation_open_close {
+        animations.exit_confirmation_open_close = v;
+    }
+    if let Some(v) = screenshot_ui_open {
+        animations.screenshot_ui_open = v;
+    }
+    if let Some(v) = overview_open_close {
+        animations.overview_open_close = v;
+    }
+    if let Some(v) = recent_windows_close {
+        animations.recent_windows_close = v;
+    }
+
+    Ok(Some(animations))
 }
 
 /// Extract simple boolean flags like prefer_no_csd.
@@ -690,6 +1046,249 @@ fn parse_click_method(s: &str) -> Option<ClickMethod> {
 }
 
 // ============================================================================
+// Output configuration extractors
+// ============================================================================
+
+fn parse_output_transform(s: &str) -> LuaResult<Transform> {
+    match s.to_lowercase().as_str() {
+        "normal" | "0" => Ok(Transform::Normal),
+        "90" => Ok(Transform::_90),
+        "180" => Ok(Transform::_180),
+        "270" => Ok(Transform::_270),
+        "flipped" => Ok(Transform::Flipped),
+        "flipped-90" | "flipped_90" => Ok(Transform::Flipped90),
+        "flipped-180" | "flipped_180" => Ok(Transform::Flipped180),
+        "flipped-270" | "flipped_270" => Ok(Transform::Flipped270),
+        other => Err(LuaError::external(format!("Unknown transform: {}", other))),
+    }
+}
+
+fn parse_variable_refresh_rate(table: &LuaTable) -> LuaResult<Option<Vrr>> {
+    if let Some(vrr_str) = extract_string_opt(table, "variable_refresh_rate")? {
+        match vrr_str.as_str() {
+            "on-demand" | "on_demand" => return Ok(Some(Vrr { on_demand: true })),
+            "always" => return Ok(Some(Vrr { on_demand: false })),
+            _ => return Ok(None),
+        }
+    }
+
+    if let Some(vrr_bool) = extract_bool_opt(table, "variable_refresh_rate")? {
+        if vrr_bool {
+            return Ok(Some(Vrr { on_demand: true }));
+        }
+        return Ok(None);
+    }
+
+    Ok(None)
+}
+
+impl FromLuaTable for OutputMode {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let width = extract_int_opt(table, "width")?.map(|v| v as u16);
+        let height = extract_int_opt(table, "height")?.map(|v| v as u16);
+        let refresh = extract_float_opt(table, "refresh")?;
+        let custom = extract_bool_opt(table, "custom")?.unwrap_or(false);
+
+        if width.is_none() && height.is_none() && refresh.is_none() && !custom {
+            return Ok(None);
+        }
+
+        let width = width.ok_or_else(|| LuaError::external("mode requires 'width' field"))?;
+        let height = height.ok_or_else(|| LuaError::external("mode requires 'height' field"))?;
+
+        if custom && refresh.is_none() {
+            return Err(LuaError::external("custom mode requires 'refresh' field"));
+        }
+
+        Ok(Some(OutputMode {
+            custom,
+            mode: ConfiguredMode {
+                width,
+                height,
+                refresh,
+            },
+        }))
+    }
+}
+
+impl FromLuaTable for Modeline {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let clock = extract_float_opt(table, "clock")?;
+        let hdisplay = extract_int_opt(table, "hdisplay")?.map(|v| v as u16);
+        let hsync_start = extract_int_opt(table, "hsync_start")?.map(|v| v as u16);
+        let hsync_end = extract_int_opt(table, "hsync_end")?.map(|v| v as u16);
+        let htotal = extract_int_opt(table, "htotal")?.map(|v| v as u16);
+        let vdisplay = extract_int_opt(table, "vdisplay")?.map(|v| v as u16);
+        let vsync_start = extract_int_opt(table, "vsync_start")?.map(|v| v as u16);
+        let vsync_end = extract_int_opt(table, "vsync_end")?.map(|v| v as u16);
+        let vtotal = extract_int_opt(table, "vtotal")?.map(|v| v as u16);
+        let hsync_polarity = extract_string_opt(table, "hsync_polarity")?;
+        let vsync_polarity = extract_string_opt(table, "vsync_polarity")?;
+
+        let has_any = clock.is_some()
+            || hdisplay.is_some()
+            || hsync_start.is_some()
+            || hsync_end.is_some()
+            || htotal.is_some()
+            || vdisplay.is_some()
+            || vsync_start.is_some()
+            || vsync_end.is_some()
+            || vtotal.is_some()
+            || hsync_polarity.is_some()
+            || vsync_polarity.is_some();
+
+        if !has_any {
+            return Ok(None);
+        }
+
+        let clock = clock.ok_or_else(|| LuaError::external("modeline requires 'clock' field"))?;
+        let hdisplay = hdisplay.ok_or_else(|| LuaError::external("modeline requires 'hdisplay'"))?;
+        let hsync_start =
+            hsync_start.ok_or_else(|| LuaError::external("modeline requires 'hsync_start'"))?;
+        let hsync_end = hsync_end.ok_or_else(|| LuaError::external("modeline requires 'hsync_end'"))?;
+        let htotal = htotal.ok_or_else(|| LuaError::external("modeline requires 'htotal'"))?;
+        let vdisplay = vdisplay.ok_or_else(|| LuaError::external("modeline requires 'vdisplay'"))?;
+        let vsync_start =
+            vsync_start.ok_or_else(|| LuaError::external("modeline requires 'vsync_start'"))?;
+        let vsync_end = vsync_end.ok_or_else(|| LuaError::external("modeline requires 'vsync_end'"))?;
+        let vtotal = vtotal.ok_or_else(|| LuaError::external("modeline requires 'vtotal'"))?;
+        let hsync_polarity = hsync_polarity
+            .ok_or_else(|| LuaError::external("modeline requires 'hsync_polarity'"))?;
+        let vsync_polarity = vsync_polarity
+            .ok_or_else(|| LuaError::external("modeline requires 'vsync_polarity'"))?;
+
+        let hsync_polarity = HSyncPolarity::from_str(&hsync_polarity)
+            .map_err(|e| LuaError::external(format!("Invalid hsync_polarity: {e}")))?;
+        let vsync_polarity = VSyncPolarity::from_str(&vsync_polarity)
+            .map_err(|e| LuaError::external(format!("Invalid vsync_polarity: {e}")))?;
+
+        if !(hdisplay < hsync_start && hsync_start < hsync_end && hsync_end < htotal) {
+            return Err(LuaError::external(
+                "modeline hdisplay < hsync_start < hsync_end < htotal must hold",
+            ));
+        }
+        if !(vdisplay < vsync_start && vsync_start < vsync_end && vsync_end < vtotal) {
+            return Err(LuaError::external(
+                "modeline vdisplay < vsync_start < vsync_end < vtotal must hold",
+            ));
+        }
+        if htotal == 0 {
+            return Err(LuaError::external("modeline htotal must be > 0"));
+        }
+        if vtotal == 0 {
+            return Err(LuaError::external("modeline vtotal must be > 0"));
+        }
+
+        Ok(Some(Modeline {
+            clock,
+            hdisplay,
+            hsync_start,
+            hsync_end,
+            htotal,
+            vdisplay,
+            vsync_start,
+            vsync_end,
+            vtotal,
+            hsync_polarity,
+            vsync_polarity,
+        }))
+    }
+}
+
+impl FromLuaTable for OutputPosition {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let x = extract_int_opt(table, "x")?.map(|v| v as i32);
+        let y = extract_int_opt(table, "y")?.map(|v| v as i32);
+
+        if x.is_none() && y.is_none() {
+            return Ok(None);
+        }
+
+        Ok(Some(OutputPosition {
+            x: x.unwrap_or(0),
+            y: y.unwrap_or(0),
+        }))
+    }
+}
+
+impl FromLuaTable for Output {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let name = match extract_string_opt(table, "name")? {
+            Some(n) => Some(n),
+            None => extract_string_opt(table, "match")?,
+        };
+        let scale = extract_float_opt(table, "scale")?.map(FloatOrInt);
+
+        let (transform, has_transform) =
+            if let Some(t_str) = extract_string_opt(table, "transform")? {
+                (parse_output_transform(&t_str)?, true)
+            } else {
+                (Transform::Normal, false)
+            };
+
+        let position = table.extract_field("position")?;
+        let mode = table.extract_field("mode")?;
+        let modeline = table.extract_field("modeline")?;
+        let variable_refresh_rate = parse_variable_refresh_rate(table)?;
+        let off = extract_bool_opt(table, "off")?;
+        let focus_at_startup = extract_bool_opt(table, "focus_at_startup")?;
+
+        let has_any = name.is_some()
+            || scale.is_some()
+            || has_transform
+            || position.is_some()
+            || mode.is_some()
+            || modeline.is_some()
+            || variable_refresh_rate.is_some()
+            || off.is_some()
+            || focus_at_startup.is_some();
+
+        if !has_any {
+            return Ok(None);
+        }
+
+        if mode.is_some() && modeline.is_some() {
+            return Err(LuaError::external("cannot set both 'mode' and 'modeline'"));
+        }
+
+        let name =
+            name.ok_or_else(|| LuaError::external("output requires 'name' or 'match' field"))?;
+
+        let mut output = Output {
+            name,
+            ..Output::default()
+        };
+
+        if let Some(s) = scale {
+            output.scale = Some(s);
+        }
+        if has_transform {
+            output.transform = transform;
+        }
+        if let Some(p) = position {
+            output.position = Some(p);
+        }
+        if let Some(m) = mode {
+            output.mode = Some(m);
+        }
+        if let Some(m) = modeline {
+            output.modeline = Some(m);
+        }
+        if let Some(vrr) = variable_refresh_rate {
+            output.variable_refresh_rate = Some(vrr);
+        }
+        if let Some(v) = off {
+            output.off = v;
+        }
+        if let Some(v) = focus_at_startup {
+            output.focus_at_startup = v;
+        }
+
+        Ok(Some(output))
+    }
+}
+
+// ============================================================================
 // Layout configuration extractors
 // ============================================================================
 
@@ -968,11 +1567,12 @@ impl FromLuaTable for WindowRule {
     fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
         let matches = extract_window_matches(table, "matches")?;
         let excludes = extract_window_matches(table, "excludes")?;
-        let default_column_width = if let Some(size_table) = extract_table_opt(table, "default_column_width")? {
-            extract_size_change(&size_table)?.map(|size| DefaultPresetSize(Some(size)))
-        } else {
-            None
-        };
+        let default_column_width =
+            if let Some(size_table) = extract_table_opt(table, "default_column_width")? {
+                extract_size_change(&size_table)?.map(|size| DefaultPresetSize(Some(size)))
+            } else {
+                None
+            };
         let open_on_output = extract_string_opt(table, "open_on_output")?;
         let open_on_workspace = extract_string_opt(table, "open_on_workspace")?;
         let open_maximized = extract_bool_opt(table, "open_maximized")?;
@@ -1459,6 +2059,87 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[test]
+    fn animation_from_lua_table_applies_kind_and_off() {
+        let (lua, table) = create_test_table();
+        let kind_table = lua.create_table().unwrap();
+        let easing_table = lua.create_table().unwrap();
+        easing_table.set("duration_ms", 300).unwrap();
+        easing_table.set("curve", "ease-out-quad").unwrap();
+        kind_table.set("easing", easing_table).unwrap();
+        table.set("kind", kind_table).unwrap();
+        table.set("off", true).unwrap();
+
+        let anim = Animation::from_lua_table(&table).unwrap().unwrap();
+        assert!(anim.off);
+        match anim.kind {
+            Kind::Easing(EasingParams { duration_ms, curve }) => {
+                assert_eq!(duration_ms, 300);
+                assert_eq!(curve, Curve::EaseOutQuad);
+            }
+            _ => panic!("expected easing"),
+        }
+    }
+
+    #[test]
+    fn kind_from_lua_table_errors_on_both_spring_and_easing() {
+        let (lua, table) = create_test_table();
+        let spring = lua.create_table().unwrap();
+        spring.set("damping_ratio", 1.0).unwrap();
+        spring.set("stiffness", 800).unwrap();
+        spring.set("epsilon", 0.0001).unwrap();
+        table.set("spring", spring).unwrap();
+
+        let easing = lua.create_table().unwrap();
+        easing.set("duration_ms", 200).unwrap();
+        table.set("easing", easing).unwrap();
+
+        let result = Kind::from_lua_table(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn window_open_from_lua_table_accepts_custom_shader_only() {
+        let (_lua, table) = create_test_table();
+        table.set("custom_shader", "shader").unwrap();
+
+        let window_open = WindowOpenAnim::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(window_open.custom_shader, Some("shader".to_string()));
+    }
+
+    #[test]
+    fn easing_params_support_cubic_bezier_array() {
+        let (lua, table) = create_test_table();
+        let curve = lua.create_table().unwrap();
+        curve.set(1, 0.1).unwrap();
+        curve.set(2, 0.2).unwrap();
+        curve.set(3, 0.3).unwrap();
+        curve.set(4, 0.4).unwrap();
+        table.set("curve", curve).unwrap();
+
+        let easing = EasingParams::from_lua_table(&table).unwrap().unwrap();
+        match easing.curve {
+            Curve::CubicBezier(x1, y1, x2, y2) => {
+                assert_eq!((x1, y1, x2, y2), (0.1, 0.2, 0.3, 0.4));
+            }
+            _ => panic!("expected cubic bezier"),
+        }
+    }
+
+    #[test]
+    fn extract_animations_merges_nested_fields() {
+        let (lua, table) = create_test_table();
+        table.set("slowdown", 1.5).unwrap();
+        let ws = lua.create_table().unwrap();
+        ws.set("off", true).unwrap();
+        table.set("workspace_switch", ws).unwrap();
+
+        let animations = extract_animations(&table).unwrap().unwrap();
+        assert!(animations.off == false);
+        assert_eq!(animations.slowdown, 1.5);
+        assert!(animations.workspace_switch.0.off);
+    }
+
     // Existing tests
 
     // Re-export for backward compatibility with existing tests
@@ -1909,6 +2590,233 @@ mod tests {
         let (_lua, table) = create_test_table();
         let result = extract_cursor(&table).unwrap();
         assert_eq!(result, None);
+    }
+
+    // ========================================================================
+    // output extractor tests
+    // ========================================================================
+
+    #[test]
+    fn output_mode_requires_width_and_height() {
+        let (_lua, table) = create_test_table();
+        table.set("width", 1920).unwrap();
+        table.set("refresh", 60.0).unwrap();
+
+        let result = OutputMode::from_lua_table(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn output_mode_custom_requires_refresh() {
+        let (_lua, table) = create_test_table();
+        table.set("width", 1920).unwrap();
+        table.set("height", 1080).unwrap();
+        table.set("custom", true).unwrap();
+
+        let result = OutputMode::from_lua_table(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn modeline_requires_all_fields() {
+        let (_lua, table) = create_test_table();
+        table.set("clock", 148.5).unwrap();
+        table.set("hdisplay", 1920).unwrap();
+        table.set("hsync_start", 2008).unwrap();
+        table.set("hsync_end", 2052).unwrap();
+        table.set("htotal", 2200).unwrap();
+        table.set("vdisplay", 1080).unwrap();
+        table.set("vsync_start", 1084).unwrap();
+        table.set("vtotal", 1125).unwrap();
+        table.set("hsync_polarity", "+hsync").unwrap();
+        table.set("vsync_polarity", "+vsync").unwrap();
+
+        let result = Modeline::from_lua_table(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn modeline_extracts_fields() {
+        let (_lua, table) = create_test_table();
+        table.set("clock", 148.5).unwrap();
+        table.set("hdisplay", 1920).unwrap();
+        table.set("hsync_start", 2008).unwrap();
+        table.set("hsync_end", 2052).unwrap();
+        table.set("htotal", 2200).unwrap();
+        table.set("vdisplay", 1080).unwrap();
+        table.set("vsync_start", 1084).unwrap();
+        table.set("vsync_end", 1089).unwrap();
+        table.set("vtotal", 1125).unwrap();
+        table.set("hsync_polarity", "+hsync").unwrap();
+        table.set("vsync_polarity", "+vsync").unwrap();
+
+        let modeline = Modeline::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(modeline.clock, 148.5);
+        assert_eq!(modeline.hdisplay, 1920);
+        assert_eq!(modeline.hsync_start, 2008);
+        assert_eq!(modeline.hsync_end, 2052);
+        assert_eq!(modeline.htotal, 2200);
+        assert_eq!(modeline.vdisplay, 1080);
+        assert_eq!(modeline.vsync_start, 1084);
+        assert_eq!(modeline.vsync_end, 1089);
+        assert_eq!(modeline.vtotal, 1125);
+        assert_eq!(modeline.hsync_polarity, HSyncPolarity::PHSync);
+        assert_eq!(modeline.vsync_polarity, VSyncPolarity::PVSync);
+    }
+
+    #[test]
+    fn output_mode_extracts_fields() {
+        let (_lua, table) = create_test_table();
+        table.set("width", 1920).unwrap();
+        table.set("height", 1080).unwrap();
+        table.set("refresh", 60.0).unwrap();
+
+        let mode = OutputMode::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(mode.mode.width, 1920);
+        assert_eq!(mode.mode.height, 1080);
+        assert_eq!(mode.mode.refresh, Some(60.0));
+        assert!(!mode.custom);
+    }
+
+    #[test]
+    fn output_position_defaults_missing_axes_to_zero() {
+        let (_lua, table) = create_test_table();
+        table.set("x", 100).unwrap();
+
+        let pos = OutputPosition::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(pos.x, 100);
+        assert_eq!(pos.y, 0);
+    }
+
+    #[test]
+    fn output_position_none_when_empty() {
+        let (_lua, table) = create_test_table();
+        let pos = OutputPosition::from_lua_table(&table).unwrap();
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn output_from_lua_table_requires_name_or_match() {
+        let (_lua, table) = create_test_table();
+        table.set("scale", 2.0).unwrap();
+
+        let result = Output::from_lua_table(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn output_from_lua_table_returns_none_when_empty() {
+        let (_lua, table) = create_test_table();
+        let result = Output::from_lua_table(&table).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn output_from_lua_table_parses_fields() {
+        let (lua, table) = create_test_table();
+        table.set("name", "HDMI-A-1").unwrap();
+        table.set("scale", 1.5).unwrap();
+        table.set("transform", "90").unwrap();
+
+        let pos = lua.create_table().unwrap();
+        pos.set("x", 10).unwrap();
+        pos.set("y", 20).unwrap();
+        table.set("position", pos).unwrap();
+
+        let mode_tbl = lua.create_table().unwrap();
+        mode_tbl.set("width", 2560).unwrap();
+        mode_tbl.set("height", 1440).unwrap();
+        mode_tbl.set("refresh", 144.0).unwrap();
+        table.set("mode", mode_tbl).unwrap();
+
+        table.set("variable_refresh_rate", "on-demand").unwrap();
+        table.set("focus_at_startup", true).unwrap();
+
+        let output = Output::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(output.name, "HDMI-A-1");
+        assert_eq!(output.scale.unwrap().0, 1.5);
+        assert_eq!(output.transform, Transform::_90);
+        assert_eq!(output.position.unwrap().x, 10);
+        assert_eq!(output.position.unwrap().y, 20);
+        assert_eq!(output.mode.unwrap().mode.width, 2560);
+        assert_eq!(output.mode.unwrap().mode.height, 1440);
+        assert_eq!(output.mode.unwrap().mode.refresh, Some(144.0));
+        assert_eq!(output.variable_refresh_rate, Some(Vrr { on_demand: true }));
+        assert!(output.focus_at_startup);
+    }
+
+    #[test]
+    fn output_from_lua_table_accepts_modeline() {
+        let (lua, table) = create_test_table();
+        table.set("name", "HDMI-A-1").unwrap();
+
+        let modeline_tbl = lua.create_table().unwrap();
+        modeline_tbl.set("clock", 148.5).unwrap();
+        modeline_tbl.set("hdisplay", 1920).unwrap();
+        modeline_tbl.set("hsync_start", 2008).unwrap();
+        modeline_tbl.set("hsync_end", 2052).unwrap();
+        modeline_tbl.set("htotal", 2200).unwrap();
+        modeline_tbl.set("vdisplay", 1080).unwrap();
+        modeline_tbl.set("vsync_start", 1084).unwrap();
+        modeline_tbl.set("vsync_end", 1089).unwrap();
+        modeline_tbl.set("vtotal", 1125).unwrap();
+        modeline_tbl.set("hsync_polarity", "+hsync").unwrap();
+        modeline_tbl.set("vsync_polarity", "+vsync").unwrap();
+        table.set("modeline", modeline_tbl).unwrap();
+
+        let output = Output::from_lua_table(&table).unwrap().unwrap();
+        assert!(output.mode.is_none());
+        let modeline = output.modeline.unwrap();
+        assert_eq!(modeline.clock, 148.5);
+        assert_eq!(modeline.hdisplay, 1920);
+        assert_eq!(modeline.vdisplay, 1080);
+    }
+
+    #[test]
+    fn output_from_lua_table_rejects_both_mode_and_modeline() {
+        let (lua, table) = create_test_table();
+        table.set("name", "HDMI-A-1").unwrap();
+
+        let mode_tbl = lua.create_table().unwrap();
+        mode_tbl.set("width", 2560).unwrap();
+        mode_tbl.set("height", 1440).unwrap();
+        table.set("mode", mode_tbl).unwrap();
+
+        let modeline_tbl = lua.create_table().unwrap();
+        modeline_tbl.set("clock", 148.5).unwrap();
+        modeline_tbl.set("hdisplay", 1920).unwrap();
+        modeline_tbl.set("hsync_start", 2008).unwrap();
+        modeline_tbl.set("hsync_end", 2052).unwrap();
+        modeline_tbl.set("htotal", 2200).unwrap();
+        modeline_tbl.set("vdisplay", 1080).unwrap();
+        modeline_tbl.set("vsync_start", 1084).unwrap();
+        modeline_tbl.set("vsync_end", 1089).unwrap();
+        modeline_tbl.set("vtotal", 1125).unwrap();
+        modeline_tbl.set("hsync_polarity", "+hsync").unwrap();
+        modeline_tbl.set("vsync_polarity", "+vsync").unwrap();
+        table.set("modeline", modeline_tbl).unwrap();
+
+        let result = Output::from_lua_table(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn output_from_lua_table_accepts_match_field() {
+        let (_lua, table) = create_test_table();
+        table.set("match", "eDP-1").unwrap();
+
+        let output = Output::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(output.name, "eDP-1");
+    }
+
+    #[test]
+    fn output_from_lua_table_accepts_vrr_bool() {
+        let (_lua, table) = create_test_table();
+        table.set("name", "HDMI-A-1").unwrap();
+        table.set("variable_refresh_rate", true).unwrap();
+
+        let output = Output::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(output.variable_refresh_rate, Some(Vrr { on_demand: true }));
     }
 
     // ========================================================================

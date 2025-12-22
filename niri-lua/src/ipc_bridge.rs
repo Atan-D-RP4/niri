@@ -3,8 +3,19 @@
 //! This module provides conversion functions from niri's IPC types (Window, Workspace, Output,
 //! etc.) into Lua tables that can be accessed from Lua scripts.
 
+use mlua::prelude::*;
 use mlua::{Lua, Result, Table, Value};
 use niri_ipc::{Output, Window, Workspace};
+
+/// Convert a Window to a Lua table using mlua prelude types.
+pub fn window_to_lua_table(lua: &Lua, window: &Window) -> LuaResult<LuaTable> {
+    window_to_lua(lua, window)
+}
+
+/// Convert a Workspace to a Lua table using mlua prelude types.
+pub fn workspace_to_lua_table(lua: &Lua, workspace: &Workspace) -> LuaResult<LuaTable> {
+    workspace_to_lua(lua, workspace)
+}
 
 /// Convert a Window to a Lua table.
 ///

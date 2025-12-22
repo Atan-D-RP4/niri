@@ -284,10 +284,7 @@ pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<L
                     Err(e) => {
                         let repeat_ms = {
                             let mgr = manager.borrow();
-                            mgr.timers
-                                .get(&id)
-                                .map(|t| t.repeat_ms)
-                                .unwrap_or(0)
+                            mgr.timers.get(&id).map(|t| t.repeat_ms).unwrap_or(0)
                         };
 
                         let enriched_error = LuaError::external(format!(
@@ -408,7 +405,6 @@ pub fn register_loop_api(lua: &Lua, manager: SharedTimerManager) -> LuaResult<()
     Ok(())
 }
 
-
 /// Timer userdata for Lua.
 struct Timer {
     id: u64,
@@ -475,9 +471,7 @@ impl LuaUserData for Timer {
             };
 
             let now = Instant::now();
-            Ok(next_fire
-                .saturating_duration_since(now)
-                .as_millis() as u64)
+            Ok(next_fire.saturating_duration_since(now).as_millis() as u64)
         });
 
         // timer:set_repeat(repeat_ms)
@@ -531,10 +525,7 @@ mod tests {
         register_loop_api(&lua, manager).unwrap();
 
         let start = Instant::now();
-        let (ok, value): (bool, LuaValue) = lua
-            .load("return niri.loop.wait(50)")
-            .eval()
-            .unwrap();
+        let (ok, value): (bool, LuaValue) = lua.load("return niri.loop.wait(50)").eval().unwrap();
         let elapsed = start.elapsed();
 
         assert!(ok);
@@ -545,7 +536,9 @@ mod tests {
     #[test]
     fn wait_returns_early_when_condition_met() {
         let lua = Lua::new();
-        lua.load("niri = {}; __flag = false".to_string()).exec().unwrap();
+        lua.load("niri = {}; __flag = false".to_string())
+            .exec()
+            .unwrap();
 
         let manager = create_timer_manager();
         register_loop_api(&lua, manager).unwrap();
@@ -604,7 +597,9 @@ mod tests {
     #[test]
     fn wait_with_zero_interval_uses_minimum() {
         let lua = Lua::new();
-        lua.load("niri = {}; __calls = 0".to_string()).exec().unwrap();
+        lua.load("niri = {}; __calls = 0".to_string())
+            .exec()
+            .unwrap();
 
         let manager = create_timer_manager();
         register_loop_api(&lua, manager).unwrap();
@@ -624,13 +619,19 @@ mod tests {
 
         assert!(!ok);
         assert!(matches!(value, LuaValue::Nil));
-        assert!(calls < 100, "expected clamped interval to avoid busy spin, got {}", calls);
+        assert!(
+            calls < 100,
+            "expected clamped interval to avoid busy spin, got {}",
+            calls
+        );
     }
 
     #[test]
     fn wait_with_negative_interval_clamps_to_minimum() {
         let lua = Lua::new();
-        lua.load("niri = {}; __calls = 0".to_string()).exec().unwrap();
+        lua.load("niri = {}; __calls = 0".to_string())
+            .exec()
+            .unwrap();
 
         let manager = create_timer_manager();
         register_loop_api(&lua, manager).unwrap();
@@ -650,7 +651,11 @@ mod tests {
 
         assert!(!ok);
         assert!(matches!(value, LuaValue::Nil));
-        assert!(calls < 100, "expected clamped interval to avoid busy spin, got {}", calls);
+        assert!(
+            calls < 100,
+            "expected clamped interval to avoid busy spin, got {}",
+            calls
+        );
     }
 
     #[test]

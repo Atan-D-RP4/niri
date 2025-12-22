@@ -91,13 +91,8 @@ impl LuaUserData for EventsProxy {
                 if event_types.len() == 1 {
                     // Single event: return just the handler ID (backwards compatible)
                     let event_type = &event_types[0];
-                    let handler_id = register_single_handler(
-                        &mut h,
-                        "on",
-                        event_type,
-                        callback,
-                        false,
-                    )?;
+                    let handler_id =
+                        register_single_handler(&mut h, "on", event_type, callback, false)?;
                     Ok(LuaValue::Integer(handler_id as i64))
                 } else {
                     // Multiple events: return a table mapping event names to handler IDs
@@ -129,13 +124,8 @@ impl LuaUserData for EventsProxy {
                 if event_types.len() == 1 {
                     // Single event: return just the handler ID (backwards compatible)
                     let event_type = &event_types[0];
-                    let handler_id = register_single_handler(
-                        &mut h,
-                        "once",
-                        event_type,
-                        callback,
-                        true,
-                    )?;
+                    let handler_id =
+                        register_single_handler(&mut h, "once", event_type, callback, true)?;
                     Ok(LuaValue::Integer(handler_id as i64))
                 } else {
                     // Multiple events: return a table mapping event names to handler IDs
@@ -189,7 +179,10 @@ impl LuaUserData for EventsProxy {
                     } else {
                         let had_handlers = h.handler_count(&event_str) > 0;
                         h.clear_event(&event_str);
-                        debug!("events:off('{}') -> removed_all={}", event_str, had_handlers);
+                        debug!(
+                            "events:off('{}') -> removed_all={}",
+                            event_str, had_handlers
+                        );
                         had_handlers
                     };
 

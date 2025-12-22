@@ -9,16 +9,23 @@ use niri_lua::LuaRuntime;
 mod common;
 use common::create_runtime;
 
+fn create_watch_runtime() -> LuaRuntime {
+    let mut runtime = create_runtime();
+    runtime.init_event_system().unwrap();
+    runtime.init_loop_api().unwrap();
+    runtime.init_scheduler().unwrap();
+
+    runtime
+}
+
 // ========================================================================
 // SCHEDULER WRAP TESTS
 // ========================================================================
 
 #[test]
 fn schedule_wrap_defers_execution() {
-    let mut runtime = create_runtime();
-    runtime.load_string("niri = {}").unwrap();
+    let mut runtime = create_watch_runtime();
     runtime.init_scheduler().unwrap();
-    runtime.init_loop_api().unwrap();
 
     let code = r#"
         value = nil
@@ -46,10 +53,8 @@ fn schedule_wrap_defers_execution() {
 
 #[test]
 fn schedule_wrap_preserves_arguments() {
-    let mut runtime = create_runtime();
-    runtime.load_string("niri = {}").unwrap();
+    let mut runtime = create_watch_runtime();
     runtime.init_scheduler().unwrap();
-    runtime.init_loop_api().unwrap();
 
     let code = r#"
         args = nil
@@ -78,9 +83,7 @@ fn schedule_wrap_preserves_arguments() {
 
 #[test]
 fn test_loop_defer_integration() {
-    let mut rt = LuaRuntime::new().unwrap();
-    rt.load_string("niri = {}").unwrap();
-    rt.init_loop_api().unwrap();
+    let mut rt = create_watch_runtime();
 
     rt.load_string(
         r#"
@@ -97,6 +100,144 @@ fn test_loop_defer_integration() {
 
     let ran: bool = rt.inner().globals().get("__deferred_ran").unwrap();
     assert!(ran);
+}
+
+// ========================================================================
+// STATE.WATCH TESTS
+// ========================================================================
+
+#[test]
+fn state_watch_immediate_invokes_once() {
+    let mut rt = create_watch_runtime();
+
+    let code = r#"
+        __watch_calls = {}
+        niri.state.watch({
+            events = {"test:event"},
+            immediate = true,
+        }, function(payload)
+            table.insert(__watch_calls, payload.immediate or false)
+        end)
+    "#;
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+
+    rt.process_async();
+
+    let calls: mlua::Table = rt.inner().globals().get("__watch_calls").unwrap();
+    let len = calls.len().unwrap();
+    assert_eq!(len, 1, "Immediate callback should fire once");
+    let first: bool = calls.get(1).unwrap();
+    assert!(first, "Immediate callback should mark payload.immediate");
+}
+
+#[test]
+fn state_watch_debounce_coalesces_events() {
+    let mut rt = create_watch_runtime();
+
+    let code = r#"
+        __call_count = 0
+        __payload = nil
+        niri.state.watch({
+            events = {"debounce:event"},
+            debounce_ms = 20,
+        }, function(payload)
+            __call_count = __call_count + 1
+            __payload = payload
+        end)
+
+        for i = 1, 3 do
+            niri.events:emit("debounce:event", { value = i })
+        end
+    "#;
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    rt.process_async();
+
+    let count: i64 = rt.inner().globals().get("__call_count").unwrap();
+    assert_eq!(count, 1, "Debounce should coalesce rapid events");
+    let payload: mlua::Table = rt.inner().globals().get("__payload").unwrap();
+    let value: i64 = payload.get("value").unwrap();
+    assert_eq!(value, 3, "Debounce should deliver last payload");
+}
+
+#[test]
+fn state_watch_filter_blocks_payloads() {
+    let mut rt = create_watch_runtime();
+
+    let code = r#"
+        local count = 0
+        niri.state.watch({
+            events = {"filter:event"},
+            filter = function(p) return p.allow == true end,
+        }, function()
+            count = count + 1
+        end)
+
+        niri.events:emit("filter:event", { allow = false })
+        niri.events:emit("filter:event", { allow = true })
+        return count
+    "#;
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+    assert_eq!(output, "1", "Filter should allow only matching payloads");
+}
+
+#[test]
+fn state_watch_cancel_stops_callbacks() {
+    let mut rt = create_watch_runtime();
+
+    let code = r#"
+        local count = 0
+        local sub = niri.state.watch({
+            events = {"cancel:event"},
+        }, function()
+            count = count + 1
+        end)
+
+        niri.events:emit("cancel:event", {})
+        sub:cancel()
+        niri.events:emit("cancel:event", {})
+        return count
+    "#;
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+    assert_eq!(output, "1", "Callbacks should stop after cancel");
+}
+
+#[test]
+fn state_watch_multiple_subscriptions_independent() {
+    let mut rt = create_watch_runtime();
+
+    let code = r#"
+        __count_a = 0
+        __count_b = 0
+        niri.state.watch({
+            events = {"multi:event"},
+            filter = function(p) return p.tag == "a" end,
+        }, function()
+            __count_a = __count_a + 1
+        end)
+        niri.state.watch({
+            events = {"multi:event"},
+            filter = function(p) return p.tag == "b" end,
+        }, function()
+            __count_b = __count_b + 1
+        end)
+
+        niri.events:emit("multi:event", { tag = "a" })
+        niri.events:emit("multi:event", { tag = "b" })
+        niri.events:emit("multi:event", { tag = "a" })
+    "#;
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+
+    let a: i64 = rt.inner().globals().get("__count_a").unwrap();
+    let b: i64 = rt.inner().globals().get("__count_b").unwrap();
+    assert_eq!(a, 2, "Subscription A should see two matching events");
+    assert_eq!(b, 1, "Subscription B should see one matching event");
 }
 
 // ========================================================================

@@ -428,6 +428,9 @@ impl LuaRuntime {
         // Load Lua loop helpers (e.g., niri.loop.defer, niri.schedule_wrap)
         self.lua.load(include_str!("loop_helpers.lua")).exec()?;
 
+        // Load state watch helper (niri.state.watch)
+        self.lua.load(include_str!("state_watch.lua")).exec()?;
+
         self.timer_manager = Some(manager);
         Ok(())
     }
