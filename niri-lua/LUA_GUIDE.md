@@ -648,25 +648,141 @@ end)
 niri.events:off(ids)  -- Removes all handlers
 ```
 
+### Unsubscribe Variants
+
+The `off()` method supports multiple calling conventions:
+
+```lua
+-- Remove a specific handler by ID
+local id = niri.events:on("window:open", handler)
+niri.events:off("window:open", id)  -- Returns true if removed
+
+-- Remove ALL handlers for an event
+niri.events:off("window:open")  -- Returns true if any were removed
+
+-- Remove multiple handlers using the table from on()
+local ids = niri.events:on({"window:open", "window:close"}, handler)
+niri.events:off(ids)  -- Returns { ["window:open"] = true, ["window:close"] = true }
+```
+
+### Custom Event Emission
+
+You can emit custom events for testing or inter-module communication:
+
+```lua
+-- emit(event, data) - data handling:
+-- - If data is a table: passed through unchanged
+-- - If data is a primitive (number/string/boolean): wrapped as { value = ... }
+-- - If data is nil: replaced with empty table {}
+
+niri.events:emit("custom:event", { foo = "bar" })  -- Handlers see { foo = "bar" }
+niri.events:emit("custom:event", 42)               -- Handlers see { value = 42 }
+niri.events:emit("custom:event", "hello")          -- Handlers see { value = "hello" }
+niri.events:emit("custom:event", nil)              -- Handlers see {}
+```
+
+### Event Handler Context
+
+**Important:** Event handlers receive a **snapshot** of compositor state at the time the event was emitted. This means:
+
+```lua
+niri.events:on("window:open", function(event)
+    -- niri.state.windows() returns a snapshot, not live data
+    -- The window that triggered this event IS included in the snapshot
+    local windows = niri.state.windows()
+end)
+```
+
+This design prevents deadlocks and race conditions but means you shouldn't cache state across handler invocations.
+
+### Event Payloads
+
+Events provide **minimal, consistent payloads** containing just enough information to identify the subject (window ID, workspace name/index, etc.). This is by design:
+
+1. **Maintenance burden**: This is a fork that must regularly merge upstream niri changes. Richer payloads would require constructing full `IpcWindow`/`IpcWorkspace` objects at every emit site, touching many files across the codebase and increasing merge conflict risk.
+
+2. **Performance**: Gathering all window/workspace fields at every event emission would add overhead even when handlers don't need that data.
+
+3. **Consistency**: Simple payloads are uniform across all events of the same type, avoiding subtle differences that could confuse users.
+
+**You can always query full details from the state snapshot** - see "Querying Full State from Events" below.
+
 ### Available Events
 
-| Event | Payload |
-|-------|---------|
-| `window:open` | `{id, app_id, title, workspace_id}` |
-| `window:close` | `{id, app_id, title}` |
-| `window:focus` | `{id, app_id, title}` |
-| `window:blur` | `{id, title}` |
-| `window:title_changed` | `{id, title}` |
-| `workspace:create` | `{id, idx, name, output}` |
-| `workspace:destroy` | `{id, name, output}` |
-| `workspace:activate` | `{id, idx, name, output}` |
-| `workspace:deactivate` | `{id, idx, name, output}` |
-| `monitor:connect` | `{name, make, model}` |
-| `monitor:disconnect` | `{name}` |
-| `config:reload` | `{}` |
-| `overview:open` | `{}` |
-| `overview:close` | `{}` |
-| `layout:mode_changed` | `{is_floating}` |
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `window:open` | `{id, title}` | Window created and mapped |
+| `window:close` | `{id, title}` | Window destroyed |
+| `window:focus` | `{id, title}` | Window received focus |
+| `window:blur` | `{id, title}` | Window lost focus |
+| `window:title_changed` | `{id, title}` | Window title updated |
+| `window:fullscreen` | `{id, title, is_fullscreen}` | Fullscreen state changed |
+| `window:maximize` | `{id, title, is_maximized}` | Maximize state changed |
+| `window:resize` | `{id, title, width, height}` | Window resized |
+| `workspace:activate` | `{name, idx}` | Workspace became active |
+| `workspace:deactivate` | `{name, idx}` | Workspace became inactive |
+| `workspace:create` | `{name, idx, output}` | Workspace created |
+| `workspace:destroy` | `{name, idx, output}` | Workspace destroyed |
+| `config:reload` | `{success}` | Config file reloaded |
+| `overview:open` | `{}` | Overview mode opened |
+| `overview:close` | `{}` | Overview mode closed |
+| `layout:mode_changed` | `{mode}` | Layout mode changed (mode: "floating"\|"tiling") |
+
+### Querying Full State from Events
+
+Event payloads are intentionally minimal. Use the state snapshot to get full details:
+
+```lua
+-- Get full window details from a window event
+niri.events:on("window:open", function(event)
+    -- Find the full window object by ID
+    for _, window in ipairs(niri.state.windows()) do
+        if window.id == event.id then
+            -- Now you have everything: app_id, workspace_id, output, size, etc.
+            niri.utils.log(string.format(
+                "Window opened: %s (%s) on workspace %s",
+                window.title,
+                window.app_id or "unknown",
+                window.workspace_id or "?"
+            ))
+            break
+        end
+    end
+end)
+
+-- Get full workspace details from a workspace event
+niri.events:on("workspace:activate", function(event)
+    for _, ws in ipairs(niri.state.workspaces()) do
+        if ws.idx == event.idx then
+            -- Full workspace info: id, name, output, is_active, etc.
+            niri.utils.log(string.format(
+                "Activated workspace %s (id=%d) on output %s",
+                ws.name or tostring(ws.idx),
+                ws.id,
+                ws.output
+            ))
+            break
+        end
+    end
+end)
+
+-- Helper function for convenience
+local function find_window(id)
+    for _, w in ipairs(niri.state.windows()) do
+        if w.id == id then return w end
+    end
+    return nil
+end
+
+local function find_workspace_by_idx(idx)
+    for _, ws in ipairs(niri.state.workspaces()) do
+        if ws.idx == idx then return ws end
+    end
+    return nil
+end
+```
+
+**Note:** For `window:close` events, the window may no longer be in `niri.state.windows()` since it's being destroyed. Use the payload fields directly in that case.
 
 ### Event Handler Examples
 
@@ -711,13 +827,60 @@ end)
 
 ### Timer Methods
 
+| Method | Description |
+|--------|-------------|
+| `timer:start(delay_ms, repeat_ms, callback)` | Start timer with initial delay and repeat interval |
+| `timer:stop()` | Stop timer (can be restarted with `again()`) |
+| `timer:again()` | Restart with same settings |
+| `timer:close()` | Permanently clean up resources |
+| `timer:is_active()` | Check if timer is running |
+| `timer:get_due_in()` | Returns ms until next fire (0 when inactive) |
+| `timer:set_repeat(ms)` | Change repeat interval at runtime |
+| `timer:get_repeat()` | Returns current repeat interval (ms) |
+| `timer.id` | Read-only numeric timer ID |
+
+**Important:** Timers persist until `timer:close()` is called. Garbage collection of the Lua handle does **not** stop the timer. Always call `close()` when done.
+
+### Current Time
+
 ```lua
-timer:start(delay_ms, repeat_ms, callback)  -- Start timer
-timer:stop()                                 -- Stop timer
-timer:again()                                -- Restart with same settings
-timer:close()                                -- Clean up resources
-timer:is_active()                            -- Check if active
+local now = niri.loop.now()  -- Monotonic time in milliseconds
 ```
+
+### Waiting with a Condition
+
+The `wait()` function provides a convenient way to sleep or poll for a condition:
+
+```lua
+-- Signature: niri.loop.wait(timeout_ms, condition_fn?, interval_ms?) -> (ok, value)
+
+-- Simple sleep (no condition)
+local ok, _ = niri.loop.wait(1000)  -- Sleep for 1 second, returns (true, nil)
+
+-- Wait for a condition with polling
+local ok, val = niri.loop.wait(5000, function()
+    local focused = niri.state.focused_window()
+    if focused and focused.app_id == "firefox" then
+        return focused  -- Return truthy value to end wait early
+    end
+    return false
+end, 50)  -- Poll every 50ms
+
+if ok then
+    niri.utils.log("Firefox focused: " .. val.title)
+else
+    niri.utils.log("Timed out waiting for Firefox")
+end
+```
+
+**Behavior:**
+- Without `condition_fn`: Sleeps for `timeout_ms` and returns `(true, nil)`
+- With `condition_fn`: Polls every `interval_ms` (default 10ms, minimum 1ms)
+  - Returns `(true, value)` when condition returns a truthy value (anything except `nil` or `false`)
+  - Returns `(false, nil)` if timeout elapses
+  - Errors in the condition function propagate to the caller
+
+**Truthiness:** In Lua, only `nil` and `false` are falsy. Values like `0`, `""`, and `{}` are truthy and will satisfy the condition.
 
 ### Deferred Execution
 

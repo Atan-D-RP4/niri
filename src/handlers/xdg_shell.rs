@@ -43,7 +43,7 @@ use crate::input::resize_grab::ResizeGrab;
 use crate::input::touch_resize_grab::TouchResizeGrab;
 use crate::input::{PointerOrTouchStartData, DOUBLE_CLICK_TIME};
 use crate::layout::ActivateWindow;
-use crate::lua_event_hooks;
+use crate::lua_event_hooks::StateLuaEvents;
 use crate::niri::{CastTarget, PopupGrabState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -433,7 +433,7 @@ impl XdgShellHandler for State {
             self.niri.layout.set_maximized(&window, true);
 
             // Emit Lua event for maximize
-            lua_event_hooks::emit_window_maximize(self, window_id, &window_title, true);
+            self.emit_window_maximize(window_id, &window_title, true);
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -523,7 +523,7 @@ impl XdgShellHandler for State {
             self.niri.layout.set_maximized(&window, false);
 
             // Emit Lua event for unmaximize
-            lua_event_hooks::emit_window_maximize(self, window_id, &window_title, false);
+            self.emit_window_maximize(window_id, &window_title, false);
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -672,7 +672,7 @@ impl XdgShellHandler for State {
                 let title = crate::utils::with_toplevel_role(&toplevel, |role| {
                     role.title.clone().unwrap_or_default()
                 });
-                lua_event_hooks::emit_window_fullscreen(self, window_id, &title, true);
+                self.emit_window_fullscreen(window_id, &title, true);
             }
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
@@ -754,7 +754,7 @@ impl XdgShellHandler for State {
             let title = crate::utils::with_toplevel_role(&toplevel, |role| {
                 role.title.clone().unwrap_or_default()
             });
-            lua_event_hooks::emit_window_fullscreen(self, window_id, &title, false);
+            self.emit_window_fullscreen(window_id, &title, false);
         } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) {
             match &mut unmapped.state {
                 InitialConfigureState::NotConfigured {
@@ -888,10 +888,8 @@ impl XdgShellHandler for State {
 
         let id = mapped.id();
 
-        // Get window title/app_id BEFORE any mutable borrows (to avoid borrow conflicts)
-        let (title, app_id) = crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
-            (role.title.clone(), role.app_id.clone())
-        });
+        // Get window title BEFORE any mutable borrows (to avoid borrow conflicts)
+        let title = crate::utils::with_toplevel_role(mapped.toplevel(), |role| role.title.clone());
 
         self.niri
             .stop_casts_for_target(CastTarget::Window { id: id.get() });
@@ -916,15 +914,10 @@ impl XdgShellHandler for State {
         self.add_default_dmabuf_pre_commit_hook(surface.wl_surface());
 
         // Emit layout:window_removed event for Lua handlers
-        lua_event_hooks::emit_layout_window_removed(self, id.get() as u32);
+        self.emit_layout_window_removed(id.get() as u32);
 
-        // Emit window:close event with real window data
-        lua_event_hooks::emit_window_close_full(
-            self,
-            id.get() as u32,
-            title.as_deref().unwrap_or(""),
-            app_id.as_deref().unwrap_or(""),
-        );
+        // Emit window:close event
+        self.emit_window_close(id.get() as u32, title.as_deref().unwrap_or(""));
 
         // If this is the only instance, then this transaction will complete immediately, so no
         // need to set the timer.
@@ -959,7 +952,7 @@ impl XdgShellHandler for State {
             let new_app_id = crate::utils::with_toplevel_role(&toplevel, |role| {
                 role.app_id.clone().unwrap_or_default()
             });
-            lua_event_hooks::emit_window_app_id_changed(self, window_id, &new_app_id);
+            self.emit_window_app_id_changed(window_id, &new_app_id);
         }
         self.update_window_rules(&toplevel);
     }
@@ -975,7 +968,7 @@ impl XdgShellHandler for State {
             let new_title = crate::utils::with_toplevel_role(&toplevel, |role| {
                 role.title.clone().unwrap_or_default()
             });
-            lua_event_hooks::emit_window_title_changed(self, window_id, &new_title);
+            self.emit_window_title_changed(window_id, &new_title);
         }
         self.update_window_rules(&toplevel);
     }

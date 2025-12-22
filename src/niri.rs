@@ -143,6 +143,8 @@ use crate::layer::MappedLayer;
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{HitType, Layout, LayoutElement as _, MonitorRenderElement};
+use crate::lua_event_hooks::{NiriLuaEvents, StateLuaEvents};
+use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
 use crate::protocols::gamma_control::GammaControlManagerState;
@@ -180,7 +182,6 @@ use crate::utils::{
 };
 use crate::window::mapped::MappedId;
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
-use crate::{lua_event_hooks, niri_render_elements};
 
 const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 
@@ -762,15 +763,18 @@ impl State {
         self.niri.advance_animations();
 
         // Process Lua async work: fire due timers and flush scheduled callbacks
-        // Clone the wrapper reference outside the runtime borrow to avoid borrow conflicts
+        // We temporarily take the runtime out to avoid borrow conflicts when passing
+        // `self` (which implements CompositorState) to process_async_with_state.
+        // This ensures each callback gets a fresh snapshot of compositor state.
         let config_wrapper = self
             .niri
             .lua_runtime
             .as_ref()
             .and_then(|r| r.config_wrapper.clone());
 
-        if let Some(ref runtime) = self.niri.lua_runtime {
-            let (timers, scheduled, process_callbacks, errors) = runtime.process_async();
+        if let Some(runtime) = self.niri.lua_runtime.take() {
+            let (timers, scheduled, process_callbacks, errors) =
+                runtime.process_async_with_state(self);
             for error in errors {
                 warn!("Lua async error: {}", error);
             }
@@ -782,6 +786,8 @@ impl State {
                     process_callbacks
                 );
             }
+            // Put the runtime back
+            self.niri.lua_runtime = Some(runtime);
         }
 
         // Check if Lua code called config:apply() during async processing
@@ -848,16 +854,16 @@ impl State {
         // Refresh workspace protocol and dispatch Lua events for lifecycle changes.
         let ws_events = ext_workspace::refresh(self);
         for ws in &ws_events.destroyed {
-            lua_event_hooks::emit_workspace_destroy(self, &ws.name, ws.idx, &ws.output);
+            self.emit_workspace_destroy(&ws.name, ws.idx, &ws.output);
         }
         for ws in &ws_events.created {
-            lua_event_hooks::emit_workspace_create(self, &ws.name, ws.idx, &ws.output);
+            self.emit_workspace_create(&ws.name, ws.idx, &ws.output);
         }
         for ws in &ws_events.deactivated {
-            lua_event_hooks::emit_workspace_deactivate(self, &ws.name, ws.idx);
+            self.emit_workspace_deactivate(&ws.name, ws.idx);
         }
         for ws in &ws_events.activated {
-            lua_event_hooks::emit_workspace_activate(self, &ws.name, ws.idx);
+            self.emit_workspace_activate(&ws.name, ws.idx);
         }
 
         // Detect overview state changes and emit Lua events.
@@ -865,9 +871,9 @@ impl State {
         if overview_open != self.niri.lua_event_state.prev_overview_open {
             self.niri.lua_event_state.prev_overview_open = overview_open;
             if overview_open {
-                lua_event_hooks::emit_overview_open(self);
+                self.emit_overview_open();
             } else {
-                lua_event_hooks::emit_overview_close(self);
+                self.emit_overview_close();
             }
         }
 
@@ -880,7 +886,7 @@ impl State {
             .unwrap_or(false);
         if floating_active != self.niri.lua_event_state.prev_floating_active {
             self.niri.lua_event_state.prev_floating_active = floating_active;
-            lua_event_hooks::emit_layout_mode_changed(self, floating_active);
+            self.emit_layout_mode_changed(floating_active);
         }
 
         #[cfg(feature = "xdp-gnome-screencast")]
@@ -1068,13 +1074,13 @@ impl State {
         // Emit blur event for previously focused window (if different from new focus)
         if let Some((prev_id, ref prev_title, ref _prev_app_id)) = prev_focused_info {
             if new_focused_info.as_ref().map(|(id, _, _)| *id) != Some(prev_id) {
-                lua_event_hooks::emit_window_blur(self, prev_id, prev_title);
+                self.emit_window_blur(prev_id, prev_title);
             }
         }
 
         // Emit focus event for newly focused window
         if let Some((new_id, ref new_title, ref _new_app_id)) = new_focused_info {
-            lua_event_hooks::emit_window_focus(self, new_id, new_title);
+            self.emit_window_focus(new_id, new_title);
         }
 
         let new_active = self.niri.layout.active_output().cloned();
@@ -1536,7 +1542,7 @@ impl State {
                 self.niri.a11y_announce_config_error();
 
                 // Emit config:reload event with failure
-                lua_event_hooks::emit_config_reload(self, false);
+                self.emit_config_reload(false);
 
                 return;
             }
@@ -1821,7 +1827,7 @@ impl State {
         // clients will use the new xdg-decoration setting.
 
         // Emit config:reload event with success
-        lua_event_hooks::emit_config_reload(self, true);
+        self.emit_config_reload(true);
 
         self.niri.queue_redraw_all();
     }
@@ -3470,13 +3476,7 @@ impl Niri {
         // Emit Lua event for output mode change
         if let Some(mode) = output.current_mode() {
             let refresh_rate = Some(mode.refresh as f64 / 1000.0);
-            lua_event_hooks::emit_output_mode_change(
-                self,
-                &output.name(),
-                mode.size.w,
-                mode.size.h,
-                refresh_rate,
-            );
+            self.emit_output_mode_change(&output.name(), mode.size.w, mode.size.h, refresh_rate);
         }
     }
 
@@ -6172,7 +6172,7 @@ impl Niri {
         let lock = confirmation.ext_session_lock().clone();
         confirmation.lock();
         self.lock_state = LockState::Locked(lock);
-        crate::lua_event_hooks::emit_lock_activate_niri(self);
+        self.emit_lock_activate();
     }
 
     pub fn lock(&mut self, confirmation: SessionLocker) {
@@ -6299,7 +6299,7 @@ impl Niri {
         self.queue_redraw_all();
 
         // Emit lock:deactivate event
-        crate::lua_event_hooks::emit_lock_deactivate_niri(self);
+        self.emit_lock_deactivate();
     }
 
     #[cfg(feature = "dbus")]

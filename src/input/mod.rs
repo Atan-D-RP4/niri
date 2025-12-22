@@ -45,7 +45,7 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::dbus::freedesktop_a11y::KbMonBlock;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
-use crate::lua_event_hooks;
+use crate::lua_event_hooks::StateLuaEvents;
 use crate::niri::{CastTarget, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
@@ -1297,8 +1297,7 @@ impl State {
                         .active_output()
                         .map(|o| o.name())
                         .unwrap_or_default();
-                    lua_event_hooks::emit_window_move(
-                        self,
+                    self.emit_window_move(
                         window_id,
                         &window_title,
                         from_ws.as_deref(),
@@ -1345,8 +1344,7 @@ impl State {
                         .active_output()
                         .map(|o| o.name())
                         .unwrap_or_default();
-                    lua_event_hooks::emit_window_move(
-                        self,
+                    self.emit_window_move(
                         window_id,
                         &window_title,
                         from_ws.as_deref(),
@@ -1614,8 +1612,7 @@ impl State {
                 self.niri.layout.set_workspace_name(name, None);
                 // Emit rename event if name changed
                 if old_name.as_deref() != Some(new_name.as_str()) {
-                    lua_event_hooks::emit_workspace_rename(
-                        self,
+                    self.emit_workspace_rename(
                         0,
                         old_name.as_deref(),
                         Some(new_name.as_str()),

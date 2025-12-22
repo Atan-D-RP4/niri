@@ -139,3 +139,77 @@ summary_timer:start(60000, 60000, function()  -- Every 60 seconds
 end)
 
 niri.utils.log("Event summary will print every 60 seconds.")
+
+-- =============================================================================
+-- emit() Data Wrapping Demo
+-- =============================================================================
+-- The emit() method normalizes data before passing to handlers:
+-- - Table: passed through unchanged
+-- - Primitive (number/string/boolean): wrapped as { value = ... }
+-- - nil: replaced with empty table {}
+
+niri.utils.log("=== emit() Data Wrapping Demo ===")
+
+-- Register a handler for custom events to demonstrate wrapping
+niri.events:on("custom:demo", function(data)
+    niri.utils.log("custom:demo received:")
+    if data.value ~= nil then
+        niri.utils.log("  Wrapped primitive: value = " .. tostring(data.value))
+    else
+        for key, val in pairs(data) do
+            niri.utils.log("  " .. key .. " = " .. tostring(val))
+        end
+        if next(data) == nil then
+            niri.utils.log("  (empty table)")
+        end
+    end
+end)
+
+-- Emit with a table (passed through unchanged)
+niri.utils.log("Emitting table data...")
+niri.events:emit("custom:demo", { foo = "bar", count = 42 })
+
+-- Emit with a number (wrapped as { value = 42 })
+niri.utils.log("Emitting number...")
+niri.events:emit("custom:demo", 42)
+
+-- Emit with a string (wrapped as { value = "hello" })
+niri.utils.log("Emitting string...")
+niri.events:emit("custom:demo", "hello world")
+
+-- Emit with a boolean (wrapped as { value = true })
+niri.utils.log("Emitting boolean...")
+niri.events:emit("custom:demo", true)
+
+-- Emit with nil (replaced with empty table {})
+niri.utils.log("Emitting nil...")
+niri.events:emit("custom:demo", nil)
+
+-- =============================================================================
+-- off() Variants Demo
+-- =============================================================================
+niri.utils.log("=== off() Variants Demo ===")
+
+-- Variant 1: Remove specific handler by ID
+local specific_id = niri.events:on("custom:removal_test", function()
+    niri.utils.log("This handler will be removed")
+end)
+local removed = niri.events:off("custom:removal_test", specific_id)
+niri.utils.log("Removed specific handler: " .. tostring(removed))
+
+-- Variant 2: Remove ALL handlers for an event
+niri.events:on("custom:clear_all", function() end)
+niri.events:on("custom:clear_all", function() end)
+local cleared = niri.events:off("custom:clear_all")
+niri.utils.log("Cleared all handlers for event: " .. tostring(cleared))
+
+-- Variant 3: Remove multiple handlers using table from on()
+local multi_ids = niri.events:on({"custom:multi1", "custom:multi2"}, function() end)
+local multi_removed = niri.events:off(multi_ids)
+niri.utils.log("Removed multi-event handlers:")
+for event, success in pairs(multi_removed) do
+    niri.utils.log("  " .. event .. ": " .. tostring(success))
+end
+
+niri.utils.log("=== Event System Demo Complete ===")
+

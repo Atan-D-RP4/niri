@@ -488,7 +488,7 @@ This tiered architecture allows different levels of Lua integration:
 ### 9. Current Implementation Status
 
 #### Fully Working
-- Event system: 28 events integrated with centralized emission (4 intentionally excluded for security: idle:*, key:*)
+- Event system: 32 events implemented with centralized emission (4 intentionally excluded for security: idle:*, key:*)
 - Config API: Read-only exposure of all configuration sections
 - Reactive config proxy: Lua can modify config via `niri.config.*`
 - Action proxy: All compositor actions accessible via `niri.action`
@@ -749,47 +749,47 @@ This ensures events fire regardless of trigger source (keybindings, touch, IPC).
 
 #### Event Integration Reference
 
-The following table shows all 28 integrated events and their call sites in the main compositor:
+The following table shows all 32 implemented events and their call sites in the main compositor:
 
 | Event | Call Site(s) | Description |
 |-------|--------------|-------------|
 | **Window Events (10)** | | |
-| `window:open` | `handlers/compositor.rs:237` | Window created and mapped |
-| `window:close` | `handlers/xdg_shell.rs:922` | Window destroyed |
-| `window:focus` | `niri.rs:1075` | Window receives focus |
-| `window:blur` | `niri.rs:1069` | Window loses focus |
-| `window:title_changed` | `handlers/xdg_shell.rs:978` | Window title updated |
-| `window:app_id_changed` | `handlers/xdg_shell.rs:962` | Window app_id updated |
-| `window:fullscreen` | `handlers/xdg_shell.rs:675,757` | Fullscreen enter/exit |
-| `window:move` | `input/mod.rs:1300,1348` | Window moved to different workspace/output |
-| `window:resize` | `input/resize_grab.rs:37`, `input/touch_resize_grab.rs:35` | Window size changed |
-| `window:maximize` | `handlers/xdg_shell.rs:436,526` | Maximize/unmaximize |
+| `window:open` | `handlers/compositor.rs` | Window created and mapped |
+| `window:close` | `handlers/xdg_shell.rs` | Window destroyed |
+| `window:focus` | `niri.rs` | Window receives focus |
+| `window:blur` | `niri.rs` | Window loses focus |
+| `window:title_changed` | `handlers/xdg_shell.rs` | Window title updated |
+| `window:app_id_changed` | `handlers/xdg_shell.rs` | Window app_id updated |
+| `window:fullscreen` | `handlers/xdg_shell.rs` | Fullscreen enter/exit |
+| `window:move` | `input/mod.rs` | Window moved to different workspace/output |
+| `window:resize` | `input/resize_grab.rs`, `input/touch_resize_grab.rs` | Window size changed |
+| `window:maximize` | `handlers/xdg_shell.rs` | Maximize/unmaximize |
 | **Workspace Events (5)** | | |
-| `workspace:activate` | `niri.rs:858` | Workspace becomes active |
-| `workspace:deactivate` | `niri.rs:855` | Workspace becomes inactive |
-| `workspace:create` | `niri.rs:852` | New workspace created |
-| `workspace:destroy` | `niri.rs:849` | Workspace destroyed |
-| `workspace:rename` | `input/mod.rs:1617` | Workspace renamed |
-| **Monitor Events (2)** | | |
-| `monitor:connect` | `backend/tty.rs:1477` | Monitor connected |
-| `monitor:disconnect` | `backend/tty.rs:1546` | Monitor disconnected |
+| `workspace:activate` | `niri.rs` | Workspace becomes active |
+| `workspace:deactivate` | `niri.rs` | Workspace becomes inactive |
+| `workspace:create` | `niri.rs` | New workspace created |
+| `workspace:destroy` | `niri.rs` | Workspace destroyed |
+| `workspace:rename` | `input/mod.rs` | Workspace renamed |
 | **Layout Events (3)** | | |
-| `layout:mode_changed` | `niri.rs:881` | Tiling/floating mode changed |
-| `layout:window_added` | `handlers/compositor.rs:229` | Window added to layout |
-| `layout:window_removed` | `handlers/xdg_shell.rs:919` | Window removed from layout |
+| `layout:mode_changed` | `niri.rs` | Tiling/floating mode changed |
+| `layout:window_added` | `handlers/compositor.rs` | Window added to layout |
+| `layout:window_removed` | `handlers/xdg_shell.rs` | Window removed from layout |
+| **Monitor Events (2)** | | |
+| `monitor:connect` | `backend/tty.rs` | Monitor connected |
+| `monitor:disconnect` | `backend/tty.rs` | Monitor disconnected |
 | **Output Events (1)** | | |
-| `output:mode_change` | `niri.rs:3471` | Output resolution/refresh changed |
+| `output:mode_change` | `niri.rs` | Output resolution/refresh changed |
 | **Lock Events (2)** | | |
-| `lock:activate` | `niri.rs:6173` | Screen locked |
-| `lock:deactivate` | `niri.rs:6300` | Screen unlocked |
+| `lock:activate` | `niri.rs` | Screen locked |
+| `lock:deactivate` | `niri.rs` | Screen unlocked |
 | **Overview Events (2)** | | |
-| `overview:open` | `niri.rs:866` | Overview mode opened |
-| `overview:close` | `niri.rs:868` | Overview mode closed |
+| `overview:open` | `niri.rs` | Overview mode opened |
+| `overview:close` | `niri.rs` | Overview mode closed |
 | **Config Events (1)** | | |
-| `config:reload` | `niri.rs:1537,1822` | Configuration reloaded |
+| `config:reload` | `niri.rs` | Configuration reloaded |
 | **Lifecycle Events (2)** | | |
-| `startup` | `main.rs:290` | Compositor finished initializing |
-| `shutdown` | `main.rs:298` | Compositor shutting down |
+| `startup` | `main.rs` | Compositor finished initializing |
+| `shutdown` | `main.rs` | Compositor shutting down |
 
 #### Security-Excluded Events (4)
 

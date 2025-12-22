@@ -18,6 +18,7 @@ use niri::cli::{Cli, CompletionShell, Sub};
 #[cfg(feature = "dbus")]
 use niri::dbus;
 use niri::ipc::client::handle_msg;
+use niri::lua_event_hooks::StateLuaEvents;
 use niri::lua_integration;
 use niri::niri::State;
 use niri::utils::spawning::{
@@ -303,7 +304,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Emit startup event now that the compositor is fully initialized
-    niri::lua_event_hooks::emit_startup(&state);
+    state.emit_startup();
 
     // Run the compositor.
     event_loop
@@ -311,7 +312,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
 
     // Emit shutdown event before cleanup
-    niri::lua_event_hooks::emit_shutdown(&state);
+    state.emit_shutdown();
 
     Ok(())
 }

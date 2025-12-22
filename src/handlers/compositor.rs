@@ -21,7 +21,7 @@ use smithay::{delegate_compositor, delegate_shm};
 use super::xdg_shell::add_mapped_toplevel_pre_commit_hook;
 use crate::handlers::XDG_ACTIVATION_TOKEN_TIMEOUT;
 use crate::layout::{ActivateWindow, AddWindowTarget, LayoutElement as _};
-use crate::lua_event_hooks;
+use crate::lua_event_hooks::StateLuaEvents;
 use crate::niri::{CastTarget, ClientState, LockState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{is_mapped, send_scale_transform};
@@ -182,7 +182,6 @@ impl CompositorHandler for State {
                         .and_then(|parent| self.niri.layout.find_window_and_output(&parent))
                         // Only consider the parent if we configured the window for the same
                         // output.
-                        //
                         // Normally when we're following the parent, the configured output will be
                         // None. If the configured output is set, that means it was set explicitly
                         // by a window rule or a fullscreen request.
@@ -226,20 +225,15 @@ impl CompositorHandler for State {
                     // here so that unfullscreening the window makes it maximized.
                     if let Some((mapped, _)) = self.niri.layout.find_window_and_output(surface) {
                         // Emit layout:window_added event
-                        lua_event_hooks::emit_layout_window_added(self, mapped.id().get() as u32);
+                        self.emit_layout_window_added(mapped.id().get() as u32);
 
                         // Emit window:open event with real window data
                         let window_id = mapped.id().get() as u32;
-                        let (title, app_id) =
+                        let (title, _app_id) =
                             crate::utils::with_toplevel_role(mapped.toplevel(), |role| {
                                 (role.title.clone(), role.app_id.clone())
                             });
-                        lua_event_hooks::emit_window_open_full(
-                            self,
-                            window_id,
-                            title.as_deref().unwrap_or(""),
-                            app_id.as_deref().unwrap_or(""),
-                        );
+                        self.emit_window_open(window_id, title.as_deref().unwrap_or(""));
 
                         if mapped.pending_sizing_mode().is_fullscreen() && is_pending_maximized {
                             self.niri.layout.set_maximized(&window, true);
@@ -298,7 +292,7 @@ impl CompositorHandler for State {
 
                 if !is_mapped {
                     // The toplevel got unmapped.
-                    //
+
                     // Test client: wleird-unmap.
                     trace!("toplevel got unmapped");
 
@@ -495,10 +489,10 @@ impl CompositorHandler for State {
     fn destroyed(&mut self, surface: &WlSurface) {
         // Clients may destroy their subsurfaces before the main surface. Ensure we have a snapshot
         // when that happens, so that the closing animation includes all these subsurfaces.
-        //
+
         // Test client: alacritty with CSD <= 0.13 (it was fixed in winit afterwards:
         // https://github.com/rust-windowing/winit/pull/3625).
-        //
+
         // This is still not perfect, as this function is called already after the (first)
         // subsurface is destroyed; in the case of alacritty, this is the top CSD shadow. But, it
         // gets most of the job done.

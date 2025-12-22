@@ -64,7 +64,7 @@ use wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use super::{IpcOutputMap, RenderResult};
 use crate::backend::OutputId;
 use crate::frame_clock::FrameClock;
-use crate::lua_event_hooks;
+use crate::lua_event_hooks::NiriLuaEvents;
 use crate::niri::{Niri, RedrawState, State};
 use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::renderer::AsGlesRenderer;
@@ -1474,7 +1474,7 @@ impl Tty {
 
         // Emit monitor:connect event for Lua handlers
         let monitor_name = output_name.format_description();
-        lua_event_hooks::emit_monitor_connect(niri, &monitor_name, &connector_name);
+        niri.emit_monitor_connect(&monitor_name, &connector_name);
 
         let surface = Surface {
             name: output_name,
@@ -1543,7 +1543,7 @@ impl Tty {
         // Emit monitor:disconnect event for Lua handlers
         let connector_name = format!("{:?}", surface.name.connector);
         let monitor_name = surface.name.format_description();
-        lua_event_hooks::emit_monitor_disconnect(niri, &monitor_name, &connector_name);
+        niri.emit_monitor_disconnect(&monitor_name, &connector_name);
 
         let output = niri
             .global_space

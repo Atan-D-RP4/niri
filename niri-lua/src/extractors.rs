@@ -39,8 +39,7 @@ use std::str::FromStr;
 use mlua::prelude::*;
 use niri_config::animations::*;
 use niri_config::appearance::*;
-use niri_config::debug::Debug;
-use niri_config::debug::PreviewRender;
+use niri_config::debug::{Debug, PreviewRender};
 use niri_config::gestures::Gestures;
 use niri_config::input::*;
 use niri_config::layout::*;
@@ -325,13 +324,17 @@ impl FromLuaTable for SpringParams {
         }
 
         if !(0.1..=10.0).contains(&params.damping_ratio) {
-            return Err(LuaError::external("damping_ratio must be between 0.1 and 10.0"));
+            return Err(LuaError::external(
+                "damping_ratio must be between 0.1 and 10.0",
+            ));
         }
         if params.stiffness < 1 {
             return Err(LuaError::external("stiffness must be >= 1"));
         }
         if !(0.00001..=0.1).contains(&params.epsilon) {
-            return Err(LuaError::external("epsilon must be between 0.00001 and 0.1"));
+            return Err(LuaError::external(
+                "epsilon must be between 0.00001 and 0.1",
+            ));
         }
 
         Ok(Some(params))
@@ -392,7 +395,10 @@ impl FromLuaTable for Kind {
     }
 }
 
-fn apply_animation_overrides(table: &LuaTable, mut base: Animation) -> LuaResult<Option<Animation>> {
+fn apply_animation_overrides(
+    table: &LuaTable,
+    mut base: Animation,
+) -> LuaResult<Option<Animation>> {
     let off = extract_bool_opt(table, "off")?;
 
     // Accept either nested `kind` table or inline spring/easing tables.
@@ -418,10 +424,13 @@ fn apply_animation_overrides(table: &LuaTable, mut base: Animation) -> LuaResult
 
 impl FromLuaTable for Animation {
     fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
-        apply_animation_overrides(table, Animation {
-            off: false,
-            kind: Kind::Easing(default_easing_params()),
-        })
+        apply_animation_overrides(
+            table,
+            Animation {
+                off: false,
+                kind: Kind::Easing(default_easing_params()),
+            },
+        )
     }
 }
 
@@ -482,7 +491,10 @@ impl FromLuaTable for WindowOpenAnim {
         }
 
         if let Some(anim) = apply_animation_overrides(table, Self::default().anim)? {
-            Ok(Some(Self { anim, custom_shader }))
+            Ok(Some(Self {
+                anim,
+                custom_shader,
+            }))
         } else if has_any {
             Ok(Some(Self {
                 anim: Self::default().anim,
@@ -503,7 +515,10 @@ impl FromLuaTable for WindowCloseAnim {
         }
 
         if let Some(anim) = apply_animation_overrides(table, Self::default().anim)? {
-            Ok(Some(Self { anim, custom_shader }))
+            Ok(Some(Self {
+                anim,
+                custom_shader,
+            }))
         } else if has_any {
             Ok(Some(Self {
                 anim: Self::default().anim,
@@ -524,7 +539,10 @@ impl FromLuaTable for WindowResizeAnim {
         }
 
         if let Some(anim) = apply_animation_overrides(table, Self::default().anim)? {
-            Ok(Some(Self { anim, custom_shader }))
+            Ok(Some(Self {
+                anim,
+                custom_shader,
+            }))
         } else if has_any {
             Ok(Some(Self {
                 anim: Self::default().anim,
@@ -1142,15 +1160,19 @@ impl FromLuaTable for Modeline {
         }
 
         let clock = clock.ok_or_else(|| LuaError::external("modeline requires 'clock' field"))?;
-        let hdisplay = hdisplay.ok_or_else(|| LuaError::external("modeline requires 'hdisplay'"))?;
+        let hdisplay =
+            hdisplay.ok_or_else(|| LuaError::external("modeline requires 'hdisplay'"))?;
         let hsync_start =
             hsync_start.ok_or_else(|| LuaError::external("modeline requires 'hsync_start'"))?;
-        let hsync_end = hsync_end.ok_or_else(|| LuaError::external("modeline requires 'hsync_end'"))?;
+        let hsync_end =
+            hsync_end.ok_or_else(|| LuaError::external("modeline requires 'hsync_end'"))?;
         let htotal = htotal.ok_or_else(|| LuaError::external("modeline requires 'htotal'"))?;
-        let vdisplay = vdisplay.ok_or_else(|| LuaError::external("modeline requires 'vdisplay'"))?;
+        let vdisplay =
+            vdisplay.ok_or_else(|| LuaError::external("modeline requires 'vdisplay'"))?;
         let vsync_start =
             vsync_start.ok_or_else(|| LuaError::external("modeline requires 'vsync_start'"))?;
-        let vsync_end = vsync_end.ok_or_else(|| LuaError::external("modeline requires 'vsync_end'"))?;
+        let vsync_end =
+            vsync_end.ok_or_else(|| LuaError::external("modeline requires 'vsync_end'"))?;
         let vtotal = vtotal.ok_or_else(|| LuaError::external("modeline requires 'vtotal'"))?;
         let hsync_polarity = hsync_polarity
             .ok_or_else(|| LuaError::external("modeline requires 'hsync_polarity'"))?;

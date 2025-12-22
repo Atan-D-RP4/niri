@@ -95,7 +95,7 @@ local reserved = niri.state.reserved_space("eDP-1") -- {top, bottom, left, right
 local mode = niri.state.focus_mode()        -- "normal"|"overview"|"layer_shell"|"locked" (Since 25.XX)
 ```
 
-### Events (28 integrated, 4 excluded for security)
+### Events (28 available, 4 excluded for security)
 
 ```lua
 -- Single event subscription
@@ -187,7 +187,7 @@ The niri Lua system enables configuration and runtime scripting of the niri Wayl
 - 400+ passing tests
 - Full KDL configuration parity (all sections implemented)
 - ~90 actions available
-- 28 events integrated (4 intentionally excluded for security: idle:*, key:*)
+- 32 events implemented (4 intentionally excluded for security: idle:*, key:*)
 
 ---
 
@@ -253,7 +253,7 @@ Pinnacle (Smithay-based, like niri) uses a **separate UI process** (Snowcap) com
 
 1. **Complete Configuration**: Full KDL parity—every config option is scriptable
 2. **Runtime State Queries**: Access to windows, workspaces, outputs, keyboard layouts
-3. **Event System**: 14 compositor events for reactive programming
+3. **Event System**: 28 compositor events for reactive programming
 4. **Action System**: ~90 actions for controlling the compositor
 5. **Timers**: Deferred and repeating callbacks for dynamic behavior
 6. **REPL**: Interactive Lua console for debugging and exploration
@@ -338,7 +338,7 @@ Just as Neovim users can build entirely custom editing experiences through Lua, 
 - ✅ **niri-lua**: Complete and production-ready
   - Configuration API: Full KDL parity (input, outputs, layout, binds, window_rules, etc.)
   - Runtime API: Windows, workspaces, outputs, keyboard layouts
-  - Events: 14 compositor events (Window, Workspace, Monitor, Layout, Config)
+  - Events: 28 compositor events (Window, Workspace, Layout, System, Monitor, Output, Lock, Lifecycle)
   - Actions: ~90 actions
   - REPL: Interactive development
 
@@ -1057,39 +1057,127 @@ niri.events:off("window:open", handler_id)
 niri.events:off(handler_ids)  -- Multi-event unsubscribe
 ```
 
+### Return Value Semantics
+
+| Subscription Type | Return Value |
+|-------------------|--------------|
+| Single event `:on("event", fn)` | `integer` (handler ID) |
+| Multi-event `:on({"e1", "e2"}, fn)` | `{["e1"] = id1, ["e2"] = id2}` |
+| Single event `:once("event", fn)` | `integer` (handler ID) |
+| Multi-event `:once({"e1", "e2"}, fn)` | `{["e1"] = id1, ["e2"] = id2}` |
+
+### off() Variants
+
+| Signature | Behavior | Return |
+|-----------|----------|--------|
+| `:off("event", id)` | Remove specific handler | `boolean` |
+| `:off("event")` | Remove ALL handlers for event | `boolean` |
+| `:off(handler_table)` | Remove multiple handlers | `{[event] = boolean, ...}` |
+
+### emit() Data Wrapping
+
+The `emit()` method normalizes data before passing to handlers:
+
+| Input Type | Handler Receives |
+|------------|------------------|
+| Table `{foo = 1}` | `{foo = 1}` (unchanged) |
+| Primitive `42` | `{value = 42}` |
+| Primitive `"hello"` | `{value = "hello"}` |
+| Primitive `true` | `{value = true}` |
+| `nil` | `{}` (empty table) |
+
+```lua
+-- Examples
+niri.events:emit("custom:event", {foo = "bar"})  -- Handler sees {foo = "bar"}
+niri.events:emit("custom:event", 42)             -- Handler sees {value = 42}
+niri.events:emit("custom:event", nil)            -- Handler sees {}
+```
+
+### Event Handler Context (Snapshots)
+
+Event handlers receive a **snapshot** of compositor state at emission time:
+
+```lua
+niri.events:on("window:open", function(ev)
+    -- niri.state.windows() returns a snapshot, not live data
+    -- This prevents deadlocks and race conditions
+    local windows = niri.state.windows()
+end)
+```
+
+This is stored in a thread-local `EVENT_CONTEXT_STATE` and automatically cleared after the handler returns.
+
+### Event Payload Design
+
+Events provide **minimal, consistent payloads** - just enough to identify the subject. This design choice reflects:
+
+1. **Fork maintenance**: Regular upstream merges. Rich payloads would require constructing full IPC objects at every emit site, increasing merge conflicts.
+2. **Performance**: Avoids gathering all fields when handlers don't need them.
+3. **Consistency**: All events of the same type have identical payload structure.
+
+Handlers can query `niri.state.windows()` / `niri.state.workspaces()` for full details (see LUA_GUIDE.md).
+
 ### Available Events
 
 #### Window Events
 | Event | Payload | When |
 |-------|---------|------|
-| `window:open` | `{id, app_id, title, workspace_id}` | Window created |
-| `window:close` | `{id, app_id, title}` | Window destroyed |
-| `window:focus` | `{id, app_id, title}` | Window gained focus |
-| `window:blur` | `{id, app_id, title}` | Window lost focus |
+| `window:open` | `{id, title}` | Window created |
+| `window:close` | `{id, title}` | Window destroyed |
+| `window:focus` | `{id, title}` | Window gained focus |
+| `window:blur` | `{id, title}` | Window lost focus |
+| `window:title_changed` | `{id, title}` | Title updated |
+| `window:app_id_changed` | `{id, app_id}` | App ID updated |
+| `window:fullscreen` | `{id, title, is_fullscreen}` | Fullscreen toggled |
+| `window:maximize` | `{id, title, is_maximized}` | Maximize toggled |
+| `window:resize` | `{id, title, width, height}` | Window resized |
+| `window:move` | `{id, title, from_workspace?, to_workspace, from_output?, to_output}` | Window moved |
 
 #### Workspace Events
 | Event | Payload | When |
 |-------|---------|------|
-| `workspace:activate` | `{name, idx, output}` | Workspace became active |
-| `workspace:deactivate` | `{name, idx, output}` | Workspace became inactive |
-
-#### Monitor Events
-| Event | Payload | When |
-|-------|---------|------|
-| `monitor:connect` | `{name, connector, make, model}` | Output connected |
-| `monitor:disconnect` | `{name, connector}` | Output disconnected |
+| `workspace:activate` | `{name, idx}` | Workspace became active |
+| `workspace:deactivate` | `{name, idx}` | Workspace became inactive |
+| `workspace:create` | `{name, idx, output}` | Workspace created |
+| `workspace:destroy` | `{name, idx, output}` | Workspace destroyed |
+| `workspace:rename` | `{idx, old_name?, new_name?, output}` | Workspace renamed |
 
 #### Layout Events
 | Event | Payload | When |
 |-------|---------|------|
-| `layout:change` | `{keyboard_layouts, current_idx}` | Keyboard layout changed |
+| `layout:mode_changed` | `{mode}` | Layout mode changed (mode: "floating"\|"tiling") |
+| `layout:window_added` | `{id}` | Window added to layout |
+| `layout:window_removed` | `{id}` | Window removed from layout |
 
 #### System Events
 | Event | Payload | When |
 |-------|---------|------|
-| `config:reload` | `{}` | Configuration reloaded |
+| `config:reload` | `{success}` | Configuration reloaded |
 | `overview:open` | `{}` | Overview mode opened |
 | `overview:close` | `{}` | Overview mode closed |
+
+#### Monitor Events
+| Event | Payload | When |
+|-------|---------|------|
+| `monitor:connect` | `{name, connector}` | Monitor connected |
+| `monitor:disconnect` | `{name, connector}` | Monitor disconnected |
+
+#### Output Events
+| Event | Payload | When |
+|-------|---------|------|
+| `output:mode_change` | `{output, width, height, refresh_rate?}` | Output resolution/refresh changed |
+
+#### Lock Events
+| Event | Payload | When |
+|-------|---------|------|
+| `lock:activate` | `{}` | Screen locked |
+| `lock:deactivate` | `{}` | Screen unlocked |
+
+#### Lifecycle Events
+| Event | Payload | When |
+|-------|---------|------|
+| `startup` | `{}` | Compositor finished initializing |
+| `shutdown` | `{}` | Compositor shutting down |
 
 ### Excluded Events (Security)
 
@@ -1383,12 +1471,6 @@ local timer = niri.loop.new_timer()
 timer:start(1000, 1000, function()
     print("Fires every 1 second!")
 end)
-
--- One-shot timer (fires once after delay)
-local timer = niri.loop.new_timer()
-timer:start(1000, 0, function()
-    print("One-shot after 1 second")
-end)
 ```
 
 ### Timer Methods
@@ -1396,14 +1478,65 @@ end)
 | Method | Description |
 |--------|-------------|
 | `timer:start(delay_ms, repeat_ms, callback)` | Start timer with delay and optional repeat |
-| `timer:stop()` | Stop timer (can be restarted) |
+| `timer:stop()` | Stop timer (can be restarted with `again()`) |
+| `timer:again()` | Restart with same settings |
 | `timer:close()` | Permanently destroy timer |
 | `timer:is_active()` | Check if timer is running |
+| `timer:get_due_in()` | Returns ms until next fire (0 when inactive) |
+| `timer:set_repeat(ms)` | Change repeat interval at runtime |
+| `timer:get_repeat()` | Returns current repeat interval (ms) |
+| `timer.id` | Read-only numeric timer ID |
 
 ### Current Time
 
 ```lua
 local now = niri.loop.now()  -- Monotonic time in milliseconds
+```
+
+### wait() Function
+
+The `wait()` function provides convenient sleep and condition-polling:
+
+```lua
+-- Signature: niri.loop.wait(timeout_ms, condition_fn?, interval_ms?) -> (ok, value)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `timeout_ms` | integer | required | Maximum time to wait |
+| `condition_fn` | function | nil | Optional function to poll |
+| `interval_ms` | integer | 10 | Polling interval (minimum 1ms) |
+
+**Return values:**
+- `(true, nil)` - Timeout elapsed (when no condition provided)
+- `(true, value)` - Condition returned truthy value
+- `(false, nil)` - Timeout elapsed before condition was satisfied
+
+**Behavior:**
+- Without `condition_fn`: Sleeps for `timeout_ms` and returns `(true, nil)`
+- With `condition_fn`: Polls every `interval_ms`
+  - Returns immediately when condition returns truthy (anything except `nil` or `false`)
+  - The returned `value` is whatever the condition function returned
+  - Interval is clamped to minimum 1ms to prevent busy-spin
+  - Errors in condition function propagate to caller
+
+**Examples:**
+```lua
+-- Simple sleep
+niri.loop.wait(1000)  -- Sleep 1 second
+
+-- Wait for window to appear
+local ok, window = niri.loop.wait(5000, function()
+    local windows = niri.state.windows()
+    for _, w in ipairs(windows) do
+        if w.app_id == "firefox" then return w end
+    end
+    return false
+end, 50)
+
+-- Truthiness: 0, "", {} are truthy in Lua
+local ok, val = niri.loop.wait(100, function() return 0 end)
+-- ok=true, val=0 (0 is truthy)
 ```
 
 ### Timer Lifetime

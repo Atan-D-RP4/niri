@@ -8,8 +8,9 @@ use smithay::utils::{IsAlive, Logical, Point, Serial};
 use smithay::wayland::seat::WaylandFocus;
 
 use crate::layout::LayoutElement;
+use crate::lua_event_hooks::StateLuaEvents;
 use crate::niri::State;
-use crate::{lua_event_hooks, utils};
+use crate::utils;
 
 pub struct TouchResizeGrab {
     start_data: TouchGrabStartData<State>,
@@ -32,13 +33,7 @@ impl TouchResizeGrab {
                     role.title.clone().unwrap_or_default()
                 });
                 let size = mapped.size();
-                lua_event_hooks::emit_window_resize(
-                    state,
-                    window_id,
-                    &window_title,
-                    size.w,
-                    size.h,
-                );
+                state.emit_window_resize(window_id, &window_title, size.w, size.h);
             }
         }
     }

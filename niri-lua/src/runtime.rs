@@ -57,10 +57,12 @@ use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
 use crate::loop_api::{
-    create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
+    create_timer_manager, fire_due_timers, fire_due_timers_with_state, register_loop_api,
+    SharedTimerManager,
 };
 use crate::process::{create_process_manager, CallbackPayload, SharedProcessManager};
-use crate::{CallbackRegistry, LuaComponent, NiriApi, SharedCallbackRegistry};
+use crate::runtime_api::{clear_event_context_state, set_event_context_state, StateSnapshot};
+use crate::{CallbackRegistry, CompositorState, LuaComponent, NiriApi, SharedCallbackRegistry};
 
 /// Maximum callbacks to execute per flush cycle.
 /// This bounds latency while allowing some callback chaining.
@@ -589,6 +591,224 @@ impl LuaRuntime {
 
         // Finally fire process events
         let (process_executed, process_errors) = self.fire_process_events();
+        all_errors.extend(process_errors);
+
+        (
+            timers_fired,
+            scheduled_executed,
+            process_executed,
+            all_errors,
+        )
+    }
+
+    /// Execute scheduled callbacks with fresh state snapshots per callback.
+    ///
+    /// This version creates a fresh `StateSnapshot` before each callback,
+    /// ensuring that each callback sees the current compositor state rather than
+    /// a stale snapshot captured at the start of the frame.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Reference to compositor state for creating fresh snapshots
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of callbacks executed and any errors encountered.
+    pub fn flush_scheduled_with_state<S: CompositorState>(
+        &self,
+        state: &S,
+    ) -> (usize, Vec<LuaError>) {
+        let mut executed = 0;
+        let mut errors = Vec::new();
+
+        // Execute up to limit, allowing newly scheduled callbacks within limit
+        while executed < MAX_CALLBACKS_PER_FLUSH {
+            let key = self.scheduled_callbacks.borrow_mut().pop_front();
+            match key {
+                Some(registry_key) => {
+                    // Retrieve callback from registry
+                    let callback: LuaFunction = match self.lua.registry_value(&registry_key) {
+                        Ok(cb) => cb,
+                        Err(e) => {
+                            errors.push(e);
+                            executed += 1;
+                            continue;
+                        }
+                    };
+
+                    // Clean up registry
+                    if let Err(e) = self.lua.remove_registry_value(registry_key) {
+                        log::warn!("Failed to remove scheduled callback from registry: {}", e);
+                    }
+
+                    // Create fresh snapshot for THIS callback
+                    let snapshot = StateSnapshot::from_compositor_state(state);
+                    set_event_context_state(snapshot);
+
+                    // Execute the callback with timeout protection
+                    let result = self.call_with_timeout::<()>(&callback, ());
+
+                    // Clear context after callback completes
+                    clear_event_context_state();
+
+                    match result {
+                        Ok(()) => executed += 1,
+                        Err(e) => {
+                            log::error!("Scheduled Lua callback failed: {}", e);
+                            errors.push(e);
+                            executed += 1;
+                        }
+                    }
+                }
+                None => break, // Queue empty
+            }
+        }
+
+        (executed, errors)
+    }
+
+    /// Fire all due timers with fresh state snapshots per callback.
+    ///
+    /// This version creates a fresh `StateSnapshot` before each timer callback,
+    /// ensuring that each callback sees the current compositor state.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Reference to compositor state for creating fresh snapshots
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of timers fired and any errors encountered.
+    pub fn fire_timers_with_state<S: CompositorState>(&self, state: &S) -> (usize, Vec<LuaError>) {
+        if let Some(ref manager) = self.timer_manager {
+            fire_due_timers_with_state(&self.lua, manager, state)
+        } else {
+            (0, Vec::new())
+        }
+    }
+
+    /// Fire process events with fresh state snapshots per callback.
+    ///
+    /// This version creates a fresh `StateSnapshot` before each process callback,
+    /// ensuring that each callback sees the current compositor state.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Reference to compositor state for creating fresh snapshots
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of callbacks executed and any errors encountered.
+    pub fn fire_process_events_with_state<S: CompositorState>(
+        &self,
+        state: &S,
+    ) -> (usize, Vec<LuaError>) {
+        let mut executed = 0;
+        let mut errors = Vec::new();
+
+        if let Some(ref manager) = self.process_manager {
+            let events = manager.lock().unwrap().process_events();
+
+            for event in events.into_iter().take(MAX_CALLBACKS_PER_FLUSH) {
+                if let Some(ref registry) = self.callback_registry {
+                    match registry.get(&self.lua, event.callback_id) {
+                        Ok(Some(callback)) => {
+                            // Create fresh snapshot for THIS callback
+                            let snapshot = StateSnapshot::from_compositor_state(state);
+                            set_event_context_state(snapshot);
+
+                            let result = match &event.payload {
+                                CallbackPayload::Stdout(data) | CallbackPayload::Stderr(data) => {
+                                    if event.text_mode {
+                                        let text = String::from_utf8_lossy(data);
+                                        self.call_with_timeout(&callback, (LuaValue::Nil, text))
+                                    } else {
+                                        self.call_with_timeout(
+                                            &callback,
+                                            (LuaValue::Nil, self.lua.create_string(data).unwrap()),
+                                        )
+                                    }
+                                }
+                                CallbackPayload::Exit(result) => {
+                                    let table =
+                                        result.to_lua_table(&self.lua, event.text_mode).unwrap();
+                                    self.call_with_timeout(&callback, (table, LuaValue::Nil))
+                                }
+                            };
+
+                            // Clear context after callback completes
+                            clear_event_context_state();
+
+                            match result {
+                                Ok(()) => executed += 1,
+                                Err(e) => {
+                                    log::error!("Process callback failed: {}", e);
+                                    errors.push(e);
+                                    executed += 1;
+                                }
+                            }
+
+                            // For exit events, clean up callbacks
+                            if let CallbackPayload::Exit(_) = &event.payload {
+                                if let Some((stdout_id, stderr_id, exit_id)) =
+                                    manager.lock().unwrap().get_callback_ids(event.handle_id)
+                                {
+                                    if let Some(id) = stdout_id {
+                                        let _ = registry.unregister(id);
+                                    }
+                                    if let Some(id) = stderr_id {
+                                        let _ = registry.unregister(id);
+                                    }
+                                    if let Some(id) = exit_id {
+                                        let _ = registry.unregister(id);
+                                    }
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            log::warn!("Callback {} not found in registry", event.callback_id);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to get callback {}: {}", event.callback_id, e);
+                            errors.push(e);
+                        }
+                    }
+                }
+            }
+        }
+
+        (executed, errors)
+    }
+
+    /// Process all pending Lua async work with fresh state snapshots per callback.
+    ///
+    /// This is the preferred entry point for the compositor to drive Lua async execution.
+    /// Each callback receives a fresh snapshot of compositor state, ensuring that
+    /// callbacks that modify state don't leave subsequent callbacks seeing stale data.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Reference to compositor state for creating fresh snapshots
+    ///
+    /// # Returns
+    ///
+    /// Returns (timers_fired, scheduled_executed, process_events_executed, errors).
+    pub fn process_async_with_state<S: CompositorState>(
+        &self,
+        state: &S,
+    ) -> (usize, usize, usize, Vec<LuaError>) {
+        let mut all_errors = Vec::new();
+
+        // Fire due timers first (they may schedule callbacks)
+        let (timers_fired, timer_errors) = self.fire_timers_with_state(state);
+        all_errors.extend(timer_errors);
+
+        // Then flush scheduled callbacks
+        let (scheduled_executed, scheduled_errors) = self.flush_scheduled_with_state(state);
+        all_errors.extend(scheduled_errors);
+
+        // Finally fire process events
+        let (process_executed, process_errors) = self.fire_process_events_with_state(state);
         all_errors.extend(process_errors);
 
         (
