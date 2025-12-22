@@ -282,8 +282,21 @@ pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<L
                 Ok(callback) => match call_with_lua_timeout::<()>(lua, &callback, ()) {
                     Ok(()) => fired += 1,
                     Err(e) => {
-                        log::error!("Timer callback error: {}", e);
-                        errors.push(e);
+                        let repeat_ms = {
+                            let mgr = manager.borrow();
+                            mgr.timers
+                                .get(&id)
+                                .map(|t| t.repeat_ms)
+                                .unwrap_or(0)
+                        };
+
+                        let enriched_error = LuaError::external(format!(
+                            "timer callback error (timer_id={}, repeat={}ms): {}",
+                            id, repeat_ms, e
+                        ));
+
+                        log::error!("Timer callback error: {}", enriched_error);
+                        errors.push(enriched_error);
                         fired += 1;
                     }
                 },
@@ -296,6 +309,49 @@ pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<L
     }
 
     (fired, errors)
+}
+
+/// Check if a Lua value is truthy (not nil or false)
+fn is_truthy(value: &LuaValue) -> bool {
+    !matches!(value, LuaValue::Nil | LuaValue::Boolean(false))
+}
+
+fn wait(
+    _lua: &Lua,
+    (timeout_ms, condition, interval_ms): (u64, Option<LuaFunction>, Option<i64>),
+) -> LuaResult<(bool, LuaValue)> {
+    let timeout = Duration::from_millis(timeout_ms);
+
+    if condition.is_none() {
+        std::thread::sleep(timeout);
+        return Ok((true, LuaValue::Nil));
+    }
+
+    // Clamp interval to minimum of 1ms (handles negative values)
+    let interval = interval_ms.unwrap_or(10).max(1) as u64;
+    let start = Instant::now();
+    let condition = condition.unwrap();
+
+    loop {
+        let result: LuaValue = condition.call(())?;
+
+        if is_truthy(&result) {
+            return Ok((true, result));
+        }
+
+        if start.elapsed() >= timeout {
+            return Ok((false, LuaValue::Nil));
+        }
+
+        let elapsed = start.elapsed();
+        let remaining = timeout.saturating_sub(elapsed);
+        let sleep_duration = Duration::from_millis(interval).min(remaining);
+        std::thread::sleep(sleep_duration);
+
+        if start.elapsed() >= timeout {
+            return Ok((false, LuaValue::Nil));
+        }
+    }
 }
 
 /// Register the loop API in a Lua context.
@@ -343,10 +399,15 @@ pub fn register_loop_api(lua: &Lua, manager: SharedTimerManager) -> LuaResult<()
     })?;
     loop_table.set("now", now_fn)?;
 
+    // niri.loop.wait(timeout_ms, condition, interval_ms) -> (bool, any)
+    let wait_fn = lua.create_function(wait)?;
+    loop_table.set("wait", wait_fn)?;
+
     niri.set("loop", loop_table)?;
 
     Ok(())
 }
+
 
 /// Timer userdata for Lua.
 struct Timer {
@@ -397,6 +458,50 @@ impl LuaUserData for Timer {
             Ok(this.manager.borrow().is_active(this.id))
         });
 
+        // timer:get_due_in()
+        methods.add_method("get_due_in", |_lua, this, ()| {
+            let manager = this.manager.borrow();
+
+            let Some(timer) = manager.timers.get(&this.id) else {
+                return Ok(0_u64);
+            };
+
+            if !timer.active {
+                return Ok(0_u64);
+            }
+
+            let Some(next_fire) = timer.next_fire else {
+                return Ok(0_u64);
+            };
+
+            let now = Instant::now();
+            Ok(next_fire
+                .saturating_duration_since(now)
+                .as_millis() as u64)
+        });
+
+        // timer:set_repeat(repeat_ms)
+        methods.add_method("set_repeat", |_lua, this, repeat_ms: u64| {
+            if let Some(timer) = this.manager.borrow_mut().timers.get_mut(&this.id) {
+                timer.repeat_ms = repeat_ms;
+            }
+
+            Ok(())
+        });
+
+        // timer:get_repeat()
+        methods.add_method("get_repeat", |_lua, this, ()| {
+            let repeat_ms = this
+                .manager
+                .borrow()
+                .timers
+                .get(&this.id)
+                .map(|timer| timer.repeat_ms)
+                .unwrap_or(0);
+
+            Ok(repeat_ms)
+        });
+
         // timer.id (read-only property via __index)
         methods.add_meta_method(LuaMetaMethod::Index, |_lua, this, key: String| {
             match key.as_str() {
@@ -412,6 +517,245 @@ mod tests {
     use std::thread;
 
     use super::*;
+
+    // ========================================================================
+    // niri.loop.wait() Tests
+    // ========================================================================
+
+    #[test]
+    fn wait_sleeps_without_condition() {
+        let lua = Lua::new();
+        lua.load("niri = {}".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let start = Instant::now();
+        let (ok, value): (bool, LuaValue) = lua
+            .load("return niri.loop.wait(50)")
+            .eval()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(ok);
+        assert!(matches!(value, LuaValue::Nil));
+        assert!(elapsed >= Duration::from_millis(45));
+    }
+
+    #[test]
+    fn wait_returns_early_when_condition_met() {
+        let lua = Lua::new();
+        lua.load("niri = {}; __flag = false".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let start = Instant::now();
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                local start = niri.loop.now()
+                local first = true
+                return niri.loop.wait(200, function()
+                    if first then
+                        first = false
+                        return nil
+                    end
+                    __flag = true
+                    return true
+                end, 5)
+            "#,
+            )
+            .eval()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(ok);
+        assert!(value == LuaValue::Boolean(true));
+        assert!(elapsed < Duration::from_millis(200));
+    }
+
+    #[test]
+    fn wait_times_out_and_returns_false() {
+        let lua = Lua::new();
+        lua.load("niri = {}".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let start = Instant::now();
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                return niri.loop.wait(30, function()
+                    return false
+                end, 5)
+            "#,
+            )
+            .eval()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(!ok);
+        assert!(matches!(value, LuaValue::Nil));
+        assert!(elapsed >= Duration::from_millis(25));
+    }
+
+    #[test]
+    fn wait_with_zero_interval_uses_minimum() {
+        let lua = Lua::new();
+        lua.load("niri = {}; __calls = 0".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                return niri.loop.wait(10, function()
+                    __calls = __calls + 1
+                    return false
+                end, 0)
+            "#,
+            )
+            .eval()
+            .unwrap();
+        let calls: i64 = lua.globals().get("__calls").unwrap();
+
+        assert!(!ok);
+        assert!(matches!(value, LuaValue::Nil));
+        assert!(calls < 100, "expected clamped interval to avoid busy spin, got {}", calls);
+    }
+
+    #[test]
+    fn wait_with_negative_interval_clamps_to_minimum() {
+        let lua = Lua::new();
+        lua.load("niri = {}; __calls = 0".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                return niri.loop.wait(10, function()
+                    __calls = __calls + 1
+                    return false
+                end, -5)
+            "#,
+            )
+            .eval()
+            .unwrap();
+        let calls: i64 = lua.globals().get("__calls").unwrap();
+
+        assert!(!ok);
+        assert!(matches!(value, LuaValue::Nil));
+        assert!(calls < 100, "expected clamped interval to avoid busy spin, got {}", calls);
+    }
+
+    #[test]
+    fn wait_treats_table_as_truthy() {
+        let lua = Lua::new();
+        lua.load("niri = {}".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                return niri.loop.wait(50, function()
+                    return {}
+                end, 5)
+            "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert!(ok);
+        assert!(matches!(value, LuaValue::Table(_)));
+    }
+
+    #[test]
+    fn wait_treats_nonzero_number_as_truthy() {
+        let lua = Lua::new();
+        lua.load("niri = {}".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                return niri.loop.wait(50, function()
+                    return 0
+                end, 5)
+            "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert!(ok);
+        match value {
+            LuaValue::Integer(0) => {}
+            LuaValue::Number(n) => assert_eq!(n, 0.0),
+            other => panic!("unexpected value: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn wait_treats_empty_string_as_truthy() {
+        let lua = Lua::new();
+        lua.load("niri = {}".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let (ok, value): (bool, LuaValue) = lua
+            .load(
+                r#"
+                return niri.loop.wait(50, function()
+                    return ""
+                end, 5)
+            "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert!(ok);
+        match value {
+            LuaValue::String(s) => {
+                assert_eq!(s.to_str().unwrap(), "");
+            }
+            other => panic!("unexpected value: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn wait_propagates_condition_errors() {
+        let lua = Lua::new();
+        lua.load("niri = {}".to_string()).exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let err = lua
+            .load(
+                r#"
+                return niri.loop.wait(50, function()
+                    error("boom")
+                end, 5)
+            "#,
+            )
+            .eval::<(bool, LuaValue)>()
+            .unwrap_err();
+
+        match err {
+            LuaError::RuntimeError(msg) => assert!(msg.contains("boom")),
+            LuaError::CallbackError { cause, .. } => assert!(cause.to_string().contains("boom")),
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
 
     // ========================================================================
     // Timer Manager Tests
@@ -700,6 +1044,112 @@ mod tests {
         assert!(!result.0); // Before start
         assert!(result.1); // After start
         assert!(!result.2); // After stop
+    }
+
+    #[test]
+    fn timer_get_due_in_returns_positive_for_active() {
+        let lua = Lua::new();
+        lua.load("niri = {}").exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let due_in: u64 = lua
+            .load(
+                r#"
+            local t = niri.loop.new_timer()
+            t:start(50, 0, function() end)
+            return t:get_due_in()
+        "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert!(due_in > 0);
+        assert!(due_in <= 50);
+    }
+
+    #[test]
+    fn timer_get_due_in_returns_zero_when_inactive() {
+        let lua = Lua::new();
+        lua.load("niri = {}").exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let due_in: u64 = lua
+            .load(
+                r#"
+            local t = niri.loop.new_timer()
+            t:start(10, 0, function() end)
+            t:stop()
+            return t:get_due_in()
+        "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert_eq!(due_in, 0);
+    }
+
+    #[test]
+    fn timer_repeat_can_be_read_and_updated() {
+        let lua = Lua::new();
+        lua.load("niri = {}").exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager).unwrap();
+
+        let (initial, updated): (u64, u64) = lua
+            .load(
+                r#"
+            local t = niri.loop.new_timer()
+            t:start(0, 123, function() end)
+            local before = t:get_repeat()
+            t:set_repeat(456)
+            local after = t:get_repeat()
+            return before, after
+        "#,
+            )
+            .eval()
+            .unwrap();
+
+        assert_eq!(initial, 123);
+        assert_eq!(updated, 456);
+    }
+
+    #[test]
+    fn timer_set_repeat_changes_running_interval() {
+        let lua = Lua::new();
+        lua.load("niri = {}; __count = 0").exec().unwrap();
+
+        let manager = create_timer_manager();
+        register_loop_api(&lua, manager.clone()).unwrap();
+
+        lua.load(
+            r#"
+            __timer = niri.loop.new_timer()
+            __timer:start(0, 50, function()
+                __count = __count + 1
+            end)
+            __timer:set_repeat(5)
+        "#,
+        )
+        .exec()
+        .unwrap();
+
+        // First fire (immediate)
+        fire_due_timers(&lua, &manager);
+        let count_after_first: i64 = lua.globals().get("__count").unwrap();
+        assert_eq!(count_after_first, 1);
+
+        // Wait for the updated repeat interval
+        thread::sleep(Duration::from_millis(6));
+
+        // Second fire should happen with new repeat interval
+        fire_due_timers(&lua, &manager);
+        let count_after_second: i64 = lua.globals().get("__count").unwrap();
+        assert_eq!(count_after_second, 2);
     }
 
     #[test]

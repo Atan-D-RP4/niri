@@ -236,10 +236,8 @@ impl LuaRuntime {
     ///
     /// Returns an error if the Lua runtime cannot be created.
     pub fn new_with_limits(limits: ExecutionLimits) -> LuaResult<Self> {
-        let lua = Lua::new();
-
         // Set up standard library with appropriate restrictions
-        lua.load_std_libs(LuaStdLib::ALL_SAFE)?;
+        let lua = Lua::new_with(LuaStdLib::ALL_SAFE, LuaOptions::default())?;
 
         let scheduled_callbacks = Rc::new(RefCell::new(VecDeque::new()));
         let deadline = Rc::new(Cell::new(None::<Instant>));
@@ -426,6 +424,10 @@ impl LuaRuntime {
     pub fn init_loop_api(&mut self) -> LuaResult<()> {
         let manager = create_timer_manager();
         register_loop_api(&self.lua, manager.clone())?;
+
+        // Load Lua loop helpers (e.g., niri.loop.defer, niri.schedule_wrap)
+        self.lua.load(include_str!("loop_helpers.lua")).exec()?;
+
         self.timer_manager = Some(manager);
         Ok(())
     }
@@ -1477,49 +1479,149 @@ mod tests {
     }
 
     #[test]
+    fn fire_timers_errors_include_timer_context() {
+        let mut rt = LuaRuntime::new().unwrap();
+        rt.load_string("niri = {}").unwrap();
+        rt.init_loop_api().unwrap();
+
+        rt.load_string(
+            r#"
+            __timer = niri.loop.new_timer()
+            __timer:start(0, 100, function()
+                error("boom")
+            end)
+        "#,
+        )
+        .unwrap();
+
+        let (count, errors) = rt.fire_timers();
+        assert_eq!(count, 1);
+        assert_eq!(errors.len(), 1);
+
+        let msg = errors[0].to_string();
+        assert!(msg.contains("timer_id="));
+        assert!(msg.contains("repeat=100ms"));
+        assert!(msg.contains("boom"));
+    }
+
+    #[test]
+    fn loop_defer_executes_and_auto_closes() {
+        let mut rt = LuaRuntime::new().unwrap();
+        rt.load_string("niri = {}").unwrap();
+        rt.init_loop_api().unwrap();
+
+        rt.load_string(
+            r#"
+            __fired = false
+            __timer = niri.loop.defer(function()
+                __fired = true
+            end, 10)
+        "#,
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let (count, errors) = rt.fire_timers();
+        assert_eq!(count, 1);
+        assert!(errors.is_empty());
+
+        let fired: bool = rt.inner().globals().get("__fired").unwrap();
+        assert!(fired);
+
+        let active: bool = rt
+            .inner()
+            .load("return __timer:is_active()")
+            .eval()
+            .unwrap();
+        assert!(!active);
+
+        // Subsequent fires should do nothing
+        let (count2, errors2) = rt.fire_timers();
+        assert_eq!(count2, 0);
+        assert!(errors2.is_empty());
+    }
+
+    #[test]
+    fn loop_defer_can_be_cancelled_before_firing() {
+        let mut rt = LuaRuntime::new().unwrap();
+        rt.load_string("niri = {}").unwrap();
+        rt.init_loop_api().unwrap();
+
+        rt.load_string(
+            r#"
+            __fired = false
+            __timer = niri.loop.defer(function()
+                __fired = true
+            end, 50)
+            __timer:stop()
+        "#,
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(60));
+
+        let (count, errors) = rt.fire_timers();
+        assert_eq!(count, 0);
+        assert!(errors.is_empty());
+
+        let fired: bool = rt.inner().globals().get("__fired").unwrap();
+        assert!(!fired);
+
+        let active: bool = rt
+            .inner()
+            .load("return __timer:is_active()")
+            .eval()
+            .unwrap();
+        assert!(!active);
+    }
+
+    #[test]
     fn process_async_combines_timers_and_scheduled_with_chaining() {
         let mut rt = LuaRuntime::new().unwrap();
         rt.load_string("niri = {}").unwrap();
         rt.init_scheduler().unwrap();
         rt.init_loop_api().unwrap();
 
-        // Timer schedules a callback, both should run in same process_async call
+        // Schedule a callback that schedules another callback
         rt.load_string(
             r#"
-            __timer_ran = false
-            __scheduled_ran = false
-            __chained_ran = false
-
-            niri.schedule(function() __scheduled_ran = true end)
-
-            local timer = niri.loop.new_timer()
-            timer:start(0, 0, function()
-                __timer_ran = true
-                niri.schedule(function() __chained_ran = true end)
+            __step1 = false
+            __step2 = false
+            niri.schedule(function()
+                __step1 = true
+                niri.schedule(function()
+                    __step2 = true
+                end)
             end)
         "#,
         )
         .unwrap();
 
-        let (timers, scheduled, process, errors) = rt.process_async();
-        assert_eq!(timers, 1);
-        assert_eq!(scheduled, 2); // original + chained from timer
-        assert_eq!(process, 0); // no process events
+        // process_async runs all scheduled callbacks including newly queued ones
+        // So both step1 and step2 should run in a single call
+        let (timers, scheduled, _process, errors) = rt.process_async();
+        assert_eq!(timers, 0);
+        assert_eq!(scheduled, 2); // Both callbacks run in one pass
         assert!(errors.is_empty());
 
-        let timer: bool = rt.inner().globals().get("__timer_ran").unwrap();
-        let scheduled: bool = rt.inner().globals().get("__scheduled_ran").unwrap();
-        let chained: bool = rt.inner().globals().get("__chained_ran").unwrap();
-        assert!(timer && scheduled && chained);
+        let step1: bool = rt.inner().globals().get("__step1").unwrap();
+        let step2: bool = rt.inner().globals().get("__step2").unwrap();
+        assert!(step1);
+        assert!(step2); // Both completed
+
+        // Subsequent call should have nothing to do
+        let (timers2, scheduled2, _process2, errors2) = rt.process_async();
+        assert_eq!(timers2, 0);
+        assert_eq!(scheduled2, 0);
+        assert!(errors2.is_empty());
     }
 
-    // ========================================================================
-    // Process events tests
-    // ========================================================================
-
     #[test]
-    fn fire_process_events_with_no_manager_returns_zero() {
+    fn fire_process_events_without_manager() {
         let rt = LuaRuntime::new().unwrap();
+
+        // Without process manager initialized, should return zero
         let (count, errors) = rt.fire_process_events();
         assert_eq!(count, 0);
         assert!(errors.is_empty());

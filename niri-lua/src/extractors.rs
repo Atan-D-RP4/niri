@@ -1,7 +1,38 @@
-//! Lua configuration value extractors.
+//! # Lua Table Extraction
 //!
-//! This module provides utilities for extracting complex configuration structures
-//! from Lua tables and converting them to Niri config types.
+//! This module provides the `FromLuaTable` trait for type-safe extraction of
+//! Rust configuration types from Lua tables.
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use mlua::{Lua, Table};
+//! use niri_lua::extractors::FromLuaTable;
+//! use niri_config::HotkeyOverlay;
+//!
+//! fn extract_config(lua: &Lua) -> mlua::Result<Option<HotkeyOverlay>> {
+//!     let table: Table = lua.globals().get("config")?;
+//!     HotkeyOverlay::from_lua_table(&table)
+//! }
+//! ```
+//!
+//! ## Implementing FromLuaTable
+//!
+//! ```rust,ignore
+//! impl FromLuaTable for MyConfig {
+//!     fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+//!         let field1 = extract_string_opt(table, "field1")?;
+//!         let field2 = extract_bool_opt(table, "field2")?;
+//!         
+//!         // Return None if no relevant fields present
+//!         if field1.is_none() && field2.is_none() {
+//!             return Ok(None);
+//!         }
+//!         
+//!         Ok(Some(MyConfig { field1, field2 }))
+//!     }
+//! }
+//! ```
 
 use std::str::FromStr;
 
@@ -9,12 +40,65 @@ use mlua::prelude::*;
 use niri_config::animations::*;
 use niri_config::appearance::*;
 use niri_config::debug::Debug;
+use niri_config::debug::PreviewRender;
 use niri_config::gestures::Gestures;
 use niri_config::input::*;
 use niri_config::layout::*;
 use niri_config::misc::*;
 use niri_config::recent_windows::{MruHighlight, MruPreviews, RecentWindows};
+use niri_config::utils::RegexEq;
+use niri_config::window_rule::{Match as WindowMatch, WindowRule};
 use niri_config::{ConfigNotification, FloatOrInt, XwaylandSatellite};
+use regex::Regex;
+
+/// Types that can be constructed from a Lua table.
+pub trait FromLuaTable: Sized {
+    /// Extract this type from a Lua table.
+    /// Returns `Ok(Some(Self))` if any relevant fields were present,
+    /// `Ok(None)` if the table had no relevant fields (all defaults),
+    /// or `Err` if extraction failed due to type mismatch or validation error.
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>>;
+
+    /// Extract this type, returning default if no fields present.
+    fn from_lua_table_or_default(table: &LuaTable) -> LuaResult<Self>
+    where
+        Self: Default,
+    {
+        match Self::from_lua_table(table)? {
+            Some(value) => Ok(value),
+            None => Ok(Self::default()),
+        }
+    }
+
+    /// Extract a required instance (error if no fields present).
+    fn from_lua_table_required(table: &LuaTable) -> LuaResult<Self> {
+        match Self::from_lua_table(table)? {
+            Some(value) => Ok(value),
+            None => Err(LuaError::external("missing required fields")),
+        }
+    }
+}
+
+/// Trait for extracting a nested table field as a type.
+pub trait ExtractField<T> {
+    fn extract_field(&self, field: &str) -> LuaResult<Option<T>>;
+}
+
+impl<T> ExtractField<T> for LuaTable
+where
+    T: FromLuaTable,
+{
+    fn extract_field(&self, field: &str) -> LuaResult<Option<T>> {
+        match self.get::<LuaValue>(field)? {
+            LuaValue::Nil => Ok(None),
+            LuaValue::Boolean(false) => Ok(None),
+            LuaValue::Table(table) => T::from_lua_table(&table),
+            other => Err(LuaError::external(format!(
+                "expected table for field '{field}', found {other:?}"
+            ))),
+        }
+    }
+}
 
 /// Helper to extract an optional string field from a Lua table.
 pub fn extract_string_opt(table: &LuaTable, field: &str) -> LuaResult<Option<String>> {
@@ -94,6 +178,12 @@ pub fn extract_screenshot_path(table: &LuaTable) -> LuaResult<Option<ScreenshotP
     }
 }
 
+impl FromLuaTable for ScreenshotPath {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        extract_screenshot_path(table)
+    }
+}
+
 /// Extract hotkey overlay configuration from Lua table.
 pub fn extract_hotkey_overlay(table: &LuaTable) -> LuaResult<Option<HotkeyOverlay>> {
     let skip_at_startup = extract_bool_opt(table, "skip_at_startup")?.unwrap_or(false);
@@ -106,6 +196,12 @@ pub fn extract_hotkey_overlay(table: &LuaTable) -> LuaResult<Option<HotkeyOverla
         }))
     } else {
         Ok(None)
+    }
+}
+
+impl FromLuaTable for HotkeyOverlay {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        extract_hotkey_overlay(table)
     }
 }
 
@@ -136,6 +232,12 @@ pub fn extract_cursor(table: &LuaTable) -> LuaResult<Option<Cursor>> {
         Ok(Some(cursor))
     } else {
         Ok(None)
+    }
+}
+
+impl FromLuaTable for Cursor {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        extract_cursor(table)
     }
 }
 
@@ -807,6 +909,125 @@ fn extract_preset_sizes(table: &LuaTable, field: &str) -> LuaResult<Option<Vec<P
     Ok(None)
 }
 
+// ============================================================================
+// Window rule extractors
+// ============================================================================
+
+fn extract_regex(field: &str, table: &LuaTable) -> LuaResult<Option<Regex>> {
+    if let Some(value) = extract_string_opt(table, field)? {
+        let regex = Regex::new(&value)
+            .map_err(|e| LuaError::external(format!("Invalid {field} regex: {e}")))?;
+        Ok(Some(regex))
+    } else {
+        Ok(None)
+    }
+}
+
+fn extract_window_match(table: &LuaTable) -> LuaResult<Option<WindowMatch>> {
+    let app_id = extract_regex("app_id", table)?.map(RegexEq);
+    let title = extract_regex("title", table)?.map(RegexEq);
+    let is_active = extract_bool_opt(table, "is_active")?;
+    let is_focused = extract_bool_opt(table, "is_focused")?;
+
+    if app_id.is_none() && title.is_none() && is_active.is_none() && is_focused.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(WindowMatch {
+        app_id,
+        title,
+        is_active,
+        is_focused,
+        ..Default::default()
+    }))
+}
+
+fn extract_window_matches(table: &LuaTable, field: &str) -> LuaResult<Vec<WindowMatch>> {
+    if let Some(array_table) = extract_table_opt(table, field)? {
+        let mut matches = Vec::new();
+        for i in 1..=array_table.len()? {
+            if let Ok(match_table) = array_table.get::<LuaTable>(i) {
+                if let Some(m) = extract_window_match(&match_table)? {
+                    matches.push(m);
+                }
+            }
+        }
+        return Ok(matches);
+    }
+
+    Ok(Vec::new())
+}
+
+impl FromLuaTable for WindowMatch {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        extract_window_match(table)
+    }
+}
+
+impl FromLuaTable for WindowRule {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        let matches = extract_window_matches(table, "matches")?;
+        let excludes = extract_window_matches(table, "excludes")?;
+        let default_column_width = if let Some(size_table) = extract_table_opt(table, "default_column_width")? {
+            extract_size_change(&size_table)?.map(|size| DefaultPresetSize(Some(size)))
+        } else {
+            None
+        };
+        let open_on_output = extract_string_opt(table, "open_on_output")?;
+        let open_on_workspace = extract_string_opt(table, "open_on_workspace")?;
+        let open_maximized = extract_bool_opt(table, "open_maximized")?;
+        let open_fullscreen = extract_bool_opt(table, "open_fullscreen")?;
+        let open_floating = extract_bool_opt(table, "open_floating")?;
+        let opacity = extract_float_opt(table, "opacity")?.map(|v| v as f32);
+
+        if matches.is_empty()
+            && excludes.is_empty()
+            && default_column_width.is_none()
+            && open_on_output.is_none()
+            && open_on_workspace.is_none()
+            && open_maximized.is_none()
+            && open_fullscreen.is_none()
+            && open_floating.is_none()
+            && opacity.is_none()
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(WindowRule {
+            matches,
+            excludes,
+            default_column_width,
+            default_window_height: None,
+            open_on_output,
+            open_on_workspace,
+            open_maximized,
+            open_maximized_to_edges: None,
+            open_fullscreen,
+            open_floating,
+            open_focused: None,
+            min_width: None,
+            min_height: None,
+            max_width: None,
+            max_height: None,
+            focus_ring: Default::default(),
+            border: Default::default(),
+            shadow: Default::default(),
+            tab_indicator: Default::default(),
+            draw_border_with_background: None,
+            opacity,
+            geometry_corner_radius: None,
+            clip_to_geometry: None,
+            baba_is_float: None,
+            block_out_from: None,
+            variable_refresh_rate: None,
+            default_column_display: None,
+            default_floating_position: None,
+            scroll_factor: None,
+            tiled_state: None,
+        }))
+    }
+}
+
 /// Extract a single size change (proportion or fixed).
 fn extract_size_change(table: &LuaTable) -> LuaResult<Option<PresetSize>> {
     if let Some(proportion) = extract_float_opt(table, "proportion")? {
@@ -959,28 +1180,136 @@ pub fn extract_config_notification(table: &LuaTable) -> LuaResult<Option<ConfigN
 
 /// Extract debug configuration from Lua table.
 pub fn extract_debug(table: &LuaTable) -> LuaResult<Option<Debug>> {
-    // Debug has many options - only handle common ones here
+    let preview_render = extract_string_opt(table, "preview_render")?;
+    let dbus_interfaces_in_non_session_instances =
+        extract_bool_opt(table, "dbus_interfaces_in_non_session_instances")?;
+    let wait_for_frame_completion_before_queueing =
+        extract_bool_opt(table, "wait_for_frame_completion_before_queueing")?;
+    let enable_overlay_planes = extract_bool_opt(table, "enable_overlay_planes")?;
+    let disable_cursor_plane = extract_bool_opt(table, "disable_cursor_plane")?;
     let disable_direct_scanout = extract_bool_opt(table, "disable_direct_scanout")?;
+    let keep_max_bpc_unchanged = extract_bool_opt(table, "keep_max_bpc_unchanged")?;
+    let restrict_primary_scanout_to_matching_format =
+        extract_bool_opt(table, "restrict_primary_scanout_to_matching_format")?;
     let render_drm_device = extract_string_opt(table, "render_drm_device")?;
+    let ignored_drm_devices = extract_table_opt(table, "ignored_drm_devices")?;
+    let force_pipewire_invalid_modifier =
+        extract_bool_opt(table, "force_pipewire_invalid_modifier")?;
+    let emulate_zero_presentation_time = extract_bool_opt(table, "emulate_zero_presentation_time")?;
     let disable_resize_throttling = extract_bool_opt(table, "disable_resize_throttling")?;
+    let disable_transactions = extract_bool_opt(table, "disable_transactions")?;
+    let keep_laptop_panel_on_when_lid_is_closed =
+        extract_bool_opt(table, "keep_laptop_panel_on_when_lid_is_closed")?;
+    let disable_monitor_names = extract_bool_opt(table, "disable_monitor_names")?;
+    let strict_new_window_focus_policy = extract_bool_opt(table, "strict_new_window_focus_policy")?;
+    let honor_xdg_activation_with_invalid_serial =
+        extract_bool_opt(table, "honor_xdg_activation_with_invalid_serial")?;
+    let deactivate_unfocused_windows = extract_bool_opt(table, "deactivate_unfocused_windows")?;
+    let skip_cursor_only_updates_during_vrr =
+        extract_bool_opt(table, "skip_cursor_only_updates_during_vrr")?;
 
-    if disable_direct_scanout.is_some()
+    if preview_render.is_some()
+        || dbus_interfaces_in_non_session_instances.is_some()
+        || wait_for_frame_completion_before_queueing.is_some()
+        || enable_overlay_planes.is_some()
+        || disable_cursor_plane.is_some()
+        || disable_direct_scanout.is_some()
+        || keep_max_bpc_unchanged.is_some()
+        || restrict_primary_scanout_to_matching_format.is_some()
         || render_drm_device.is_some()
+        || ignored_drm_devices.is_some()
+        || force_pipewire_invalid_modifier.is_some()
+        || emulate_zero_presentation_time.is_some()
         || disable_resize_throttling.is_some()
+        || disable_transactions.is_some()
+        || keep_laptop_panel_on_when_lid_is_closed.is_some()
+        || disable_monitor_names.is_some()
+        || strict_new_window_focus_policy.is_some()
+        || honor_xdg_activation_with_invalid_serial.is_some()
+        || deactivate_unfocused_windows.is_some()
+        || skip_cursor_only_updates_during_vrr.is_some()
     {
         let mut debug = Debug::default();
+
+        if let Some(value) = preview_render {
+            debug.preview_render = match value.as_str() {
+                "screencast" => Some(PreviewRender::Screencast),
+                "screen_capture" => Some(PreviewRender::ScreenCapture),
+                _ => None,
+            };
+        }
+        if let Some(v) = dbus_interfaces_in_non_session_instances {
+            debug.dbus_interfaces_in_non_session_instances = v;
+        }
+        if let Some(v) = wait_for_frame_completion_before_queueing {
+            debug.wait_for_frame_completion_before_queueing = v;
+        }
+        if let Some(v) = enable_overlay_planes {
+            debug.enable_overlay_planes = v;
+        }
+        if let Some(v) = disable_cursor_plane {
+            debug.disable_cursor_plane = v;
+        }
         if let Some(v) = disable_direct_scanout {
             debug.disable_direct_scanout = v;
+        }
+        if let Some(v) = keep_max_bpc_unchanged {
+            debug.keep_max_bpc_unchanged = v;
+        }
+        if let Some(v) = restrict_primary_scanout_to_matching_format {
+            debug.restrict_primary_scanout_to_matching_format = v;
         }
         if let Some(v) = render_drm_device {
             debug.render_drm_device = Some(v.into());
         }
+        if let Some(devices) = ignored_drm_devices {
+            for pair in devices.sequence_values::<LuaValue>() {
+                let value = pair?;
+                if let LuaValue::String(s) = value {
+                    debug.ignored_drm_devices.push(s.to_string_lossy().into());
+                }
+            }
+        }
+        if let Some(v) = force_pipewire_invalid_modifier {
+            debug.force_pipewire_invalid_modifier = v;
+        }
+        if let Some(v) = emulate_zero_presentation_time {
+            debug.emulate_zero_presentation_time = v;
+        }
         if let Some(v) = disable_resize_throttling {
             debug.disable_resize_throttling = v;
         }
+        if let Some(v) = disable_transactions {
+            debug.disable_transactions = v;
+        }
+        if let Some(v) = keep_laptop_panel_on_when_lid_is_closed {
+            debug.keep_laptop_panel_on_when_lid_is_closed = v;
+        }
+        if let Some(v) = disable_monitor_names {
+            debug.disable_monitor_names = v;
+        }
+        if let Some(v) = strict_new_window_focus_policy {
+            debug.strict_new_window_focus_policy = v;
+        }
+        if let Some(v) = honor_xdg_activation_with_invalid_serial {
+            debug.honor_xdg_activation_with_invalid_serial = v;
+        }
+        if let Some(v) = deactivate_unfocused_windows {
+            debug.deactivate_unfocused_windows = v;
+        }
+        if let Some(v) = skip_cursor_only_updates_during_vrr {
+            debug.skip_cursor_only_updates_during_vrr = v;
+        }
+
         Ok(Some(debug))
     } else {
         Ok(None)
+    }
+}
+
+impl FromLuaTable for Debug {
+    fn from_lua_table(table: &LuaTable) -> LuaResult<Option<Self>> {
+        extract_debug(table)
     }
 }
 
@@ -1007,6 +1336,130 @@ pub fn extract_xwayland_satellite(table: &LuaTable) -> LuaResult<Option<Xwayland
 mod tests {
     use super::*;
     use crate::test_utils::create_test_lua_table;
+
+    #[test]
+    fn screenshot_path_from_lua_table_supports_none_and_false() {
+        let (_lua, table) = create_test_table();
+        table.set("path", false).unwrap();
+
+        let result = ScreenshotPath::from_lua_table(&table).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, None);
+    }
+
+    #[test]
+    fn debug_from_lua_table_extracts_multiple_fields() {
+        let (_lua, table) = create_test_table();
+        table.set("disable_direct_scanout", true).unwrap();
+        table
+            .set("render_drm_device", "/dev/dri/renderD128")
+            .unwrap();
+        table
+            .set(
+                "ignored_drm_devices",
+                vec!["/dev/dri/card0", "/dev/dri/card1"],
+            )
+            .unwrap();
+
+        let result = Debug::from_lua_table(&table).unwrap();
+        assert!(result.is_some());
+        let debug = result.unwrap();
+        assert!(debug.disable_direct_scanout);
+        assert_eq!(
+            debug.render_drm_device.unwrap().to_string_lossy(),
+            "/dev/dri/renderD128"
+        );
+        assert_eq!(debug.ignored_drm_devices.len(), 2);
+    }
+
+    #[test]
+    fn from_lua_table_returns_none_when_empty() {
+        let (_lua, table) = create_test_table();
+        let result = HotkeyOverlay::from_lua_table(&table).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn from_lua_table_extracts_hotkey_overlay() {
+        let (_lua, table) = create_test_table();
+        table.set("skip_at_startup", true).unwrap();
+        let result = HotkeyOverlay::from_lua_table(&table).unwrap();
+        assert!(result.is_some());
+        let overlay = result.unwrap();
+        assert!(overlay.skip_at_startup);
+        assert!(!overlay.hide_not_bound);
+    }
+
+    #[test]
+    fn from_lua_table_or_default_uses_defaults_when_empty() {
+        let (_lua, table) = create_test_table();
+        let overlay = HotkeyOverlay::from_lua_table_or_default(&table).unwrap();
+        assert_eq!(overlay, HotkeyOverlay::default());
+    }
+
+    #[test]
+    fn from_lua_table_required_errors_when_empty() {
+        let (_lua, table) = create_test_table();
+        let result = HotkeyOverlay::from_lua_table_required(&table);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_field_delegates_to_from_lua_table() {
+        let (lua, table) = create_test_table();
+        let nested = lua.create_table().unwrap();
+        nested.set("skip_at_startup", true).unwrap();
+        table.set("hotkey", nested).unwrap();
+
+        let result: Option<HotkeyOverlay> = table.extract_field("hotkey").unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().skip_at_startup);
+    }
+
+    #[test]
+    fn extract_field_none_for_missing_table() {
+        let (_lua, table) = create_test_table();
+        let result: Option<HotkeyOverlay> = table.extract_field("hotkey").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn extract_field_none_for_false() {
+        let (_lua, table) = create_test_table();
+        table.set("hotkey", false).unwrap();
+
+        let result: Option<HotkeyOverlay> = table.extract_field("hotkey").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn extract_field_errors_on_non_table() {
+        let (_lua, table) = create_test_table();
+        table.set("hotkey", 5).unwrap();
+
+        let result: LuaResult<Option<HotkeyOverlay>> = table.extract_field("hotkey");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cursor_from_lua_table_applies_fields() {
+        let (_lua, table) = create_test_table();
+        table.set("xcursor_theme", "mytheme").unwrap();
+        table.set("hide_when_typing", true).unwrap();
+
+        let cursor = Cursor::from_lua_table_or_default(&table).unwrap();
+        assert_eq!(cursor.xcursor_theme, "mytheme");
+        assert!(cursor.hide_when_typing);
+    }
+
+    #[test]
+    fn cursor_from_lua_table_none_when_empty() {
+        let (_lua, table) = create_test_table();
+        let result = Cursor::from_lua_table(&table).unwrap();
+        assert!(result.is_none());
+    }
+
+    // Existing tests
 
     // Re-export for backward compatibility with existing tests
     fn create_test_table() -> (mlua::Lua, mlua::Table) {

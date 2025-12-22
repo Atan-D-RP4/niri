@@ -10,6 +10,96 @@ mod common;
 use common::create_runtime;
 
 // ========================================================================
+// SCHEDULER WRAP TESTS
+// ========================================================================
+
+#[test]
+fn schedule_wrap_defers_execution() {
+    let mut runtime = create_runtime();
+    runtime.load_string("niri = {}").unwrap();
+    runtime.init_scheduler().unwrap();
+    runtime.init_loop_api().unwrap();
+
+    let code = r#"
+        value = nil
+        local wrapped = niri.schedule_wrap(function(v) value = v end)
+        wrapped(42)
+        assert(value == nil, "should not run immediately")
+    "#;
+
+    // Execute the code; value should still be nil right after call
+    let (output, success) = runtime.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+
+    // Flush scheduled callbacks by processing async work
+    let (_timers, _scheduled, _process, _errors) = runtime.process_async();
+
+    // Read value after processing scheduled callbacks
+    let value: mlua::Value = runtime.inner().globals().get("value").unwrap();
+    match value {
+        mlua::Value::Nil => panic!("wrapped function should have executed"),
+        mlua::Value::Integer(i) => assert_eq!(i, 42),
+        mlua::Value::Number(n) => assert_eq!(n as i64, 42),
+        _ => panic!("unexpected value type"),
+    }
+}
+
+#[test]
+fn schedule_wrap_preserves_arguments() {
+    let mut runtime = create_runtime();
+    runtime.load_string("niri = {}").unwrap();
+    runtime.init_scheduler().unwrap();
+    runtime.init_loop_api().unwrap();
+
+    let code = r#"
+        args = nil
+        local wrapped = niri.schedule_wrap(function(a, b, c) args = {a, b, c} end)
+        wrapped(1, "two", true)
+    "#;
+
+    let (output, success) = runtime.execute_string(code);
+    assert!(success, "Lua execution should succeed: {}", output);
+
+    let (_timers, _scheduled, _process, _errors) = runtime.process_async();
+
+    let args: mlua::Value = runtime.inner().globals().get("args").unwrap();
+    match args {
+        mlua::Value::Table(t) => {
+            let a: i64 = t.get(1).unwrap();
+            let b: String = t.get(2).unwrap();
+            let c: bool = t.get(3).unwrap();
+            assert_eq!(a, 1);
+            assert_eq!(b, "two");
+            assert!(c);
+        }
+        _ => panic!("expected table for args"),
+    }
+}
+
+#[test]
+fn test_loop_defer_integration() {
+    let mut rt = LuaRuntime::new().unwrap();
+    rt.load_string("niri = {}").unwrap();
+    rt.init_loop_api().unwrap();
+
+    rt.load_string(
+        r#"
+        __deferred_ran = false
+        niri.loop.defer(function()
+            __deferred_ran = true
+        end, 10)
+    "#,
+    )
+    .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    rt.process_async();
+
+    let ran: bool = rt.inner().globals().get("__deferred_ran").unwrap();
+    assert!(ran);
+}
+
+// ========================================================================
 // BASIC LUA EXECUTION TESTS
 // ========================================================================
 
@@ -692,7 +782,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn should succeed: {}", output);
-        assert!(output.contains("true"), "spawn should return handle: {}", output);
+        assert!(
+            output.contains("true"),
+            "spawn should return handle: {}",
+            output
+        );
     }
 
     #[test]
@@ -705,7 +799,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn should succeed: {}", output);
-        assert!(output.contains("true"), "spawn without opts returns nil: {}", output);
+        assert!(
+            output.contains("true"),
+            "spawn without opts returns nil: {}",
+            output
+        );
     }
 
     #[test]
@@ -734,7 +832,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "pid access should succeed: {}", output);
-        assert!(output.contains("true"), "pid should be positive number: {}", output);
+        assert!(
+            output.contains("true"),
+            "pid should be positive number: {}",
+            output
+        );
     }
 
     #[test]
@@ -752,7 +854,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "is_closing() test should succeed: {}", output);
-        assert!(output.contains("true"), "is_closing should track stdin state: {}", output);
+        assert!(
+            output.contains("true"),
+            "is_closing should track stdin state: {}",
+            output
+        );
     }
 
     #[test]
@@ -767,7 +873,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "kill should succeed: {}", output);
-        assert!(output.contains("true"), "killed process should have signal 9: {}", output);
+        assert!(
+            output.contains("true"),
+            "killed process should have signal 9: {}",
+            output
+        );
     }
 
     #[test]
@@ -780,7 +890,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "wait should succeed: {}", output);
-        assert!(output.contains("true"), "wait should return result table: {}", output);
+        assert!(
+            output.contains("true"),
+            "wait should return result table: {}",
+            output
+        );
     }
 
     #[test]
@@ -799,7 +913,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "wait with capture should succeed: {}", output);
-        assert!(output.contains("true"), "should return result table: {}", output);
+        assert!(
+            output.contains("true"),
+            "should return result table: {}",
+            output
+        );
     }
 
     #[test]
@@ -812,8 +930,16 @@ mod process_integration_tests {
             return type(result) == "table" and result.code == 0
         "#;
         let (output, success) = runtime.execute_string(code);
-        assert!(success, "wait with stderr capture should succeed: {}", output);
-        assert!(output.contains("true"), "should return result table: {}", output);
+        assert!(
+            success,
+            "wait with stderr capture should succeed: {}",
+            output
+        );
+        assert!(
+            output.contains("true"),
+            "should return result table: {}",
+            output
+        );
     }
 
     #[test]
@@ -826,7 +952,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "wait with timeout should succeed: {}", output);
-        assert!(output.contains("true"), "fast process should complete: {}", output);
+        assert!(
+            output.contains("true"),
+            "fast process should complete: {}",
+            output
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -844,7 +974,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn with cwd should succeed: {}", output);
-        assert!(output.contains("true"), "process should exit cleanly: {}", output);
+        assert!(
+            output.contains("true"),
+            "process should exit cleanly: {}",
+            output
+        );
     }
 
     #[test]
@@ -878,7 +1012,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn with stdin data should succeed: {}", output);
-        assert!(output.contains("true"), "stdin should be passed to process: {}", output);
+        assert!(
+            output.contains("true"),
+            "stdin should be passed to process: {}",
+            output
+        );
     }
 
     #[test]
@@ -897,7 +1035,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "spawn with stdin pipe should succeed: {}", output);
-        assert!(output.contains("true"), "piped input should reach process: {}", output);
+        assert!(
+            output.contains("true"),
+            "piped input should reach process: {}",
+            output
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -914,7 +1056,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "nonzero exit should succeed: {}", output);
-        assert!(output.contains("true"), "exit code should be 42: {}", output);
+        assert!(
+            output.contains("true"),
+            "exit code should be 42: {}",
+            output
+        );
     }
 
     #[test]
@@ -930,7 +1076,11 @@ mod process_integration_tests {
         let (output, success) = runtime.execute_string(code);
         assert!(success, "pcall should succeed: {}", output);
         // Either pcall catches error or we get an error result
-        assert!(output.contains("true"), "should handle nonexistent command: {}", output);
+        assert!(
+            output.contains("true"),
+            "should handle nonexistent command: {}",
+            output
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -948,7 +1098,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "text mode should succeed: {}", output);
-        assert!(output.contains("true"), "process should exit cleanly: {}", output);
+        assert!(
+            output.contains("true"),
+            "process should exit cleanly: {}",
+            output
+        );
     }
 
     #[test]
@@ -962,7 +1116,11 @@ mod process_integration_tests {
         "#;
         let (output, success) = runtime.execute_string(code);
         assert!(success, "binary mode should succeed: {}", output);
-        assert!(output.contains("true"), "process should exit cleanly: {}", output);
+        assert!(
+            output.contains("true"),
+            "process should exit cleanly: {}",
+            output
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -1015,7 +1173,11 @@ mod process_integration_tests {
             return handle ~= nil
         "#;
         let (output, success) = runtime.execute_string(code);
-        assert!(success, "spawn with stderr callback should succeed: {}", output);
+        assert!(
+            success,
+            "spawn with stderr callback should succeed: {}",
+            output
+        );
         assert!(output.contains("true"), "should return handle: {}", output);
     }
 
@@ -1034,7 +1196,11 @@ mod process_integration_tests {
             return handle ~= nil
         "#;
         let (output, success) = runtime.execute_string(code);
-        assert!(success, "spawn with all callbacks should succeed: {}", output);
+        assert!(
+            success,
+            "spawn with all callbacks should succeed: {}",
+            output
+        );
         assert!(output.contains("true"), "should return handle: {}", output);
     }
 
@@ -1121,21 +1287,14 @@ mod process_integration_tests {
         assert!(success, "setup should succeed: {}", output);
 
         // Process events until callback fires
-        let condition_met = wait_for_lua_condition(
-            &runtime,
-            "return _G.exit_called",
-            Duration::from_secs(5),
-        );
+        let condition_met =
+            wait_for_lua_condition(&runtime, "return _G.exit_called", Duration::from_secs(5));
         assert!(condition_met, "on_exit callback should fire within timeout");
 
         // Verify exit code
         let (output, success) = runtime.execute_string("return _G.exit_code == 7");
         assert!(success, "verify should succeed: {}", output);
-        assert!(
-            output.contains("true"),
-            "exit code should be 7: {}",
-            output
-        );
+        assert!(output.contains("true"), "exit code should be 7: {}", output);
     }
 
     #[test]
@@ -1162,11 +1321,8 @@ mod process_integration_tests {
         let (output, success) = runtime.execute_string(setup);
         assert!(success, "setup should succeed: {}", output);
 
-        let condition_met = wait_for_lua_condition(
-            &runtime,
-            "return _G.stderr_called",
-            Duration::from_secs(5),
-        );
+        let condition_met =
+            wait_for_lua_condition(&runtime, "return _G.stderr_called", Duration::from_secs(5));
         assert!(condition_met, "stderr callback should be called");
 
         let verify = r#"
