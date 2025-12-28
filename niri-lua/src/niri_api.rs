@@ -27,9 +27,11 @@ impl LuaComponent for NiriApi {
         // Create the niri table
         let niri = lua.create_table()?;
 
-        // Register the format_value function globally for pretty-printing
-        let format_value_fn: LuaFunction = lua.load(include_str!("format_value.lua")).eval()?;
+        // Register format utilities globally for pretty-printing
+        let format_utils: LuaTable = lua.load(include_str!("format_value.lua")).eval()?;
+        let format_value_fn: LuaFunction = format_utils.get("format_value")?;
         lua.globals().set("__niri_format_value", format_value_fn)?;
+        lua.globals().set("__niri_format_utils", format_utils)?;
 
         // Create the utils table for logging and utility functions
         let utils = lua.create_table()?;
@@ -259,9 +261,9 @@ impl LuaComponent for NiriApi {
         })?;
         niri.set("apply_config", apply_config_fn)?;
 
-        // Register nice_print function as niri.print
-        let nice_print_code = include_str!("nice_print.lua");
-        let nice_print_fn: LuaFunction = lua.load(nice_print_code).eval()?;
+        // Register niri.print (uses format_value's nice_print)
+        let format_utils: LuaTable = globals.get("__niri_format_utils")?;
+        let nice_print_fn: LuaFunction = format_utils.get("nice_print")?;
         niri.set("print", nice_print_fn)?;
 
         // Register the niri table globally

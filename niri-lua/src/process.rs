@@ -57,14 +57,31 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use mlua::prelude::*;
 use nix::libc;
+use niri_config::Environment;
 
 use crate::CallbackRegistry;
+
+pub static CHILD_ENV: RwLock<Environment> = RwLock::new(Environment(Vec::new()));
+pub static CHILD_WAYLAND_DISPLAY: RwLock<Option<String>> = RwLock::new(None);
+pub static CHILD_DISPLAY: RwLock<Option<String>> = RwLock::new(None);
+
+pub fn set_child_wayland_display(socket_name: Option<String>) {
+    *CHILD_WAYLAND_DISPLAY.write().unwrap() = socket_name;
+}
+
+pub fn set_child_display(display: Option<String>) {
+    *CHILD_DISPLAY.write().unwrap() = display;
+}
+
+pub fn set_child_env(env: Environment) {
+    *CHILD_ENV.write().unwrap() = env;
+}
 
 /// Grace period after SIGTERM before sending SIGKILL (configurable).
 pub const SIGTERM_GRACE_MS: u64 = 1000;
@@ -309,6 +326,35 @@ impl ProcessManager {
         if opts.clear_env {
             cmd.env_clear();
         }
+
+        // Set WAYLAND_DISPLAY from compositor (critical for spawned apps to connect)
+        let wayland_display = CHILD_WAYLAND_DISPLAY.read().unwrap();
+        if let Some(ref display) = *wayland_display {
+            cmd.env("WAYLAND_DISPLAY", display);
+        }
+        drop(wayland_display);
+
+        // Set DISPLAY (X11) from compositor
+        let x_display = CHILD_DISPLAY.read().unwrap();
+        if let Some(ref display) = *x_display {
+            cmd.env("DISPLAY", display);
+        } else {
+            cmd.env_remove("DISPLAY");
+        }
+        drop(x_display);
+
+        // Set configured environment from compositor config
+        let child_env = CHILD_ENV.read().unwrap();
+        for var in &child_env.0 {
+            if let Some(value) = &var.value {
+                cmd.env(&var.name, value);
+            } else {
+                cmd.env_remove(&var.name);
+            }
+        }
+        drop(child_env);
+
+        // Set user-provided environment (overrides compositor env)
         if let Some(ref env) = opts.env {
             for (k, v) in env {
                 cmd.env(k, v);
@@ -1028,6 +1074,22 @@ impl LuaUserData for ProcessHandle {
         methods.add_method("is_closing", |_lua, this, ()| {
             let manager = this.manager.lock().unwrap();
             Ok(manager.is_stdin_closed(this.id))
+        });
+
+        methods.add_meta_method(mlua::MetaMethod::ToString, |_lua, this, ()| {
+            Ok(format!("ProcessHandle {{ pid = {} }}", this.pid))
+        });
+
+        methods.add_method("inspect", |lua, this, ()| {
+            let props = lua.create_table()?;
+            props.set("pid", this.pid)?;
+            props.set("wait", "<method: wait(timeout_ms?) -> result>")?;
+            props.set("kill", "<method: kill(signal?) -> boolean>")?;
+            props.set("write", "<method: write(data) -> boolean>")?;
+            props.set("close_stdin", "<method: close_stdin()>")?;
+            props.set("is_closing", "<method: is_closing() -> boolean>")?;
+            props.set("inspect", "<method: inspect() -> table>")?;
+            Ok(props)
         });
     }
 }

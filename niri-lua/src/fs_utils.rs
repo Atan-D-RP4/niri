@@ -1210,6 +1210,7 @@ mod tests {
     use std::path::PathBuf;
 
     use mlua::{Function, Lua, Table};
+    use serial_test::serial;
     use tempfile::tempdir;
 
     use super::*;
@@ -1327,6 +1328,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn which_finds_executable_in_path() {
         let dir = tempdir().unwrap();
         let bin = dir.path().join("test-exec");
@@ -1339,7 +1341,6 @@ mod tests {
             fs::set_permissions(&bin, perms).unwrap();
         }
 
-        // Prepend temp dir to PATH
         let old_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", dir.path().to_str().unwrap(), old_path);
         std::env::set_var("PATH", &new_path);
