@@ -603,7 +603,7 @@ impl LuaRuntime {
 
     /// Execute scheduled callbacks with fresh state snapshots per callback.
     ///
-    /// This version creates a fresh `StateSnapshot` before each callback,
+    /// This version uses `with_scoped_state()` to provide fresh state access per callback,
     /// ensuring that each callback sees the current compositor state rather than
     /// a stale snapshot captured at the start of the frame.
     ///
@@ -663,7 +663,7 @@ impl LuaRuntime {
 
     /// Fire all due timers with fresh state snapshots per callback.
     ///
-    /// This version creates a fresh `StateSnapshot` before each timer callback,
+    /// This version uses `with_scoped_state()` to provide fresh state access per timer callback,
     /// ensuring that each callback sees the current compositor state.
     ///
     /// # Arguments
@@ -683,7 +683,7 @@ impl LuaRuntime {
 
     /// Fire process events with fresh state snapshots per callback.
     ///
-    /// This version creates a fresh `StateSnapshot` before each process callback,
+    /// This version uses `with_scoped_state()` to provide fresh state access per process callback,
     /// ensuring that each callback sees the current compositor state.
     ///
     /// # Arguments

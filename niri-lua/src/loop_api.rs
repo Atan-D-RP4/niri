@@ -310,7 +310,7 @@ pub fn fire_due_timers(lua: &Lua, manager: &SharedTimerManager) -> (usize, Vec<L
 
 /// Fire all due timers with fresh state snapshots per callback.
 ///
-/// This version creates a fresh `StateSnapshot` before each timer callback,
+/// This version uses `with_scoped_state()` to provide fresh state access per timer callback,
 /// ensuring that each callback sees the current compositor state rather than
 /// a stale snapshot captured at the start of the frame.
 ///
