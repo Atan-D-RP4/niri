@@ -609,3 +609,97 @@ mod dirty_flags_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod from_lua_table_tests {
+    use mlua::Lua;
+
+    use crate::extractors::FromLuaTable;
+
+    #[derive(Default, Debug, PartialEq, niri_lua_derive::FromLuaTable)]
+    #[allow(dead_code)]
+    struct TestConfig {
+        name: String,
+        width: f64,
+        enabled: bool,
+        count: i32,
+    }
+
+    #[test]
+    fn test_from_lua_table_basic() {
+        let lua = Lua::new();
+        let table = lua
+            .load(
+                r#"
+            return {
+                name = "test",
+                width = 100.5,
+                enabled = true,
+                count = 42
+            }
+        "#,
+            )
+            .eval::<mlua::Table>()
+            .unwrap();
+
+        let config = TestConfig::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(config.name, "test");
+        assert!((config.width - 100.5).abs() < f64::EPSILON);
+        assert!(config.enabled);
+        assert_eq!(config.count, 42);
+    }
+
+    #[test]
+    fn test_from_lua_table_partial() {
+        let lua = Lua::new();
+        let table = lua
+            .load(
+                r#"
+            return {
+                name = "partial"
+            }
+        "#,
+            )
+            .eval::<mlua::Table>()
+            .unwrap();
+
+        let config = TestConfig::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(config.name, "partial");
+        assert!((config.width - 0.0).abs() < f64::EPSILON);
+        assert!(!config.enabled);
+        assert_eq!(config.count, 0);
+    }
+
+    #[test]
+    fn test_from_lua_table_empty_returns_none() {
+        let lua = Lua::new();
+        let table = lua.load("return {}").eval::<mlua::Table>().unwrap();
+
+        let result = TestConfig::from_lua_table(&table).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_from_lua_table_kebab_case() {
+        let lua = Lua::new();
+        let table = lua
+            .load(
+                r#"
+            return {
+                ["some-value"] = "test"
+            }
+        "#,
+            )
+            .eval::<mlua::Table>()
+            .unwrap();
+
+        #[derive(Default, Debug, PartialEq, niri_lua_derive::FromLuaTable)]
+        #[allow(dead_code)]
+        struct KebabTest {
+            some_value: String,
+        }
+
+        let config = KebabTest::from_lua_table(&table).unwrap().unwrap();
+        assert_eq!(config.some_value, "test");
+    }
+}
