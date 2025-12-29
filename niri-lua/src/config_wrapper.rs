@@ -17,9 +17,9 @@ use crate::config_proxies::{
 };
 use crate::config_state::ConfigState;
 use crate::extractors::{
-    extract_animations, extract_clipboard, extract_config_notification, extract_cursor,
-    extract_debug, extract_gestures, extract_hotkey_overlay, extract_input, extract_layout,
-    extract_overview, extract_recent_windows, extract_xwayland_satellite,
+    extract_clipboard, extract_config_notification, extract_debug, extract_gestures, extract_input,
+    extract_layout, extract_overview, extract_recent_windows, extract_xwayland_satellite,
+    FromLuaTable,
 };
 
 macro_rules! proxy_field {
@@ -31,6 +31,23 @@ macro_rules! proxy_field {
 
         $fields.add_field_method_set($name, |_, this, value: LuaTable| {
             if let Some(v) = $extractor(&value)? {
+                this.config.lock().unwrap().$config_field = v;
+                this.dirty.lock().unwrap().$dirty_flag = true;
+            }
+            Ok(())
+        });
+    };
+}
+
+macro_rules! proxy_field_direct {
+    ($fields:expr, $name:literal, $config_field:ident, $dirty_flag:ident, $proxy:ident, $type:ty) => {
+        $fields.add_field_method_get($name, |_, this| {
+            let state = ConfigState::new(this.config.clone(), this.dirty.clone());
+            Ok($proxy::new(state))
+        });
+
+        $fields.add_field_method_set($name, |_, this, value: LuaTable| {
+            if let Some(v) = <$type>::from_lua_table(&value)? {
                 this.config.lock().unwrap().$config_field = v;
                 this.dirty.lock().unwrap().$dirty_flag = true;
             }
@@ -208,21 +225,21 @@ impl UserData for ConfigWrapper {
             LayoutConfigProxy,
             extract_layout
         );
-        proxy_field!(
+        proxy_field_direct!(
             fields,
             "cursor",
             cursor,
             cursor,
             CursorConfigProxy,
-            extract_cursor
+            niri_config::Cursor
         );
-        proxy_field!(
+        proxy_field_direct!(
             fields,
             "animations",
             animations,
             animations,
             AnimationsConfigProxy,
-            extract_animations
+            niri_config::Animations
         );
         proxy_field!(
             fields,
@@ -240,13 +257,13 @@ impl UserData for ConfigWrapper {
             OverviewConfigProxy,
             extract_overview
         );
-        proxy_field!(
+        proxy_field_direct!(
             fields,
             "hotkey_overlay",
             hotkey_overlay,
             misc,
             HotkeyOverlayConfigProxy,
-            extract_hotkey_overlay
+            niri_config::HotkeyOverlay
         );
         proxy_field!(
             fields,

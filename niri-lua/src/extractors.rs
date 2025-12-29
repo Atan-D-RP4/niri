@@ -37,13 +37,12 @@
 use std::str::FromStr;
 
 use mlua::prelude::*;
-use niri_config::animations::Animations;
 use niri_config::appearance::*;
 use niri_config::debug::{Debug, PreviewRender};
 use niri_config::gestures::Gestures;
 use niri_config::input::*;
 use niri_config::layout::*;
-use niri_config::misc::{Cursor, HotkeyOverlay, *};
+use niri_config::misc::*;
 use niri_config::recent_windows::{MruHighlight, MruPreviews, RecentWindows};
 use niri_config::{ConfigNotification, FloatOrInt, XwaylandSatellite};
 pub use niri_lua_traits::{
@@ -55,29 +54,12 @@ pub fn extract_color(color_str: &str) -> Option<Color> {
     Color::from_str(color_str).ok()
 }
 
-pub fn extract_animations(table: &LuaTable) -> LuaResult<Option<Animations>> {
-    Animations::from_lua_table(table)
-}
-
-pub fn extract_cursor(table: &LuaTable) -> LuaResult<Option<Cursor>> {
-    Cursor::from_lua_table(table)
-}
-
-pub fn extract_hotkey_overlay(table: &LuaTable) -> LuaResult<Option<HotkeyOverlay>> {
-    HotkeyOverlay::from_lua_table(table)
-}
-
 pub fn extract_color_opt(table: &LuaTable, field: &str) -> LuaResult<Option<Color>> {
     if let Some(color_str) = extract_string_opt(table, field)? {
         Ok(extract_color(&color_str))
     } else {
         Ok(None)
     }
-}
-
-/// Extract simple boolean flags like prefer_no_csd.
-pub fn extract_prefer_no_csd(table: &LuaTable) -> LuaResult<Option<bool>> {
-    extract_bool_opt(table, "prefer_no_csd")
 }
 
 /// Extract clipboard configuration from Lua table.
@@ -1597,26 +1579,6 @@ mod tests {
     // ========================================================================
     // extract_animations tests
     // ========================================================================
-
-    // ========================================================================
-    // extract_prefer_no_csd tests
-    // ========================================================================
-
-    #[test]
-    fn extract_prefer_no_csd_true() {
-        let (_lua, table) = create_test_table();
-        table.set("prefer_no_csd", true).unwrap();
-        let result = extract_prefer_no_csd(&table).unwrap();
-        assert_eq!(result, Some(true));
-    }
-
-    #[test]
-    fn extract_prefer_no_csd_false() {
-        let (_lua, table) = create_test_table();
-        table.set("prefer_no_csd", false).unwrap();
-        let result = extract_prefer_no_csd(&table).unwrap();
-        assert_eq!(result, Some(false));
-    }
 
     // ========================================================================
     // extract_clipboard tests

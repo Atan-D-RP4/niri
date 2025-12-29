@@ -40,101 +40,26 @@ pub trait LuaEnumConvert: Sized {
 // Primitive Implementations
 // ============================================================================
 
-impl LuaFieldConvert for bool {
-    type LuaType = bool;
+/// Macro to implement LuaFieldConvert for Copy types where LuaType = Self.
+macro_rules! impl_lua_field_convert_copy {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl LuaFieldConvert for $ty {
+                type LuaType = $ty;
 
-    fn to_lua(&self) -> bool {
-        *self
-    }
+                fn to_lua(&self) -> $ty {
+                    *self
+                }
 
-    fn from_lua(value: bool) -> LuaResult<Self> {
-        Ok(value)
-    }
+                fn from_lua(value: $ty) -> LuaResult<Self> {
+                    Ok(value)
+                }
+            }
+        )+
+    };
 }
 
-impl LuaFieldConvert for i32 {
-    type LuaType = i32;
-
-    fn to_lua(&self) -> i32 {
-        *self
-    }
-
-    fn from_lua(value: i32) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
-
-impl LuaFieldConvert for i64 {
-    type LuaType = i64;
-
-    fn to_lua(&self) -> i64 {
-        *self
-    }
-
-    fn from_lua(value: i64) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
-
-impl LuaFieldConvert for u8 {
-    type LuaType = u8;
-
-    fn to_lua(&self) -> u8 {
-        *self
-    }
-
-    fn from_lua(value: u8) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
-
-impl LuaFieldConvert for u16 {
-    type LuaType = u16;
-
-    fn to_lua(&self) -> u16 {
-        *self
-    }
-
-    fn from_lua(value: u16) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
-
-impl LuaFieldConvert for u32 {
-    type LuaType = u32;
-
-    fn to_lua(&self) -> u32 {
-        *self
-    }
-
-    fn from_lua(value: u32) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
-
-impl LuaFieldConvert for u64 {
-    type LuaType = u64;
-
-    fn to_lua(&self) -> u64 {
-        *self
-    }
-
-    fn from_lua(value: u64) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
-
-impl LuaFieldConvert for f64 {
-    type LuaType = f64;
-
-    fn to_lua(&self) -> f64 {
-        *self
-    }
-
-    fn from_lua(value: f64) -> LuaResult<Self> {
-        Ok(value)
-    }
-}
+impl_lua_field_convert_copy!(bool, i32, i64, u8, u16, u32, u64, f64);
 
 impl LuaFieldConvert for String {
     type LuaType = String;
@@ -407,154 +332,100 @@ impl<const MIN: i32, const MAX: i32> LuaFieldConvert for FloatOrInt<MIN, MAX> {
 // ============================================================================
 
 use niri_config::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap, TrackLayout};
-
-impl LuaFieldConvert for AccelProfile {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            AccelProfile::Adaptive => "adaptive",
-            AccelProfile::Flat => "flat",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "adaptive" => Ok(AccelProfile::Adaptive),
-            "flat" => Ok(AccelProfile::Flat),
-            _ => Err(LuaError::external(format!(
-                "Invalid accel_profile '{}'. Expected: adaptive, flat",
-                value
-            ))),
-        }
-    }
-}
-
-impl LuaFieldConvert for ClickMethod {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            ClickMethod::ButtonAreas => "button-areas",
-            ClickMethod::Clickfinger => "clickfinger",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "button-areas" => Ok(ClickMethod::ButtonAreas),
-            "clickfinger" => Ok(ClickMethod::Clickfinger),
-            _ => Err(LuaError::external(format!(
-                "Invalid click_method '{}'. Expected: button-areas, clickfinger",
-                value
-            ))),
-        }
-    }
-}
-
-impl LuaFieldConvert for ScrollMethod {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            ScrollMethod::NoScroll => "no-scroll",
-            ScrollMethod::TwoFinger => "two-finger",
-            ScrollMethod::Edge => "edge",
-            ScrollMethod::OnButtonDown => "on-button-down",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "no-scroll" => Ok(ScrollMethod::NoScroll),
-            "two-finger" => Ok(ScrollMethod::TwoFinger),
-            "edge" => Ok(ScrollMethod::Edge),
-            "on-button-down" => Ok(ScrollMethod::OnButtonDown),
-            _ => Err(LuaError::external(format!(
-                "Invalid scroll_method '{}'. Expected: no-scroll, two-finger, edge, on-button-down",
-                value
-            ))),
-        }
-    }
-}
-
-impl LuaFieldConvert for TapButtonMap {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            TapButtonMap::LeftRightMiddle => "left-right-middle",
-            TapButtonMap::LeftMiddleRight => "left-middle-right",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "left-right-middle" => Ok(TapButtonMap::LeftRightMiddle),
-            "left-middle-right" => Ok(TapButtonMap::LeftMiddleRight),
-            _ => Err(LuaError::external(format!(
-                "Invalid tap_button_map '{}'. Expected: left-right-middle, left-middle-right",
-                value
-            ))),
-        }
-    }
-}
-
-impl LuaFieldConvert for TrackLayout {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            TrackLayout::Global => "global",
-            TrackLayout::Window => "window",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "global" => Ok(TrackLayout::Global),
-            "window" => Ok(TrackLayout::Window),
-            _ => Err(LuaError::external(format!(
-                "Invalid track_layout '{}'. Expected: global, window",
-                value
-            ))),
-        }
-    }
-}
-
+use niri_config::layout::CenterFocusedColumn;
 use niri_config::TabIndicatorPosition;
+use niri_ipc::ColumnDisplay;
 
-impl LuaFieldConvert for TabIndicatorPosition {
-    type LuaType = String;
+macro_rules! impl_lua_enum {
+    ($ty:ty, $name:expr, [$(($variant:ident, $str:expr)),+ $(,)?]) => {
+        impl LuaFieldConvert for $ty {
+            type LuaType = String;
 
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            TabIndicatorPosition::Left => "left",
-            TabIndicatorPosition::Right => "right",
-            TabIndicatorPosition::Top => "top",
-            TabIndicatorPosition::Bottom => "bottom",
+            fn to_lua(&self) -> String {
+                match self {
+                    $(Self::$variant => $str,)+
+                }
+                .to_string()
+            }
+
+            fn from_lua(value: String) -> LuaResult<Self> {
+                match value.as_str() {
+                    $($str => Ok(Self::$variant),)+
+                    _ => Err(LuaError::external(format!(
+                        concat!("Invalid ", $name, " '{}'. Expected: {}"),
+                        value,
+                        [$($str),+].join(", ")
+                    ))),
+                }
+            }
         }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "left" => Ok(TabIndicatorPosition::Left),
-            "right" => Ok(TabIndicatorPosition::Right),
-            "top" => Ok(TabIndicatorPosition::Top),
-            "bottom" => Ok(TabIndicatorPosition::Bottom),
-            _ => Err(LuaError::external(format!(
-                "Invalid position '{}'. Expected: left, right, top, bottom",
-                value
-            ))),
-        }
-    }
+    };
 }
+
+impl_lua_enum!(
+    AccelProfile,
+    "accel_profile",
+    [(Adaptive, "adaptive"), (Flat, "flat"),]
+);
+
+impl_lua_enum!(
+    ClickMethod,
+    "click_method",
+    [(ButtonAreas, "button-areas"), (Clickfinger, "clickfinger"),]
+);
+
+impl_lua_enum!(
+    ScrollMethod,
+    "scroll_method",
+    [
+        (NoScroll, "no-scroll"),
+        (TwoFinger, "two-finger"),
+        (Edge, "edge"),
+        (OnButtonDown, "on-button-down"),
+    ]
+);
+
+impl_lua_enum!(
+    TapButtonMap,
+    "tap_button_map",
+    [
+        (LeftRightMiddle, "left-right-middle"),
+        (LeftMiddleRight, "left-middle-right"),
+    ]
+);
+
+impl_lua_enum!(
+    TrackLayout,
+    "track_layout",
+    [(Global, "global"), (Window, "window"),]
+);
+
+impl_lua_enum!(
+    TabIndicatorPosition,
+    "position",
+    [
+        (Left, "left"),
+        (Right, "right"),
+        (Top, "top"),
+        (Bottom, "bottom"),
+    ]
+);
+
+impl_lua_enum!(
+    CenterFocusedColumn,
+    "center_focused_column",
+    [
+        (Never, "never"),
+        (Always, "always"),
+        (OnOverflow, "on-overflow"),
+    ]
+);
+
+impl_lua_enum!(
+    ColumnDisplay,
+    "default_column_display",
+    [(Normal, "normal"), (Tabbed, "tabbed"),]
+);
 
 // ============================================================================
 // SpawnAtStartup Implementation
@@ -563,7 +434,6 @@ impl LuaFieldConvert for TabIndicatorPosition {
 use niri_config::SpawnAtStartup;
 
 impl LuaFieldConvert for SpawnAtStartup {
-    /// SpawnAtStartup is represented as a table { command = { "arg1", "arg2", ... } }
     type LuaType = SpawnAtStartupTable;
 
     fn to_lua(&self) -> SpawnAtStartupTable {
@@ -579,7 +449,6 @@ impl LuaFieldConvert for SpawnAtStartup {
     }
 }
 
-/// Intermediate struct for SpawnAtStartup Lua representation
 #[derive(Clone)]
 pub struct SpawnAtStartupTable {
     pub command: Vec<String>,
@@ -603,58 +472,6 @@ impl FromLua for SpawnAtStartupTable {
             _ => Err(LuaError::external(
                 "Expected a table for spawn_at_startup with 'command' field",
             )),
-        }
-    }
-}
-
-use niri_config::layout::CenterFocusedColumn;
-
-impl LuaFieldConvert for CenterFocusedColumn {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            CenterFocusedColumn::Never => "never",
-            CenterFocusedColumn::Always => "always",
-            CenterFocusedColumn::OnOverflow => "on-overflow",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "never" => Ok(CenterFocusedColumn::Never),
-            "always" => Ok(CenterFocusedColumn::Always),
-            "on-overflow" => Ok(CenterFocusedColumn::OnOverflow),
-            _ => Err(LuaError::external(format!(
-                "Invalid center_focused_column '{}'. Expected: never, always, on-overflow",
-                value
-            ))),
-        }
-    }
-}
-
-use niri_ipc::ColumnDisplay;
-
-impl LuaFieldConvert for ColumnDisplay {
-    type LuaType = String;
-
-    fn to_lua(&self) -> Self::LuaType {
-        match self {
-            ColumnDisplay::Normal => "normal",
-            ColumnDisplay::Tabbed => "tabbed",
-        }
-        .to_string()
-    }
-
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self> {
-        match value.as_str() {
-            "normal" => Ok(ColumnDisplay::Normal),
-            "tabbed" => Ok(ColumnDisplay::Tabbed),
-            _ => Err(LuaError::external(format!(
-                "Invalid default_column_display '{}'. Expected: normal, tabbed",
-                value
-            ))),
         }
     }
 }
