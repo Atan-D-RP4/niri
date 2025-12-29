@@ -322,28 +322,13 @@ impl LuaUserData for BindsCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
-        methods.add_method("add", |lua, this, value: LuaValue| -> LuaResult<()> {
-            this.with_dirty_config(|config, dirty| {
-                match &value {
-                    LuaValue::Table(tbl) => {
-                        if tbl.contains_key(1)? {
-                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                                let (_, output_tbl) = pair?;
-                                let output = extract_output(lua, &output_tbl)?;
-                                config.outputs.0.push(output);
-                            }
-                        } else {
-                            let output = extract_output(lua, tbl)?;
-                            config.outputs.0.push(output);
-                        }
-                        dirty.outputs = true;
-                        Ok(())
-                    }
-                    _ => Err(LuaError::external("outputs:add() expects a table")),
-                }
-            })
+        // TODO: binds:add() requires complex action parsing - not yet implemented
+        // Use niri.config.binds in config.lua instead
+        methods.add_method("add", |_lua, _this, _value: LuaValue| -> LuaResult<()> {
+            Err(LuaError::external(
+                "binds:add() is not yet implemented. Define bindings in config.lua instead.",
+            ))
         });
-
 
         methods.add_method("list", |lua, this, ()| {
             this.with_config(|config| {
