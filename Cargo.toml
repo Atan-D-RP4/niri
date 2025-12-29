@@ -4,6 +4,7 @@ members = [
     "niri-ipc",
     "niri-lua",
     "niri-lua-derive",
+    "niri-lua-traits",
     "niri-visual-tests",
 ]
 

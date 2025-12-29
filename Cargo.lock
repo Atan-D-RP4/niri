@@ -2359,7 +2359,10 @@ dependencies = [
  "insta",
  "knuffel",
  "miette",
+ "mlua",
  "niri-ipc",
+ "niri-lua-derive",
+ "niri-lua-traits",
  "pretty_assertions",
  "regex",
  "smithay",
@@ -2388,12 +2391,14 @@ dependencies = [
  "dirs",
  "gethostname",
  "glob",
+ "indexmap",
  "insta",
  "log",
  "mlua",
  "niri-config",
  "niri-ipc",
  "niri-lua-derive",
+ "niri-lua-traits",
  "nix 0.29.0",
  "regex",
  "serial_test",
@@ -2410,6 +2415,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
+]
+
+[[package]]
+name = "niri-lua-traits"
+version = "25.11.0"
+dependencies = [
+ "mlua",
 ]
 
 [[package]]

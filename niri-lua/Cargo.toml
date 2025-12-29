@@ -14,11 +14,13 @@ async-channel.workspace = true
 calloop.workspace = true
 dirs = "6"
 gethostname = "1"
+indexmap = "2"
 log.workspace = true
 mlua.workspace = true
 niri-config = { version = "25.8.0", path = "../niri-config" }
 niri-ipc = { version = "25.8.0", path = "../niri-ipc" }
 niri-lua-derive = { version = "25.11.0", path = "../niri-lua-derive" }
+niri-lua-traits = { version = "25.11.0", path = "../niri-lua-traits" }
 
 nix = { version = "0.29", features = ["signal", "process"] }
 
