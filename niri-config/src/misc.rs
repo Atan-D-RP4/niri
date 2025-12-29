@@ -1,3 +1,5 @@
+use niri_lua_derive::FromLuaTable;
+
 use crate::appearance::{Color, WorkspaceShadow, WorkspaceShadowPart, DEFAULT_BACKDROP_COLOR};
 use crate::utils::{Flag, MergeWith};
 use crate::FloatOrInt;
@@ -14,7 +16,7 @@ pub struct SpawnShAtStartup {
     pub command: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, FromLuaTable)]
 pub struct Cursor {
     pub xcursor_theme: String,
     pub xcursor_size: u8,
@@ -64,7 +66,7 @@ impl Default for ScreenshotPath {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, FromLuaTable)]
 pub struct HotkeyOverlay {
     pub skip_at_startup: bool,
     pub hide_not_bound: bool,

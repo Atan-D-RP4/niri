@@ -29,19 +29,24 @@ use miette::{miette, Context as _, IntoDiagnostic as _};
 pub mod macros;
 
 pub mod animations;
+mod animations_lua;
 pub mod appearance;
 pub mod binds;
 pub mod debug;
+mod debug_lua;
 pub mod error;
 pub mod gestures;
 pub mod input;
 pub mod layer_rule;
 pub mod layout;
 pub mod misc;
+mod misc_lua;
 pub mod output;
+mod output_lua;
 pub mod recent_windows;
 pub mod utils;
 pub mod window_rule;
+mod window_rule_lua;
 pub mod workspace;
 
 pub use crate::animations::{Animation, Animations};
