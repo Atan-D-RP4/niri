@@ -3,11 +3,20 @@
 //! When Lua modifies config values, dirty flags are set to indicate which
 //! compositor subsystems need to be updated. The compositor polls these
 //! flags after Lua execution and refreshes the appropriate subsystems.
+//!
+//! ## Field-Level Tracking
+//!
+//! In addition to section-level boolean flags, this module provides field-level
+//! dirty path tracking via `dirty_paths`. This allows the compositor to know
+//! exactly which fields changed (e.g., "layout.gaps" vs "layout.border").
+
+use indexmap::IndexSet;
 
 /// Tracks which config subsystems have been modified.
 ///
 /// Each flag corresponds to a subsystem that may need to be refreshed
-/// when its configuration changes.
+/// when its configuration changes. Additionally, `dirty_paths` tracks
+/// the specific field paths that were modified.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConfigDirtyFlags {
     /// Layout-related changes (gaps, borders, focus ring, etc.)
@@ -52,12 +61,24 @@ pub struct ConfigDirtyFlags {
     pub environment: bool,
     /// Workspace configuration
     pub workspaces: bool,
+    /// Field-level dirty paths (e.g., "layout.gaps", "input.touchpad.natural_scroll")
+    pub dirty_paths: IndexSet<String>,
 }
 
 impl ConfigDirtyFlags {
     /// Create a new set of dirty flags with all flags cleared.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Mark a specific field path as dirty.
+    pub fn mark_dirty(&mut self, path: &str) {
+        self.dirty_paths.insert(path.to_string());
+    }
+
+    /// Take the dirty paths, returning them and clearing the set.
+    pub fn take_dirty_paths(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.dirty_paths).into_iter().collect()
     }
 
     /// Check if any flag is set.
@@ -83,6 +104,7 @@ impl ConfigDirtyFlags {
             || self.spawn_at_startup
             || self.environment
             || self.workspaces
+            || !self.dirty_paths.is_empty()
     }
 
     /// Clear all flags.
@@ -157,5 +179,62 @@ mod tests {
         // Taken should have the values
         assert!(taken.layout);
         assert!(taken.animations);
+    }
+
+    #[test]
+    fn test_mark_dirty_adds_path() {
+        let mut flags = ConfigDirtyFlags::default();
+        flags.mark_dirty("layout.gaps");
+        flags.mark_dirty("input.touchpad.natural_scroll");
+
+        assert!(flags.dirty_paths.contains("layout.gaps"));
+        assert!(flags.dirty_paths.contains("input.touchpad.natural_scroll"));
+        assert_eq!(flags.dirty_paths.len(), 2);
+    }
+
+    #[test]
+    fn test_mark_dirty_deduplicates() {
+        let mut flags = ConfigDirtyFlags::default();
+        flags.mark_dirty("layout.gaps");
+        flags.mark_dirty("layout.gaps");
+        flags.mark_dirty("layout.gaps");
+
+        assert_eq!(flags.dirty_paths.len(), 1);
+    }
+
+    #[test]
+    fn test_take_dirty_paths_returns_and_clears() {
+        let mut flags = ConfigDirtyFlags::default();
+        flags.mark_dirty("layout.gaps");
+        flags.mark_dirty("layout.border");
+
+        let paths = flags.take_dirty_paths();
+
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&"layout.gaps".to_string()));
+        assert!(paths.contains(&"layout.border".to_string()));
+        assert!(flags.dirty_paths.is_empty());
+    }
+
+    #[test]
+    fn test_any_returns_true_when_dirty_paths_set() {
+        let mut flags = ConfigDirtyFlags::default();
+        assert!(!flags.any());
+
+        flags.mark_dirty("layout.gaps");
+        assert!(flags.any());
+    }
+
+    #[test]
+    fn test_clear_also_clears_dirty_paths() {
+        let mut flags = ConfigDirtyFlags::default();
+        flags.layout = true;
+        flags.mark_dirty("layout.gaps");
+
+        flags.clear();
+
+        assert!(!flags.layout);
+        assert!(flags.dirty_paths.is_empty());
+        assert!(!flags.any());
     }
 }
