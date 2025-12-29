@@ -9,13 +9,13 @@ use crate::collections::{
     WindowRulesCollection, WorkspacesCollection,
 };
 use crate::config_dirty::ConfigDirtyFlags;
+use crate::config_state::ConfigState;
 use crate::config_proxies::{
     AnimationsConfigProxy, ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy,
     DebugConfigProxy, GesturesConfigProxy, HotkeyOverlayConfigProxy, InputConfigProxy,
     LayoutConfigProxy, OverviewConfigProxy, RecentWindowsConfigProxy, SpawnAtStartupConfigProxy,
     XwaylandSatelliteConfigProxy,
 };
-use crate::config_state::ConfigState;
 use crate::extractors::{
     extract_clipboard, extract_config_notification, extract_debug, extract_gestures, extract_input,
     extract_layout, extract_overview, extract_recent_windows, extract_xwayland_satellite,
@@ -64,8 +64,7 @@ macro_rules! collection_field {
     ($fields:expr, $name:literal, $collection:ident) => {
         $fields.add_field_method_get($name, |_, this| {
             Ok($collection {
-                config: this.config.clone(),
-                dirty: this.dirty.clone(),
+                state: this.state(),
             })
         });
     };
@@ -142,6 +141,10 @@ impl ConfigWrapper {
     pub fn swap_config(&self, new_config: Config) -> Config {
         let mut guard = self.config.lock().unwrap();
         std::mem::replace(&mut *guard, new_config)
+    }
+
+    pub fn state(&self) -> ConfigState {
+        ConfigState::new(self.config.clone(), self.dirty.clone())
     }
 }
 

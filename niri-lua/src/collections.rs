@@ -3,7 +3,6 @@
 //! Provides CRUD operations for collection-type configuration:
 //! - outputs, binds, window_rules, workspaces, environment, layer_rules
 
-use std::sync::{Arc, Mutex};
 
 use mlua::prelude::*;
 use niri_config::binds::{Bind, Key};
@@ -11,77 +10,89 @@ use niri_config::output::{Mode, Output, Position, Vrr};
 use niri_config::Config;
 use niri_ipc::{ConfiguredMode, Transform};
 
-use crate::config_dirty::ConfigDirtyFlags;
+
+use crate::config_state::{ConfigState, DirtyFlag};
 use crate::extractors::*;
 
 pub trait CollectionProxyBase<T: Clone> {
-    fn config(&self) -> Arc<Mutex<Config>>;
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>>;
+    fn state(&self) -> &ConfigState;
 
     fn collection<'a>(&self, config: &'a Config) -> &'a Vec<T>;
 
-    fn with_config<R>(&self, f: impl FnOnce(&Config) -> R) -> R {
-        let config_handle = self.config();
-        let config = config_handle.lock().unwrap();
+    fn collection_mut<'a>(&self, config: &'a mut Config) -> &'a mut Vec<T>;
+
+    fn dirty_flag(&self) -> DirtyFlag;
+
+    fn with_config<R>(&self, f: impl FnOnce(&Config) -> mlua::Result<R>) -> mlua::Result<R> {
+        let config = self
+            .state()
+            .try_borrow_config()
+            .map_err(|e| mlua::Error::external(e))?;
         f(&config)
     }
 
-    fn with_dirty_config<R, E: From<LuaError>>(
+    fn with_dirty_config<R>(
         &self,
-        f: impl FnOnce(&mut Config, &mut ConfigDirtyFlags) -> Result<R, E>,
-    ) -> Result<R, E> {
-        let config_handle = self.config();
-        let dirty_handle = self.dirty();
-        let mut config = config_handle.lock().unwrap();
-        let mut dirty = dirty_handle.lock().unwrap();
-        f(&mut config, &mut dirty)
+        f: impl FnOnce(&mut Config) -> mlua::Result<R>,
+    ) -> mlua::Result<R> {
+        let mut config = self
+            .state()
+            .try_borrow_config()
+            .map_err(|e| mlua::Error::external(e))?;
+        let result = f(&mut config)?;
+        drop(config);
+        self.state().mark_dirty(self.dirty_flag());
+        Ok(result)
     }
 
-    fn list(&self) -> Vec<T> {
-        self.with_config(|config| self.collection(config).clone())
+    fn list(&self) -> mlua::Result<Vec<T>> {
+        self.with_config(|config| Ok(self.collection(config).clone()))
     }
 
-    fn len(&self) -> usize {
-        self.with_config(|config| self.collection(config).len())
+    fn len(&self) -> mlua::Result<usize> {
+        self.with_config(|config| Ok(self.collection(config).len()))
     }
 
-    fn is_empty(&self) -> bool {
-        self.with_config(|config| self.collection(config).is_empty())
-    }
-}
-
-// ============================================================================
-// OutputsCollection - CRUD for output configurations
-// ============================================================================
-
-/// Proxy for `niri.config.outputs` collection
-#[derive(Clone)]
-pub struct OutputsCollection {
-    pub config: Arc<Mutex<Config>>,
-    pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl CollectionProxyBase<Output> for OutputsCollection {
-    fn config(&self) -> Arc<Mutex<Config>> {
-        self.config.clone()
-    }
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
-        self.dirty.clone()
-    }
-
-    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<Output> {
-        &config.outputs.0
+    fn is_empty(&self) -> mlua::Result<bool> {
+        self.with_config(|config| Ok(self.collection(config).is_empty()))
     }
 }
+
+macro_rules! define_collection {
+    ($name:ident, $item:ty, $path:ident $(. $field:tt)*, $dirty:ident) => {
+        #[derive(Clone)]
+        pub struct $name {
+            pub state: ConfigState,
+        }
+
+        impl CollectionProxyBase<$item> for $name {
+            fn state(&self) -> &ConfigState {
+                &self.state
+            }
+
+            fn collection<'a>(&self, config: &'a Config) -> &'a Vec<$item> {
+                &config.$path $(.$field)*
+            }
+
+            fn collection_mut<'a>(&self, config: &'a mut Config) -> &'a mut Vec<$item> {
+                &mut config.$path $(.$field)*
+            }
+
+            fn dirty_flag(&self) -> DirtyFlag {
+                DirtyFlag::$dirty
+            }
+        }
+    };
+}
+
+define_collection!(OutputsCollection, Output, outputs.0, Outputs);
 
 impl LuaUserData for OutputsCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| -> LuaResult<()> {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 match &value {
                     LuaValue::Table(tbl) => {
                         if tbl.contains_key(1)? {
@@ -94,7 +105,7 @@ impl LuaUserData for OutputsCollection {
                             let output = extract_output(lua, tbl)?;
                             config.outputs.0.push(output);
                         }
-                        dirty.outputs = true;
+                        
                         Ok(())
                     }
                     _ => Err(LuaError::external("outputs:add() expects a table")),
@@ -153,12 +164,12 @@ impl LuaUserData for OutputsCollection {
         });
 
         methods.add_method("remove", |_, this, name: String| -> LuaResult<()> {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 let len_before = config.outputs.0.len();
                 config.outputs.0.retain(|o| o.name != name);
 
                 if config.outputs.0.len() < len_before {
-                    dirty.outputs = true;
+                    
                 }
 
                 Ok(())
@@ -166,10 +177,10 @@ impl LuaUserData for OutputsCollection {
         });
 
         methods.add_method("clear", |_, this, ()| -> LuaResult<()> {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if !config.outputs.0.is_empty() {
                     config.outputs.0.clear();
-                    dirty.outputs = true;
+                    
                 }
 
                 Ok(())
@@ -294,29 +305,7 @@ fn parse_transform(s: &str) -> LuaResult<Transform> {
     }
 }
 
-// ============================================================================
-// BindsCollection - CRUD for keybindings
-// ============================================================================
-
-#[derive(Clone)]
-pub struct BindsCollection {
-    pub config: Arc<Mutex<Config>>,
-    pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl CollectionProxyBase<Bind> for BindsCollection {
-    fn config(&self) -> Arc<Mutex<Config>> {
-        self.config.clone()
-    }
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
-        self.dirty.clone()
-    }
-
-    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<Bind> {
-        &config.binds.0
-    }
-}
+define_collection!(BindsCollection, Bind, binds.0, Binds);
 
 impl LuaUserData for BindsCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
@@ -350,7 +339,7 @@ impl LuaUserData for BindsCollection {
         });
 
         methods.add_method("remove", |_, this, key_str: String| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 let key: Key = key_str
                     .parse()
                     .map_err(|e| LuaError::external(format!("Invalid key: {}", e)))?;
@@ -359,7 +348,7 @@ impl LuaUserData for BindsCollection {
                 config.binds.0.retain(|b| b.key != key);
 
                 if config.binds.0.len() < len_before {
-                    dirty.binds = true;
+                    
                 }
 
                 Ok(())
@@ -367,10 +356,10 @@ impl LuaUserData for BindsCollection {
         });
 
         methods.add_method("clear", |_, this, ()| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if !config.binds.0.is_empty() {
                     config.binds.0.clear();
-                    dirty.binds = true;
+                    
                 }
 
                 Ok(())
@@ -379,36 +368,14 @@ impl LuaUserData for BindsCollection {
     }
 }
 
-// ============================================================================
-// WindowRulesCollection - CRUD for window rules
-// ============================================================================
-
-#[derive(Clone)]
-pub struct WindowRulesCollection {
-    pub config: Arc<Mutex<Config>>,
-    pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl CollectionProxyBase<niri_config::WindowRule> for WindowRulesCollection {
-    fn config(&self) -> Arc<Mutex<Config>> {
-        self.config.clone()
-    }
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
-        self.dirty.clone()
-    }
-
-    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::WindowRule> {
-        &config.window_rules
-    }
-}
+define_collection!(WindowRulesCollection, niri_config::WindowRule, window_rules, WindowRules);
 
 impl LuaUserData for WindowRulesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 match &value {
                     LuaValue::Table(tbl) => {
                         if tbl.contains_key(1)? {
@@ -421,7 +388,7 @@ impl LuaUserData for WindowRulesCollection {
                             let rule = extract_window_rule(lua, tbl)?;
                             config.window_rules.push(rule);
                         }
-                        dirty.window_rules = true;
+                        
                         Ok(())
                     }
                     _ => Err(LuaError::external("window_rules:add() expects a table")),
@@ -457,10 +424,10 @@ impl LuaUserData for WindowRulesCollection {
         });
 
         methods.add_method("clear", |_, this, ()| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if !config.window_rules.is_empty() {
                     config.window_rules.clear();
-                    dirty.window_rules = true;
+                    
                 }
 
                 Ok(())
@@ -535,36 +502,14 @@ fn extract_match(tbl: &LuaTable) -> LuaResult<niri_config::window_rule::Match> {
     Ok(m)
 }
 
-// ============================================================================
-// WorkspacesCollection - CRUD for named workspaces
-// ============================================================================
-
-#[derive(Clone)]
-pub struct WorkspacesCollection {
-    pub config: Arc<Mutex<Config>>,
-    pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl CollectionProxyBase<niri_config::Workspace> for WorkspacesCollection {
-    fn config(&self) -> Arc<Mutex<Config>> {
-        self.config.clone()
-    }
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
-        self.dirty.clone()
-    }
-
-    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::Workspace> {
-        &config.workspaces
-    }
-}
+define_collection!(WorkspacesCollection, niri_config::Workspace, workspaces, Workspaces);
 
 impl LuaUserData for WorkspacesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 match &value {
                     LuaValue::Table(tbl) => {
                         if tbl.contains_key(1)? {
@@ -577,7 +522,7 @@ impl LuaUserData for WorkspacesCollection {
                             let ws = extract_workspace(lua, tbl)?;
                             config.workspaces.push(ws);
                         }
-                        dirty.workspaces = true;
+                        
                         Ok(())
                     }
                     _ => Err(LuaError::external("workspaces:add() expects a table")),
@@ -645,12 +590,12 @@ impl LuaUserData for WorkspacesCollection {
         });
 
         methods.add_method("remove", |_, this, name: String| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 let len_before = config.workspaces.len();
                 config.workspaces.retain(|ws| ws.name.0 != name);
 
                 if config.workspaces.len() < len_before {
-                    dirty.workspaces = true;
+                    
                 }
 
                 Ok(())
@@ -658,10 +603,10 @@ impl LuaUserData for WorkspacesCollection {
         });
 
         methods.add_method("clear", |_, this, ()| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if !config.workspaces.is_empty() {
                     config.workspaces.clear();
-                    dirty.workspaces = true;
+                    
                 }
 
                 Ok(())
@@ -686,36 +631,14 @@ fn extract_workspace(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::Works
     })
 }
 
-// ============================================================================
-// EnvironmentCollection - CRUD for environment variables
-// ============================================================================
-
-#[derive(Clone)]
-pub struct EnvironmentCollection {
-    pub config: Arc<Mutex<Config>>,
-    pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl CollectionProxyBase<niri_config::EnvironmentVariable> for EnvironmentCollection {
-    fn config(&self) -> Arc<Mutex<Config>> {
-        self.config.clone()
-    }
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
-        self.dirty.clone()
-    }
-
-    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::EnvironmentVariable> {
-        &config.environment.0
-    }
-}
+define_collection!(EnvironmentCollection, niri_config::EnvironmentVariable, environment.0, Environment);
 
 impl LuaUserData for EnvironmentCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 match &value {
                     LuaValue::Table(tbl) => {
                         if tbl.contains_key(1)? {
@@ -728,7 +651,7 @@ impl LuaUserData for EnvironmentCollection {
                             let env = extract_environment_variable(lua, tbl)?;
                             config.environment.0.push(env);
                         }
-                        dirty.environment = true;
+                        
                         Ok(())
                     }
                     _ => Err(LuaError::external("environment:add() expects a table")),
@@ -771,7 +694,7 @@ impl LuaUserData for EnvironmentCollection {
         });
 
         methods.add_method("set", |_, this, (name, value): (String, Option<String>)| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if let Some(env) = config.environment.0.iter_mut().find(|e| e.name == name) {
                     env.value = value;
                 } else {
@@ -780,19 +703,19 @@ impl LuaUserData for EnvironmentCollection {
                         .0
                         .push(niri_config::EnvironmentVariable { name, value });
                 }
-                dirty.environment = true;
+                
 
                 Ok(())
             })
         });
 
         methods.add_method("remove", |_, this, name: String| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 let len_before = config.environment.0.len();
                 config.environment.0.retain(|e| e.name != name);
 
                 if config.environment.0.len() < len_before {
-                    dirty.environment = true;
+                    
                 }
 
                 Ok(())
@@ -800,10 +723,10 @@ impl LuaUserData for EnvironmentCollection {
         });
 
         methods.add_method("clear", |_, this, ()| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if !config.environment.0.is_empty() {
                     config.environment.0.clear();
-                    dirty.environment = true;
+                    
                 }
 
                 Ok(())
@@ -824,36 +747,14 @@ fn extract_environment_variable(
     Ok(niri_config::EnvironmentVariable { name, value })
 }
 
-// ============================================================================
-// LayerRulesCollection - CRUD for layer shell rules
-// ============================================================================
-
-#[derive(Clone)]
-pub struct LayerRulesCollection {
-    pub config: Arc<Mutex<Config>>,
-    pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
-}
-
-impl CollectionProxyBase<niri_config::LayerRule> for LayerRulesCollection {
-    fn config(&self) -> Arc<Mutex<Config>> {
-        self.config.clone()
-    }
-
-    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
-        self.dirty.clone()
-    }
-
-    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::LayerRule> {
-        &config.layer_rules
-    }
-}
+define_collection!(LayerRulesCollection, niri_config::LayerRule, layer_rules, LayerRules);
 
 impl LuaUserData for LayerRulesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 match &value {
                     LuaValue::Table(tbl) => {
                         if tbl.contains_key(1)? {
@@ -866,7 +767,7 @@ impl LuaUserData for LayerRulesCollection {
                             let rule = extract_layer_rule(lua, tbl)?;
                             config.layer_rules.push(rule);
                         }
-                        dirty.layer_rules = true;
+                        
                         Ok(())
                     }
                     _ => Err(LuaError::external("layer_rules:add() expects a table")),
@@ -899,10 +800,10 @@ impl LuaUserData for LayerRulesCollection {
         });
 
         methods.add_method("clear", |_, this, ()| {
-            this.with_dirty_config(|config, dirty| {
+            this.with_dirty_config(|config| {
                 if !config.layer_rules.is_empty() {
                     config.layer_rules.clear();
-                    dirty.layer_rules = true;
+                    
                 }
 
                 Ok(())
