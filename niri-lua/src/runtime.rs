@@ -61,7 +61,7 @@ use crate::loop_api::{
     SharedTimerManager,
 };
 use crate::process::{create_process_manager, CallbackPayload, SharedProcessManager};
-use crate::runtime_api::{clear_event_context_state, set_event_context_state, StateSnapshot};
+use crate::runtime_api::with_scoped_state;
 use crate::{CallbackRegistry, CompositorState, LuaComponent, NiriApi, SharedCallbackRegistry};
 
 /// Maximum callbacks to execute per flush cycle.
@@ -641,15 +641,9 @@ impl LuaRuntime {
                         log::warn!("Failed to remove scheduled callback from registry: {}", e);
                     }
 
-                    // Create fresh snapshot for THIS callback
-                    let snapshot = StateSnapshot::from_compositor_state(state);
-                    set_event_context_state(snapshot);
-
-                    // Execute the callback with timeout protection
-                    let result = self.call_with_timeout::<()>(&callback, ());
-
-                    // Clear context after callback completes
-                    clear_event_context_state();
+                    let result = with_scoped_state(&self.lua, state, || {
+                        self.call_with_timeout::<()>(&callback, ())
+                    });
 
                     match result {
                         Ok(()) => executed += 1,
@@ -713,31 +707,30 @@ impl LuaRuntime {
                 if let Some(ref registry) = self.callback_registry {
                     match registry.get(&self.lua, event.callback_id) {
                         Ok(Some(callback)) => {
-                            // Create fresh snapshot for THIS callback
-                            let snapshot = StateSnapshot::from_compositor_state(state);
-                            set_event_context_state(snapshot);
-
-                            let result = match &event.payload {
-                                CallbackPayload::Stdout(data) | CallbackPayload::Stderr(data) => {
-                                    if event.text_mode {
-                                        let text = String::from_utf8_lossy(data);
-                                        self.call_with_timeout(&callback, (LuaValue::Nil, text))
-                                    } else {
-                                        self.call_with_timeout(
-                                            &callback,
-                                            (LuaValue::Nil, self.lua.create_string(data).unwrap()),
-                                        )
+                            let result =
+                                with_scoped_state(&self.lua, state, || match &event.payload {
+                                    CallbackPayload::Stdout(data)
+                                    | CallbackPayload::Stderr(data) => {
+                                        if event.text_mode {
+                                            let text = String::from_utf8_lossy(data);
+                                            self.call_with_timeout(&callback, (LuaValue::Nil, text))
+                                        } else {
+                                            self.call_with_timeout(
+                                                &callback,
+                                                (
+                                                    LuaValue::Nil,
+                                                    self.lua.create_string(data).unwrap(),
+                                                ),
+                                            )
+                                        }
                                     }
-                                }
-                                CallbackPayload::Exit(result) => {
-                                    let table =
-                                        result.to_lua_table(&self.lua, event.text_mode).unwrap();
-                                    self.call_with_timeout(&callback, (table, LuaValue::Nil))
-                                }
-                            };
-
-                            // Clear context after callback completes
-                            clear_event_context_state();
+                                    CallbackPayload::Exit(result) => {
+                                        let table = result
+                                            .to_lua_table(&self.lua, event.text_mode)
+                                            .unwrap();
+                                        self.call_with_timeout(&callback, (table, LuaValue::Nil))
+                                    }
+                                });
 
                             match result {
                                 Ok(()) => executed += 1,
@@ -909,18 +902,13 @@ impl LuaRuntime {
     ///
     /// * `S` - The compositor state type that implements `CompositorState`
     ///
-    /// # Arguments
-    ///
-    /// * `api` - The RuntimeApi instance connected to the compositor's event loop
+    /// Register the runtime state API for querying compositor state.
     ///
     /// # Errors
     ///
     /// Returns an error if runtime API registration fails.
-    pub fn register_runtime_api<S>(&self, api: crate::RuntimeApi<S>) -> LuaResult<()>
-    where
-        S: crate::CompositorState + 'static,
-    {
-        crate::register_runtime_api(&self.lua, api)
+    pub fn register_runtime_api(&self) -> LuaResult<()> {
+        crate::register_runtime_api(&self.lua)
     }
 
     /// Initialize the event system for this runtime.

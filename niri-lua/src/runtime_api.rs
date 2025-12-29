@@ -5,33 +5,15 @@
 //!
 //! ## Architecture
 //!
-//! This module supports two modes of operation:
+//! All state queries use `lua.scope()` to create non-static userdata that directly borrows
+//! `&State`. This provides live state access and Rust's borrow checker ensures callbacks
+//! cannot retain references beyond the scope.
 //!
-//! ### 1. Event Handler Context (synchronous, no deadlock)
-//! When called from within an event handler (e.g., `niri.events:on("window:open", ...)`),
-//! we use pre-captured state snapshot stored in a thread-local. This avoids the deadlock
-//! that would occur if we tried to use the idle callback pattern while the event loop
-//! is blocked waiting for the Lua handler to complete.
-//!
-//! ### 2. Normal Context (async via idle callback)
-//! When called from other contexts (e.g., REPL, timers), we use the event loop message
-//! passing pattern like the IPC server:
-//! - Lua calls a function like `niri.state.windows()`
-//! - We create a channel and send a message to the event loop via `insert_idle()`
-//! - The event loop handler runs on the main thread with access to State
-//! - The handler collects the data and sends it back through the channel
-//! - The Lua function blocks waiting for the response (from Lua's perspective)
-//!
-//!
-//! See `niri-ui/spec/components/niri-lua-extensions.md` for detailed specifications:
-//! - Section 2: `niri.state.watch()` reactive subscription helper
-//! - Section 3: State interface improvements (rich event payloads, `niri.state.refresh()`)
-//! - Section 4: Event system extensions (handler IDs, pattern matching)
+//! State queries are only available within a scoped context (event handlers, timers with
+//! `insert_idle`, IPC execution). Calling them outside a scoped context returns an error.
 
-use std::cell::RefCell;
+use std::cell::Cell;
 
-use async_channel::{bounded, Sender};
-use calloop::LoopHandle;
 use mlua::{Lua, Result, Table, Value};
 use niri_ipc::{KeyboardLayouts, Output, Window, Workspace};
 
@@ -42,22 +24,33 @@ use crate::ipc_bridge::{output_to_lua, window_to_lua, windows_to_lua, workspaces
 // This allows `niri.state.*` functions to access pre-captured state data
 // when called from within event handlers, avoiding the deadlock that would
 // occur with the idle callback pattern.
+pub const SCOPED_STATE_GLOBAL_KEY: &str = "__niri_scoped_state";
+
+// Thread-local storage for scoped state active flag.
 thread_local! {
-    static EVENT_CONTEXT_STATE: RefCell<Option<StateSnapshot>> = const { RefCell::new(None) };
+    static SCOPED_STATE_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
 
-/// A snapshot of compositor state captured before event handler execution.
+/// Set whether scoped state is currently active.
 ///
-/// This is used to provide state access within event handlers without
-/// needing to query the event loop (which would deadlock).
-#[derive(Clone, Default)]
-pub struct StateSnapshot {
-    pub windows: Vec<Window>,
-    pub workspaces: Vec<Workspace>,
-    pub outputs: Vec<Output>,
-    pub keyboard_layouts: Option<KeyboardLayouts>,
-    pub cursor_position: Option<CursorPosition>,
-    pub focus_mode: FocusMode,
+/// This is used by query functions to determine if they should use the
+/// scoped state table or fall back to other methods.
+pub fn set_scoped_state_active(active: bool) {
+    SCOPED_STATE_ACTIVE.with(|cell| cell.set(active));
+}
+
+/// Check if scoped state is currently active.
+pub fn is_scoped_state_active() -> bool {
+    SCOPED_STATE_ACTIVE.with(|cell| cell.get())
+}
+
+fn get_scoped_state_table(lua: &Lua) -> mlua::Result<Table> {
+    if !is_scoped_state_active() {
+        return Err(mlua::Error::external(
+            "state queries require scoped state context",
+        ));
+    }
+    lua.globals().get::<Table>(SCOPED_STATE_GLOBAL_KEY)
 }
 
 /// Cursor position in global compositor coordinates.
@@ -87,95 +80,160 @@ pub enum FocusMode {
     Locked,
 }
 
-impl StateSnapshot {
-    /// Create a new state snapshot from the compositor state.
-    pub fn from_compositor_state<S: CompositorState>(state: &S) -> Self {
-        Self {
-            windows: state.get_windows(),
-            workspaces: state.get_workspaces(),
-            outputs: state.get_outputs(),
-            keyboard_layouts: state.get_keyboard_layouts(),
-            cursor_position: state.get_cursor_position(),
-            focus_mode: state.get_focus_mode(),
-        }
-    }
-
-    /// Get the focused window from the snapshot.
-    pub fn get_focused_window(&self) -> Option<&Window> {
-        self.windows.iter().find(|w| w.is_focused)
-    }
-}
-
-/// Set the event context state snapshot for the current thread.
+/// Execute a callback with scoped state access.
 ///
-/// This should be called before invoking Lua event handlers, and cleared
-/// afterwards using `clear_event_context_state()`.
-///
-/// # Example
-///
-/// ```ignore
-/// let snapshot = StateSnapshot::from_compositor_state(&state);
-/// set_event_context_state(snapshot);
-/// // ... call Lua event handlers ...
-/// clear_event_context_state();
-/// ```
-pub fn set_event_context_state(snapshot: StateSnapshot) {
-    EVENT_CONTEXT_STATE.with(|cell| {
-        *cell.borrow_mut() = Some(snapshot);
-    });
-}
+/// This sets up the scoped state context so that `niri.state.*` functions
+/// can access live compositor state. Use this for timer callbacks, scheduled
+/// callbacks, and IPC Lua execution.
+pub fn with_scoped_state<S, F, R>(lua: &Lua, state: &S, f: F) -> R
+where
+    S: CompositorState,
+    F: FnOnce() -> R,
+{
+    let result = lua.scope(|scope| {
+        let scoped_state_table = lua.create_table().unwrap();
 
-/// Clear the event context state snapshot for the current thread.
-///
-/// This should be called after Lua event handlers have completed.
-pub fn clear_event_context_state() {
-    EVENT_CONTEXT_STATE.with(|cell| {
-        *cell.borrow_mut() = None;
-    });
-}
+        let windows = state.get_windows();
+        let windows_data = windows_to_lua(lua, &windows).unwrap();
+        scoped_state_table
+            .set(
+                "windows",
+                scope
+                    .create_function(move |_, ()| -> Result<Table> { Ok(windows_data.clone()) })
+                    .unwrap(),
+            )
+            .unwrap();
 
-/// Get a clone of the event context state snapshot, if available.
-fn get_event_context_state() -> Option<StateSnapshot> {
-    EVENT_CONTEXT_STATE.with(|cell| cell.borrow().clone())
-}
+        let focused = windows.iter().find(|w| w.is_focused).cloned();
+        let focused_data = focused.as_ref().map(|w| window_to_lua(lua, w).unwrap());
+        scoped_state_table
+            .set(
+                "focused_window",
+                scope
+                    .create_function(move |_, ()| -> Result<Option<Table>> {
+                        Ok(focused_data.clone())
+                    })
+                    .unwrap(),
+            )
+            .unwrap();
 
-/// Generic runtime API that can query state from the compositor.
-///
-/// The generic parameter `S` allows this to work with any State type that provides the necessary
-/// accessors (e.g., `niri::State` from the main crate).
-///
-/// We use a generic here to avoid circular dependencies: niri-lua can't depend on niri, but niri
-/// can depend on niri-lua.
-pub struct RuntimeApi<S: 'static> {
-    event_loop: LoopHandle<'static, S>,
-}
+        let workspaces = state.get_workspaces();
+        let workspaces_data = workspaces_to_lua(lua, &workspaces).unwrap();
+        scoped_state_table
+            .set(
+                "workspaces",
+                scope
+                    .create_function(move |_, ()| -> Result<Table> { Ok(workspaces_data.clone()) })
+                    .unwrap(),
+            )
+            .unwrap();
 
-impl<S> RuntimeApi<S> {
-    /// Create a new RuntimeApi with access to the event loop.
-    pub fn new(event_loop: LoopHandle<'static, S>) -> Self {
-        Self { event_loop }
-    }
+        let outputs = state.get_outputs();
+        let outputs_data: Vec<Table> = outputs
+            .iter()
+            .map(|o| output_to_lua(lua, o).unwrap())
+            .collect();
+        scoped_state_table
+            .set(
+                "outputs",
+                scope
+                    .create_function(move |_, ()| -> Result<Vec<Table>> {
+                        Ok(outputs_data.clone())
+                    })
+                    .unwrap(),
+            )
+            .unwrap();
 
-    /// Query the event loop and wait for a response.
-    ///
-    /// This is a helper that creates a channel, inserts an idle callback into the event loop,
-    /// and blocks waiting for the response.
-    fn query<F, T>(&self, f: F) -> std::result::Result<T, String>
-    where
-        F: FnOnce(&mut S, Sender<T>) + 'static,
-        T: Send + 'static,
-    {
-        let (tx, rx) = bounded(1);
-
-        self.event_loop.insert_idle(move |state| {
-            f(state, tx);
+        let keyboard_layouts = state.get_keyboard_layouts();
+        let keyboard_layouts_data = keyboard_layouts.as_ref().map(|kl| {
+            let t = lua.create_table().unwrap();
+            let names_table = lua.create_table().unwrap();
+            for (i, name) in kl.names.iter().enumerate() {
+                names_table.set(i + 1, name.as_str()).unwrap();
+            }
+            t.set("names", names_table).unwrap();
+            t.set("current_idx", kl.current_idx).unwrap();
+            t
         });
+        scoped_state_table
+            .set(
+                "keyboard_layouts",
+                scope
+                    .create_function(move |_, ()| -> Result<Option<Table>> {
+                        Ok(keyboard_layouts_data.clone())
+                    })
+                    .unwrap(),
+            )
+            .unwrap();
 
-        // Block waiting for response from the event loop
-        // This blocks the Lua thread but not the main event loop
-        rx.recv_blocking()
-            .map_err(|_| String::from("Failed to receive response from compositor"))
-    }
+        let cursor_position = state.get_cursor_position();
+        let cursor_position_data = cursor_position.as_ref().map(|pos| {
+            let t = lua.create_table().unwrap();
+            t.set("x", pos.x).unwrap();
+            t.set("y", pos.y).unwrap();
+            t.set("output", pos.output.clone()).unwrap();
+            t
+        });
+        scoped_state_table
+            .set(
+                "cursor_position",
+                scope
+                    .create_function(move |_, ()| -> Result<Option<Table>> {
+                        Ok(cursor_position_data.clone())
+                    })
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let focus_mode = state.get_focus_mode();
+        let focus_mode_str = match focus_mode {
+            FocusMode::Normal => "normal",
+            FocusMode::Overview => "overview",
+            FocusMode::LayerShell => "layer_shell",
+            FocusMode::Locked => "locked",
+        };
+        scoped_state_table
+            .set(
+                "focus_mode",
+                scope
+                    .create_function(move |_, ()| -> Result<&'static str> { Ok(focus_mode_str) })
+                    .unwrap(),
+            )
+            .unwrap();
+
+        scoped_state_table
+            .set(
+                "reserved_space",
+                scope
+                    .create_function(move |lua, output_name: String| -> Result<Table> {
+                        let reserved = state.get_reserved_space(&output_name);
+                        let t = lua.create_table()?;
+                        t.set("top", reserved.top)?;
+                        t.set("bottom", reserved.bottom)?;
+                        t.set("left", reserved.left)?;
+                        t.set("right", reserved.right)?;
+                        Ok(t)
+                    })
+                    .unwrap(),
+            )
+            .unwrap();
+
+        lua.globals()
+            .set(SCOPED_STATE_GLOBAL_KEY, scoped_state_table)
+            .unwrap();
+        set_scoped_state_active(true);
+
+        let result = f();
+
+        set_scoped_state_active(false);
+        lua.globals()
+            .set(SCOPED_STATE_GLOBAL_KEY, Value::Nil)
+            .unwrap();
+
+        Ok(result)
+    });
+
+    result.unwrap()
 }
 
 /// Trait for accessing compositor state.
@@ -210,29 +268,9 @@ pub trait CompositorState {
 
 /// Register the runtime state API in a Lua context.
 ///
-/// This creates the `niri.state` table with the following functions:
-/// - `windows()` - Returns an array of all window tables
-/// - `focused_window()` - Returns the focused window table, or nil
-/// - `workspaces()` - Returns an array of all workspace tables
-/// - `outputs()` - Returns an array of all output tables
-///
-/// # Example
-///
-/// ```lua
-/// local windows = niri.state.windows()
-/// for i, win in ipairs(windows) do
-///     print(win.id, win.title, win.app_id)
-/// end
-///
-/// local focused = niri.state.focused_window()
-/// if focused then
-///     print("Focused:", focused.title)
-/// end
-/// ```
-pub fn register_runtime_api<S>(lua: &Lua, api: RuntimeApi<S>) -> Result<()>
-where
-    S: CompositorState + 'static,
-{
+/// This creates the `niri.state` table with functions for querying compositor state.
+/// All functions require a scoped state context (event handlers, timers, IPC execution).
+pub fn register_runtime_api(lua: &Lua) -> Result<()> {
     // Get or create the niri table
     let niri: Table = match lua.globals().get("niri")? {
         Value::Table(t) => t,
@@ -246,293 +284,79 @@ where
     // Create the state table
     let state_table = lua.create_table()?;
 
-    // windows() -> array of window tables
     {
-        let api = api.event_loop.clone();
-        let windows_fn = lua.create_function(move |lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                return windows_to_lua(lua, &snapshot.windows);
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let windows: Vec<Window> = runtime_api
-                .query(|state, tx| {
-                    let windows = state.get_windows();
-                    if let Err(e) = tx.send_blocking(windows) {
-                        log::warn!("Failed to send windows query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            windows_to_lua(lua, &windows)
+        let windows_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("windows")?;
+            scoped_fn.call(())
         })?;
         state_table.set("windows", windows_fn)?;
     }
 
-    // focused_window() -> window table or nil
     {
-        let api = api.event_loop.clone();
-        let focused_window_fn = lua.create_function(move |lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                return match snapshot.get_focused_window() {
-                    Some(win) => window_to_lua(lua, win).map(Value::Table),
-                    None => Ok(Value::Nil),
-                };
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let window = runtime_api
-                .query(|state, tx| {
-                    let window = state.get_focused_window();
-                    if let Err(e) = tx.send_blocking(window) {
-                        log::warn!("Failed to send focused_window query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            match window {
-                Some(win) => window_to_lua(lua, &win).map(Value::Table),
-                None => Ok(Value::Nil),
-            }
+        let focused_window_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("focused_window")?;
+            scoped_fn.call(())
         })?;
         state_table.set("focused_window", focused_window_fn)?;
     }
 
-    // workspaces() -> array of workspace tables
     {
-        let api = api.event_loop.clone();
-        let workspaces_fn = lua.create_function(move |lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                return workspaces_to_lua(lua, &snapshot.workspaces);
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let workspaces: Vec<Workspace> = runtime_api
-                .query(|state, tx| {
-                    let workspaces = state.get_workspaces();
-                    if let Err(e) = tx.send_blocking(workspaces) {
-                        log::warn!("Failed to send workspaces query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            workspaces_to_lua(lua, &workspaces)
+        let workspaces_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("workspaces")?;
+            scoped_fn.call(())
         })?;
         state_table.set("workspaces", workspaces_fn)?;
     }
 
-    // outputs() -> array of output tables
     {
-        let api = api.event_loop.clone();
-        let outputs_fn = lua.create_function(move |lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                let table = lua.create_table()?;
-                for (i, output) in snapshot.outputs.iter().enumerate() {
-                    let output_table = output_to_lua(lua, output)?;
-                    table.set(i + 1, output_table)?;
-                }
-                return Ok(table);
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let outputs: Vec<Output> = runtime_api
-                .query(|state, tx| {
-                    let outputs = state.get_outputs();
-                    if let Err(e) = tx.send_blocking(outputs) {
-                        log::warn!("Failed to send outputs query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            // Convert Vec<Output> to Lua array
-            let table = lua.create_table()?;
-            for (i, output) in outputs.iter().enumerate() {
-                let output_table = output_to_lua(lua, output)?;
-                table.set(i + 1, output_table)?;
-            }
-            Ok(table)
+        let outputs_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("outputs")?;
+            scoped_fn.call(())
         })?;
         state_table.set("outputs", outputs_fn)?;
     }
 
-    // keyboard_layouts() -> {names, current_idx} | nil
     {
-        let api = api.event_loop.clone();
-        let keyboard_layouts_fn = lua.create_function(move |lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                return match &snapshot.keyboard_layouts {
-                    Some(layouts) => {
-                        let table = lua.create_table()?;
-                        let names_table = lua.create_table()?;
-                        for (i, name) in layouts.names.iter().enumerate() {
-                            names_table.set(i + 1, name.as_str())?;
-                        }
-                        table.set("names", names_table)?;
-                        table.set("current_idx", layouts.current_idx)?;
-                        Ok(Value::Table(table))
-                    }
-                    None => Ok(Value::Nil),
-                };
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let layouts: Option<KeyboardLayouts> = runtime_api
-                .query(|state, tx| {
-                    let layouts = state.get_keyboard_layouts();
-                    if let Err(e) = tx.send_blocking(layouts) {
-                        log::warn!("Failed to send keyboard_layouts query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            match layouts {
-                Some(layouts) => {
-                    let table = lua.create_table()?;
-                    let names_table = lua.create_table()?;
-                    for (i, name) in layouts.names.iter().enumerate() {
-                        names_table.set(i + 1, name.as_str())?;
-                    }
-                    table.set("names", names_table)?;
-                    table.set("current_idx", layouts.current_idx)?;
-                    Ok(Value::Table(table))
-                }
-                None => Ok(Value::Nil),
-            }
+        let keyboard_layouts_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("keyboard_layouts")?;
+            scoped_fn.call(())
         })?;
         state_table.set("keyboard_layouts", keyboard_layouts_fn)?;
     }
 
-    // cursor_position() -> {x, y, output} | nil
     {
-        let api = api.event_loop.clone();
-        let cursor_position_fn = lua.create_function(move |lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                return match &snapshot.cursor_position {
-                    Some(pos) => {
-                        let table = lua.create_table()?;
-                        table.set("x", pos.x)?;
-                        table.set("y", pos.y)?;
-                        table.set("output", pos.output.clone())?;
-                        Ok(Value::Table(table))
-                    }
-                    None => Ok(Value::Nil),
-                };
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let position: Option<CursorPosition> = runtime_api
-                .query(|state, tx| {
-                    let position = state.get_cursor_position();
-                    if let Err(e) = tx.send_blocking(position) {
-                        log::warn!("Failed to send cursor_position query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            match position {
-                Some(pos) => {
-                    let table = lua.create_table()?;
-                    table.set("x", pos.x)?;
-                    table.set("y", pos.y)?;
-                    table.set("output", pos.output)?;
-                    Ok(Value::Table(table))
-                }
-                None => Ok(Value::Nil),
-            }
+        let cursor_position_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("cursor_position")?;
+            scoped_fn.call(())
         })?;
         state_table.set("cursor_position", cursor_position_fn)?;
     }
 
-    // reserved_space(output_name) -> {top, bottom, left, right}
     {
-        let api = api.event_loop.clone();
-        let reserved_space_fn = lua.create_function(move |lua, output_name: String| {
-            // Check if we're in an event handler context with pre-captured state
-            // Note: reserved_space is not snapshotted, always query live state
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let reserved: ReservedSpace = runtime_api
-                .query(move |state, tx| {
-                    let reserved = state.get_reserved_space(&output_name);
-                    if let Err(e) = tx.send_blocking(reserved) {
-                        log::warn!("Failed to send reserved_space query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            let table = lua.create_table()?;
-            table.set("top", reserved.top)?;
-            table.set("bottom", reserved.bottom)?;
-            table.set("left", reserved.left)?;
-            table.set("right", reserved.right)?;
-            Ok(Value::Table(table))
-        })?;
+        let reserved_space_fn =
+            lua.create_function(|lua, output_name: String| -> mlua::Result<mlua::Value> {
+                let state_table = get_scoped_state_table(lua)?;
+                let scoped_fn = state_table.get::<mlua::Function>("reserved_space")?;
+                scoped_fn.call(output_name)
+            })?;
         state_table.set("reserved_space", reserved_space_fn)?;
     }
 
-    // focus_mode() -> string
     {
-        let api = api.event_loop.clone();
-        let focus_mode_fn = lua.create_function(move |_lua, ()| {
-            // Check if we're in an event handler context with pre-captured state
-            if let Some(snapshot) = get_event_context_state() {
-                return match snapshot.focus_mode {
-                    FocusMode::Normal => Ok("normal".to_string()),
-                    FocusMode::Overview => Ok("overview".to_string()),
-                    FocusMode::LayerShell => Ok("layer_shell".to_string()),
-                    FocusMode::Locked => Ok("locked".to_string()),
-                };
-            }
-
-            // Fall back to idle callback pattern for non-event contexts
-            let runtime_api = RuntimeApi {
-                event_loop: api.clone(),
-            };
-            let mode: FocusMode = runtime_api
-                .query(|state, tx| {
-                    let mode = state.get_focus_mode();
-                    if let Err(e) = tx.send_blocking(mode) {
-                        log::warn!("Failed to send focus_mode query result: {}", e);
-                    }
-                })
-                .map_err(mlua::Error::external)?;
-
-            match mode {
-                FocusMode::Normal => Ok("normal".to_string()),
-                FocusMode::Overview => Ok("overview".to_string()),
-                FocusMode::LayerShell => Ok("layer_shell".to_string()),
-                FocusMode::Locked => Ok("locked".to_string()),
-            }
+        let focus_mode_fn = lua.create_function(|lua, ()| -> mlua::Result<mlua::Value> {
+            let state_table = get_scoped_state_table(lua)?;
+            let scoped_fn = state_table.get::<mlua::Function>("focus_mode")?;
+            scoped_fn.call(())
         })?;
         state_table.set("focus_mode", focus_mode_fn)?;
     }
 
-    // Set niri.state
     niri.set("state", state_table)?;
 
     Ok(())
@@ -889,287 +713,5 @@ mod tests {
         assert_eq!(state2.get_windows().len(), 2);
         assert_eq!(state1.get_focused_window().unwrap().id, 1);
         assert_eq!(state2.get_focused_window().unwrap().id, 3);
-    }
-
-    // ========================================================================
-    // Event Context State Tests
-    // ========================================================================
-
-    #[test]
-    fn event_context_initially_none() {
-        // Ensure clean state before test
-        clear_event_context_state();
-        assert!(get_event_context_state().is_none());
-    }
-
-    #[test]
-    fn set_event_context_makes_snapshot_available() {
-        // Clean up first
-        clear_event_context_state();
-
-        let snapshot = StateSnapshot {
-            windows: vec![make_window(1, "Test Window", "test-app", true)],
-            workspaces: vec![make_workspace(1, 1, Some("main"), true)],
-            outputs: vec![make_output("DP-1", true)],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-
-        set_event_context_state(snapshot);
-
-        let retrieved = get_event_context_state();
-        assert!(retrieved.is_some());
-
-        let retrieved = retrieved.unwrap();
-        assert_eq!(retrieved.windows.len(), 1);
-        assert_eq!(retrieved.windows[0].id, 1);
-        assert_eq!(retrieved.windows[0].title.as_deref(), Some("Test Window"));
-
-        // Clean up
-        clear_event_context_state();
-    }
-
-    #[test]
-    fn clear_event_context_removes_snapshot() {
-        // Set up a snapshot
-        let snapshot = StateSnapshot {
-            windows: vec![make_window(1, "Window", "app", false)],
-            workspaces: vec![],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-        set_event_context_state(snapshot);
-
-        // Verify it's set
-        assert!(get_event_context_state().is_some());
-
-        // Clear it
-        clear_event_context_state();
-
-        // Verify it's gone
-        assert!(get_event_context_state().is_none());
-    }
-
-    #[test]
-    fn event_context_snapshot_is_cloned() {
-        clear_event_context_state();
-
-        let snapshot = StateSnapshot {
-            windows: vec![make_window(42, "Original", "app", true)],
-            workspaces: vec![],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-        set_event_context_state(snapshot);
-
-        // Get multiple clones
-        let clone1 = get_event_context_state().unwrap();
-        let clone2 = get_event_context_state().unwrap();
-
-        // Both should have the same data
-        assert_eq!(clone1.windows[0].id, 42);
-        assert_eq!(clone2.windows[0].id, 42);
-
-        // They should be independent clones
-        assert_eq!(clone1.windows.len(), clone2.windows.len());
-
-        clear_event_context_state();
-    }
-
-    #[test]
-    fn event_context_overwrite_replaces_snapshot() {
-        clear_event_context_state();
-
-        // Set first snapshot
-        let snapshot1 = StateSnapshot {
-            windows: vec![make_window(1, "First", "app1", true)],
-            workspaces: vec![],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-        set_event_context_state(snapshot1);
-
-        // Verify first snapshot
-        let retrieved = get_event_context_state().unwrap();
-        assert_eq!(retrieved.windows[0].id, 1);
-        assert_eq!(retrieved.windows[0].title.as_deref(), Some("First"));
-
-        // Set second snapshot (overwrites)
-        let snapshot2 = StateSnapshot {
-            windows: vec![make_window(2, "Second", "app2", false)],
-            workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-        set_event_context_state(snapshot2);
-
-        // Verify second snapshot is now active
-        let retrieved = get_event_context_state().unwrap();
-        assert_eq!(retrieved.windows[0].id, 2);
-        assert_eq!(retrieved.windows[0].title.as_deref(), Some("Second"));
-        assert_eq!(retrieved.workspaces.len(), 1);
-
-        clear_event_context_state();
-    }
-
-    #[test]
-    fn snapshot_get_focused_window_returns_focused() {
-        let snapshot = StateSnapshot {
-            windows: vec![
-                make_window(1, "Unfocused1", "app1", false),
-                make_window(2, "Focused", "app2", true),
-                make_window(3, "Unfocused2", "app3", false),
-            ],
-            workspaces: vec![],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-
-        let focused = snapshot.get_focused_window();
-        assert!(focused.is_some());
-        let focused = focused.unwrap();
-        assert_eq!(focused.id, 2);
-        assert_eq!(focused.title.as_deref(), Some("Focused"));
-        assert!(focused.is_focused);
-    }
-
-    #[test]
-    fn snapshot_get_focused_window_returns_none_when_no_focus() {
-        let snapshot = StateSnapshot {
-            windows: vec![
-                make_window(1, "Win1", "app1", false),
-                make_window(2, "Win2", "app2", false),
-            ],
-            workspaces: vec![],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-
-        assert!(snapshot.get_focused_window().is_none());
-    }
-
-    #[test]
-    fn snapshot_get_focused_window_empty_windows() {
-        let snapshot = StateSnapshot {
-            windows: vec![],
-            workspaces: vec![],
-            outputs: vec![],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-
-        assert!(snapshot.get_focused_window().is_none());
-    }
-
-    #[test]
-    fn snapshot_from_compositor_state_copies_all_data() {
-        let state = MockState {
-            windows: vec![
-                make_window(1, "Win1", "app1", false),
-                make_window(2, "Win2", "app2", true),
-            ],
-            workspaces: vec![
-                make_workspace(1, 1, Some("ws1"), true),
-                make_workspace(2, 2, Some("ws2"), false),
-            ],
-            outputs: vec![make_output("DP-1", true), make_output("HDMI-1", false)],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-
-        let snapshot = StateSnapshot::from_compositor_state(&state);
-
-        // Verify all data was copied
-        assert_eq!(snapshot.windows.len(), 2);
-        assert_eq!(snapshot.workspaces.len(), 2);
-        assert_eq!(snapshot.outputs.len(), 2);
-
-        // Verify focused window works on snapshot
-        let focused = snapshot.get_focused_window();
-        assert!(focused.is_some());
-        assert_eq!(focused.unwrap().id, 2);
-    }
-
-    #[test]
-    fn event_context_lifecycle_simulation() {
-        // Simulate the lifecycle of event context during event handling
-        clear_event_context_state();
-
-        // 1. Before event: no context
-        assert!(get_event_context_state().is_none());
-
-        // 2. Event starts: capture snapshot
-        let state = MockState {
-            windows: vec![make_window(1, "Before Action", "app", true)],
-            workspaces: vec![make_workspace(1, 1, Some("ws"), true)],
-            outputs: vec![make_output("DP-1", true)],
-            keyboard_layouts: None,
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-        };
-        let snapshot = StateSnapshot::from_compositor_state(&state);
-        set_event_context_state(snapshot);
-
-        // 3. During event: snapshot available
-        let ctx = get_event_context_state();
-        assert!(ctx.is_some());
-        let ctx = ctx.unwrap();
-        assert_eq!(ctx.windows[0].title.as_deref(), Some("Before Action"));
-
-        // 4. Event ends: clear context
-        clear_event_context_state();
-
-        // 5. After event: no context
-        assert!(get_event_context_state().is_none());
-    }
-
-    #[test]
-    fn snapshot_staleness_demonstration() {
-        // This test demonstrates the staleness limitation:
-        // The snapshot is captured at event start and doesn't update
-        // even if the underlying state changes.
-
-        clear_event_context_state();
-
-        // Initial state
-        let initial_state = MockState {
-            windows: vec![make_window(1, "Initial Title", "app", true)],
-            ..Default::default()
-        };
-
-        // Capture snapshot (as done at event start)
-        let snapshot = StateSnapshot::from_compositor_state(&initial_state);
-        set_event_context_state(snapshot);
-
-        // "State changes" (simulated - in reality this would be compositor state changing)
-        let _updated_state = MockState {
-            windows: vec![make_window(1, "Updated Title", "app", true)],
-            ..Default::default()
-        };
-
-        // Query within event context still returns OLD data
-        let ctx = get_event_context_state().unwrap();
-        assert_eq!(
-            ctx.windows[0].title.as_deref(),
-            Some("Initial Title"),
-            "Snapshot should show pre-captured state, not updated state"
-        );
-
-        clear_event_context_state();
     }
 }
