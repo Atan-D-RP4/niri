@@ -329,7 +329,7 @@ pub fn fire_due_timers_with_state<S: crate::CompositorState>(
     state: &S,
 ) -> (usize, Vec<LuaError>) {
     use crate::runtime::call_with_lua_timeout;
-    use crate::runtime_api::{clear_event_context_state, set_event_context_state, StateSnapshot};
+    use crate::runtime_api::with_scoped_state;
 
     let mut fired = 0;
     let mut errors = Vec::new();
@@ -351,15 +351,11 @@ pub fn fire_due_timers_with_state<S: crate::CompositorState>(
         if let Some(callback_result) = callback_result {
             match callback_result {
                 Ok(callback) => {
-                    // Create fresh snapshot for THIS callback
-                    let snapshot = StateSnapshot::from_compositor_state(state);
-                    set_event_context_state(snapshot);
-
-                    let result = call_with_lua_timeout::<()>(lua, &callback, ());
+                    let result = with_scoped_state(lua, state, || {
+                        call_with_lua_timeout::<()>(lua, &callback, ())
+                    });
 
                     // Clear context after callback completes
-                    clear_event_context_state();
-
                     match result {
                         Ok(()) => fired += 1,
                         Err(e) => {

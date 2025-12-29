@@ -62,8 +62,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use mlua::prelude::*;
-use nix::libc;
 use niri_config::Environment;
+use nix::libc;
 
 use crate::CallbackRegistry;
 

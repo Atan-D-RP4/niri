@@ -221,7 +221,6 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
             }
 
             fn add_methods<M: ::mlua::UserDataMethods<Self>>(methods: &mut M) {
-                // Add __tostring for pretty-printing
                 const FIELD_NAMES: &[&str] = &[#(#tostring_field_names),*];
                 methods.add_meta_method(::mlua::MetaMethod::ToString, |lua, this, ()| {
                     use ::mlua::ObjectLike;
