@@ -3,11 +3,35 @@
 //! This module provides the `ConfigState` type that wraps the shared configuration
 //! and dirty flags, allowing proxy objects to safely access and modify config values.
 
+use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use niri_config::Config;
 
 use crate::config_dirty::ConfigDirtyFlags;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigStateError {
+    ConfigMutexPoisoned,
+    DirtyFlagsMutexPoisoned,
+}
+
+impl fmt::Display for ConfigStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConfigMutexPoisoned => write!(f, "config mutex poisoned"),
+            Self::DirtyFlagsMutexPoisoned => write!(f, "dirty flags mutex poisoned"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigStateError {}
+
+impl From<ConfigStateError> for mlua::Error {
+    fn from(err: ConfigStateError) -> Self {
+        mlua::Error::external(err)
+    }
+}
 
 /// Represents which part of the config has been modified.
 ///
@@ -86,11 +110,32 @@ impl ConfigState {
         }
     }
 
+    /// Try to borrow the configuration for reading.
+    ///
+    /// Returns an error if the mutex is poisoned.
+    pub fn try_borrow_config(&self) -> Result<MutexGuard<'_, Config>, ConfigStateError> {
+        self.config
+            .lock()
+            .map_err(|_| ConfigStateError::ConfigMutexPoisoned)
+    }
+
+    /// Try to borrow the dirty flags for reading/writing.
+    ///
+    /// Returns an error if the mutex is poisoned.
+    pub fn try_borrow_dirty_flags(
+        &self,
+    ) -> Result<MutexGuard<'_, ConfigDirtyFlags>, ConfigStateError> {
+        self.dirty_flags
+            .lock()
+            .map_err(|_| ConfigStateError::DirtyFlagsMutexPoisoned)
+    }
+
     /// Borrow the configuration for reading.
     ///
     /// # Panics
     ///
-    /// Panics if the mutex is poisoned.
+    /// Panics if the mutex is poisoned. Prefer `try_borrow_config` in
+    /// production code paths.
     pub fn borrow_config(&self) -> MutexGuard<'_, Config> {
         self.config.lock().expect("Config mutex poisoned")
     }
@@ -99,7 +144,8 @@ impl ConfigState {
     ///
     /// # Panics
     ///
-    /// Panics if the mutex is poisoned.
+    /// Panics if the mutex is poisoned. Prefer `try_borrow_dirty_flags` in
+    /// production code paths.
     pub fn borrow_dirty_flags(&self) -> MutexGuard<'_, ConfigDirtyFlags> {
         self.dirty_flags.lock().expect("DirtyFlags mutex poisoned")
     }

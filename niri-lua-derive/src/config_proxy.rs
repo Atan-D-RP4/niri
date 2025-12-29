@@ -318,10 +318,9 @@ fn generate_getter_method(
             if is_option_type(field_ty) {
                 let inner_ty = get_option_inner_type(field_ty);
                 Ok(quote! {
-                    /// Get the value of this field, returning nil if None.
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
                         use ::mlua::IntoLua;
-                        let config = self.state.borrow_config();
+                        let config = self.state.try_borrow_config()?;
                         match &#field_path {
                             Some(v) => {
                                 let lua_val = <#inner_ty as #crate_path::traits::LuaFieldConvert>::to_lua(v);
@@ -333,10 +332,9 @@ fn generate_getter_method(
                 })
             } else {
                 Ok(quote! {
-                    /// Get the value of this field.
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
                         use ::mlua::IntoLua;
-                        let config = self.state.borrow_config();
+                        let config = self.state.try_borrow_config()?;
                         let lua_val = <#field_ty as #crate_path::traits::LuaFieldConvert>::to_lua(&#field_path);
                         lua_val.into_lua(lua)
                     }
@@ -344,7 +342,6 @@ fn generate_getter_method(
             }
         }
         FieldKind::Nested => {
-            // Extract the actual type name, handling Option<T>
             let inner_ty = if is_option_type(field_ty) {
                 get_option_inner_type(field_ty)
             } else {
@@ -353,20 +350,17 @@ fn generate_getter_method(
             let nested_proxy = format_ident!("{}Proxy", get_type_name_from_tokens(&inner_ty));
 
             Ok(quote! {
-                /// Get a proxy for the nested configuration.
                 pub fn #getter_name(&self) -> #nested_proxy {
                     #nested_proxy::new(self.state.clone())
                 }
             })
         }
         FieldKind::Collection => {
-            // Extract item type from Vec<T>
             let item_ty = extract_vec_inner_type(field_ty);
             let item_type_name = get_type_name_from_tokens(&item_ty);
             let proxy_name = format_ident!("Vec{}Proxy", item_type_name);
 
             Ok(quote! {
-                /// Get a proxy for the collection.
                 pub fn #getter_name(&self) -> #proxy_name {
                     #proxy_name::new(self.state.clone())
                 }
@@ -374,12 +368,10 @@ fn generate_getter_method(
         }
         FieldKind::Skip => Ok(quote! {}),
         FieldKind::Gradient => {
-            // Gradient field - uses helper function from traits
             if is_option_type(field_ty) {
                 Ok(quote! {
-                    /// Get the gradient as a Lua table, or nil if not set.
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
-                        let config = self.state.borrow_config();
+                        let config = self.state.try_borrow_config()?;
                         match &#field_path {
                             Some(g) => {
                                 let table = #crate_path::traits::gradient_to_table(lua, g)?;
@@ -391,40 +383,33 @@ fn generate_getter_method(
                 })
             } else {
                 Ok(quote! {
-                    /// Get the gradient as a Lua table.
                     pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
-                        let config = self.state.borrow_config();
+                        let config = self.state.try_borrow_config()?;
                         #crate_path::traits::gradient_to_table(lua, &#field_path)
                     }
                 })
             }
         }
         FieldKind::Offset => {
-            // Offset field - returns {x, y} table
             Ok(quote! {
-                /// Get the offset as a {x, y} table.
                 pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
-                    let config = self.state.borrow_config();
+                    let config = self.state.try_borrow_config()?;
                     #crate_path::traits::offset_to_table(lua, &#field_path)
                 }
             })
         }
         FieldKind::AnimKind => {
-            // Animation kind field - returns type/params table
             Ok(quote! {
-                /// Get the animation kind as a Lua table.
                 pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
-                    let config = self.state.borrow_config();
+                    let config = self.state.try_borrow_config()?;
                     #crate_path::traits::anim_kind_to_table(lua, &#field_path)
                 }
             })
         }
         FieldKind::Inverted => {
-            // Inverted boolean - returns !value
             Ok(quote! {
-                /// Get the inverted value of this boolean field.
                 pub fn #getter_name(&self, _lua: &::mlua::Lua) -> ::mlua::Result<bool> {
-                    let config = self.state.borrow_config();
+                    let config = self.state.try_borrow_config()?;
                     Ok(!#field_path)
                 }
             })
@@ -468,9 +453,8 @@ fn generate_setter_method(
                             Some(<#inner_ty as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?)
                         };
 
-                        // Explicit scope to release borrow before mark_dirty
                         {
-                            let mut config = self.state.borrow_config();
+                            let mut config = self.state.try_borrow_config()?;
                             #field_path = new_value;
                         }
 
@@ -480,13 +464,11 @@ fn generate_setter_method(
                 })
             } else {
                 Ok(quote! {
-                    /// Set the value of this field.
                     pub fn #setter_name(&self, value: <#field_ty as #crate_path::traits::LuaFieldConvert>::LuaType) -> ::mlua::Result<()> {
                         let new_value = <#field_ty as #crate_path::traits::LuaFieldConvert>::from_lua(value)?;
 
-                        // Explicit scope to release borrow before mark_dirty
                         {
-                            let mut config = self.state.borrow_config();
+                            let mut config = self.state.try_borrow_config()?;
                             #field_path = new_value;
                         }
 
@@ -499,7 +481,6 @@ fn generate_setter_method(
         FieldKind::Gradient => {
             if is_option_type(field_ty) {
                 Ok(quote! {
-                    /// Set the gradient from a Lua table, or nil to clear.
                     pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Value) -> ::mlua::Result<()> {
                         let new_value = if value.is_nil() {
                             None
@@ -511,7 +492,7 @@ fn generate_setter_method(
                         };
 
                         {
-                            let mut config = self.state.borrow_config();
+                            let mut config = self.state.try_borrow_config()?;
                             #field_path = new_value;
                         }
 
@@ -521,12 +502,11 @@ fn generate_setter_method(
                 })
             } else {
                 Ok(quote! {
-                    /// Set the gradient from a Lua table.
                     pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
                         let new_value = #crate_path::traits::table_to_gradient(value)?;
 
                         {
-                            let mut config = self.state.borrow_config();
+                            let mut config = self.state.try_borrow_config()?;
                             #field_path = new_value;
                         }
 
@@ -538,12 +518,11 @@ fn generate_setter_method(
         }
         FieldKind::Offset => {
             Ok(quote! {
-                /// Set the offset from a {x, y} Lua table.
                 pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
                     let new_value = #crate_path::traits::table_to_offset(value)?;
 
                     {
-                        let mut config = self.state.borrow_config();
+                        let mut config = self.state.try_borrow_config()?;
                         #field_path = new_value;
                     }
 
@@ -554,12 +533,11 @@ fn generate_setter_method(
         }
         FieldKind::AnimKind => {
             Ok(quote! {
-                /// Set the animation kind from a Lua table.
                 pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
                     let new_value = #crate_path::traits::table_to_anim_kind(value)?;
 
                     {
-                        let mut config = self.state.borrow_config();
+                        let mut config = self.state.try_borrow_config()?;
                         #field_path = new_value;
                     }
 
@@ -570,10 +548,9 @@ fn generate_setter_method(
         }
         FieldKind::Inverted => {
             Ok(quote! {
-                /// Set the inverted value of this boolean field.
                 pub fn #setter_name(&self, value: bool) -> ::mlua::Result<()> {
                     {
-                        let mut config = self.state.borrow_config();
+                        let mut config = self.state.try_borrow_config()?;
                         #field_path = !value;
                     }
 

@@ -45,50 +45,42 @@ pub fn generate_collection_proxy(
         }
 
         impl #proxy_name {
-            /// Create a new collection proxy.
             pub fn new(state: #crate_path::config_state::ConfigState) -> Self {
                 Self { state }
             }
 
-            /// Get the length of the collection.
-            pub fn len(&self) -> usize {
-                let config = self.state.borrow_config();
-                #access_path.len()
+            pub fn len(&self) -> ::mlua::Result<usize> {
+                let config = self.state.try_borrow_config()?;
+                Ok(#access_path.len())
             }
 
-            /// Check if the collection is empty.
-            pub fn is_empty(&self) -> bool {
-                self.len() == 0
+            pub fn is_empty(&self) -> ::mlua::Result<bool> {
+                Ok(self.len()? == 0)
             }
 
-            /// Get an item by index (0-based internally, 1-based from Lua).
             pub fn get(&self, index: usize, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Value> {
                 use ::mlua::IntoLua;
-                let config = self.state.borrow_config();
+                let config = self.state.try_borrow_config()?;
                 if index >= #access_path.len() {
                     return Err(::mlua::Error::external(format!(
                         "Index {} out of bounds (length: {})",
-                        index + 1,  // Show 1-based index in error
+                        index + 1,
                         #access_path.len()
                     )));
                 }
 
-                // Convert the item to Lua value
                 let item = &#access_path[index];
                 let lua_val = <#item_type as #crate_path::traits::LuaFieldConvert>::to_lua(item);
                 lua_val.into_lua(lua)
             }
 
-            /// Append an item to the collection.
             pub fn append(&self, value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<()> {
-                // First convert Lua Value to the intermediate LuaType
                 let intermediate: <#item_type as #crate_path::traits::LuaFieldConvert>::LuaType =
                     ::mlua::FromLua::from_lua(value, lua)?;
-                // Then convert to the actual Rust type
                 let new_item = <#item_type as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?;
 
                 {
-                    let mut config = self.state.borrow_config();
+                    let mut config = self.state.try_borrow_config()?;
                     #access_path.push(new_item);
                 }
 
@@ -96,10 +88,9 @@ pub fn generate_collection_proxy(
                 Ok(())
             }
 
-            /// Remove an item at the given index (1-based from Lua).
             pub fn remove(&self, index: usize) -> ::mlua::Result<()> {
                 {
-                    let mut config = self.state.borrow_config();
+                    let mut config = self.state.try_borrow_config()?;
                     if index == 0 || index > #access_path.len() {
                         return Err(::mlua::Error::external(format!(
                             "Index {} out of bounds (length: {})",
@@ -107,17 +98,16 @@ pub fn generate_collection_proxy(
                             #access_path.len()
                         )));
                     }
-                    #access_path.remove(index - 1);  // Convert to 0-based
+                    #access_path.remove(index - 1);
                 }
 
                 self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
                 Ok(())
             }
 
-            /// Clear all items from the collection.
             pub fn clear(&self) -> ::mlua::Result<()> {
                 {
-                    let mut config = self.state.borrow_config();
+                    let mut config = self.state.try_borrow_config()?;
                     #access_path.clear();
                 }
 
@@ -128,24 +118,20 @@ pub fn generate_collection_proxy(
 
         impl ::mlua::UserData for #proxy_name {
             fn add_fields<F: ::mlua::UserDataFields<Self>>(_fields: &mut F) {
-                // No direct fields - use metamethods for table-like access
             }
 
             fn add_methods<M: ::mlua::UserDataMethods<Self>>(methods: &mut M) {
-                // __len metamethod
                 methods.add_meta_method(::mlua::MetaMethod::Len, |_lua, this, ()| {
-                    Ok(this.len())
+                    this.len()
                 });
 
-                // __index metamethod (1-based indexing)
                 methods.add_meta_method(::mlua::MetaMethod::Index, |lua, this, index: usize| {
                     if index == 0 {
                         return Err(::mlua::Error::external("Lua indices start at 1, not 0"));
                     }
-                    this.get(index - 1, lua)  // Convert to 0-based
+                    this.get(index - 1, lua)
                 });
 
-                // Collection methods
                 methods.add_method("append", |lua, this, value: ::mlua::Value| {
                     this.append(value, lua)
                 });
@@ -158,26 +144,20 @@ pub fn generate_collection_proxy(
                     this.clear()
                 });
 
-                // __iter metamethod for iteration support
-                // Luau uses __iter instead of __pairs for iteration
-                // The iterator returns (index, value) pairs with 1-based indices
                 methods.add_meta_method(::mlua::MetaMethod::Iter, |lua, this, ()| {
                     use ::mlua::IntoLua;
-                    let len = this.len();
+                    let len = this.len()?;
                     let state = this.state.clone();
 
-                    // Create iterator function that returns next (key, value) pair
                     let iter_fn = lua.create_function(move |lua, (_, prev_idx): (::mlua::Value, Option<i64>)| {
                         use ::mlua::IntoLua;
                         let next_idx = prev_idx.map(|i| i + 1).unwrap_or(1);
 
                         if next_idx as usize > len || next_idx < 1 {
-                            // End of iteration - return nil
                             return Ok((::mlua::Value::Nil, ::mlua::Value::Nil));
                         }
 
-                        // Get item at 0-based index
-                        let config = state.borrow_config();
+                        let config = state.try_borrow_config()?;
                         let item = &#access_path[(next_idx as usize) - 1];
                         let lua_val = <#item_type as #crate_path::traits::LuaFieldConvert>::to_lua(item);
                         drop(config);
@@ -185,7 +165,6 @@ pub fn generate_collection_proxy(
                         Ok((::mlua::Value::Integer(next_idx), lua_val.into_lua(lua)?))
                     })?;
 
-                    // Return (iterator_fn, nil, nil) - standard Lua iteration protocol
                     Ok((iter_fn, ::mlua::Value::Nil, ::mlua::Value::Nil))
                 });
             }
