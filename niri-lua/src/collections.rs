@@ -15,6 +15,43 @@ use niri_ipc::{ConfiguredMode, SizeChange, Transform};
 use crate::config_dirty::ConfigDirtyFlags;
 use crate::extractors::*;
 
+pub trait CollectionProxyBase<T: Clone> {
+    fn config(&self) -> Arc<Mutex<Config>>;
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>>;
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<T>;
+
+    fn with_config<R>(&self, f: impl FnOnce(&Config) -> R) -> R {
+        let config_handle = self.config();
+        let config = config_handle.lock().unwrap();
+        f(&config)
+    }
+
+    fn with_dirty_config<R, E: From<LuaError>>(
+        &self,
+        f: impl FnOnce(&mut Config, &mut ConfigDirtyFlags) -> Result<R, E>,
+    ) -> Result<R, E> {
+        let config_handle = self.config();
+        let dirty_handle = self.dirty();
+        let mut config = config_handle.lock().unwrap();
+        let mut dirty = dirty_handle.lock().unwrap();
+        f(&mut config, &mut dirty)
+    }
+
+    fn list(&self) -> Vec<T> {
+        self.with_config(|config| self.collection(config).clone())
+    }
+
+    fn len(&self) -> usize {
+        self.with_config(|config| self.collection(config).len())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.with_config(|config| self.collection(config).is_empty())
+    }
+}
+
 // ============================================================================
 // OutputsCollection - CRUD for output configurations
 // ============================================================================
@@ -26,108 +63,118 @@ pub struct OutputsCollection {
     pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
 }
 
+impl CollectionProxyBase<Output> for OutputsCollection {
+    fn config(&self) -> Arc<Mutex<Config>> {
+        self.config.clone()
+    }
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
+        self.dirty.clone()
+    }
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<Output> {
+        &config.outputs.0
+    }
+}
+
 impl LuaUserData for OutputsCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("len", |_, this, ()| {
-            Ok(this.config.lock().unwrap().outputs.0.len())
-        });
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
-        methods.add_method("add", |lua, this, value: LuaValue| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
-
-            match &value {
-                LuaValue::Table(tbl) => {
-                    if tbl.contains_key(1)? {
-                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                            let (_, output_tbl) = pair?;
-                            let output = extract_output(lua, &output_tbl)?;
+        methods.add_method("add", |lua, this, value: LuaValue| -> LuaResult<()> {
+            this.with_dirty_config(|config, dirty| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, output_tbl) = pair?;
+                                let output = extract_output(lua, &output_tbl)?;
+                                config.outputs.0.push(output);
+                            }
+                        } else {
+                            let output = extract_output(lua, tbl)?;
                             config.outputs.0.push(output);
                         }
-                    } else {
-                        let output = extract_output(lua, tbl)?;
-                        config.outputs.0.push(output);
+                        dirty.outputs = true;
+                        Ok(())
                     }
-                    dirty.outputs = true;
-                    Ok(())
+                    _ => Err(LuaError::external("outputs:add() expects a table")),
                 }
-                _ => Err(LuaError::external("outputs:add() expects a table")),
-            }
+            })
         });
 
-        methods.add_method("list", |lua, this, ()| {
-            let config = this.config.lock().unwrap();
-            let result = lua.create_table()?;
+        methods.add_method("list", |lua, this, ()| -> LuaResult<LuaTable> {
+            this.with_config(|config| {
+                let result = lua.create_table()?;
 
-            for (i, output) in config.outputs.0.iter().enumerate() {
-                let tbl = lua.create_table()?;
-                tbl.set("name", output.name.clone())?;
-                if let Some(ref mode) = output.mode {
-                    tbl.set(
-                        "mode",
-                        format!(
-                            "{}x{}{}",
-                            mode.mode.width,
-                            mode.mode.height,
-                            mode.mode
-                                .refresh
-                                .map(|r| format!("@{}", r))
-                                .unwrap_or_default()
-                        ),
-                    )?;
-                }
-                if let Some(ref scale) = output.scale {
-                    tbl.set("scale", scale.0)?;
-                }
-                result.set(i + 1, tbl)?;
-            }
-
-            Ok(result)
-        });
-
-        methods.add_method("get", |lua, this, name: String| {
-            let config = this.config.lock().unwrap();
-
-            for output in &config.outputs.0 {
-                if output.name == name {
+                for (i, output) in config.outputs.0.iter().enumerate() {
                     let tbl = lua.create_table()?;
                     tbl.set("name", output.name.clone())?;
-                    tbl.set("off", output.off)?;
+                    if let Some(ref mode) = output.mode {
+                        tbl.set(
+                            "mode",
+                            format!(
+                                "{}x{}{}",
+                                mode.mode.width,
+                                mode.mode.height,
+                                mode.mode
+                                    .refresh
+                                    .map(|r| format!("@{}", r))
+                                    .unwrap_or_default()
+                            ),
+                        )?;
+                    }
                     if let Some(ref scale) = output.scale {
                         tbl.set("scale", scale.0)?;
                     }
-                    tbl.set("focus_at_startup", output.focus_at_startup)?;
-                    return Ok(LuaValue::Table(tbl));
+                    result.set(i + 1, tbl)?;
                 }
-            }
 
-            Ok(LuaValue::Nil)
+                Ok(result)
+            })
         });
 
-        methods.add_method("remove", |_, this, name: String| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+        methods.add_method("get", |lua, this, name: String| -> LuaResult<LuaValue> {
+            this.with_config(|config| {
+                for output in &config.outputs.0 {
+                    if output.name == name {
+                        let tbl = lua.create_table()?;
+                        tbl.set("name", output.name.clone())?;
+                        tbl.set("off", output.off)?;
+                        if let Some(ref scale) = output.scale {
+                            tbl.set("scale", scale.0)?;
+                        }
+                        tbl.set("focus_at_startup", output.focus_at_startup)?;
+                        return Ok(LuaValue::Table(tbl));
+                    }
+                }
 
-            let len_before = config.outputs.0.len();
-            config.outputs.0.retain(|o| o.name != name);
-
-            if config.outputs.0.len() < len_before {
-                dirty.outputs = true;
-            }
-
-            Ok(())
+                Ok(LuaValue::Nil)
+            })
         });
 
-        methods.add_method("clear", |_, this, ()| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+        methods.add_method("remove", |_, this, name: String| -> LuaResult<()> {
+            this.with_dirty_config(|config, dirty| {
+                let len_before = config.outputs.0.len();
+                config.outputs.0.retain(|o| o.name != name);
 
-            if !config.outputs.0.is_empty() {
-                config.outputs.0.clear();
-                dirty.outputs = true;
-            }
+                if config.outputs.0.len() < len_before {
+                    dirty.outputs = true;
+                }
 
-            Ok(())
+                Ok(())
+            })
+        });
+
+        methods.add_method("clear", |_, this, ()| -> LuaResult<()> {
+            this.with_dirty_config(|config, dirty| {
+                if !config.outputs.0.is_empty() {
+                    config.outputs.0.clear();
+                    dirty.outputs = true;
+                }
+
+                Ok(())
+            })
         });
     }
 }
@@ -258,90 +305,92 @@ pub struct BindsCollection {
     pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
 }
 
+impl CollectionProxyBase<Bind> for BindsCollection {
+    fn config(&self) -> Arc<Mutex<Config>> {
+        self.config.clone()
+    }
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
+        self.dirty.clone()
+    }
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<Bind> {
+        &config.binds.0
+    }
+}
+
 impl LuaUserData for BindsCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("len", |_, this, ()| {
-            Ok(this.config.lock().unwrap().binds.0.len())
-        });
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
-        methods.add_method("add", |lua, this, value: LuaValue| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
-
-            match &value {
-                LuaValue::Table(tbl) => {
-                    if tbl.contains_key(1)? {
-                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                            let (_, bind_tbl) = pair?;
-                            let bind = extract_bind(lua, &bind_tbl)?;
-                            config.binds.0.push(bind);
+        methods.add_method("add", |lua, this, value: LuaValue| -> LuaResult<()> {
+            this.with_dirty_config(|config, dirty| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, output_tbl) = pair?;
+                                let output = extract_output(lua, &output_tbl)?;
+                                config.outputs.0.push(output);
+                            }
+                        } else {
+                            let output = extract_output(lua, tbl)?;
+                            config.outputs.0.push(output);
                         }
-                    } else {
-                        let bind = extract_bind(lua, tbl)?;
-                        config.binds.0.push(bind);
+                        dirty.outputs = true;
+                        Ok(())
                     }
-                    dirty.binds = true;
-                    Ok(())
+                    _ => Err(LuaError::external("outputs:add() expects a table")),
                 }
-                LuaValue::String(s) => {
-                    // Parse string format like "Mod+Return spawn alacritty"
-                    // or "Mod+Q close-window"
-                    let s = s.to_str()?;
-                    let bind = parse_bind_string(&s)?;
-                    config.binds.0.push(bind);
-                    dirty.binds = true;
-                    Ok(())
-                }
-                _ => Err(LuaError::external("binds:add() expects a table or string")),
-            }
+            })
         });
+
 
         methods.add_method("list", |lua, this, ()| {
-            let config = this.config.lock().unwrap();
-            let result = lua.create_table()?;
+            this.with_config(|config| {
+                let result = lua.create_table()?;
 
-            for (i, bind) in config.binds.0.iter().enumerate() {
-                let tbl = lua.create_table()?;
-                tbl.set("key", format!("{:?}", bind.key))?;
-                tbl.set("action", format!("{:?}", bind.action))?;
-                tbl.set("repeat", bind.repeat)?;
-                if let Some(cooldown) = bind.cooldown {
-                    tbl.set("cooldown_ms", cooldown.as_millis() as u64)?;
+                for (i, bind) in config.binds.0.iter().enumerate() {
+                    let tbl = lua.create_table()?;
+                    tbl.set("key", format!("{:?}", bind.key))?;
+                    tbl.set("action", format!("{:?}", bind.action))?;
+                    tbl.set("repeat", bind.repeat)?;
+                    if let Some(cooldown) = bind.cooldown {
+                        tbl.set("cooldown_ms", cooldown.as_millis() as u64)?;
+                    }
+                    result.set(i + 1, tbl)?;
                 }
-                result.set(i + 1, tbl)?;
-            }
 
-            Ok(result)
+                Ok(result)
+            })
         });
 
         methods.add_method("remove", |_, this, key_str: String| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                let key: Key = key_str
+                    .parse()
+                    .map_err(|e| LuaError::external(format!("Invalid key: {}", e)))?;
 
-            let key: Key = key_str
-                .parse()
-                .map_err(|e| LuaError::external(format!("Invalid key: {}", e)))?;
+                let len_before = config.binds.0.len();
+                config.binds.0.retain(|b| b.key != key);
 
-            let len_before = config.binds.0.len();
-            config.binds.0.retain(|b| b.key != key);
+                if config.binds.0.len() < len_before {
+                    dirty.binds = true;
+                }
 
-            if config.binds.0.len() < len_before {
-                dirty.binds = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
 
         methods.add_method("clear", |_, this, ()| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                if !config.binds.0.is_empty() {
+                    config.binds.0.clear();
+                    dirty.binds = true;
+                }
 
-            if !config.binds.0.is_empty() {
-                config.binds.0.clear();
-                dirty.binds = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
     }
 }
@@ -668,71 +717,82 @@ pub struct WindowRulesCollection {
     pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
 }
 
+impl CollectionProxyBase<niri_config::WindowRule> for WindowRulesCollection {
+    fn config(&self) -> Arc<Mutex<Config>> {
+        self.config.clone()
+    }
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
+        self.dirty.clone()
+    }
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::WindowRule> {
+        &config.window_rules
+    }
+}
+
 impl LuaUserData for WindowRulesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("len", |_, this, ()| {
-            Ok(this.config.lock().unwrap().window_rules.len())
-        });
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
-
-            match &value {
-                LuaValue::Table(tbl) => {
-                    if tbl.contains_key(1)? {
-                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                            let (_, rule_tbl) = pair?;
-                            let rule = extract_window_rule(lua, &rule_tbl)?;
+            this.with_dirty_config(|config, dirty| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, rule_tbl) = pair?;
+                                let rule = extract_window_rule(lua, &rule_tbl)?;
+                                config.window_rules.push(rule);
+                            }
+                        } else {
+                            let rule = extract_window_rule(lua, tbl)?;
                             config.window_rules.push(rule);
                         }
-                    } else {
-                        let rule = extract_window_rule(lua, tbl)?;
-                        config.window_rules.push(rule);
+                        dirty.window_rules = true;
+                        Ok(())
                     }
-                    dirty.window_rules = true;
-                    Ok(())
+                    _ => Err(LuaError::external("window_rules:add() expects a table")),
                 }
-                _ => Err(LuaError::external("window_rules:add() expects a table")),
-            }
+            })
         });
 
         methods.add_method("list", |lua, this, ()| {
-            let config = this.config.lock().unwrap();
-            let result = lua.create_table()?;
+            this.with_config(|config| {
+                let result = lua.create_table()?;
 
-            for (i, rule) in config.window_rules.iter().enumerate() {
-                let tbl = lua.create_table()?;
-                if !rule.matches.is_empty() {
-                    let matches_tbl = lua.create_table()?;
-                    for (j, m) in rule.matches.iter().enumerate() {
-                        let match_tbl = lua.create_table()?;
-                        if let Some(ref app_id) = m.app_id {
-                            match_tbl.set("app_id", app_id.0.to_string())?;
+                for (i, rule) in config.window_rules.iter().enumerate() {
+                    let tbl = lua.create_table()?;
+                    if !rule.matches.is_empty() {
+                        let matches_tbl = lua.create_table()?;
+                        for (j, m) in rule.matches.iter().enumerate() {
+                            let match_tbl = lua.create_table()?;
+                            if let Some(ref app_id) = m.app_id {
+                                match_tbl.set("app_id", app_id.0.to_string())?;
+                            }
+                            if let Some(ref title) = m.title {
+                                match_tbl.set("title", title.0.to_string())?;
+                            }
+                            matches_tbl.set(j + 1, match_tbl)?;
                         }
-                        if let Some(ref title) = m.title {
-                            match_tbl.set("title", title.0.to_string())?;
-                        }
-                        matches_tbl.set(j + 1, match_tbl)?;
+                        tbl.set("matches", matches_tbl)?;
                     }
-                    tbl.set("matches", matches_tbl)?;
+                    result.set(i + 1, tbl)?;
                 }
-                result.set(i + 1, tbl)?;
-            }
 
-            Ok(result)
+                Ok(result)
+            })
         });
 
         methods.add_method("clear", |_, this, ()| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                if !config.window_rules.is_empty() {
+                    config.window_rules.clear();
+                    dirty.window_rules = true;
+                }
 
-            if !config.window_rules.is_empty() {
-                config.window_rules.clear();
-                dirty.window_rules = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
     }
 }
@@ -813,117 +873,127 @@ pub struct WorkspacesCollection {
     pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
 }
 
+impl CollectionProxyBase<niri_config::Workspace> for WorkspacesCollection {
+    fn config(&self) -> Arc<Mutex<Config>> {
+        self.config.clone()
+    }
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
+        self.dirty.clone()
+    }
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::Workspace> {
+        &config.workspaces
+    }
+}
+
 impl LuaUserData for WorkspacesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("len", |_, this, ()| {
-            Ok(this.config.lock().unwrap().workspaces.len())
-        });
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
-
-            match &value {
-                LuaValue::Table(tbl) => {
-                    if tbl.contains_key(1)? {
-                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                            let (_, ws_tbl) = pair?;
-                            let ws = extract_workspace(lua, &ws_tbl)?;
+            this.with_dirty_config(|config, dirty| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, ws_tbl) = pair?;
+                                let ws = extract_workspace(lua, &ws_tbl)?;
+                                config.workspaces.push(ws);
+                            }
+                        } else {
+                            let ws = extract_workspace(lua, tbl)?;
                             config.workspaces.push(ws);
                         }
-                    } else {
-                        let ws = extract_workspace(lua, tbl)?;
-                        config.workspaces.push(ws);
+                        dirty.workspaces = true;
+                        Ok(())
                     }
-                    dirty.workspaces = true;
-                    Ok(())
+                    _ => Err(LuaError::external("workspaces:add() expects a table")),
                 }
-                _ => Err(LuaError::external("workspaces:add() expects a table")),
-            }
+            })
         });
 
         methods.add_method("list", |lua, this, ()| {
-            let config = this.config.lock().unwrap();
-            let result = lua.create_table()?;
+            this.with_config(|config| {
+                let result = lua.create_table()?;
 
-            for (i, ws) in config.workspaces.iter().enumerate() {
-                let tbl = lua.create_table()?;
-                tbl.set("name", ws.name.0.clone())?;
-                if let Some(ref output) = ws.open_on_output {
-                    tbl.set("open_on_output", output.clone())?;
-                }
-                result.set(i + 1, tbl)?;
-            }
-
-            Ok(result)
-        });
-
-        methods.add_method("get", |lua, this, key: LuaValue| {
-            let config = this.config.lock().unwrap();
-
-            // Accept both index (number) and name (string)
-            match key {
-                LuaValue::Integer(idx) => {
-                    // 1-based indexing for Lua
-                    if idx < 1 {
-                        return Ok(LuaValue::Nil);
-                    }
-                    let idx = (idx - 1) as usize;
-                    if idx >= config.workspaces.len() {
-                        return Ok(LuaValue::Nil);
-                    }
-                    let ws = &config.workspaces[idx];
+                for (i, ws) in config.workspaces.iter().enumerate() {
                     let tbl = lua.create_table()?;
                     tbl.set("name", ws.name.0.clone())?;
                     if let Some(ref output) = ws.open_on_output {
                         tbl.set("open_on_output", output.clone())?;
                     }
-                    Ok(LuaValue::Table(tbl))
+                    result.set(i + 1, tbl)?;
                 }
-                LuaValue::String(name) => {
-                    let name = name.to_str()?;
-                    for ws in &config.workspaces {
-                        if name == ws.name.0 {
-                            let tbl = lua.create_table()?;
-                            tbl.set("name", ws.name.0.clone())?;
-                            if let Some(ref output) = ws.open_on_output {
-                                tbl.set("open_on_output", output.clone())?;
-                            }
-                            return Ok(LuaValue::Table(tbl));
+
+                Ok(result)
+            })
+        });
+
+        methods.add_method("get", |lua, this, key: LuaValue| {
+            this.with_config(|config| {
+                // Accept both index (number) and name (string)
+                match key {
+                    LuaValue::Integer(idx) => {
+                        // 1-based indexing for Lua
+                        if idx < 1 {
+                            return Ok(LuaValue::Nil);
                         }
+                        let idx = (idx - 1) as usize;
+                        if idx >= config.workspaces.len() {
+                            return Ok(LuaValue::Nil);
+                        }
+                        let ws = &config.workspaces[idx];
+                        let tbl = lua.create_table()?;
+                        tbl.set("name", ws.name.0.clone())?;
+                        if let Some(ref output) = ws.open_on_output {
+                            tbl.set("open_on_output", output.clone())?;
+                        }
+                        Ok(LuaValue::Table(tbl))
                     }
-                    Ok(LuaValue::Nil)
+                    LuaValue::String(name) => {
+                        let name = name.to_str()?;
+                        for ws in &config.workspaces {
+                            if name == ws.name.0 {
+                                let tbl = lua.create_table()?;
+                                tbl.set("name", ws.name.0.clone())?;
+                                if let Some(ref output) = ws.open_on_output {
+                                    tbl.set("open_on_output", output.clone())?;
+                                }
+                                return Ok(LuaValue::Table(tbl));
+                            }
+                        }
+                        Ok(LuaValue::Nil)
+                    }
+                    _ => Err(LuaError::external(
+                        "get() expects an index (number) or workspace name (string)",
+                    )),
                 }
-                _ => Err(LuaError::external(
-                    "get() expects an index (number) or workspace name (string)",
-                )),
-            }
+            })
         });
 
         methods.add_method("remove", |_, this, name: String| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                let len_before = config.workspaces.len();
+                config.workspaces.retain(|ws| ws.name.0 != name);
 
-            let len_before = config.workspaces.len();
-            config.workspaces.retain(|ws| ws.name.0 != name);
+                if config.workspaces.len() < len_before {
+                    dirty.workspaces = true;
+                }
 
-            if config.workspaces.len() < len_before {
-                dirty.workspaces = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
 
         methods.add_method("clear", |_, this, ()| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                if !config.workspaces.is_empty() {
+                    config.workspaces.clear();
+                    dirty.workspaces = true;
+                }
 
-            if !config.workspaces.is_empty() {
-                config.workspaces.clear();
-                dirty.workspaces = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
     }
 }
@@ -954,109 +1024,118 @@ pub struct EnvironmentCollection {
     pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
 }
 
+impl CollectionProxyBase<niri_config::EnvironmentVariable> for EnvironmentCollection {
+    fn config(&self) -> Arc<Mutex<Config>> {
+        self.config.clone()
+    }
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
+        self.dirty.clone()
+    }
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::EnvironmentVariable> {
+        &config.environment.0
+    }
+}
+
 impl LuaUserData for EnvironmentCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("len", |_, this, ()| {
-            Ok(this.config.lock().unwrap().environment.0.len())
-        });
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
-
-            match &value {
-                LuaValue::Table(tbl) => {
-                    if tbl.contains_key(1)? {
-                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                            let (_, env_tbl) = pair?;
-                            let env = extract_environment_variable(lua, &env_tbl)?;
+            this.with_dirty_config(|config, dirty| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, env_tbl) = pair?;
+                                let env = extract_environment_variable(lua, &env_tbl)?;
+                                config.environment.0.push(env);
+                            }
+                        } else {
+                            let env = extract_environment_variable(lua, tbl)?;
                             config.environment.0.push(env);
                         }
-                    } else {
-                        let env = extract_environment_variable(lua, tbl)?;
-                        config.environment.0.push(env);
+                        dirty.environment = true;
+                        Ok(())
                     }
-                    dirty.environment = true;
-                    Ok(())
+                    _ => Err(LuaError::external("environment:add() expects a table")),
                 }
-                _ => Err(LuaError::external("environment:add() expects a table")),
-            }
+            })
         });
 
         methods.add_method("list", |lua, this, ()| {
-            let config = this.config.lock().unwrap();
-            let result = lua.create_table()?;
+            this.with_config(|config| {
+                let result = lua.create_table()?;
 
-            for (i, env) in config.environment.0.iter().enumerate() {
-                let tbl = lua.create_table()?;
-                tbl.set("name", env.name.clone())?;
-                if let Some(ref value) = env.value {
-                    tbl.set("value", value.clone())?;
-                }
-                result.set(i + 1, tbl)?;
-            }
-
-            Ok(result)
-        });
-
-        methods.add_method("get", |lua, this, name: String| {
-            let config = this.config.lock().unwrap();
-
-            for env in &config.environment.0 {
-                if env.name == name {
+                for (i, env) in config.environment.0.iter().enumerate() {
                     let tbl = lua.create_table()?;
                     tbl.set("name", env.name.clone())?;
                     if let Some(ref value) = env.value {
                         tbl.set("value", value.clone())?;
                     }
-                    return Ok(LuaValue::Table(tbl));
+                    result.set(i + 1, tbl)?;
                 }
-            }
 
-            Ok(LuaValue::Nil)
+                Ok(result)
+            })
+        });
+
+        methods.add_method("get", |lua, this, name: String| {
+            this.with_config(|config| {
+                for env in &config.environment.0 {
+                    if env.name == name {
+                        let tbl = lua.create_table()?;
+                        tbl.set("name", env.name.clone())?;
+                        if let Some(ref value) = env.value {
+                            tbl.set("value", value.clone())?;
+                        }
+                        return Ok(LuaValue::Table(tbl));
+                    }
+                }
+
+                Ok(LuaValue::Nil)
+            })
         });
 
         methods.add_method("set", |_, this, (name, value): (String, Option<String>)| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                if let Some(env) = config.environment.0.iter_mut().find(|e| e.name == name) {
+                    env.value = value;
+                } else {
+                    config
+                        .environment
+                        .0
+                        .push(niri_config::EnvironmentVariable { name, value });
+                }
+                dirty.environment = true;
 
-            if let Some(env) = config.environment.0.iter_mut().find(|e| e.name == name) {
-                env.value = value;
-            } else {
-                config
-                    .environment
-                    .0
-                    .push(niri_config::EnvironmentVariable { name, value });
-            }
-            dirty.environment = true;
-
-            Ok(())
+                Ok(())
+            })
         });
 
         methods.add_method("remove", |_, this, name: String| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                let len_before = config.environment.0.len();
+                config.environment.0.retain(|e| e.name != name);
 
-            let len_before = config.environment.0.len();
-            config.environment.0.retain(|e| e.name != name);
+                if config.environment.0.len() < len_before {
+                    dirty.environment = true;
+                }
 
-            if config.environment.0.len() < len_before {
-                dirty.environment = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
 
         methods.add_method("clear", |_, this, ()| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                if !config.environment.0.is_empty() {
+                    config.environment.0.clear();
+                    dirty.environment = true;
+                }
 
-            if !config.environment.0.is_empty() {
-                config.environment.0.clear();
-                dirty.environment = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
     }
 }
@@ -1083,68 +1162,79 @@ pub struct LayerRulesCollection {
     pub dirty: Arc<Mutex<ConfigDirtyFlags>>,
 }
 
+impl CollectionProxyBase<niri_config::LayerRule> for LayerRulesCollection {
+    fn config(&self) -> Arc<Mutex<Config>> {
+        self.config.clone()
+    }
+
+    fn dirty(&self) -> Arc<Mutex<ConfigDirtyFlags>> {
+        self.dirty.clone()
+    }
+
+    fn collection<'a>(&self, config: &'a Config) -> &'a Vec<niri_config::LayerRule> {
+        &config.layer_rules
+    }
+}
+
 impl LuaUserData for LayerRulesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("len", |_, this, ()| {
-            Ok(this.config.lock().unwrap().layer_rules.len())
-        });
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
-
-            match &value {
-                LuaValue::Table(tbl) => {
-                    if tbl.contains_key(1)? {
-                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                            let (_, rule_tbl) = pair?;
-                            let rule = extract_layer_rule(lua, &rule_tbl)?;
+            this.with_dirty_config(|config, dirty| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, rule_tbl) = pair?;
+                                let rule = extract_layer_rule(lua, &rule_tbl)?;
+                                config.layer_rules.push(rule);
+                            }
+                        } else {
+                            let rule = extract_layer_rule(lua, tbl)?;
                             config.layer_rules.push(rule);
                         }
-                    } else {
-                        let rule = extract_layer_rule(lua, tbl)?;
-                        config.layer_rules.push(rule);
+                        dirty.layer_rules = true;
+                        Ok(())
                     }
-                    dirty.layer_rules = true;
-                    Ok(())
+                    _ => Err(LuaError::external("layer_rules:add() expects a table")),
                 }
-                _ => Err(LuaError::external("layer_rules:add() expects a table")),
-            }
+            })
         });
 
         methods.add_method("list", |lua, this, ()| {
-            let config = this.config.lock().unwrap();
-            let result = lua.create_table()?;
+            this.with_config(|config| {
+                let result = lua.create_table()?;
 
-            for (i, rule) in config.layer_rules.iter().enumerate() {
-                let tbl = lua.create_table()?;
-                if !rule.matches.is_empty() {
-                    let matches_tbl = lua.create_table()?;
-                    for (j, m) in rule.matches.iter().enumerate() {
-                        let match_tbl = lua.create_table()?;
-                        if let Some(ref ns) = m.namespace {
-                            match_tbl.set("namespace", ns.0.to_string())?;
+                for (i, rule) in config.layer_rules.iter().enumerate() {
+                    let tbl = lua.create_table()?;
+                    if !rule.matches.is_empty() {
+                        let matches_tbl = lua.create_table()?;
+                        for (j, m) in rule.matches.iter().enumerate() {
+                            let match_tbl = lua.create_table()?;
+                            if let Some(ref ns) = m.namespace {
+                                match_tbl.set("namespace", ns.0.to_string())?;
+                            }
+                            matches_tbl.set(j + 1, match_tbl)?;
                         }
-                        matches_tbl.set(j + 1, match_tbl)?;
+                        tbl.set("matches", matches_tbl)?;
                     }
-                    tbl.set("matches", matches_tbl)?;
+                    result.set(i + 1, tbl)?;
                 }
-                result.set(i + 1, tbl)?;
-            }
 
-            Ok(result)
+                Ok(result)
+            })
         });
 
         methods.add_method("clear", |_, this, ()| {
-            let mut config = this.config.lock().unwrap();
-            let mut dirty = this.dirty.lock().unwrap();
+            this.with_dirty_config(|config, dirty| {
+                if !config.layer_rules.is_empty() {
+                    config.layer_rules.clear();
+                    dirty.layer_rules = true;
+                }
 
-            if !config.layer_rules.is_empty() {
-                config.layer_rules.clear();
-                dirty.layer_rules = true;
-            }
-
-            Ok(())
+                Ok(())
+            })
         });
     }
 }

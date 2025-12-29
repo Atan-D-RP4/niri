@@ -25,7 +25,6 @@ pub enum TestDirection {
 pub enum TestMode {
     FastMode,
     SlowMode,
-    AutoDetect,
 }
 
 /// Test enum with custom variant renames
@@ -71,7 +70,6 @@ fn test_enum_from_lua_string_kebab_case() {
 fn test_enum_to_lua_string_snake_case() {
     assert_eq!(TestMode::FastMode.to_lua_string(), "fast_mode");
     assert_eq!(TestMode::SlowMode.to_lua_string(), "slow_mode");
-    assert_eq!(TestMode::AutoDetect.to_lua_string(), "auto_detect");
 }
 
 #[test]
@@ -83,10 +81,6 @@ fn test_enum_from_lua_string_snake_case() {
     assert_eq!(
         TestMode::from_lua_string("slow_mode").unwrap(),
         TestMode::SlowMode
-    );
-    assert_eq!(
-        TestMode::from_lua_string("auto_detect").unwrap(),
-        TestMode::AutoDetect
     );
 }
 
@@ -122,7 +116,7 @@ fn test_enum_variant_names() {
 #[test]
 fn test_enum_variant_names_snake_case() {
     let names = TestMode::variant_names();
-    assert_eq!(names, &["fast_mode", "slow_mode", "auto_detect"]);
+    assert_eq!(names, &["fast_mode", "slow_mode"]);
 }
 
 #[test]
@@ -168,7 +162,6 @@ fn test_enum_invalid_value_error_snake_case() {
     assert!(err_msg.contains("wrong_value"));
     assert!(err_msg.contains("fast_mode"));
     assert!(err_msg.contains("slow_mode"));
-    assert!(err_msg.contains("auto_detect"));
 }
 
 #[test]

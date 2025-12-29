@@ -32,7 +32,9 @@ macro_rules! proxy_field {
         $fields.add_field_method_set($name, |_, this, value: LuaTable| {
             if let Some(v) = $extractor(&value)? {
                 this.config.lock().unwrap().$config_field = v;
-                this.dirty.lock().unwrap().$dirty_flag = true;
+                let mut dirty = this.dirty.lock().unwrap();
+                dirty.$dirty_flag = true;
+                dirty.mark_dirty($name);
             }
             Ok(())
         });
@@ -49,7 +51,9 @@ macro_rules! proxy_field_direct {
         $fields.add_field_method_set($name, |_, this, value: LuaTable| {
             if let Some(v) = <$type>::from_lua_table(&value)? {
                 this.config.lock().unwrap().$config_field = v;
-                this.dirty.lock().unwrap().$dirty_flag = true;
+                let mut dirty = this.dirty.lock().unwrap();
+                dirty.$dirty_flag = true;
+                dirty.mark_dirty($name);
             }
             Ok(())
         });
@@ -75,7 +79,9 @@ macro_rules! scalar_field {
 
         $fields.add_field_method_set($name, |_, this, value: $type| {
             this.config.lock().unwrap().$config_field = value;
-            this.dirty.lock().unwrap().$dirty_flag = true;
+            let mut dirty = this.dirty.lock().unwrap();
+            dirty.$dirty_flag = true;
+            dirty.mark_dirty($name);
             Ok(())
         });
     };
@@ -89,89 +95,14 @@ macro_rules! wrapper_field {
 
         $fields.add_field_method_set($name, |_, this, value: $inner| {
             this.config.lock().unwrap().$config_field = $wrapper(value);
-            this.dirty.lock().unwrap().$dirty_flag = true;
+            let mut dirty = this.dirty.lock().unwrap();
+            dirty.$dirty_flag = true;
+            dirty.mark_dirty($name);
             Ok(())
         });
     };
 }
 
-#[derive(Default, Debug)]
-pub struct DirtyFlags {
-    pub layout: bool,
-    pub cursor: bool,
-    pub animations: bool,
-    pub input: bool,
-    pub misc: bool,
-    pub outputs: bool,
-    pub window_rules: bool,
-    pub layer_rules: bool,
-    pub binds: bool,
-    pub workspaces: bool,
-    pub environment: bool,
-    pub spawn_at_startup: bool,
-}
-
-impl DirtyFlags {
-    pub fn any(&self) -> bool {
-        self.layout
-            || self.cursor
-            || self.animations
-            || self.input
-            || self.misc
-            || self.outputs
-            || self.window_rules
-            || self.layer_rules
-            || self.binds
-            || self.workspaces
-            || self.environment
-            || self.spawn_at_startup
-    }
-
-    pub fn clear(&mut self) {
-        *self = Self::default();
-    }
-
-    pub fn summary(&self) -> Vec<&'static str> {
-        let mut result = Vec::new();
-        if self.layout {
-            result.push("layout");
-        }
-        if self.cursor {
-            result.push("cursor");
-        }
-        if self.animations {
-            result.push("animations");
-        }
-        if self.input {
-            result.push("input");
-        }
-        if self.misc {
-            result.push("misc");
-        }
-        if self.outputs {
-            result.push("outputs");
-        }
-        if self.window_rules {
-            result.push("window_rules");
-        }
-        if self.layer_rules {
-            result.push("layer_rules");
-        }
-        if self.binds {
-            result.push("binds");
-        }
-        if self.workspaces {
-            result.push("workspaces");
-        }
-        if self.environment {
-            result.push("environment");
-        }
-        if self.spawn_at_startup {
-            result.push("spawn_at_startup");
-        }
-        result
-    }
-}
 
 #[derive(Clone)]
 pub struct ConfigWrapper {
@@ -253,7 +184,7 @@ impl UserData for ConfigWrapper {
             fields,
             "overview",
             overview,
-            misc,
+            overview,
             OverviewConfigProxy,
             extract_overview
         );
@@ -261,7 +192,7 @@ impl UserData for ConfigWrapper {
             fields,
             "hotkey_overlay",
             hotkey_overlay,
-            misc,
+            hotkey_overlay,
             HotkeyOverlayConfigProxy,
             niri_config::HotkeyOverlay
         );
@@ -269,7 +200,7 @@ impl UserData for ConfigWrapper {
             fields,
             "config_notification",
             config_notification,
-            misc,
+            config_notification,
             ConfigNotificationConfigProxy,
             extract_config_notification
         );
@@ -277,7 +208,7 @@ impl UserData for ConfigWrapper {
             fields,
             "clipboard",
             clipboard,
-            misc,
+            clipboard,
             ClipboardConfigProxy,
             extract_clipboard
         );
@@ -285,7 +216,7 @@ impl UserData for ConfigWrapper {
             fields,
             "xwayland_satellite",
             xwayland_satellite,
-            misc,
+            xwayland_satellite,
             XwaylandSatelliteConfigProxy,
             extract_xwayland_satellite
         );
@@ -293,7 +224,7 @@ impl UserData for ConfigWrapper {
             fields,
             "debug",
             debug,
-            misc,
+            debug,
             DebugConfigProxy,
             extract_debug
         );
@@ -301,7 +232,7 @@ impl UserData for ConfigWrapper {
             fields,
             "gestures",
             gestures,
-            misc,
+            gestures,
             GesturesConfigProxy,
             extract_gestures
         );
@@ -309,7 +240,7 @@ impl UserData for ConfigWrapper {
             fields,
             "recent_windows",
             recent_windows,
-            misc,
+            recent_windows,
             RecentWindowsConfigProxy,
             extract_recent_windows
         );
@@ -354,3 +285,4 @@ pub fn register_config_wrapper(lua: &Lua, wrapper: ConfigWrapper) -> LuaResult<(
     niri.set("config", wrapper)?;
     Ok(())
 }
+

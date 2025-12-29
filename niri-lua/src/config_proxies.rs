@@ -56,7 +56,7 @@ pub use crate::config_state::ConfigState;
 /// config.cursor.hide_after_inactive_ms = 5000
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "cursor", dirty = "Cursor", auto_detect)]
+#[lua_proxy(crate = "crate", parent_path = "cursor", dirty = "Cursor")]
 pub struct CursorConfig {
     /// Cursor size in pixels. Default is 24.
     pub xcursor_size: u8,
@@ -84,8 +84,7 @@ pub struct CursorConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "clipboard",
-    dirty = "Clipboard",
-    auto_detect
+    dirty = "Clipboard"
 )]
 pub struct ClipboardConfig {
     /// Whether to disable primary selection (middle-click paste).
@@ -107,8 +106,7 @@ pub struct ClipboardConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "hotkey_overlay",
-    dirty = "HotkeyOverlay",
-    auto_detect
+    dirty = "HotkeyOverlay"
 )]
 pub struct HotkeyOverlayConfig {
     /// Whether to skip showing the overlay at startup.
@@ -130,8 +128,7 @@ pub struct HotkeyOverlayConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "config_notification",
-    dirty = "ConfigNotification",
-    auto_detect
+    dirty = "ConfigNotification"
 )]
 pub struct ConfigNotificationConfig {
     /// Whether to disable notifications when config loading fails.
@@ -153,8 +150,7 @@ pub struct ConfigNotificationConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "xwayland_satellite",
-    dirty = "XwaylandSatellite",
-    auto_detect
+    dirty = "XwaylandSatellite"
 )]
 pub struct XwaylandSatelliteConfig {
     /// Whether xwayland-satellite is disabled.
@@ -169,7 +165,7 @@ pub struct XwaylandSatelliteConfig {
 /// Contains various debug flags that affect compositor behavior.
 /// These are primarily for development and troubleshooting.
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "debug", dirty = "Debug", auto_detect)]
+#[lua_proxy(crate = "crate", parent_path = "debug", dirty = "Debug")]
 pub struct DebugConfig {
     /// Whether to enable DBus interfaces in non-session instances.
     pub dbus_interfaces_in_non_session_instances: bool,
@@ -208,8 +204,7 @@ pub struct DebugConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "layout.struts",
-    dirty = "Layout",
-    auto_detect
+    dirty = "Layout"
 )]
 pub struct StrutsConfig {
     /// Left strut size in logical pixels.
@@ -277,8 +272,7 @@ pub struct SpawnAtStartupConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "input.keyboard.xkb",
-    dirty = "Keyboard",
-    auto_detect
+    dirty = "Keyboard"
 )]
 pub struct XkbConfig {
     /// XKB layout name(s).
@@ -312,8 +306,7 @@ pub struct XkbConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "input.keyboard",
-    dirty = "Keyboard",
-    auto_detect
+    dirty = "Keyboard"
 )]
 pub struct KeyboardConfig {
     /// Key repeat delay in milliseconds.
@@ -329,6 +322,7 @@ pub struct KeyboardConfig {
     pub track_layout: TrackLayout,
 
     /// XKB keyboard configuration (layout, variant, options, etc).
+    #[lua_proxy(nested)]
     pub xkb: XkbConfig,
 }
 
@@ -348,8 +342,7 @@ pub struct KeyboardConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "input.mouse",
-    dirty = "Input",
-    auto_detect
+    dirty = "Input"
 )]
 pub struct MouseConfig {
     /// Whether the mouse is disabled.
@@ -380,8 +373,7 @@ pub struct MouseConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "input.trackpoint",
-    dirty = "Input",
-    auto_detect
+    dirty = "Input"
 )]
 pub struct TrackpointConfig {
     /// Whether the trackpoint is disabled.
@@ -413,8 +405,7 @@ pub struct TrackpointConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "input.touch",
-    dirty = "Input",
-    auto_detect
+    dirty = "Input"
 )]
 pub struct TouchConfig {
     /// Whether touch input is disabled.
@@ -460,8 +451,7 @@ pub struct TouchConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "input.touchpad",
-    dirty = "Input",
-    auto_detect
+    dirty = "Input"
 )]
 pub struct TouchpadConfig {
     /// Whether the touchpad is disabled.
@@ -533,7 +523,7 @@ pub struct TouchpadConfig {
 /// config.input.mouse.accel_speed = 0.5
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "input", dirty = "Input", auto_detect)]
+#[lua_proxy(crate = "crate", parent_path = "input", dirty = "Input")]
 pub struct InputConfig {
     /// Whether to disable power key handling.
     pub disable_power_key_handling: bool,
@@ -542,18 +532,23 @@ pub struct InputConfig {
     pub workspace_auto_back_and_forth: bool,
 
     /// Keyboard configuration.
+    #[lua_proxy(nested)]
     pub keyboard: KeyboardConfig,
 
     /// Touchpad configuration.
+    #[lua_proxy(nested)]
     pub touchpad: TouchpadConfig,
 
     /// Mouse configuration.
+    #[lua_proxy(nested)]
     pub mouse: MouseConfig,
 
     /// Trackpoint configuration.
+    #[lua_proxy(nested)]
     pub trackpoint: TrackpointConfig,
 
     /// Touch configuration.
+    #[lua_proxy(nested)]
     pub touch: TouchConfig,
 }
 
@@ -568,8 +563,7 @@ pub struct InputConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "gestures.dnd_edge_view_scroll",
-    dirty = "Gestures",
-    auto_detect
+    dirty = "Gestures"
 )]
 pub struct DndEdgeViewScrollConfig {
     /// Width of the trigger zone at the edge.
@@ -589,8 +583,7 @@ pub struct DndEdgeViewScrollConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "gestures.dnd_edge_workspace_switch",
-    dirty = "Gestures",
-    auto_detect
+    dirty = "Gestures"
 )]
 pub struct DndEdgeWorkspaceSwitchConfig {
     /// Height of the trigger zone at the edge.
@@ -610,8 +603,7 @@ pub struct DndEdgeWorkspaceSwitchConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "gestures.hot_corners",
-    dirty = "Gestures",
-    auto_detect
+    dirty = "Gestures"
 )]
 pub struct HotCornersConfig {
     /// Whether hot corners are disabled.
@@ -638,17 +630,19 @@ pub struct HotCornersConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "gestures",
-    dirty = "Gestures",
-    auto_detect
+    dirty = "Gestures"
 )]
 pub struct GesturesConfig {
     /// DnD edge view scroll configuration.
+    #[lua_proxy(nested)]
     pub dnd_edge_view_scroll: DndEdgeViewScrollConfig,
 
     /// DnD edge workspace switch configuration.
+    #[lua_proxy(nested)]
     pub dnd_edge_workspace_switch: DndEdgeWorkspaceSwitchConfig,
 
     /// Hot corners configuration.
+    #[lua_proxy(nested)]
     pub hot_corners: HotCornersConfig,
 }
 
@@ -670,8 +664,7 @@ pub struct GesturesConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "recent_windows.previews",
-    dirty = "RecentWindows",
-    auto_detect
+    dirty = "RecentWindows"
 )]
 pub struct MruPreviewsConfig {
     /// Maximum height of preview thumbnails.
@@ -702,8 +695,7 @@ pub struct MruPreviewsConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "recent_windows.highlight",
-    dirty = "RecentWindows",
-    auto_detect
+    dirty = "RecentWindows"
 )]
 pub struct MruHighlightConfig {
     /// Color of highlight for active windows.
@@ -746,8 +738,7 @@ pub struct MruHighlightConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "recent_windows",
-    dirty = "RecentWindows",
-    auto_detect
+    dirty = "RecentWindows"
 )]
 pub struct RecentWindowsConfig {
     /// Whether recent windows is disabled (inverted from underlying `on` field).
@@ -762,9 +753,11 @@ pub struct RecentWindowsConfig {
     pub open_delay_ms: u16,
 
     /// Highlight configuration.
+    #[lua_proxy(nested)]
     pub highlight: MruHighlightConfig,
 
     /// Previews configuration.
+    #[lua_proxy(nested)]
     pub previews: MruPreviewsConfig,
 }
 
@@ -789,8 +782,7 @@ pub struct RecentWindowsConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "layout.insert_hint",
-    dirty = "Layout",
-    auto_detect
+    dirty = "Layout"
 )]
 pub struct InsertHintConfig {
     /// Whether the insert hint is disabled.
@@ -808,8 +800,7 @@ pub struct InsertHintConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "layout.tab_indicator",
-    dirty = "Layout",
-    auto_detect
+    dirty = "Layout"
 )]
 pub struct TabIndicatorConfig {
     /// Whether tab indicator is off (disabled).
@@ -884,8 +875,7 @@ pub struct TabIndicatorConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "layout.focus_ring",
-    dirty = "Layout",
-    auto_detect
+    dirty = "Layout"
 )]
 pub struct FocusRingConfig {
     /// Whether the focus ring is disabled.
@@ -946,8 +936,7 @@ pub struct FocusRingConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "layout.border",
-    dirty = "Layout",
-    auto_detect
+    dirty = "Layout"
 )]
 pub struct BorderConfig {
     /// Whether borders are disabled.
@@ -1006,8 +995,7 @@ pub struct BorderConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "layout.shadow",
-    dirty = "Layout",
-    auto_detect
+    dirty = "Layout"
 )]
 pub struct ShadowConfig {
     /// Whether shadows are enabled.
@@ -1065,7 +1053,7 @@ pub struct ShadowConfig {
 /// config.layout.shadow.on = true
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(crate = "crate", parent_path = "layout", dirty = "Layout", auto_detect)]
+#[lua_proxy(crate = "crate", parent_path = "layout", dirty = "Layout")]
 pub struct LayoutConfig {
     /// Gap between windows in logical pixels.
     pub gaps: f64,
@@ -1090,21 +1078,27 @@ pub struct LayoutConfig {
     pub background_color: Color,
 
     /// Focus ring configuration.
+    #[lua_proxy(nested)]
     pub focus_ring: FocusRingConfig,
 
     /// Border configuration.
+    #[lua_proxy(nested)]
     pub border: BorderConfig,
 
     /// Shadow configuration.
+    #[lua_proxy(nested)]
     pub shadow: ShadowConfig,
 
     /// Struts configuration.
+    #[lua_proxy(nested)]
     pub struts: StrutsConfig,
 
     /// Tab indicator configuration.
+    #[lua_proxy(nested)]
     pub tab_indicator: TabIndicatorConfig,
 
     /// Insert hint configuration.
+    #[lua_proxy(nested)]
     pub insert_hint: InsertHintConfig,
 }
 
@@ -1136,8 +1130,7 @@ pub struct LayoutConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "overview.workspace_shadow",
-    dirty = "Overview",
-    auto_detect
+    dirty = "Overview"
 )]
 pub struct OverviewWorkspaceShadowConfig {
     /// Whether workspace shadow is disabled.
@@ -1178,8 +1171,7 @@ pub struct OverviewWorkspaceShadowConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "overview",
-    dirty = "Overview",
-    auto_detect
+    dirty = "Overview"
 )]
 pub struct OverviewConfig {
     /// Overview zoom level (0.0 to 1.0).
@@ -1189,6 +1181,7 @@ pub struct OverviewConfig {
     pub backdrop_color: Color,
 
     /// Workspace shadow configuration.
+    #[lua_proxy(nested)]
     pub workspace_shadow: OverviewWorkspaceShadowConfig,
 }
 
@@ -1219,8 +1212,7 @@ pub struct OverviewConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.workspace_switch.0",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct WorkspaceSwitchAnimConfig {
     /// Whether this animation is disabled.
@@ -1254,8 +1246,7 @@ pub struct WorkspaceSwitchAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.horizontal_view_movement.0",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct HorizontalViewMovementAnimConfig {
     /// Whether this animation is disabled.
@@ -1289,8 +1280,7 @@ pub struct HorizontalViewMovementAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.window_movement.0",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct WindowMovementAnimConfig {
     /// Whether this animation is disabled.
@@ -1323,8 +1313,7 @@ pub struct WindowMovementAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.config_notification_open_close.0",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct ConfigNotificationAnimConfig {
     /// Whether this animation is disabled.
@@ -1357,8 +1346,7 @@ pub struct ConfigNotificationAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.overview_open_close.0",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct OverviewAnimConfig {
     /// Whether this animation is disabled.
@@ -1391,8 +1379,7 @@ pub struct OverviewAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.screenshot_ui_open.0",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct ScreenshotUiAnimConfig {
     /// Whether this animation is disabled.
@@ -1431,8 +1418,7 @@ pub struct ScreenshotUiAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.window_open.anim",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct WindowOpenAnimConfig {
     /// Whether this animation is disabled.
@@ -1474,8 +1460,7 @@ pub struct WindowOpenAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.window_close.anim",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct WindowCloseAnimConfig {
     /// Whether this animation is disabled.
@@ -1518,8 +1503,7 @@ pub struct WindowCloseAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations.window_resize.anim",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct WindowResizeAnimConfig {
     /// Whether this animation is disabled.
@@ -1564,8 +1548,7 @@ pub struct WindowResizeAnimConfig {
 #[lua_proxy(
     crate = "crate",
     parent_path = "animations",
-    dirty = "Animations",
-    auto_detect
+    dirty = "Animations"
 )]
 pub struct AnimationsConfig {
     /// Whether all animations are disabled.
@@ -1575,29 +1558,38 @@ pub struct AnimationsConfig {
     pub slowdown: f64,
 
     /// Workspace switch animation settings.
+    #[lua_proxy(nested)]
     pub workspace_switch: WorkspaceSwitchAnimConfig,
 
     /// Horizontal view movement animation settings.
+    #[lua_proxy(nested)]
     pub horizontal_view_movement: HorizontalViewMovementAnimConfig,
 
     /// Window movement animation settings.
+    #[lua_proxy(nested)]
     pub window_movement: WindowMovementAnimConfig,
 
     /// Config notification open/close animation settings.
+    #[lua_proxy(nested)]
     pub config_notification_open_close: ConfigNotificationAnimConfig,
 
     /// Overview open/close animation settings.
+    #[lua_proxy(nested)]
     pub overview_open_close: OverviewAnimConfig,
 
     /// Screenshot UI open animation settings.
+    #[lua_proxy(nested)]
     pub screenshot_ui_open: ScreenshotUiAnimConfig,
 
     /// Window open animation settings.
+    #[lua_proxy(nested)]
     pub window_open: WindowOpenAnimConfig,
 
     /// Window close animation settings.
+    #[lua_proxy(nested)]
     pub window_close: WindowCloseAnimConfig,
 
     /// Window resize animation settings.
+    #[lua_proxy(nested)]
     pub window_resize: WindowResizeAnimConfig,
 }
