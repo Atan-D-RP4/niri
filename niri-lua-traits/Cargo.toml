@@ -1,0 +1,11 @@
+[package]
+name = "niri-lua-traits"
+version.workspace = true
+description = "Shared traits for Lua table extraction in niri"
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+mlua.workspace = true
