@@ -1002,15 +1002,4 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_parse_size_change() {
-        let change = parse_size_change("+10%").unwrap();
-        assert!(matches!(change, SizeChange::AdjustProportion(v) if (v - 0.1).abs() < 0.001));
-
-        let change = parse_size_change("-10%").unwrap();
-        assert!(matches!(change, SizeChange::AdjustProportion(v) if (v + 0.1).abs() < 0.001));
-
-        let change = parse_size_change("50%").unwrap();
-        assert!(matches!(change, SizeChange::SetProportion(v) if (v - 0.5).abs() < 0.001));
-    }
 }

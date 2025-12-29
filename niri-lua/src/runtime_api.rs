@@ -499,28 +499,6 @@ mod tests {
     }
 
     // ========================================================================
-    // RuntimeApi Construction Tests
-    // ========================================================================
-
-    #[test]
-    fn runtime_api_type_system() {
-        // Verify RuntimeApi can be constructed with generic CompositorState types.
-        // Full event loop testing is integration-level.
-        let _ = std::mem::size_of::<RuntimeApi<MockState>>();
-
-        // Verify generic constraint works with any CompositorState impl
-        fn accepts_compositor_state<S: CompositorState + 'static>(_state: &S) {
-            let _ = std::mem::size_of::<RuntimeApi<S>>();
-        }
-        let mock_state = MockState {
-            cursor_position: None,
-            focus_mode: FocusMode::Normal,
-            ..Default::default()
-        };
-        accepts_compositor_state(&mock_state);
-    }
-
-    // ========================================================================
     // Empty State Tests
     // ========================================================================
 

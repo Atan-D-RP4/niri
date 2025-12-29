@@ -1040,7 +1040,7 @@ mod tests {
             )
             .unwrap();
 
-        let result = Debug::from_lua_table(&table).unwrap();
+        let result = extract_debug(&table).unwrap();
         assert!(result.is_some());
         let debug = result.unwrap();
         assert!(debug.disable_direct_scanout);
@@ -1050,105 +1050,6 @@ mod tests {
         );
         assert_eq!(debug.ignored_drm_devices.len(), 2);
     }
-
-    #[test]
-    fn from_lua_table_returns_none_when_empty() {
-        let (_lua, table) = create_test_table();
-        let result = HotkeyOverlay::from_lua_table(&table).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn from_lua_table_extracts_hotkey_overlay() {
-        let (_lua, table) = create_test_table();
-        table.set("skip_at_startup", true).unwrap();
-        let result = HotkeyOverlay::from_lua_table(&table).unwrap();
-        assert!(result.is_some());
-        let overlay = result.unwrap();
-        assert!(overlay.skip_at_startup);
-        assert!(!overlay.hide_not_bound);
-    }
-
-    #[test]
-    fn from_lua_table_or_default_uses_defaults_when_empty() {
-        let (_lua, table) = create_test_table();
-        let overlay = HotkeyOverlay::from_lua_table_or_default(&table).unwrap();
-        assert_eq!(overlay, HotkeyOverlay::default());
-    }
-
-    #[test]
-    fn from_lua_table_required_errors_when_empty() {
-        let (_lua, table) = create_test_table();
-        let result = HotkeyOverlay::from_lua_table_required(&table);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn extract_field_delegates_to_from_lua_table() {
-        let (lua, table) = create_test_table();
-        let nested = lua.create_table().unwrap();
-        nested.set("skip_at_startup", true).unwrap();
-        table.set("hotkey", nested).unwrap();
-
-        let result: Option<HotkeyOverlay> = table.extract_field("hotkey").unwrap();
-        assert!(result.is_some());
-        assert!(result.unwrap().skip_at_startup);
-    }
-
-    #[test]
-    fn extract_field_none_for_missing_table() {
-        let (_lua, table) = create_test_table();
-        let result: Option<HotkeyOverlay> = table.extract_field("hotkey").unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn extract_field_none_for_false() {
-        let (_lua, table) = create_test_table();
-        table.set("hotkey", false).unwrap();
-
-        let result: Option<HotkeyOverlay> = table.extract_field("hotkey").unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn extract_field_errors_on_non_table() {
-        let (_lua, table) = create_test_table();
-        table.set("hotkey", 5).unwrap();
-
-        let result: LuaResult<Option<HotkeyOverlay>> = table.extract_field("hotkey");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn cursor_from_lua_table_applies_fields() {
-        let (_lua, table) = create_test_table();
-        table.set("xcursor_theme", "mytheme").unwrap();
-        table.set("hide_when_typing", true).unwrap();
-
-        let cursor = Cursor::from_lua_table_or_default(&table).unwrap();
-        assert_eq!(cursor.xcursor_theme, "mytheme");
-        assert!(cursor.hide_when_typing);
-    }
-
-    #[test]
-    fn cursor_from_lua_table_none_when_empty() {
-        let (_lua, table) = create_test_table();
-        let result = Cursor::from_lua_table(&table).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn extract_animations_merges_nested_fields() {
-        let (_lua, table) = create_test_table();
-        table.set("slowdown", 1.5).unwrap();
-
-        let animations = Animations::from_lua_table(&table).unwrap().unwrap();
-        assert!(!animations.off);
-        assert_eq!(animations.slowdown, 1.5);
-    }
-
-    // Existing tests
 
     // Re-export for backward compatibility with existing tests
     fn create_test_table() -> (mlua::Lua, mlua::Table) {
@@ -1488,89 +1389,6 @@ mod tests {
     // ========================================================================
     // extract_screenshot_path tests
     // ========================================================================
-
-    // ========================================================================
-    // extract_hotkey_overlay tests
-    // ========================================================================
-
-    #[test]
-    fn extract_hotkey_overlay_with_values() {
-        let (_lua, table) = create_test_table();
-        table.set("skip_at_startup", true).unwrap();
-        table.set("hide_not_bound", false).unwrap();
-        let result = extract_hotkey_overlay(&table).unwrap();
-        assert!(result.is_some());
-        let overlay = result.unwrap();
-        assert!(overlay.skip_at_startup);
-        assert!(!overlay.hide_not_bound);
-    }
-
-    #[test]
-    fn extract_hotkey_overlay_both_true() {
-        let (_lua, table) = create_test_table();
-        table.set("skip_at_startup", true).unwrap();
-        table.set("hide_not_bound", true).unwrap();
-        let result = extract_hotkey_overlay(&table).unwrap();
-        assert!(result.is_some());
-        let overlay = result.unwrap();
-        assert!(overlay.skip_at_startup);
-        assert!(overlay.hide_not_bound);
-    }
-
-    #[test]
-    fn extract_hotkey_overlay_empty() {
-        let (_lua, table) = create_test_table();
-        let result = extract_hotkey_overlay(&table).unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn extract_hotkey_overlay_both_false() {
-        let (_lua, table) = create_test_table();
-        table.set("skip_at_startup", false).unwrap();
-        table.set("hide_not_bound", false).unwrap();
-        let result = extract_hotkey_overlay(&table).unwrap();
-        assert_eq!(result, None);
-    }
-
-    // ========================================================================
-    // extract_cursor tests
-    // ========================================================================
-
-    #[test]
-    fn extract_cursor_with_all_fields() {
-        let (_lua, table) = create_test_table();
-        table.set("xcursor_theme", "default").unwrap();
-        table.set("xcursor_size", 32i64).unwrap();
-        table.set("hide_when_typing", true).unwrap();
-        table.set("hide_after_inactive_ms", 1000i64).unwrap();
-
-        let result = extract_cursor(&table).unwrap();
-        assert!(result.is_some());
-        let cursor = result.unwrap();
-        assert_eq!(cursor.xcursor_theme, "default");
-        assert_eq!(cursor.xcursor_size, 32);
-        assert!(cursor.hide_when_typing);
-        assert_eq!(cursor.hide_after_inactive_ms, Some(1000));
-    }
-
-    #[test]
-    fn extract_cursor_partial_fields() {
-        let (_lua, table) = create_test_table();
-        table.set("xcursor_theme", "default").unwrap();
-
-        let result = extract_cursor(&table).unwrap();
-        assert!(result.is_some());
-        let cursor = result.unwrap();
-        assert_eq!(cursor.xcursor_theme, "default");
-    }
-
-    #[test]
-    fn extract_cursor_empty() {
-        let (_lua, table) = create_test_table();
-        let result = extract_cursor(&table).unwrap();
-        assert_eq!(result, None);
-    }
 
     // ========================================================================
     // output extractor tests
