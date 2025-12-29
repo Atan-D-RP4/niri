@@ -33,6 +33,7 @@ pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
 pub mod parse_utils;
+pub mod table_assignment;
 pub mod traits;
 
 // Tier 3: Runtime State Access
@@ -87,8 +88,8 @@ pub use process::{
 };
 pub use runtime::LuaRuntime;
 pub use runtime_api::{
-    clear_event_context_state, register_runtime_api, set_event_context_state, CompositorState,
-    RuntimeApi, StateSnapshot,
+    is_scoped_state_active, register_runtime_api, set_scoped_state_active, with_scoped_state,
+    CompositorState, FocusMode, SCOPED_STATE_GLOBAL_KEY,
 };
 
 /// Trait for registering Lua components to the global context.
