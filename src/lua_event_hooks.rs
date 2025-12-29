@@ -15,7 +15,7 @@
 
 use log::debug;
 use mlua::prelude::*;
-use niri_lua::{clear_event_context_state, set_event_context_state, StateSnapshot};
+use niri_lua::{set_scoped_state_active, CompositorState, SCOPED_STATE_GLOBAL_KEY};
 
 use crate::niri::{Niri, State};
 
@@ -23,11 +23,17 @@ use crate::niri::{Niri, State};
 // Internal helpers for event emission
 // ============================================================================
 
-/// Helper to emit an event with state context.
+/// Helper to emit an event with live scoped state access via lua.scope().
 ///
-/// This sets up the state snapshot in thread-local storage before emitting the event,
-/// allowing `niri.state.*` functions to work inside event handlers without deadlocking.
-fn emit_with_state_context<F>(state: &State, event_name: &str, create_data: F)
+/// This uses mlua's scope API to create non-static userdata that directly borrows `&State`.
+/// Event handlers get live state access (not a stale snapshot), and Rust's borrow checker
+/// ensures callbacks cannot retain references beyond the scope.
+///
+/// Benefits over snapshot-based approach:
+/// - Live data: queries return current state, not pre-captured snapshot
+/// - No cloning: avoids Vec cloning overhead for windows/workspaces/outputs
+/// - Lifetime safety: Rust enforces callbacks can't store references
+fn emit_with_scoped_state<F>(state: &State, event_name: &str, create_data: F)
 where
     F: FnOnce(&Lua) -> LuaResult<LuaValue>,
 {
@@ -35,16 +41,138 @@ where
         if let Some(event_system) = &lua_runtime.event_system {
             let lua = lua_runtime.inner();
 
-            // Capture state snapshot for use inside event handlers
-            let snapshot = StateSnapshot::from_compositor_state(state);
-            set_event_context_state(snapshot);
+            let result = lua.scope(|scope| {
+                let state_table = lua.create_table()?;
 
-            // Create event data and emit
-            let result = create_data(lua)
-                .and_then(|lua_value| event_system.emit(lua, event_name, lua_value));
+                let windows_fn = scope.create_function(|lua, ()| {
+                    let windows = state.get_windows();
+                    let result = lua.create_table()?;
+                    for (i, w) in windows.iter().enumerate() {
+                        let t = lua.create_table()?;
+                        t.set("id", w.id)?;
+                        t.set("title", w.title.clone())?;
+                        t.set("app_id", w.app_id.clone())?;
+                        t.set("workspace_id", w.workspace_id)?;
+                        t.set("is_focused", w.is_focused)?;
+                        result.set(i + 1, t)?;
+                    }
+                    Ok(result)
+                })?;
+                state_table.set("windows", windows_fn)?;
 
-            // Always clear the context, even on error
-            clear_event_context_state();
+                let focused_window_fn =
+                    scope.create_function(|lua, ()| match state.get_focused_window() {
+                        Some(w) => {
+                            let t = lua.create_table()?;
+                            t.set("id", w.id)?;
+                            t.set("title", w.title.clone())?;
+                            t.set("app_id", w.app_id.clone())?;
+                            t.set("workspace_id", w.workspace_id)?;
+                            t.set("is_focused", w.is_focused)?;
+                            Ok(LuaValue::Table(t))
+                        }
+                        None => Ok(LuaValue::Nil),
+                    })?;
+                state_table.set("focused_window", focused_window_fn)?;
+
+                let workspaces_fn = scope.create_function(|lua, ()| {
+                    let workspaces = state.get_workspaces();
+                    let result = lua.create_table()?;
+                    for (i, ws) in workspaces.iter().enumerate() {
+                        let t = lua.create_table()?;
+                        t.set("id", ws.id)?;
+                        t.set("idx", ws.idx)?;
+                        t.set("name", ws.name.clone())?;
+                        t.set("output", ws.output.clone())?;
+                        t.set("is_active", ws.is_active)?;
+                        t.set("is_focused", ws.is_focused)?;
+                        result.set(i + 1, t)?;
+                    }
+                    Ok(result)
+                })?;
+                state_table.set("workspaces", workspaces_fn)?;
+
+                let outputs_fn = scope.create_function(|lua, ()| {
+                    let outputs = state.get_outputs();
+                    let result = lua.create_table()?;
+                    for (i, out) in outputs.iter().enumerate() {
+                        let t = lua.create_table()?;
+                        t.set("name", out.name.clone())?;
+                        t.set("make", out.make.clone())?;
+                        t.set("model", out.model.clone())?;
+                        if let Some(logical) = &out.logical {
+                            t.set("width", logical.width)?;
+                            t.set("height", logical.height)?;
+                            t.set("scale", logical.scale)?;
+                        }
+                        result.set(i + 1, t)?;
+                    }
+                    Ok(result)
+                })?;
+                state_table.set("outputs", outputs_fn)?;
+
+                let keyboard_layouts_fn =
+                    scope.create_function(|lua, ()| match state.get_keyboard_layouts() {
+                        Some(layouts) => {
+                            let t = lua.create_table()?;
+                            let names_table = lua.create_table()?;
+                            for (i, name) in layouts.names.iter().enumerate() {
+                                names_table.set(i + 1, name.as_str())?;
+                            }
+                            t.set("names", names_table)?;
+                            t.set("current_idx", layouts.current_idx)?;
+                            Ok(LuaValue::Table(t))
+                        }
+                        None => Ok(LuaValue::Nil),
+                    })?;
+                state_table.set("keyboard_layouts", keyboard_layouts_fn)?;
+
+                let cursor_position_fn =
+                    scope.create_function(|lua, ()| match state.get_cursor_position() {
+                        Some(pos) => {
+                            let t = lua.create_table()?;
+                            t.set("x", pos.x)?;
+                            t.set("y", pos.y)?;
+                            t.set("output", pos.output.clone())?;
+                            Ok(LuaValue::Table(t))
+                        }
+                        None => Ok(LuaValue::Nil),
+                    })?;
+                state_table.set("cursor_position", cursor_position_fn)?;
+
+                let focus_mode_fn = scope.create_function(|_, ()| {
+                    let mode = state.get_focus_mode();
+                    Ok(match mode {
+                        niri_lua::FocusMode::Normal => "normal",
+                        niri_lua::FocusMode::Overview => "overview",
+                        niri_lua::FocusMode::LayerShell => "layer_shell",
+                        niri_lua::FocusMode::Locked => "locked",
+                    })
+                })?;
+                state_table.set("focus_mode", focus_mode_fn)?;
+
+                let reserved_space_fn = scope.create_function(|lua, output_name: String| {
+                    let reserved = state.get_reserved_space(&output_name);
+                    let t = lua.create_table()?;
+                    t.set("top", reserved.top)?;
+                    t.set("bottom", reserved.bottom)?;
+                    t.set("left", reserved.left)?;
+                    t.set("right", reserved.right)?;
+                    Ok(t)
+                })?;
+                state_table.set("reserved_space", reserved_space_fn)?;
+
+                lua.globals().set(SCOPED_STATE_GLOBAL_KEY, state_table)?;
+                set_scoped_state_active(true);
+
+                let event_result = create_data(lua)
+                    .and_then(|lua_value| event_system.emit(lua, event_name, lua_value));
+
+                set_scoped_state_active(false);
+                lua.globals().set(SCOPED_STATE_GLOBAL_KEY, LuaValue::Nil)?;
+
+                event_result
+            });
 
             if let Err(e) = result {
                 debug!("Failed to emit {} event: {}", event_name, e);
@@ -54,6 +182,7 @@ where
 }
 
 /// Helper to emit an event with Niri-only context (when full State is unavailable).
+/// Uses scoped state with empty accessors since we don't have full compositor state.
 fn emit_with_niri_context<F>(niri: &Niri, event_name: &str, create_data: F)
 where
     F: FnOnce(&Lua) -> LuaResult<LuaValue>,
@@ -62,16 +191,28 @@ where
         if let Some(event_system) = &lua_runtime.event_system {
             let lua = lua_runtime.inner();
 
-            // For Niri-only context, we create an empty snapshot since we don't have full State
-            let snapshot = StateSnapshot::default();
-            set_event_context_state(snapshot);
+            let result = lua.scope(|scope| {
+                let state_table = lua.create_table()?;
 
-            // Create event data and emit
-            let result = create_data(lua)
-                .and_then(|lua_value| event_system.emit(lua, event_name, lua_value));
+                let empty_list_fn = scope.create_function(|lua, ()| lua.create_table())?;
+                let nil_fn = scope.create_function(|_, ()| Ok(LuaValue::Nil))?;
 
-            // Always clear the context, even on error
-            clear_event_context_state();
+                state_table.set("windows", empty_list_fn.clone())?;
+                state_table.set("workspaces", empty_list_fn.clone())?;
+                state_table.set("outputs", empty_list_fn)?;
+                state_table.set("focused_window", nil_fn)?;
+
+                lua.globals().set(SCOPED_STATE_GLOBAL_KEY, state_table)?;
+                set_scoped_state_active(true);
+
+                let event_result = create_data(lua)
+                    .and_then(|lua_value| event_system.emit(lua, event_name, lua_value));
+
+                set_scoped_state_active(false);
+                lua.globals().set(SCOPED_STATE_GLOBAL_KEY, LuaValue::Nil)?;
+
+                event_result
+            });
 
             if let Err(e) = result {
                 debug!("Failed to emit {} event: {}", event_name, e);
@@ -239,37 +380,37 @@ pub trait StateLuaEvents {
 
 impl StateLuaEvents for State {
     fn emit_window_open(&self, window_id: u32, window_title: &str) {
-        emit_with_state_context(self, "window:open", |lua| {
+        emit_with_scoped_state(self, "window:open", |lua| {
             create_window_table(lua, window_id, window_title)
         });
     }
 
     fn emit_window_close(&self, window_id: u32, window_title: &str) {
-        emit_with_state_context(self, "window:close", |lua| {
+        emit_with_scoped_state(self, "window:close", |lua| {
             create_window_table(lua, window_id, window_title)
         });
     }
 
     fn emit_window_focus(&self, window_id: u32, window_title: &str) {
-        emit_with_state_context(self, "window:focus", |lua| {
+        emit_with_scoped_state(self, "window:focus", |lua| {
             create_window_table(lua, window_id, window_title)
         });
     }
 
     fn emit_window_blur(&self, window_id: u32, window_title: &str) {
-        emit_with_state_context(self, "window:blur", |lua| {
+        emit_with_scoped_state(self, "window:blur", |lua| {
             create_window_table(lua, window_id, window_title)
         });
     }
 
     fn emit_window_title_changed(&self, window_id: u32, new_title: &str) {
-        emit_with_state_context(self, "window:title_changed", |lua| {
+        emit_with_scoped_state(self, "window:title_changed", |lua| {
             create_window_table(lua, window_id, new_title)
         });
     }
 
     fn emit_window_app_id_changed(&self, window_id: u32, new_app_id: &str) {
-        emit_with_state_context(self, "window:app_id_changed", |lua| {
+        emit_with_scoped_state(self, "window:app_id_changed", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             table.set("app_id", new_app_id)?;
@@ -278,7 +419,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_window_fullscreen(&self, window_id: u32, window_title: &str, is_fullscreen: bool) {
-        emit_with_state_context(self, "window:fullscreen", |lua| {
+        emit_with_scoped_state(self, "window:fullscreen", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             table.set("title", window_title)?;
@@ -288,7 +429,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_window_maximize(&self, window_id: u32, window_title: &str, is_maximized: bool) {
-        emit_with_state_context(self, "window:maximize", |lua| {
+        emit_with_scoped_state(self, "window:maximize", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             table.set("title", window_title)?;
@@ -298,7 +439,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_window_resize(&self, window_id: u32, window_title: &str, width: i32, height: i32) {
-        emit_with_state_context(self, "window:resize", |lua| {
+        emit_with_scoped_state(self, "window:resize", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             table.set("title", window_title)?;
@@ -317,7 +458,7 @@ impl StateLuaEvents for State {
         from_output: Option<&str>,
         to_output: &str,
     ) {
-        emit_with_state_context(self, "window:move", |lua| {
+        emit_with_scoped_state(self, "window:move", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             table.set("title", window_title)?;
@@ -339,19 +480,19 @@ impl StateLuaEvents for State {
             workspace_name,
             workspace_idx
         );
-        emit_with_state_context(self, "workspace:activate", |lua| {
+        emit_with_scoped_state(self, "workspace:activate", |lua| {
             create_workspace_table(lua, workspace_name, workspace_idx)
         });
     }
 
     fn emit_workspace_deactivate(&self, workspace_name: &str, workspace_idx: u32) {
-        emit_with_state_context(self, "workspace:deactivate", |lua| {
+        emit_with_scoped_state(self, "workspace:deactivate", |lua| {
             create_workspace_table(lua, workspace_name, workspace_idx)
         });
     }
 
     fn emit_workspace_create(&self, workspace_name: &str, workspace_idx: u32, output: &str) {
-        emit_with_state_context(self, "workspace:create", |lua| {
+        emit_with_scoped_state(self, "workspace:create", |lua| {
             let table = lua.create_table()?;
             table.set("name", workspace_name)?;
             table.set("idx", workspace_idx)?;
@@ -361,7 +502,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_workspace_destroy(&self, workspace_name: &str, workspace_idx: u32, output: &str) {
-        emit_with_state_context(self, "workspace:destroy", |lua| {
+        emit_with_scoped_state(self, "workspace:destroy", |lua| {
             let table = lua.create_table()?;
             table.set("name", workspace_name)?;
             table.set("idx", workspace_idx)?;
@@ -377,7 +518,7 @@ impl StateLuaEvents for State {
         new_name: Option<&str>,
         output: &str,
     ) {
-        emit_with_state_context(self, "workspace:rename", |lua| {
+        emit_with_scoped_state(self, "workspace:rename", |lua| {
             let table = lua.create_table()?;
             table.set("idx", workspace_idx)?;
             if let Some(old) = old_name {
@@ -392,7 +533,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_layout_mode_changed(&self, is_floating: bool) {
-        emit_with_state_context(self, "layout:mode_changed", |lua| {
+        emit_with_scoped_state(self, "layout:mode_changed", |lua| {
             let table = lua.create_table()?;
             table.set("mode", if is_floating { "floating" } else { "tiling" })?;
             Ok(LuaValue::Table(table))
@@ -400,7 +541,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_layout_window_added(&self, window_id: u32) {
-        emit_with_state_context(self, "layout:window_added", |lua| {
+        emit_with_scoped_state(self, "layout:window_added", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             Ok(LuaValue::Table(table))
@@ -408,7 +549,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_layout_window_removed(&self, window_id: u32) {
-        emit_with_state_context(self, "layout:window_removed", |lua| {
+        emit_with_scoped_state(self, "layout:window_removed", |lua| {
             let table = lua.create_table()?;
             table.set("id", window_id)?;
             Ok(LuaValue::Table(table))
@@ -416,7 +557,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_config_reload(&self, success: bool) {
-        emit_with_state_context(self, "config:reload", |lua| {
+        emit_with_scoped_state(self, "config:reload", |lua| {
             let table = lua.create_table()?;
             table.set("success", success)?;
             Ok(LuaValue::Table(table))
@@ -424,31 +565,31 @@ impl StateLuaEvents for State {
     }
 
     fn emit_overview_open(&self) {
-        emit_with_state_context(self, "overview:open", |lua| create_empty_table(lua));
+        emit_with_scoped_state(self, "overview:open", create_empty_table);
     }
 
     fn emit_overview_close(&self) {
-        emit_with_state_context(self, "overview:close", |lua| create_empty_table(lua));
+        emit_with_scoped_state(self, "overview:close", create_empty_table);
     }
 
     fn emit_idle_start(&self) {
-        emit_with_state_context(self, "idle:start", |lua| create_empty_table(lua));
+        emit_with_scoped_state(self, "idle:start", create_empty_table);
     }
 
     fn emit_idle_end(&self) {
-        emit_with_state_context(self, "idle:end", |lua| create_empty_table(lua));
+        emit_with_scoped_state(self, "idle:end", create_empty_table);
     }
 
     fn emit_startup(&self) {
-        emit_with_state_context(self, "startup", |lua| create_empty_table(lua));
+        emit_with_scoped_state(self, "startup", create_empty_table);
     }
 
     fn emit_shutdown(&self) {
-        emit_with_state_context(self, "shutdown", |lua| create_empty_table(lua));
+        emit_with_scoped_state(self, "shutdown", create_empty_table);
     }
 
     fn emit_key_press(&self, key_name: &str, modifiers: &str, consumed: bool) {
-        emit_with_state_context(self, "key:press", |lua| {
+        emit_with_scoped_state(self, "key:press", |lua| {
             let table = lua.create_table()?;
             table.set("key", key_name)?;
             table.set("modifiers", modifiers)?;
@@ -458,7 +599,7 @@ impl StateLuaEvents for State {
     }
 
     fn emit_key_release(&self, key_name: &str, modifiers: &str) {
-        emit_with_state_context(self, "key:release", |lua| {
+        emit_with_scoped_state(self, "key:release", |lua| {
             let table = lua.create_table()?;
             table.set("key", key_name)?;
             table.set("modifiers", modifiers)?;
@@ -531,10 +672,10 @@ impl NiriLuaEvents for Niri {
     }
 
     fn emit_lock_activate(&self) {
-        emit_with_niri_context(self, "lock:activate", |lua| create_empty_table(lua));
+        emit_with_niri_context(self, "lock:activate", create_empty_table);
     }
 
     fn emit_lock_deactivate(&self) {
-        emit_with_niri_context(self, "lock:deactivate", |lua| create_empty_table(lua));
+        emit_with_niri_context(self, "lock:deactivate", create_empty_table);
     }
 }

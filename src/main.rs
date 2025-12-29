@@ -184,12 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     let lua_action_tx = lua_integration::create_action_channel(&event_loop.handle());
-    lua_integration::setup_runtime(
-        &mut state,
-        lua_result.runtime,
-        &event_loop.handle(),
-        lua_action_tx,
-    );
+    lua_integration::setup_runtime(&mut state, lua_result.runtime, lua_action_tx);
     let lua_pending_actions = lua_result.pending_actions;
 
     // Extract spawn commands AFTER Lua config is applied

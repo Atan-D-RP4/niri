@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use calloop::LoopHandle;
 use niri_config::{Config, ConfigPath};
-use niri_lua::{LuaConfig, LuaRuntime, RuntimeApi};
+use niri_lua::{LuaConfig, LuaRuntime};
 use tracing::{info, warn};
 
 use crate::niri::State;
@@ -150,12 +150,10 @@ pub fn load_lua_config(config_path: &ConfigPath, config: &mut Config) -> LuaLoad
 ///
 /// * `state` - The compositor state (runtime will be stored here)
 /// * `runtime` - The Lua runtime to set up (if Some)
-/// * `event_loop` - The event loop handle for registering sources
 /// * `action_tx` - Channel sender for Lua actions
 pub fn setup_runtime(
     state: &mut State,
     runtime: Option<LuaRuntime>,
-    event_loop: &LoopHandle<'static, State>,
     action_tx: calloop::channel::Sender<niri_ipc::Action>,
 ) {
     // Store the Lua runtime in the compositor state
@@ -164,8 +162,7 @@ pub fn setup_runtime(
     // Register APIs if runtime is present
     if let Some(ref mut runtime) = state.niri.lua_runtime {
         // Register runtime API for state queries
-        let runtime_api = RuntimeApi::new(event_loop.clone());
-        if let Err(e) = runtime.register_runtime_api(runtime_api) {
+        if let Err(e) = runtime.register_runtime_api() {
             warn!("Failed to register Lua runtime API: {}", e);
         }
 
