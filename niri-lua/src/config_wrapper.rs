@@ -9,13 +9,13 @@ use crate::collections::{
     WindowRulesCollection, WorkspacesCollection,
 };
 use crate::config_dirty::ConfigDirtyFlags;
-use crate::config_state::ConfigState;
 use crate::config_proxies::{
     AnimationsConfigProxy, ClipboardConfigProxy, ConfigNotificationConfigProxy, CursorConfigProxy,
     DebugConfigProxy, GesturesConfigProxy, HotkeyOverlayConfigProxy, InputConfigProxy,
     LayoutConfigProxy, OverviewConfigProxy, RecentWindowsConfigProxy, SpawnAtStartupConfigProxy,
     XwaylandSatelliteConfigProxy,
 };
+use crate::config_state::ConfigState;
 use crate::extractors::{
     extract_clipboard, extract_config_notification, extract_debug, extract_gestures, extract_input,
     extract_layout, extract_overview, extract_recent_windows, extract_xwayland_satellite,
@@ -101,7 +101,6 @@ macro_rules! wrapper_field {
         });
     };
 }
-
 
 #[derive(Clone)]
 pub struct ConfigWrapper {
@@ -288,4 +287,3 @@ pub fn register_config_wrapper(lua: &Lua, wrapper: ConfigWrapper) -> LuaResult<(
     niri.set("config", wrapper)?;
     Ok(())
 }
-

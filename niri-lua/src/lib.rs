@@ -41,10 +41,12 @@ pub mod event_data;
 pub mod ipc_bridge;
 pub mod ipc_repl;
 pub mod runtime_api;
+pub mod state_handle;
 
 // API Schema (for LSP type generation and testing)
 pub mod api_registry;
 pub mod lua_api_schema;
+
 
 // Tier 4: Async Primitives
 pub mod callback_registry;
@@ -87,10 +89,9 @@ pub use process::{
     SpawnOpts,
 };
 pub use runtime::LuaRuntime;
-pub use runtime_api::{
-    is_scoped_state_active, register_runtime_api, set_scoped_state_active, with_scoped_state,
-    CompositorState, FocusMode, SCOPED_STATE_GLOBAL_KEY,
-};
+pub use runtime_api::register_runtime_api;
+pub use state_handle::{CursorPosition, FocusMode, ReservedSpace, StateHandle};
+
 
 /// Trait for registering Lua components to the global context.
 ///

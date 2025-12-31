@@ -10,3 +10,6 @@
 # tip: can be tested using
 # git archive --format=tar.gz --output=source.tar.gz HEAD && \
 # tar tfvz source.tar.gz | grep -e '.png' -e '.gitattributes'
+
+# Use bd merge for beads JSONL files
+.beads/issues.jsonl merge=beads

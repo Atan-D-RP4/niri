@@ -3,13 +3,16 @@
 //! Provides CRUD operations for collection-type configuration:
 //! - outputs, binds, window_rules, workspaces, environment, layer_rules
 
+use std::time::Duration;
 
 use mlua::prelude::*;
-use niri_config::binds::{Bind, Key};
+use niri_config::binds::{Action, Bind, Key, WorkspaceReference};
 use niri_config::output::{Mode, Output, Position, Vrr};
 use niri_config::Config;
-use niri_ipc::{ConfiguredMode, Transform};
-
+use niri_ipc::{
+    ColumnDisplay, ConfiguredMode, LayoutSwitchTarget, PositionChange, SizeChange, Transform,
+    WorkspaceReferenceArg,
+};
 
 use crate::config_state::{ConfigState, DirtyFlag};
 use crate::extractors::*;
@@ -27,7 +30,7 @@ pub trait CollectionProxyBase<T: Clone> {
         let config = self
             .state()
             .try_borrow_config()
-            .map_err(|e| mlua::Error::external(e))?;
+            .map_err(mlua::Error::external)?;
         f(&config)
     }
 
@@ -38,7 +41,7 @@ pub trait CollectionProxyBase<T: Clone> {
         let mut config = self
             .state()
             .try_borrow_config()
-            .map_err(|e| mlua::Error::external(e))?;
+            .map_err(mlua::Error::external)?;
         let result = f(&mut config)?;
         drop(config);
         self.state().mark_dirty(self.dirty_flag());
@@ -92,24 +95,22 @@ impl LuaUserData for OutputsCollection {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| -> LuaResult<()> {
-            this.with_dirty_config(|config| {
-                match &value {
-                    LuaValue::Table(tbl) => {
-                        if tbl.contains_key(1)? {
-                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                                let (_, output_tbl) = pair?;
-                                let output = extract_output(lua, &output_tbl)?;
-                                config.outputs.0.push(output);
-                            }
-                        } else {
-                            let output = extract_output(lua, tbl)?;
+            this.with_dirty_config(|config| match &value {
+                LuaValue::Table(tbl) => {
+                    if tbl.contains_key(1)? {
+                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                            let (_, output_tbl) = pair?;
+                            let output = extract_output(lua, &output_tbl)?;
                             config.outputs.0.push(output);
                         }
-                        
-                        Ok(())
+                    } else {
+                        let output = extract_output(lua, tbl)?;
+                        config.outputs.0.push(output);
                     }
-                    _ => Err(LuaError::external("outputs:add() expects a table")),
+
+                    Ok(())
                 }
+                _ => Err(LuaError::external("outputs:add() expects a table")),
             })
         });
 
@@ -165,13 +166,7 @@ impl LuaUserData for OutputsCollection {
 
         methods.add_method("remove", |_, this, name: String| -> LuaResult<()> {
             this.with_dirty_config(|config| {
-                let len_before = config.outputs.0.len();
                 config.outputs.0.retain(|o| o.name != name);
-
-                if config.outputs.0.len() < len_before {
-                    
-                }
-
                 Ok(())
             })
         });
@@ -180,7 +175,6 @@ impl LuaUserData for OutputsCollection {
             this.with_dirty_config(|config| {
                 if !config.outputs.0.is_empty() {
                     config.outputs.0.clear();
-                    
                 }
 
                 Ok(())
@@ -311,12 +305,26 @@ impl LuaUserData for BindsCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
-        // TODO: binds:add() requires complex action parsing - not yet implemented
-        // Use niri.config.binds in config.lua instead
-        methods.add_method("add", |_lua, _this, _value: LuaValue| -> LuaResult<()> {
-            Err(LuaError::external(
-                "binds:add() is not yet implemented. Define bindings in config.lua instead.",
-            ))
+        methods.add_method("add", |lua, this, value: LuaValue| -> LuaResult<()> {
+            this.with_dirty_config(|config| {
+                match &value {
+                    LuaValue::Table(tbl) => {
+                        // Check if it's an array of bindings or a single binding
+                        if tbl.contains_key(1)? {
+                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                                let (_, bind_tbl) = pair?;
+                                let bind = extract_bind(lua, &bind_tbl)?;
+                                config.binds.0.push(bind);
+                            }
+                        } else {
+                            let bind = extract_bind(lua, tbl)?;
+                            config.binds.0.push(bind);
+                        }
+                        Ok(())
+                    }
+                    _ => Err(LuaError::external("binds:add() expects a table")),
+                }
+            })
         });
 
         methods.add_method("list", |lua, this, ()| {
@@ -344,12 +352,7 @@ impl LuaUserData for BindsCollection {
                     .parse()
                     .map_err(|e| LuaError::external(format!("Invalid key: {}", e)))?;
 
-                let len_before = config.binds.0.len();
                 config.binds.0.retain(|b| b.key != key);
-
-                if config.binds.0.len() < len_before {
-                    
-                }
 
                 Ok(())
             })
@@ -359,7 +362,6 @@ impl LuaUserData for BindsCollection {
             this.with_dirty_config(|config| {
                 if !config.binds.0.is_empty() {
                     config.binds.0.clear();
-                    
                 }
 
                 Ok(())
@@ -368,31 +370,34 @@ impl LuaUserData for BindsCollection {
     }
 }
 
-define_collection!(WindowRulesCollection, niri_config::WindowRule, window_rules, WindowRules);
+define_collection!(
+    WindowRulesCollection,
+    niri_config::WindowRule,
+    window_rules,
+    WindowRules
+);
 
 impl LuaUserData for WindowRulesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config| {
-                match &value {
-                    LuaValue::Table(tbl) => {
-                        if tbl.contains_key(1)? {
-                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                                let (_, rule_tbl) = pair?;
-                                let rule = extract_window_rule(lua, &rule_tbl)?;
-                                config.window_rules.push(rule);
-                            }
-                        } else {
-                            let rule = extract_window_rule(lua, tbl)?;
+            this.with_dirty_config(|config| match &value {
+                LuaValue::Table(tbl) => {
+                    if tbl.contains_key(1)? {
+                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                            let (_, rule_tbl) = pair?;
+                            let rule = extract_window_rule(lua, &rule_tbl)?;
                             config.window_rules.push(rule);
                         }
-                        
-                        Ok(())
+                    } else {
+                        let rule = extract_window_rule(lua, tbl)?;
+                        config.window_rules.push(rule);
                     }
-                    _ => Err(LuaError::external("window_rules:add() expects a table")),
+
+                    Ok(())
                 }
+                _ => Err(LuaError::external("window_rules:add() expects a table")),
             })
         });
 
@@ -427,7 +432,6 @@ impl LuaUserData for WindowRulesCollection {
             this.with_dirty_config(|config| {
                 if !config.window_rules.is_empty() {
                     config.window_rules.clear();
-                    
                 }
 
                 Ok(())
@@ -502,31 +506,34 @@ fn extract_match(tbl: &LuaTable) -> LuaResult<niri_config::window_rule::Match> {
     Ok(m)
 }
 
-define_collection!(WorkspacesCollection, niri_config::Workspace, workspaces, Workspaces);
+define_collection!(
+    WorkspacesCollection,
+    niri_config::Workspace,
+    workspaces,
+    Workspaces
+);
 
 impl LuaUserData for WorkspacesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config| {
-                match &value {
-                    LuaValue::Table(tbl) => {
-                        if tbl.contains_key(1)? {
-                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                                let (_, ws_tbl) = pair?;
-                                let ws = extract_workspace(lua, &ws_tbl)?;
-                                config.workspaces.push(ws);
-                            }
-                        } else {
-                            let ws = extract_workspace(lua, tbl)?;
+            this.with_dirty_config(|config| match &value {
+                LuaValue::Table(tbl) => {
+                    if tbl.contains_key(1)? {
+                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                            let (_, ws_tbl) = pair?;
+                            let ws = extract_workspace(lua, &ws_tbl)?;
                             config.workspaces.push(ws);
                         }
-                        
-                        Ok(())
+                    } else {
+                        let ws = extract_workspace(lua, tbl)?;
+                        config.workspaces.push(ws);
                     }
-                    _ => Err(LuaError::external("workspaces:add() expects a table")),
+
+                    Ok(())
                 }
+                _ => Err(LuaError::external("workspaces:add() expects a table")),
             })
         });
 
@@ -591,13 +598,7 @@ impl LuaUserData for WorkspacesCollection {
 
         methods.add_method("remove", |_, this, name: String| {
             this.with_dirty_config(|config| {
-                let len_before = config.workspaces.len();
                 config.workspaces.retain(|ws| ws.name.0 != name);
-
-                if config.workspaces.len() < len_before {
-                    
-                }
-
                 Ok(())
             })
         });
@@ -606,7 +607,6 @@ impl LuaUserData for WorkspacesCollection {
             this.with_dirty_config(|config| {
                 if !config.workspaces.is_empty() {
                     config.workspaces.clear();
-                    
                 }
 
                 Ok(())
@@ -631,31 +631,34 @@ fn extract_workspace(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::Works
     })
 }
 
-define_collection!(EnvironmentCollection, niri_config::EnvironmentVariable, environment.0, Environment);
+define_collection!(
+    EnvironmentCollection,
+    niri_config::EnvironmentVariable,
+    environment.0,
+    Environment
+);
 
 impl LuaUserData for EnvironmentCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config| {
-                match &value {
-                    LuaValue::Table(tbl) => {
-                        if tbl.contains_key(1)? {
-                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                                let (_, env_tbl) = pair?;
-                                let env = extract_environment_variable(lua, &env_tbl)?;
-                                config.environment.0.push(env);
-                            }
-                        } else {
-                            let env = extract_environment_variable(lua, tbl)?;
+            this.with_dirty_config(|config| match &value {
+                LuaValue::Table(tbl) => {
+                    if tbl.contains_key(1)? {
+                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                            let (_, env_tbl) = pair?;
+                            let env = extract_environment_variable(lua, &env_tbl)?;
                             config.environment.0.push(env);
                         }
-                        
-                        Ok(())
+                    } else {
+                        let env = extract_environment_variable(lua, tbl)?;
+                        config.environment.0.push(env);
                     }
-                    _ => Err(LuaError::external("environment:add() expects a table")),
+
+                    Ok(())
                 }
+                _ => Err(LuaError::external("environment:add() expects a table")),
             })
         });
 
@@ -703,7 +706,6 @@ impl LuaUserData for EnvironmentCollection {
                         .0
                         .push(niri_config::EnvironmentVariable { name, value });
                 }
-                
 
                 Ok(())
             })
@@ -711,13 +713,7 @@ impl LuaUserData for EnvironmentCollection {
 
         methods.add_method("remove", |_, this, name: String| {
             this.with_dirty_config(|config| {
-                let len_before = config.environment.0.len();
                 config.environment.0.retain(|e| e.name != name);
-
-                if config.environment.0.len() < len_before {
-                    
-                }
-
                 Ok(())
             })
         });
@@ -726,7 +722,6 @@ impl LuaUserData for EnvironmentCollection {
             this.with_dirty_config(|config| {
                 if !config.environment.0.is_empty() {
                     config.environment.0.clear();
-                    
                 }
 
                 Ok(())
@@ -747,31 +742,34 @@ fn extract_environment_variable(
     Ok(niri_config::EnvironmentVariable { name, value })
 }
 
-define_collection!(LayerRulesCollection, niri_config::LayerRule, layer_rules, LayerRules);
+define_collection!(
+    LayerRulesCollection,
+    niri_config::LayerRule,
+    layer_rules,
+    LayerRules
+);
 
 impl LuaUserData for LayerRulesCollection {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
 
         methods.add_method("add", |lua, this, value: LuaValue| {
-            this.with_dirty_config(|config| {
-                match &value {
-                    LuaValue::Table(tbl) => {
-                        if tbl.contains_key(1)? {
-                            for pair in tbl.clone().pairs::<i64, LuaTable>() {
-                                let (_, rule_tbl) = pair?;
-                                let rule = extract_layer_rule(lua, &rule_tbl)?;
-                                config.layer_rules.push(rule);
-                            }
-                        } else {
-                            let rule = extract_layer_rule(lua, tbl)?;
+            this.with_dirty_config(|config| match &value {
+                LuaValue::Table(tbl) => {
+                    if tbl.contains_key(1)? {
+                        for pair in tbl.clone().pairs::<i64, LuaTable>() {
+                            let (_, rule_tbl) = pair?;
+                            let rule = extract_layer_rule(lua, &rule_tbl)?;
                             config.layer_rules.push(rule);
                         }
-                        
-                        Ok(())
+                    } else {
+                        let rule = extract_layer_rule(lua, tbl)?;
+                        config.layer_rules.push(rule);
                     }
-                    _ => Err(LuaError::external("layer_rules:add() expects a table")),
+
+                    Ok(())
                 }
+                _ => Err(LuaError::external("layer_rules:add() expects a table")),
             })
         });
 
@@ -803,7 +801,6 @@ impl LuaUserData for LayerRulesCollection {
             this.with_dirty_config(|config| {
                 if !config.layer_rules.is_empty() {
                     config.layer_rules.clear();
-                    
                 }
 
                 Ok(())
@@ -866,6 +863,816 @@ fn parse_block_out_from(s: &str) -> LuaResult<niri_config::BlockOutFrom> {
     }
 }
 
+fn extract_bind(_lua: &Lua, tbl: &LuaTable) -> LuaResult<Bind> {
+    let key_str = extract_string_opt(tbl, "key")?
+        .ok_or_else(|| LuaError::external("bind requires 'key' field (e.g., 'Mod+Return')"))?;
+
+    let key: Key = key_str
+        .parse()
+        .map_err(|e| LuaError::external(format!("Invalid key '{}': {}", key_str, e)))?;
+
+    let action = extract_action(tbl)?;
+
+    let repeat = extract_bool_opt(tbl, "repeat")?.unwrap_or(false);
+    let cooldown = extract_int_opt(tbl, "cooldown_ms")?.map(|ms| Duration::from_millis(ms as u64));
+    let allow_when_locked = extract_bool_opt(tbl, "allow_when_locked")?.unwrap_or(false);
+    let allow_inhibiting = extract_bool_opt(tbl, "allow_inhibiting")?.unwrap_or(true);
+    let hotkey_overlay_title = extract_string_opt(tbl, "hotkey_overlay_title")?.map(Some);
+
+    Ok(Bind {
+        key,
+        action,
+        repeat,
+        cooldown,
+        allow_when_locked,
+        allow_inhibiting,
+        hotkey_overlay_title,
+    })
+}
+
+fn extract_action(tbl: &LuaTable) -> LuaResult<Action> {
+    let action_str = extract_string_opt(tbl, "action")?
+        .ok_or_else(|| LuaError::external("bind requires 'action' field"))?;
+
+    let action_lower = action_str.to_lowercase().replace(['-', ' '], "_");
+
+    match action_lower.as_str() {
+        // system / meta
+        "quit" => {
+            let skip = extract_bool_opt(tbl, "skip_confirmation")?.unwrap_or(false);
+            Ok(Action::Quit(skip))
+        }
+        "suspend" => Ok(Action::Suspend),
+        "power_off_monitors" | "poweroffmonitors" => Ok(Action::PowerOffMonitors),
+        "power_on_monitors" | "poweronmonitors" => Ok(Action::PowerOnMonitors),
+        "toggle_debug_tint" | "toggledebugtint" => Ok(Action::ToggleDebugTint),
+        "debug_toggle_opaque_regions" | "debugtoggleopaqueregions" => {
+            Ok(Action::DebugToggleOpaqueRegions)
+        }
+        "debug_toggle_damage" | "debugtoggledamage" => Ok(Action::DebugToggleDamage),
+        "spawn" => {
+            let args = extract_string_array(tbl, "args")?;
+            if args.is_empty() {
+                return Err(LuaError::external("spawn action requires 'args' array"));
+            }
+            Ok(Action::Spawn(args))
+        }
+        "spawn_sh" | "spawnsh" => {
+            let cmd = extract_string_opt(tbl, "command")?
+                .or_else(|| {
+                    extract_string_array(tbl, "args")
+                        .ok()
+                        .and_then(|a| a.first().cloned())
+                })
+                .ok_or_else(|| LuaError::external("spawn_sh requires 'command' string"))?;
+            Ok(Action::SpawnSh(cmd))
+        }
+        "do_screen_transition" | "doscreentransition" => {
+            let delay_ms = extract_int_opt(tbl, "delay_ms")?.map(|v| v as u16);
+            Ok(Action::DoScreenTransition(delay_ms))
+        }
+        "confirm_screenshot" | "confirmscreenshot" => {
+            let write_to_disk = extract_bool_opt(tbl, "write_to_disk")?.unwrap_or(true);
+            Ok(Action::ConfirmScreenshot { write_to_disk })
+        }
+        "cancel_screenshot" | "cancelscreenshot" => Ok(Action::CancelScreenshot),
+        "screenshot_toggle_pointer" | "screenshottogglepointer" => {
+            Ok(Action::ScreenshotTogglePointer)
+        }
+        "screenshot" => {
+            let show_pointer = extract_bool_opt(tbl, "show_pointer")?.unwrap_or(true);
+            let path = extract_string_opt(tbl, "path")?;
+            Ok(Action::Screenshot(show_pointer, path))
+        }
+        "screenshot_screen" | "screenshotscreen" => {
+            let write_to_disk = extract_bool_opt(tbl, "write_to_disk")?.unwrap_or(true);
+            let show_pointer = extract_bool_opt(tbl, "show_pointer")?.unwrap_or(true);
+            let path = extract_string_opt(tbl, "path")?;
+            Ok(Action::ScreenshotScreen(write_to_disk, show_pointer, path))
+        }
+        "screenshot_window" | "screenshotwindow" => {
+            let write_to_disk = extract_bool_opt(tbl, "write_to_disk")?.unwrap_or(true);
+            let path = extract_string_opt(tbl, "path")?;
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ScreenshotWindowById {
+                    id: id as u64,
+                    write_to_disk,
+                    path,
+                })
+            } else {
+                Ok(Action::ScreenshotWindow(write_to_disk, path))
+            }
+        }
+        "toggle_keyboard_shortcuts_inhibit" | "togglekeyboardshortcutsinhibit" => {
+            Ok(Action::ToggleKeyboardShortcutsInhibit)
+        }
+        "load_config_file" | "loadconfigfile" => Ok(Action::LoadConfigFile),
+
+        // window focus and movement
+        "close_window" | "closewindow" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::CloseWindowById(id as u64))
+            } else {
+                Ok(Action::CloseWindow)
+            }
+        }
+        "fullscreen_window" | "fullscreenwindow" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::FullscreenWindowById(id as u64))
+            } else {
+                Ok(Action::FullscreenWindow)
+            }
+        }
+        "toggle_windowed_fullscreen" | "togglewindowedfullscreen" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ToggleWindowedFullscreenById(id as u64))
+            } else {
+                Ok(Action::ToggleWindowedFullscreen)
+            }
+        }
+        "focus_window" | "focuswindow" => {
+            let id = extract_int_opt(tbl, "id")?
+                .ok_or_else(|| LuaError::external("focus_window requires 'id' field (u64)"))?
+                as u64;
+            Ok(Action::FocusWindow(id))
+        }
+        "focus_window_in_column" | "focuswindowincolumn" => {
+            let index = extract_int_opt(tbl, "index")?
+                .ok_or_else(|| LuaError::external("focus_window_in_column requires 'index'"))?
+                as u8;
+            Ok(Action::FocusWindowInColumn(index))
+        }
+        "focus_window_previous" | "focuswindowprevious" => Ok(Action::FocusWindowPrevious),
+        "focus_column_left" | "focuscolumnleft" => Ok(Action::FocusColumnLeft),
+        "focus_column_left_under_mouse" | "focuscolumnleftundermouse" => {
+            Ok(Action::FocusColumnLeftUnderMouse)
+        }
+        "focus_column_right" | "focuscolumnright" => Ok(Action::FocusColumnRight),
+        "focus_column_right_under_mouse" | "focuscolumnrightundermouse" => {
+            Ok(Action::FocusColumnRightUnderMouse)
+        }
+        "focus_column_first" | "focuscolumnfirst" => Ok(Action::FocusColumnFirst),
+        "focus_column_last" | "focuscolumnlast" => Ok(Action::FocusColumnLast),
+        "focus_column_right_or_first" | "focuscolumnrightorfirst" => {
+            Ok(Action::FocusColumnRightOrFirst)
+        }
+        "focus_column_left_or_last" | "focuscolumnleftorlast" => Ok(Action::FocusColumnLeftOrLast),
+        "focus_column" | "focuscolumn" => {
+            let index = extract_int_opt(tbl, "index")?
+                .ok_or_else(|| LuaError::external("focus_column requires 'index'"))?
+                as usize;
+            Ok(Action::FocusColumn(index))
+        }
+        "focus_window_or_monitor_up" | "focuswindowormonitorup" => {
+            Ok(Action::FocusWindowOrMonitorUp)
+        }
+        "focus_window_or_monitor_down" | "focuswindowormonitordown" => {
+            Ok(Action::FocusWindowOrMonitorDown)
+        }
+        "focus_column_or_monitor_left" | "focuscolumnormonitorleft" => {
+            Ok(Action::FocusColumnOrMonitorLeft)
+        }
+        "focus_column_or_monitor_right" | "focuscolumnormonitorright" => {
+            Ok(Action::FocusColumnOrMonitorRight)
+        }
+        "focus_window_down" | "focuswindowdown" => Ok(Action::FocusWindowDown),
+        "focus_window_up" | "focuswindowup" => Ok(Action::FocusWindowUp),
+        "focus_window_down_or_column_left" | "focuswindowdownorcolumnleft" => {
+            Ok(Action::FocusWindowDownOrColumnLeft)
+        }
+        "focus_window_down_or_column_right" | "focuswindowdownorcolumnright" => {
+            Ok(Action::FocusWindowDownOrColumnRight)
+        }
+        "focus_window_up_or_column_left" | "focuswindowuporcolumnleft" => {
+            Ok(Action::FocusWindowUpOrColumnLeft)
+        }
+        "focus_window_up_or_column_right" | "focuswindowuporcolumnright" => {
+            Ok(Action::FocusWindowUpOrColumnRight)
+        }
+        "focus_window_or_workspace_up" | "focuswindoworworkspaceup" => {
+            Ok(Action::FocusWindowOrWorkspaceUp)
+        }
+        "focus_window_or_workspace_down" | "focuswindoworworkspacedown" => {
+            Ok(Action::FocusWindowOrWorkspaceDown)
+        }
+        "focus_window_top" | "focuswindowtop" => Ok(Action::FocusWindowTop),
+        "focus_window_bottom" | "focuswindowbottom" => Ok(Action::FocusWindowBottom),
+        "focus_window_down_or_top" | "focuswindowdownortop" => Ok(Action::FocusWindowDownOrTop),
+        "focus_window_up_or_bottom" | "focuswindowuporbottom" => Ok(Action::FocusWindowUpOrBottom),
+
+        // column / window movement
+        "move_column_left" | "movecolumnleft" => Ok(Action::MoveColumnLeft),
+        "move_column_right" | "movecolumnright" => Ok(Action::MoveColumnRight),
+        "move_column_to_first" | "movecolumntofirst" => Ok(Action::MoveColumnToFirst),
+        "move_column_to_last" | "movecolumntolast" => Ok(Action::MoveColumnToLast),
+        "move_column_left_or_to_monitor_left" | "movecolumnleftortomonitorleft" => {
+            Ok(Action::MoveColumnLeftOrToMonitorLeft)
+        }
+        "move_column_right_or_to_monitor_right" | "movecolumnrightortomonitorright" => {
+            Ok(Action::MoveColumnRightOrToMonitorRight)
+        }
+        "move_column_to_index" | "movecolumntoindex" => {
+            let index = extract_int_opt(tbl, "index")?
+                .ok_or_else(|| LuaError::external("move_column_to_index requires 'index'"))?
+                as usize;
+            Ok(Action::MoveColumnToIndex(index))
+        }
+        "move_window_down" | "movewindowdown" => Ok(Action::MoveWindowDown),
+        "move_window_up" | "movewindowup" => Ok(Action::MoveWindowUp),
+        "move_window_down_or_to_workspace_down" | "movewindowdownortoworkspacedown" => {
+            Ok(Action::MoveWindowDownOrToWorkspaceDown)
+        }
+        "move_window_up_or_to_workspace_up" | "movewindowuportoworkspaceup" => {
+            Ok(Action::MoveWindowUpOrToWorkspaceUp)
+        }
+        "consume_or_expel_window_left" | "consumeorexpelwindowleft" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ConsumeOrExpelWindowLeftById(id as u64))
+            } else {
+                Ok(Action::ConsumeOrExpelWindowLeft)
+            }
+        }
+        "consume_or_expel_window_right" | "consumeorexpelwindowright" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ConsumeOrExpelWindowRightById(id as u64))
+            } else {
+                Ok(Action::ConsumeOrExpelWindowRight)
+            }
+        }
+        "consume_window_into_column" | "consumewindowintocolumn" => {
+            Ok(Action::ConsumeWindowIntoColumn)
+        }
+        "expel_window_from_column" | "expelwindowfromcolumn" => Ok(Action::ExpelWindowFromColumn),
+        "swap_window_left" | "swapwindowleft" => Ok(Action::SwapWindowLeft),
+        "swap_window_right" | "swapwindowright" => Ok(Action::SwapWindowRight),
+        "toggle_column_tabbed_display" | "togglecolumntabbeddisplay" => {
+            Ok(Action::ToggleColumnTabbedDisplay)
+        }
+        "set_column_display" | "setcolumndisplay" => {
+            let display_str = extract_string_opt(tbl, "display")?
+                .ok_or_else(|| LuaError::external("set_column_display requires 'display'"))?;
+            let display = match display_str.to_lowercase().as_str() {
+                "normal" => ColumnDisplay::Normal,
+                "tabbed" => ColumnDisplay::Tabbed,
+                _ => {
+                    return Err(LuaError::external(format!(
+                        "Invalid column display: {} (use 'normal' or 'tabbed')",
+                        display_str
+                    )))
+                }
+            };
+            Ok(Action::SetColumnDisplay(display))
+        }
+        "center_column" | "centercolumn" => Ok(Action::CenterColumn),
+        "center_window" | "centerwindow" | "center_window_focused" | "centerwindowfocused" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::CenterWindowById(id as u64))
+            } else {
+                Ok(Action::CenterWindow)
+            }
+        }
+        "center_visible_columns" | "centervisiblecolumns" => Ok(Action::CenterVisibleColumns),
+        "expand_column_to_available_width" | "expandcolumntoavailablewidth" => {
+            Ok(Action::ExpandColumnToAvailableWidth)
+        }
+
+        // workspace
+        "focus_workspace_down" | "focusworkspacedown" => Ok(Action::FocusWorkspaceDown),
+        "focus_workspace_down_under_mouse" | "focusworkspacedownundermouse" => {
+            Ok(Action::FocusWorkspaceDownUnderMouse)
+        }
+        "focus_workspace_up" | "focusworkspaceup" => Ok(Action::FocusWorkspaceUp),
+        "focus_workspace_up_under_mouse" | "focusworkspaceupundermouse" => {
+            Ok(Action::FocusWorkspaceUpUnderMouse)
+        }
+        "focus_workspace" | "focusworkspace" => {
+            let ws_ref = extract_workspace_reference_config(tbl)?;
+            Ok(Action::FocusWorkspace(ws_ref))
+        }
+        "focus_workspace_previous" | "focusworkspaceprevious" => Ok(Action::FocusWorkspacePrevious),
+        "move_window_to_workspace_down" | "movewindowtoworkspacedown" => {
+            let focus = extract_bool_opt(tbl, "focus")?.unwrap_or(true);
+            Ok(Action::MoveWindowToWorkspaceDown(focus))
+        }
+        "move_window_to_workspace_up" | "movewindowtoworkspaceup" => {
+            let focus = extract_bool_opt(tbl, "focus")?.unwrap_or(true);
+            Ok(Action::MoveWindowToWorkspaceUp(focus))
+        }
+        "move_window_to_workspace" | "movewindowtoworkspace" => {
+            let reference = extract_workspace_reference_config(tbl)?;
+            let focus = extract_bool_opt(tbl, "focus")?.unwrap_or(true);
+            if let Some(window_id) = extract_int_opt(tbl, "window_id")?.map(|v| v as u64) {
+                Ok(Action::MoveWindowToWorkspaceById {
+                    window_id,
+                    reference,
+                    focus,
+                })
+            } else {
+                Ok(Action::MoveWindowToWorkspace(reference, focus))
+            }
+        }
+        "move_column_to_workspace_down" | "movecolumntoworkspacedown" => {
+            let focus = extract_bool_opt(tbl, "focus")?.unwrap_or(true);
+            Ok(Action::MoveColumnToWorkspaceDown(focus))
+        }
+        "move_column_to_workspace_up" | "movecolumntoworkspaceup" => {
+            let focus = extract_bool_opt(tbl, "focus")?.unwrap_or(true);
+            Ok(Action::MoveColumnToWorkspaceUp(focus))
+        }
+        "move_column_to_workspace" | "movecolumntoworkspace" => {
+            let reference = extract_workspace_reference_config(tbl)?;
+            let focus = extract_bool_opt(tbl, "focus")?.unwrap_or(true);
+            Ok(Action::MoveColumnToWorkspace(reference, focus))
+        }
+        "move_workspace_down" | "moveworkspacedown" => Ok(Action::MoveWorkspaceDown),
+        "move_workspace_up" | "moveworkspaceup" => Ok(Action::MoveWorkspaceUp),
+        "move_workspace_to_index" | "moveworkspacetoindex" => {
+            let index = extract_int_opt(tbl, "index")?
+                .ok_or_else(|| LuaError::external("move_workspace_to_index requires 'index'"))?
+                as usize;
+            let reference = extract_table_opt(tbl, "reference")?
+                .map(|t| extract_workspace_reference_config(&t))
+                .transpose()?;
+            if let Some(reference) = reference {
+                Ok(Action::MoveWorkspaceToIndexByRef {
+                    new_idx: index,
+                    reference,
+                })
+            } else {
+                Ok(Action::MoveWorkspaceToIndex(index))
+            }
+        }
+        "set_workspace_name" | "setworkspacename" => {
+            let name = extract_string_opt(tbl, "name")?
+                .ok_or_else(|| LuaError::external("set_workspace_name requires 'name'"))?;
+            let reference = extract_table_opt(tbl, "reference")?
+                .map(|t| extract_workspace_reference_config(&t))
+                .transpose()?;
+            if let Some(reference) = reference {
+                Ok(Action::SetWorkspaceNameByRef { name, reference })
+            } else {
+                Ok(Action::SetWorkspaceName(name))
+            }
+        }
+        "unset_workspace_name" | "unsetworkspacename" => {
+            let reference = extract_table_opt(tbl, "reference")?
+                .map(|t| extract_workspace_reference_config(&t))
+                .transpose()?;
+            if let Some(reference) = reference {
+                Ok(Action::UnsetWorkSpaceNameByRef(reference))
+            } else {
+                Ok(Action::UnsetWorkspaceName)
+            }
+        }
+
+        // monitor
+        "focus_monitor_left" | "focusmonitorleft" => Ok(Action::FocusMonitorLeft),
+        "focus_monitor_right" | "focusmonitorright" => Ok(Action::FocusMonitorRight),
+        "focus_monitor_down" | "focusmonitordown" => Ok(Action::FocusMonitorDown),
+        "focus_monitor_up" | "focusmonitorup" => Ok(Action::FocusMonitorUp),
+        "focus_monitor_previous" | "focusmonitorprevious" => Ok(Action::FocusMonitorPrevious),
+        "focus_monitor_next" | "focusmonitornext" => Ok(Action::FocusMonitorNext),
+        "focus_monitor" | "focusmonitor" => {
+            let output = extract_string_opt(tbl, "output")?
+                .ok_or_else(|| LuaError::external("focus_monitor requires 'output'"))?;
+            Ok(Action::FocusMonitor(output))
+        }
+        "move_window_to_monitor_left" | "movewindowtomonitorleft" => {
+            Ok(Action::MoveWindowToMonitorLeft)
+        }
+        "move_window_to_monitor_right" | "movewindowtomonitorright" => {
+            Ok(Action::MoveWindowToMonitorRight)
+        }
+        "move_window_to_monitor_down" | "movewindowtomonitordown" => {
+            Ok(Action::MoveWindowToMonitorDown)
+        }
+        "move_window_to_monitor_up" | "movewindowtomonitorup" => Ok(Action::MoveWindowToMonitorUp),
+        "move_window_to_monitor_previous" | "movewindowtomonitorprevious" => {
+            Ok(Action::MoveWindowToMonitorPrevious)
+        }
+        "move_window_to_monitor_next" | "movewindowtomonitornext" => {
+            Ok(Action::MoveWindowToMonitorNext)
+        }
+        "move_window_to_monitor" | "movewindowtomonitor" => {
+            let output = extract_string_opt(tbl, "output")?
+                .ok_or_else(|| LuaError::external("move_window_to_monitor requires 'output'"))?;
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::MoveWindowToMonitorById {
+                    id: id as u64,
+                    output,
+                })
+            } else {
+                Ok(Action::MoveWindowToMonitor(output))
+            }
+        }
+        "move_column_to_monitor_left" | "movecolumntomonitorleft" => {
+            Ok(Action::MoveColumnToMonitorLeft)
+        }
+        "move_column_to_monitor_right" | "movecolumntomonitorright" => {
+            Ok(Action::MoveColumnToMonitorRight)
+        }
+        "move_column_to_monitor_down" | "movecolumntomonitordown" => {
+            Ok(Action::MoveColumnToMonitorDown)
+        }
+        "move_column_to_monitor_up" | "movecolumntomonitorup" => Ok(Action::MoveColumnToMonitorUp),
+        "move_column_to_monitor_previous" | "movecolumntomonitorprevious" => {
+            Ok(Action::MoveColumnToMonitorPrevious)
+        }
+        "move_column_to_monitor_next" | "movecolumntomonitornext" => {
+            Ok(Action::MoveColumnToMonitorNext)
+        }
+        "move_column_to_monitor" | "movecolumntomonitor" => {
+            let output = extract_string_opt(tbl, "output")?
+                .ok_or_else(|| LuaError::external("move_column_to_monitor requires 'output'"))?;
+            Ok(Action::MoveColumnToMonitor(output))
+        }
+        "move_workspace_to_monitor_left" | "moveworkspacetomonitorleft" => {
+            Ok(Action::MoveWorkspaceToMonitorLeft)
+        }
+        "move_workspace_to_monitor_right" | "moveworkspacetomonitorright" => {
+            Ok(Action::MoveWorkspaceToMonitorRight)
+        }
+        "move_workspace_to_monitor_down" | "moveworkspacetomonitordown" => {
+            Ok(Action::MoveWorkspaceToMonitorDown)
+        }
+        "move_workspace_to_monitor_up" | "moveworkspacetomonitorup" => {
+            Ok(Action::MoveWorkspaceToMonitorUp)
+        }
+        "move_workspace_to_monitor_previous" | "moveworkspacetomonitorprevious" => {
+            Ok(Action::MoveWorkspaceToMonitorPrevious)
+        }
+        "move_workspace_to_monitor_next" | "moveworkspacetomonitornext" => {
+            Ok(Action::MoveWorkspaceToMonitorNext)
+        }
+        "move_workspace_to_monitor" | "moveworkspacetomonitor" => {
+            let output = extract_string_opt(tbl, "output")?
+                .ok_or_else(|| LuaError::external("move_workspace_to_monitor requires 'output'"))?;
+            let reference = extract_table_opt(tbl, "reference")?
+                .map(|t| extract_workspace_reference_config(&t))
+                .transpose()?;
+            if let Some(reference) = reference {
+                Ok(Action::MoveWorkspaceToMonitorByRef {
+                    output_name: output,
+                    reference,
+                })
+            } else {
+                Ok(Action::MoveWorkspaceToMonitor(output))
+            }
+        }
+
+        // sizing / layout
+        "set_window_width" | "setwindowwidth" => {
+            let change = extract_size_change(tbl)?;
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SetWindowWidthById {
+                    id: id as u64,
+                    change,
+                })
+            } else {
+                Ok(Action::SetWindowWidth(change))
+            }
+        }
+        "set_window_height" | "setwindowheight" => {
+            let change = extract_size_change(tbl)?;
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SetWindowHeightById {
+                    id: id as u64,
+                    change,
+                })
+            } else {
+                Ok(Action::SetWindowHeight(change))
+            }
+        }
+        "reset_window_height" | "resetwindowheight" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ResetWindowHeightById(id as u64))
+            } else {
+                Ok(Action::ResetWindowHeight)
+            }
+        }
+        "switch_preset_column_width" | "switchpresetcolumnwidth" => {
+            Ok(Action::SwitchPresetColumnWidth)
+        }
+        "switch_preset_column_width_back" | "switchpresetcolumnwidthback" => {
+            Ok(Action::SwitchPresetColumnWidthBack)
+        }
+        "switch_preset_window_width" | "switchpresetwindowwidth" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SwitchPresetWindowWidthById(id as u64))
+            } else {
+                Ok(Action::SwitchPresetWindowWidth)
+            }
+        }
+        "switch_preset_window_width_back" | "switchpresetwindowwidthback" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SwitchPresetWindowWidthBackById(id as u64))
+            } else {
+                Ok(Action::SwitchPresetWindowWidthBack)
+            }
+        }
+        "switch_preset_window_height" | "switchpresetwindowheight" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SwitchPresetWindowHeightById(id as u64))
+            } else {
+                Ok(Action::SwitchPresetWindowHeight)
+            }
+        }
+        "switch_preset_window_height_back" | "switchpresetwindowheightback" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SwitchPresetWindowHeightBackById(id as u64))
+            } else {
+                Ok(Action::SwitchPresetWindowHeightBack)
+            }
+        }
+        "maximize_column" | "maximizecolumn" => Ok(Action::MaximizeColumn),
+        "maximize_window_to_edges" | "maximizewindowtoedges" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::MaximizeWindowToEdgesById(id as u64))
+            } else {
+                Ok(Action::MaximizeWindowToEdges)
+            }
+        }
+        "set_column_width" | "setcolumnwidth" => {
+            let change = extract_size_change(tbl)?;
+            Ok(Action::SetColumnWidth(change))
+        }
+        "switch_layout" | "switchlayout" => {
+            let target = extract_layout_switch_target(tbl)?;
+            Ok(Action::SwitchLayout(target))
+        }
+        "show_hotkey_overlay" | "showhotkeyoverlay" => Ok(Action::ShowHotkeyOverlay),
+
+        // floating / tiling / overview
+        "toggle_window_floating" | "togglewindowfloating" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ToggleWindowFloatingById(id as u64))
+            } else {
+                Ok(Action::ToggleWindowFloating)
+            }
+        }
+        "move_window_to_floating" | "movewindowtofloating" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::MoveWindowToFloatingById(id as u64))
+            } else {
+                Ok(Action::MoveWindowToFloating)
+            }
+        }
+        "move_window_to_tiling" | "movewindowtotiling" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::MoveWindowToTilingById(id as u64))
+            } else {
+                Ok(Action::MoveWindowToTiling)
+            }
+        }
+        "focus_floating" | "focusfloating" => Ok(Action::FocusFloating),
+        "focus_tiling" | "focustiling" => Ok(Action::FocusTiling),
+        "switch_focus_between_floating_and_tiling" | "switchfocusbetweenfloatingandtiling" => {
+            Ok(Action::SwitchFocusBetweenFloatingAndTiling)
+        }
+        "move_floating_window" | "movefloatingwindow" => {
+            let x = parse_position_change_value(tbl.get("x")?)?;
+            let y = parse_position_change_value(tbl.get("y")?)?;
+            let id = extract_int_opt(tbl, "id")?.map(|v| v as u64);
+            Ok(Action::MoveFloatingWindowById { id, x, y })
+        }
+        "toggle_window_rule_opacity" | "togglewindowruleopacity" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::ToggleWindowRuleOpacityById(id as u64))
+            } else {
+                Ok(Action::ToggleWindowRuleOpacity)
+            }
+        }
+        "toggle_overview" | "toggleoverview" => Ok(Action::ToggleOverview),
+        "open_overview" | "openoverview" => Ok(Action::OpenOverview),
+        "close_overview" | "closeoverview" => Ok(Action::CloseOverview),
+
+        // casting
+        "set_dynamic_cast_window" | "setdynamiccastwindow" => {
+            if let Some(id) = extract_int_opt(tbl, "id")? {
+                Ok(Action::SetDynamicCastWindowById(id as u64))
+            } else {
+                Ok(Action::SetDynamicCastWindow)
+            }
+        }
+        "set_dynamic_cast_monitor" | "setdynamiccastmonitor" => {
+            let output = extract_string_opt(tbl, "output")?;
+            Ok(Action::SetDynamicCastMonitor(output))
+        }
+        "clear_dynamic_cast_target" | "cleardynamiccasttarget" => {
+            Ok(Action::ClearDynamicCastTarget)
+        }
+
+        // urgency
+        "toggle_window_urgent" | "togglewindowurgent" => {
+            let id = extract_int_opt(tbl, "id")?
+                .ok_or_else(|| LuaError::external("toggle_window_urgent requires 'id'"))?
+                as u64;
+            Ok(Action::ToggleWindowUrgent(id))
+        }
+        "set_window_urgent" | "setwindowurgent" => {
+            let id = extract_int_opt(tbl, "id")?
+                .ok_or_else(|| LuaError::external("set_window_urgent requires 'id'"))?
+                as u64;
+            Ok(Action::SetWindowUrgent(id))
+        }
+        "unset_window_urgent" | "unsetwindowurgent" => {
+            let id = extract_int_opt(tbl, "id")?
+                .ok_or_else(|| LuaError::external("unset_window_urgent requires 'id'"))?
+                as u64;
+            Ok(Action::UnsetWindowUrgent(id))
+        }
+
+        _ => Err(LuaError::external(format!(
+            "Unknown action '{}'. See niri documentation for valid actions.",
+            action_str
+        ))),
+    }
+}
+
+fn parse_position_change_value(value: LuaValue) -> LuaResult<PositionChange> {
+    match value {
+        LuaValue::Nil => Err(LuaError::external("position change requires a value")),
+        LuaValue::Integer(n) => Ok(PositionChange::SetFixed(n as f64)),
+        LuaValue::Number(n) => Ok(PositionChange::SetFixed(n)),
+        LuaValue::String(s) => parse_position_change_str(&s.to_str()?),
+        other => Err(LuaError::external(format!(
+            "position change must be a number or string, got {:?}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_position_change_str(s: &str) -> LuaResult<PositionChange> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(LuaError::external("position change cannot be empty"));
+    }
+
+    let is_relative = s.starts_with('+') || s.starts_with('-');
+    let is_proportion = s.ends_with('%');
+    let num_str = s
+        .trim_start_matches('+')
+        .trim_start_matches('-')
+        .trim_end_matches('%');
+
+    if is_proportion {
+        let value: f64 = num_str
+            .parse()
+            .map_err(|_| LuaError::external(format!("invalid proportion: {}", s)))?;
+        let proportion = value / 100.0;
+        if is_relative {
+            if s.starts_with('-') {
+                Ok(PositionChange::AdjustProportion(-proportion))
+            } else {
+                Ok(PositionChange::AdjustProportion(proportion))
+            }
+        } else {
+            Ok(PositionChange::SetProportion(proportion))
+        }
+    } else {
+        let value: f64 = num_str
+            .parse()
+            .map_err(|_| LuaError::external(format!("invalid position: {}", s)))?;
+        if is_relative {
+            if s.starts_with('-') {
+                Ok(PositionChange::AdjustFixed(-value))
+            } else {
+                Ok(PositionChange::AdjustFixed(value))
+            }
+        } else {
+            Ok(PositionChange::SetFixed(value))
+        }
+    }
+}
+
+fn extract_string_array(tbl: &LuaTable, field: &str) -> LuaResult<Vec<String>> {
+    if let Some(arr_tbl) = extract_table_opt(tbl, field)? {
+        let mut result = Vec::new();
+        for pair in arr_tbl.pairs::<i64, String>() {
+            let (_, s) = pair?;
+            result.push(s);
+        }
+        Ok(result)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+fn extract_workspace_reference(tbl: &LuaTable) -> LuaResult<WorkspaceReferenceArg> {
+    if let Some(idx) = extract_int_opt(tbl, "index")? {
+        Ok(WorkspaceReferenceArg::Index(idx as u8))
+    } else if let Some(name) = extract_string_opt(tbl, "name")? {
+        Ok(WorkspaceReferenceArg::Name(name))
+    } else if let Some(id) = extract_int_opt(tbl, "id")? {
+        Ok(WorkspaceReferenceArg::Id(id as u64))
+    } else if let Some(ref_val) = extract_int_opt(tbl, "reference")? {
+        Ok(WorkspaceReferenceArg::Index(ref_val as u8))
+    } else if let Some(ref_str) = extract_string_opt(tbl, "reference")? {
+        if let Ok(idx) = ref_str.parse::<u8>() {
+            Ok(WorkspaceReferenceArg::Index(idx))
+        } else {
+            Ok(WorkspaceReferenceArg::Name(ref_str))
+        }
+    } else {
+        Err(LuaError::external(
+            "Workspace action requires 'index', 'name', 'id', or 'reference' field",
+        ))
+    }
+}
+
+fn extract_workspace_reference_config(tbl: &LuaTable) -> LuaResult<WorkspaceReference> {
+    extract_workspace_reference(tbl).map(WorkspaceReference::from)
+}
+
+fn extract_size_change(tbl: &LuaTable) -> LuaResult<SizeChange> {
+    if let Some(fixed) = extract_int_opt(tbl, "fixed")? {
+        return Ok(SizeChange::SetFixed(fixed as i32));
+    }
+    if let Some(proportion) = extract_float_opt(tbl, "proportion")? {
+        return Ok(SizeChange::SetProportion(proportion));
+    }
+    if let Some(change_str) = extract_string_opt(tbl, "change")? {
+        return parse_size_change_string(&change_str);
+    }
+    if let Some(value) = extract_int_opt(tbl, "value")? {
+        return Ok(SizeChange::SetFixed(value as i32));
+    }
+    Err(LuaError::external(
+        "Size change requires 'fixed' (int), 'proportion' (float), or 'change' (string like '+10%')",
+    ))
+}
+
+fn parse_size_change_string(s: &str) -> LuaResult<SizeChange> {
+    let s = s.trim();
+    if s.ends_with('%') {
+        let num_str = s.trim_end_matches('%');
+        if let Some(stripped) = num_str.strip_prefix('+') {
+            let val: f64 = stripped
+                .parse()
+                .map_err(|_| LuaError::external(format!("Invalid size change: {}", s)))?;
+            Ok(SizeChange::AdjustProportion(val / 100.0))
+        } else if let Some(stripped) = num_str.strip_prefix('-') {
+            let val: f64 = stripped
+                .parse()
+                .map_err(|_| LuaError::external(format!("Invalid size change: {}", s)))?;
+            Ok(SizeChange::AdjustProportion(-val / 100.0))
+        } else {
+            let val: f64 = num_str
+                .parse()
+                .map_err(|_| LuaError::external(format!("Invalid size change: {}", s)))?;
+            Ok(SizeChange::SetProportion(val / 100.0))
+        }
+    } else if let Some(stripped) = s.strip_prefix('+') {
+        let val: i32 = stripped
+            .parse()
+            .map_err(|_| LuaError::external(format!("Invalid size change: {}", s)))?;
+        Ok(SizeChange::AdjustFixed(val))
+    } else if let Some(stripped) = s.strip_prefix('-') {
+        let val: i32 = stripped
+            .parse()
+            .map_err(|_| LuaError::external(format!("Invalid size change: {}", s)))?;
+        Ok(SizeChange::AdjustFixed(-val))
+    } else {
+        let val: i32 = s
+            .parse()
+            .map_err(|_| LuaError::external(format!("Invalid size change: {}", s)))?;
+        Ok(SizeChange::SetFixed(val))
+    }
+}
+
+fn extract_layout_switch_target(tbl: &LuaTable) -> LuaResult<LayoutSwitchTarget> {
+    if let Some(idx) = extract_int_opt(tbl, "layout")? {
+        return Ok(LayoutSwitchTarget::Index(idx as u8));
+    }
+    if let Some(target_str) = extract_string_opt(tbl, "layout")? {
+        return match target_str.to_lowercase().as_str() {
+            "next" => Ok(LayoutSwitchTarget::Next),
+            "prev" | "previous" => Ok(LayoutSwitchTarget::Prev),
+            _ => {
+                if let Ok(idx) = target_str.parse::<u8>() {
+                    Ok(LayoutSwitchTarget::Index(idx))
+                } else {
+                    Err(LuaError::external(format!(
+                        "Invalid layout target: {}. Use 'next', 'prev', or an index.",
+                        target_str
+                    )))
+                }
+            }
+        };
+    }
+    if let Some(target_str) = extract_string_opt(tbl, "target")? {
+        return match target_str.to_lowercase().as_str() {
+            "next" => Ok(LayoutSwitchTarget::Next),
+            "prev" | "previous" => Ok(LayoutSwitchTarget::Prev),
+            _ => Err(LuaError::external(format!(
+                "Invalid layout target: {}. Use 'next', 'prev', or an index.",
+                target_str
+            ))),
+        };
+    }
+    Ok(LayoutSwitchTarget::Next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,5 +1709,4 @@ mod tests {
             Transform::Flipped
         ));
     }
-
 }

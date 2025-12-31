@@ -198,6 +198,11 @@ impl State {
 
         drop(map);
 
+        if let Some(handle) = &self.niri.state_handle {
+            let reserved = self.niri.reserved_space_for_output(&output);
+            handle.set_reserved_space(&output.name(), reserved);
+        }
+
         // This will call queue_redraw() inside.
         self.niri.output_resized(&output);
 

@@ -53,6 +53,7 @@ use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::{center, get_monotonic_time, ResizeEdge};
+use niri_lua::state_handle::CursorPosition;
 
 pub mod backend_ext;
 pub mod move_grab;
@@ -2349,6 +2350,7 @@ impl State {
                 self.niri.layout.toggle_overview();
                 self.niri.queue_redraw_all();
                 // Overview events are emitted centrally in the refresh cycle.
+                self.update_state_handle_focus_mode();
             }
             Action::OpenOverview => {
                 if self.niri.layout.open_overview() {
@@ -2713,6 +2715,7 @@ impl State {
                     .unwrap_or(true)
             {
                 self.niri.layout.toggle_overview();
+                self.update_state_handle_focus_mode();
             }
             self.niri.pointer_inside_hot_corner = true;
         }
@@ -2729,6 +2732,20 @@ impl State {
                 let output = output.clone();
                 self.niri.layout.dnd_update(output, pos_within_output);
             }
+        }
+
+        if let Some(handle) = &self.niri.state_handle {
+            let output_name = self
+                .niri
+                .output_under_cursor()
+                .map(|o| o.name().to_string())
+                .unwrap_or_default();
+            let pos = self.niri.seat.get_pointer().unwrap().current_location();
+            handle.set_cursor_position(Some(CursorPosition {
+                x: pos.x,
+                y: pos.y,
+                output: output_name,
+            }));
         }
 
         // Redraw to update the cursor position.
@@ -2806,11 +2823,14 @@ impl State {
                     .unwrap_or(true)
             {
                 self.niri.layout.toggle_overview();
+                self.update_state_handle_focus_mode();
             }
             self.niri.pointer_inside_hot_corner = true;
         }
 
+        // Activate a new confinement if necessary.
         self.niri.maybe_activate_pointer_constraint();
+
 
         // We moved the pointer, show it.
         self.niri.pointer_visibility = PointerVisibility::Visible;
@@ -2827,6 +2847,19 @@ impl State {
                 let output = output.clone();
                 self.niri.layout.dnd_update(output, pos_within_output);
             }
+        }
+
+        if let Some(handle) = &self.niri.state_handle {
+            let output_name = self
+                .niri
+                .output_under_cursor()
+                .map(|o| o.name().to_string())
+                .unwrap_or_default();
+            handle.set_cursor_position(Some(CursorPosition {
+                x: pos.x,
+                y: pos.y,
+                output: output_name,
+            }));
         }
 
         // Redraw to update the cursor position.

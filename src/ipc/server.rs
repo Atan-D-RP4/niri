@@ -458,9 +458,7 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             let code_clone = code.clone();
             ctx.event_loop.insert_idle(move |state| {
                 let (output, success) = if let Some(runtime) = &state.niri.lua_runtime {
-                    niri_lua::with_scoped_state(runtime.inner(), state, || {
-                        runtime.execute_string(&code_clone)
-                    })
+                    runtime.execute_string(&code_clone)
                 } else {
                     ("Lua runtime not initialized".to_string(), false)
                 };

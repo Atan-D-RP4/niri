@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use calloop::LoopHandle;
 use niri_config::{Config, ConfigPath};
-use niri_lua::{LuaConfig, LuaRuntime};
+use niri_lua::{LuaConfig, LuaRuntime, StateHandle};
 use tracing::{info, warn};
 
 use crate::niri::State;
@@ -143,6 +143,7 @@ pub fn load_lua_config(config_path: &ConfigPath, config: &mut Config) -> LuaLoad
 ///
 /// This registers:
 /// - Runtime API for state queries (windows, workspaces, etc.)
+/// - StateHandle for always-live state access
 /// - Config wrapper API for reactive config access
 /// - Action callback for executing actions from Lua
 ///
@@ -164,6 +165,13 @@ pub fn setup_runtime(
         // Register runtime API for state queries
         if let Err(e) = runtime.register_runtime_api() {
             warn!("Failed to register Lua runtime API: {}", e);
+        }
+
+        // Set up StateHandle for always-live state access
+        if let Some(ref ipc_server) = state.niri.ipc_server {
+            let state_handle = StateHandle::new(ipc_server.event_stream_state.clone());
+            runtime.set_state_handle(state_handle.clone());
+            state.niri.state_handle = Some(state_handle);
         }
 
         // Register config wrapper API for reactive config access

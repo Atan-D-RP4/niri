@@ -390,30 +390,24 @@ fn generate_getter_method(
                 })
             }
         }
-        FieldKind::Offset => {
-            Ok(quote! {
-                pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
-                    let config = self.state.try_borrow_config()?;
-                    #crate_path::traits::offset_to_table(lua, &#field_path)
-                }
-            })
-        }
-        FieldKind::AnimKind => {
-            Ok(quote! {
-                pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
-                    let config = self.state.try_borrow_config()?;
-                    #crate_path::traits::anim_kind_to_table(lua, &#field_path)
-                }
-            })
-        }
-        FieldKind::Inverted => {
-            Ok(quote! {
-                pub fn #getter_name(&self, _lua: &::mlua::Lua) -> ::mlua::Result<bool> {
-                    let config = self.state.try_borrow_config()?;
-                    Ok(!#field_path)
-                }
-            })
-        }
+        FieldKind::Offset => Ok(quote! {
+            pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
+                let config = self.state.try_borrow_config()?;
+                #crate_path::traits::offset_to_table(lua, &#field_path)
+            }
+        }),
+        FieldKind::AnimKind => Ok(quote! {
+            pub fn #getter_name(&self, lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
+                let config = self.state.try_borrow_config()?;
+                #crate_path::traits::anim_kind_to_table(lua, &#field_path)
+            }
+        }),
+        FieldKind::Inverted => Ok(quote! {
+            pub fn #getter_name(&self, _lua: &::mlua::Lua) -> ::mlua::Result<bool> {
+                let config = self.state.try_borrow_config()?;
+                Ok(!#field_path)
+            }
+        }),
     }
 }
 
@@ -516,49 +510,43 @@ fn generate_setter_method(
                 })
             }
         }
-        FieldKind::Offset => {
-            Ok(quote! {
-                pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
-                    let new_value = #crate_path::traits::table_to_offset(value)?;
+        FieldKind::Offset => Ok(quote! {
+            pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
+                let new_value = #crate_path::traits::table_to_offset(value)?;
 
-                    {
-                        let mut config = self.state.try_borrow_config()?;
-                        #field_path = new_value;
-                    }
-
-                    self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
-                    Ok(())
+                {
+                    let mut config = self.state.try_borrow_config()?;
+                    #field_path = new_value;
                 }
-            })
-        }
-        FieldKind::AnimKind => {
-            Ok(quote! {
-                pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
-                    let new_value = #crate_path::traits::table_to_anim_kind(value)?;
 
-                    {
-                        let mut config = self.state.try_borrow_config()?;
-                        #field_path = new_value;
-                    }
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                Ok(())
+            }
+        }),
+        FieldKind::AnimKind => Ok(quote! {
+            pub fn #setter_name(&self, _lua: &::mlua::Lua, value: ::mlua::Table) -> ::mlua::Result<()> {
+                let new_value = #crate_path::traits::table_to_anim_kind(value)?;
 
-                    self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
-                    Ok(())
+                {
+                    let mut config = self.state.try_borrow_config()?;
+                    #field_path = new_value;
                 }
-            })
-        }
-        FieldKind::Inverted => {
-            Ok(quote! {
-                pub fn #setter_name(&self, value: bool) -> ::mlua::Result<()> {
-                    {
-                        let mut config = self.state.try_borrow_config()?;
-                        #field_path = !value;
-                    }
 
-                    self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
-                    Ok(())
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                Ok(())
+            }
+        }),
+        FieldKind::Inverted => Ok(quote! {
+            pub fn #setter_name(&self, value: bool) -> ::mlua::Result<()> {
+                {
+                    let mut config = self.state.try_borrow_config()?;
+                    #field_path = !value;
                 }
-            })
-        }
+
+                self.state.mark_dirty(#crate_path::config_state::DirtyFlag::#dirty_flag);
+                Ok(())
+            }
+        }),
         FieldKind::Nested | FieldKind::Collection | FieldKind::Skip => {
             // These don't have setters
             Ok(quote! {})

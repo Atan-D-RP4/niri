@@ -30,7 +30,6 @@ pub enum FieldKind {
     Inverted,
 }
 
-
 /// Parsed attributes for a struct
 #[derive(Debug, Default)]
 pub struct StructAttrs {
@@ -41,7 +40,6 @@ pub struct StructAttrs {
     /// Custom crate path for niri_lua (e.g., "crate" when used inside niri-lua)
     pub crate_path: Option<String>,
 }
-
 
 /// Parsed attributes for a field
 #[derive(Debug, Default)]
@@ -241,5 +239,3 @@ pub fn apply_rename(ident: &str, convention: RenameAll) -> String {
         RenameAll::ScreamingSnakeCase => to_screaming_snake_case(ident),
     }
 }
-
-

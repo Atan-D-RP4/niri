@@ -81,11 +81,7 @@ pub struct CursorConfig {
 /// config.clipboard.disable_primary = true
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "clipboard",
-    dirty = "Clipboard"
-)]
+#[lua_proxy(crate = "crate", parent_path = "clipboard", dirty = "Clipboard")]
 pub struct ClipboardConfig {
     /// Whether to disable primary selection (middle-click paste).
     pub disable_primary: bool,
@@ -201,11 +197,7 @@ pub struct DebugConfig {
 /// config.layout.struts.right = 0
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "layout.struts",
-    dirty = "Layout"
-)]
+#[lua_proxy(crate = "crate", parent_path = "layout.struts", dirty = "Layout")]
 pub struct StrutsConfig {
     /// Left strut size in logical pixels.
     pub left: FloatOrInt<-65535, 65535>,
@@ -303,11 +295,7 @@ pub struct XkbConfig {
 /// config.input.keyboard.xkb.layout = "us,ru"
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "input.keyboard",
-    dirty = "Keyboard"
-)]
+#[lua_proxy(crate = "crate", parent_path = "input.keyboard", dirty = "Keyboard")]
 pub struct KeyboardConfig {
     /// Key repeat delay in milliseconds.
     pub repeat_delay: u16,
@@ -339,11 +327,7 @@ pub struct KeyboardConfig {
 /// config.input.mouse.accel_speed = 0.5
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "input.mouse",
-    dirty = "Input"
-)]
+#[lua_proxy(crate = "crate", parent_path = "input.mouse", dirty = "Input")]
 pub struct MouseConfig {
     /// Whether the mouse is disabled.
     pub off: bool,
@@ -370,11 +354,7 @@ pub struct MouseConfig {
 /// config.input.trackpoint.accel_speed = 0.5
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "input.trackpoint",
-    dirty = "Input"
-)]
+#[lua_proxy(crate = "crate", parent_path = "input.trackpoint", dirty = "Input")]
 pub struct TrackpointConfig {
     /// Whether the trackpoint is disabled.
     pub off: bool,
@@ -402,11 +382,7 @@ pub struct TrackpointConfig {
 /// config.input.touch.map_to_output = "eDP-1"
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "input.touch",
-    dirty = "Input"
-)]
+#[lua_proxy(crate = "crate", parent_path = "input.touch", dirty = "Input")]
 pub struct TouchConfig {
     /// Whether touch input is disabled.
     pub off: bool,
@@ -448,11 +424,7 @@ pub struct TouchConfig {
 /// config.input.touchpad.accel_profile = "adaptive"
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "input.touchpad",
-    dirty = "Input"
-)]
+#[lua_proxy(crate = "crate", parent_path = "input.touchpad", dirty = "Input")]
 pub struct TouchpadConfig {
     /// Whether the touchpad is disabled.
     pub off: bool,
@@ -627,11 +599,7 @@ pub struct HotCornersConfig {
 /// Controls gesture-related behavior including DnD edge scrolling,
 /// workspace switching, and hot corners.
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "gestures",
-    dirty = "Gestures"
-)]
+#[lua_proxy(crate = "crate", parent_path = "gestures", dirty = "Gestures")]
 pub struct GesturesConfig {
     /// DnD edge view scroll configuration.
     #[lua_proxy(nested)]
@@ -779,11 +747,7 @@ pub struct RecentWindowsConfig {
 /// config.layout.insert_hint.color = "#ff0000"
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "layout.insert_hint",
-    dirty = "Layout"
-)]
+#[lua_proxy(crate = "crate", parent_path = "layout.insert_hint", dirty = "Layout")]
 pub struct InsertHintConfig {
     /// Whether the insert hint is disabled.
     pub off: bool,
@@ -872,11 +836,7 @@ pub struct TabIndicatorConfig {
 /// }
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "layout.focus_ring",
-    dirty = "Layout"
-)]
+#[lua_proxy(crate = "crate", parent_path = "layout.focus_ring", dirty = "Layout")]
 pub struct FocusRingConfig {
     /// Whether the focus ring is disabled.
     pub off: bool,
@@ -933,11 +893,7 @@ pub struct FocusRingConfig {
 /// }
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "layout.border",
-    dirty = "Layout"
-)]
+#[lua_proxy(crate = "crate", parent_path = "layout.border", dirty = "Layout")]
 pub struct BorderConfig {
     /// Whether borders are disabled.
     pub off: bool,
@@ -992,11 +948,7 @@ pub struct BorderConfig {
 /// config.layout.shadow.draw_behind_window = false
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "layout.shadow",
-    dirty = "Layout"
-)]
+#[lua_proxy(crate = "crate", parent_path = "layout.shadow", dirty = "Layout")]
 pub struct ShadowConfig {
     /// Whether shadows are enabled.
     pub on: bool,
@@ -1168,11 +1120,7 @@ pub struct OverviewWorkspaceShadowConfig {
 /// config.overview.workspace_shadow.softness = 40.0
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "overview",
-    dirty = "Overview"
-)]
+#[lua_proxy(crate = "crate", parent_path = "overview", dirty = "Overview")]
 pub struct OverviewConfig {
     /// Overview zoom level (0.0 to 1.0).
     pub zoom: f64,
@@ -1545,11 +1493,7 @@ pub struct WindowResizeAnimConfig {
 /// ]]
 /// ```
 #[derive(Clone, LuaConfigProxy)]
-#[lua_proxy(
-    crate = "crate",
-    parent_path = "animations",
-    dirty = "Animations"
-)]
+#[lua_proxy(crate = "crate", parent_path = "animations", dirty = "Animations")]
 pub struct AnimationsConfig {
     /// Whether all animations are disabled.
     pub off: bool,
