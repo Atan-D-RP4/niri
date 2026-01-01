@@ -9,8 +9,9 @@ use crate::appearance::{
 use crate::utils::{expect_only_children, Flag, MergeWith};
 use crate::{BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
 
-#[derive(Debug, Clone, PartialEq, ConfigProperties)]
+#[derive(Debug, Clone, PartialEq, ConfigProperties, Deserialize)]
 #[config(prefix = "layout")]
+#[serde(default)]
 pub struct Layout {
     pub focus_ring: FocusRing,
     pub border: Border,

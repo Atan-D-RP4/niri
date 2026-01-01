@@ -104,7 +104,8 @@ impl MergeWith<ConfigNotificationPart> for ConfigNotification {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
 pub struct Clipboard {
     pub disable_primary: bool,
 }
@@ -121,7 +122,8 @@ impl MergeWith<ClipboardPart> for Clipboard {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct Overview {
     pub zoom: f64,
     pub backdrop_color: Color,
@@ -166,7 +168,8 @@ pub struct EnvironmentVariable {
     pub value: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
 pub struct XwaylandSatellite {
     pub off: bool,
     pub path: String,

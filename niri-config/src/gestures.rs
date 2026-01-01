@@ -1,7 +1,8 @@
 use crate::utils::MergeWith;
 use crate::FloatOrInt;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct Gestures {
     pub dnd_edge_view_scroll: DndEdgeViewScroll,
     pub dnd_edge_workspace_switch: DndEdgeWorkspaceSwitch,
@@ -29,7 +30,8 @@ impl MergeWith<GesturesPart> for Gestures {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct DndEdgeViewScroll {
     pub trigger_width: f64,
     pub delay_ms: u16,
@@ -63,7 +65,8 @@ impl MergeWith<DndEdgeViewScrollPart> for DndEdgeViewScroll {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct DndEdgeWorkspaceSwitch {
     pub trigger_height: f64,
     pub delay_ms: u16,

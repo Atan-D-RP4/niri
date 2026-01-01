@@ -67,7 +67,8 @@ impl MergeWith<RecentWindowsPart> for RecentWindows {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct MruHighlight {
     pub active_color: Color,
     pub urgent_color: Color,
@@ -105,7 +106,8 @@ impl MergeWith<MruHighlightPart> for MruHighlight {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct MruPreviews {
     pub max_height: f64,
     pub max_scale: f64,

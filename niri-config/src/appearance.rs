@@ -230,7 +230,8 @@ impl CornerRadius {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct FocusRing {
     pub off: bool,
     pub width: f64,
@@ -257,7 +258,8 @@ impl Default for FocusRing {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct Border {
     pub off: bool,
     pub width: f64,
@@ -340,8 +342,9 @@ impl MergeWith<BorderRule> for FocusRing {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, ConfigProperties)]
+#[derive(Debug, Clone, Copy, PartialEq, ConfigProperties, Deserialize)]
 #[config(prefix = "layout.shadow")]
+#[serde(default)]
 pub struct Shadow {
     pub on: bool,
     pub offset: ShadowOffset,
@@ -392,7 +395,8 @@ pub struct ShadowOffset {
     pub y: FloatOrInt<-65535, 65535>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct WorkspaceShadow {
     pub off: bool,
     pub offset: ShadowOffset,
@@ -458,7 +462,8 @@ impl MergeWith<WorkspaceShadowPart> for WorkspaceShadow {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct TabIndicator {
     pub off: bool,
     pub hide_when_single_tab: bool,
@@ -580,7 +585,8 @@ pub enum TabIndicatorPosition {
     Bottom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct InsertHint {
     pub off: bool,
     pub color: Color,
