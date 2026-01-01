@@ -4,6 +4,7 @@ use std::str::FromStr;
 use knuffel::errors::DecodeError;
 use miette::{miette, IntoDiagnostic as _};
 use niri_lua_derive::ConfigProperties;
+use serde::{Deserialize, Deserializer};
 use smithay::backend::renderer::Color32F;
 
 use crate::utils::{Flag, MergeWith};
@@ -84,7 +85,7 @@ impl From<Color> for Color32F {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct Gradient {
     #[knuffel(property, str)]
     pub from: Color,
@@ -110,20 +111,20 @@ impl From<Color> for Gradient {
     }
 }
 
-#[derive(knuffel::DecodeScalar, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(knuffel::DecodeScalar, Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum GradientRelativeTo {
     #[default]
     Window,
     WorkspaceView,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct GradientInterpolation {
     pub color_space: GradientColorSpace,
     pub hue_interpolation: HueInterpolation,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum GradientColorSpace {
     #[default]
     Srgb,
@@ -132,7 +133,7 @@ pub enum GradientColorSpace {
     Oklch,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum HueInterpolation {
     #[default]
     Shorter,
@@ -383,7 +384,7 @@ impl MergeWith<ShadowRule> for Shadow {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct ShadowOffset {
     #[knuffel(property, default)]
     pub x: FloatOrInt<-65535, 65535>,
@@ -528,7 +529,8 @@ impl MergeWith<TabIndicatorPart> for TabIndicator {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct TabIndicatorPart {
     #[knuffel(child)]
     pub off: bool,
@@ -564,13 +566,13 @@ pub struct TabIndicatorPart {
     pub urgent_gradient: Option<Gradient>,
 }
 
-#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct TabIndicatorLength {
     #[knuffel(property)]
     pub total_proportion: Option<f64>,
 }
 
-#[derive(knuffel::DecodeScalar, Debug, Clone, Copy, PartialEq)]
+#[derive(knuffel::DecodeScalar, Debug, Clone, Copy, PartialEq, Deserialize)]
 pub enum TabIndicatorPosition {
     Left,
     Right,
@@ -606,7 +608,8 @@ impl MergeWith<InsertHintPart> for InsertHint {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct InsertHintPart {
     #[knuffel(child)]
     pub off: bool,
@@ -624,7 +627,8 @@ pub enum BlockOutFrom {
     ScreenCapture,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct BorderRule {
     #[knuffel(child)]
     pub off: bool,
@@ -646,7 +650,8 @@ pub struct BorderRule {
     pub urgent_gradient: Option<Gradient>,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct ShadowRule {
     #[knuffel(child)]
     pub off: bool,
@@ -794,6 +799,16 @@ impl FromStr for Color {
             .clamp()
             .to_array();
         Ok(Self::from_array_unpremul(color))
+    }
+}
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Color::from_str(&s).map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 

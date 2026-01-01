@@ -23,7 +23,8 @@ pub struct FloatOrInt<const MIN: i32, const MAX: i32>(pub f64);
 /// - (missing): unset, `None`
 /// - just `field`: set, `Some(true)`
 /// - explicitly `field true` or `field false`: set, `Some(true)` or `Some(false)`
-#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
 pub struct Flag(#[knuffel(argument, default = true)] pub bool);
 
 /// `Regex` that implements `PartialEq` by its string form.

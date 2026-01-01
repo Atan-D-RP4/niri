@@ -97,7 +97,8 @@ impl MergeWith<DndEdgeWorkspaceSwitchPart> for DndEdgeWorkspaceSwitch {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(default)]
 pub struct HotCorners {
     #[knuffel(child)]
     pub off: bool,

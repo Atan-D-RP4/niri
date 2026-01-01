@@ -37,6 +37,7 @@
 use std::str::FromStr;
 
 use mlua::prelude::*;
+use mlua::LuaSerdeExt;
 use niri_config::appearance::*;
 use niri_config::debug::{Debug, PreviewRender};
 use niri_config::gestures::Gestures;
