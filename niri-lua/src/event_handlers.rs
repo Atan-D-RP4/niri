@@ -5,7 +5,7 @@
 //! don't crash Niri.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use log::{debug, error, warn};
 use mlua::prelude::*;
@@ -25,10 +25,10 @@ pub struct LuaEventHandler {
 }
 
 /// Manages all registered event handlers
-#[allow(clippy::arc_with_non_send_sync)] // Arc used for copy-on-write, not thread sharing
+#[allow(clippy::rc_buffer)] // Rc used for copy-on-write, single-threaded
 pub struct EventHandlers {
     /// Map of event names to their registered handlers
-    handlers: HashMap<String, Arc<Vec<LuaEventHandler>>>,
+    handlers: HashMap<String, Rc<Vec<LuaEventHandler>>>,
     /// Next handler ID to assign
     next_handler_id: EventHandlerId,
 }
@@ -51,7 +51,7 @@ impl EventHandlers {
     ///
     /// # Returns
     /// The handler ID for later removal
-    #[allow(clippy::arc_with_non_send_sync)] // Arc used for copy-on-write semantics, not threading
+    #[allow(clippy::rc_buffer)] // Rc used for copy-on-write semantics, single-threaded
     pub fn register_handler(
         &mut self,
         event_type: &str,
@@ -67,11 +67,11 @@ impl EventHandlers {
             once,
         };
 
-        // Use Arc::make_mut to get mutable access, cloning only if needed
-        let handlers = Arc::make_mut(
+        // Use Rc::make_mut to get mutable access, cloning only if needed
+        let handlers = Rc::make_mut(
             self.handlers
                 .entry(event_type.to_string())
-                .or_insert_with(|| Arc::new(Vec::new())),
+                .or_insert_with(|| Rc::new(Vec::new())),
         );
         handlers.push(handler);
 
@@ -92,9 +92,9 @@ impl EventHandlers {
     /// # Returns
     /// True if handler was found and removed, false if not found
     pub fn unregister_handler(&mut self, event_type: &str, handler_id: EventHandlerId) -> bool {
-        if let Some(arc_handlers) = self.handlers.get_mut(event_type) {
-            // Use Arc::make_mut to get mutable access, cloning only if needed
-            let handlers = Arc::make_mut(arc_handlers);
+        if let Some(rc_handlers) = self.handlers.get_mut(event_type) {
+            // Use Rc::make_mut to get mutable access, cloning only if needed
+            let handlers = Rc::make_mut(rc_handlers);
             if let Some(pos) = handlers.iter().position(|h| h.id == handler_id) {
                 handlers.remove(pos);
                 debug!(
@@ -136,9 +136,9 @@ impl EventHandlers {
     ) -> LuaResult<()> {
         use crate::runtime::call_with_lua_timeout;
 
-        if let Some(handlers_arc) = self.handlers.get(event_type) {
-            // Cheap Arc clone - just increments reference count
-            let handlers_snapshot = Arc::clone(handlers_arc);
+        if let Some(handlers_rc) = self.handlers.get(event_type) {
+            // Cheap Rc clone - just increments reference count
+            let handlers_snapshot = Rc::clone(handlers_rc);
             let mut handlers_to_remove = Vec::new();
 
             for handler in handlers_snapshot.iter() {

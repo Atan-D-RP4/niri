@@ -7,6 +7,52 @@ use std::str::FromStr;
 
 use mlua::prelude::*;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PropertyType {
+    Bool,
+    Integer,
+    Number,
+    String,
+    Enum {
+        name: &'static str,
+        variants: &'static [&'static str],
+    },
+    Array(Box<PropertyType>),
+    Nested,
+}
+
+#[derive(Debug, Clone)]
+pub struct PropertyMetadata {
+    pub path: &'static str,
+    pub ty: PropertyType,
+    pub no_signal: bool,
+}
+
+impl PropertyMetadata {
+    pub fn new(path: &'static str, ty: PropertyType) -> Self {
+        Self {
+            path,
+            ty,
+            no_signal: false,
+        }
+    }
+
+    pub fn with_no_signal(mut self) -> Self {
+        self.no_signal = true;
+        self
+    }
+}
+
+/// Trait for configuration types that can register their properties.
+pub trait ConfigProperties {
+    fn property_metadata() -> Vec<PropertyMetadata>;
+}
+
+/// Mutable registry interface for adding configuration properties.
+pub trait PropertyRegistryMut {
+    fn add_from_metadata(&mut self, metadata: &PropertyMetadata);
+}
+
 /// Types that can be constructed from a Lua table.
 ///
 /// This trait is the foundation for extracting Rust configuration types from

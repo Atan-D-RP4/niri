@@ -86,7 +86,7 @@ impl LuaUserData for EventsProxy {
             "on",
             |lua, this, (event_spec, callback): (LuaValue, LuaFunction)| {
                 let event_types = parse_event_types(event_spec)?;
-                let mut h = this.handlers.lock().unwrap();
+                let mut h = this.handlers.borrow_mut();
 
                 if event_types.len() == 1 {
                     // Single event: return just the handler ID (backwards compatible)
@@ -119,7 +119,7 @@ impl LuaUserData for EventsProxy {
             "once",
             |lua, this, (event_spec, callback): (LuaValue, LuaFunction)| {
                 let event_types = parse_event_types(event_spec)?;
-                let mut h = this.handlers.lock().unwrap();
+                let mut h = this.handlers.borrow_mut();
 
                 if event_types.len() == 1 {
                     // Single event: return just the handler ID (backwards compatible)
@@ -158,7 +158,7 @@ impl LuaUserData for EventsProxy {
                 LuaValue::String(event_type) => {
                     // Single event mode: (event_name, handler_id?)
                     let event_str = event_type.to_str()?;
-                    let mut h = this.handlers.lock().unwrap();
+                    let mut h = this.handlers.borrow_mut();
 
                     let removed = if let Some(id_value) = args_iter.next() {
                         let handler_id: EventHandlerId = match id_value {
@@ -191,7 +191,7 @@ impl LuaUserData for EventsProxy {
                 LuaValue::Table(handler_map) => {
                     // Multi-event mode: ({event1 = id1, event2 = id2})
                     let result = lua.create_table()?;
-                    let mut h = this.handlers.lock().unwrap();
+                    let mut h = this.handlers.borrow_mut();
 
                     for pair in handler_map.pairs::<String, EventHandlerId>() {
                         let (event_type, handler_id) = pair?;
@@ -220,7 +220,7 @@ impl LuaUserData for EventsProxy {
                 // flexibility
                 debug!("events:emit('{}') triggered", event_type);
 
-                let mut h = this.handlers.lock().unwrap();
+                let mut h = this.handlers.borrow_mut();
 
                 // Convert the data to a table if it isn't already, wrapping primitives
                 let event_data = match &data {
@@ -246,7 +246,7 @@ impl LuaUserData for EventsProxy {
         // niri.events:list(event_name?)
         // List registered handler IDs for an event, or all events if no name given
         methods.add_method("list", |lua, this, event_type: Option<String>| {
-            let h = this.handlers.lock().unwrap();
+            let h = this.handlers.borrow();
             let result = lua.create_table()?;
 
             if let Some(event) = event_type {
@@ -274,7 +274,7 @@ impl LuaUserData for EventsProxy {
         // niri.events:clear(event_name?)
         // Clear handlers for a specific event, or all handlers if no name given
         methods.add_method("clear", |_lua, this, event_type: Option<String>| {
-            let mut h = this.handlers.lock().unwrap();
+            let mut h = this.handlers.borrow_mut();
 
             if let Some(event) = event_type {
                 debug!("events:clear('{}') clearing handlers", event);
@@ -323,7 +323,8 @@ pub fn register_events_proxy(lua: &Lua, handlers: SharedEventHandlers) -> LuaRes
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use super::*;
     use crate::event_handlers::EventHandlers;
@@ -335,8 +336,7 @@ mod tests {
         let niri = lua.create_table().unwrap();
         lua.globals().set("niri", niri).unwrap();
 
-        #[allow(clippy::arc_with_non_send_sync)]
-        let handlers = Arc::new(Mutex::new(EventHandlers::new()));
+        let handlers = Rc::new(RefCell::new(EventHandlers::new()));
         register_events_proxy(&lua, handlers.clone()).unwrap();
 
         (lua, handlers)
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(handler_id, 1);
 
         // Verify handler was registered
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("test:event"), 1);
     }
 
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(handler_id, 1);
 
         // Verify handler was registered
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("test:event"), 1);
     }
 
@@ -415,7 +415,7 @@ mod tests {
         .unwrap();
 
         // Verify handler was removed
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("test:event"), 0);
     }
 
@@ -453,7 +453,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("target:event"), 1);
 
         let removed: bool = lua.globals().get("_removed_specific").unwrap();
@@ -474,7 +474,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("all:event"), 0);
 
         let removed: bool = lua.globals().get("_removed_all").unwrap();
@@ -581,7 +581,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("event1"), 0);
         assert_eq!(h.handler_count("event2"), 1);
     }
@@ -601,7 +601,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.total_handlers(), 0);
     }
 
@@ -705,7 +705,7 @@ mod tests {
         .unwrap();
 
         // Verify all handlers were registered
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("event1"), 1);
         assert_eq!(h.handler_count("event2"), 1);
         assert_eq!(h.handler_count("event3"), 1);
@@ -761,7 +761,7 @@ mod tests {
 
         // Verify handlers were registered
         {
-            let h = handlers.lock().unwrap();
+            let h = handlers.borrow();
             assert_eq!(h.handler_count("event1"), 1);
             assert_eq!(h.handler_count("event2"), 1);
         }
@@ -772,7 +772,7 @@ mod tests {
             .unwrap();
 
         {
-            let h = handlers.lock().unwrap();
+            let h = handlers.borrow();
             assert_eq!(h.handler_count("event1"), 0);
             assert_eq!(h.handler_count("event2"), 1); // Still there
         }
@@ -783,7 +783,7 @@ mod tests {
             .unwrap();
 
         {
-            let h = handlers.lock().unwrap();
+            let h = handlers.borrow();
             assert_eq!(h.handler_count("event2"), 0);
         }
     }
@@ -803,7 +803,7 @@ mod tests {
         .unwrap();
 
         // Verify all handlers were removed
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("event1"), 0);
         assert_eq!(h.handler_count("event2"), 0);
 
@@ -832,7 +832,7 @@ mod tests {
         let handler_id = result.unwrap();
         assert_eq!(handler_id, 1);
 
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("test:event"), 1);
     }
 
@@ -868,7 +868,7 @@ mod tests {
         .exec()
         .unwrap();
 
-        let h = handlers.lock().unwrap();
+        let h = handlers.borrow();
         assert_eq!(h.handler_count("test:event"), 0);
 
         let removed: bool = lua.globals().get("_test_removed").unwrap();

@@ -1,5 +1,6 @@
 use knuffel::errors::DecodeError;
 use niri_ipc::{ColumnDisplay, SizeChange};
+use niri_lua_derive::ConfigProperties;
 
 use crate::appearance::{
     Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKGROUND_COLOR,
@@ -7,19 +8,25 @@ use crate::appearance::{
 use crate::utils::{expect_only_children, Flag, MergeWith};
 use crate::{BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "layout")]
 pub struct Layout {
     pub focus_ring: FocusRing,
     pub border: Border,
     pub shadow: Shadow,
     pub tab_indicator: TabIndicator,
     pub insert_hint: InsertHint,
+    #[config(enum_type, variants = "Proportion,Fixed")]
     pub preset_column_widths: Vec<PresetSize>,
+    #[config(enum_type, variants = "Proportion,Fixed")]
     pub default_column_width: Option<PresetSize>,
+    #[config(enum_type, variants = "Proportion,Fixed")]
     pub preset_window_heights: Vec<PresetSize>,
+    #[config(enum_type, variants = "Never,Always,OnOverflow")]
     pub center_focused_column: CenterFocusedColumn,
     pub always_center_single_column: bool,
     pub empty_workspace_above_first: bool,
+    #[config(enum_type, variants = "Normal,Tabbed")]
     pub default_column_display: ColumnDisplay,
     pub gaps: f64,
     pub struts: Struts,

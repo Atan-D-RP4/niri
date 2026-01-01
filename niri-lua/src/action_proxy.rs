@@ -44,7 +44,7 @@ use crate::{parse_utils, SharedCallbackRegistry};
 
 /// Type alias for the action execution callback.
 /// This callback sends actions to the compositor for execution.
-pub type ActionCallback = Arc<dyn Fn(Action) -> LuaResult<()> + Send + Sync>;
+pub type ActionCallback = Arc<dyn Fn(Action) -> LuaResult<()>>;
 
 /// Proxy for the `niri.action` namespace.
 ///

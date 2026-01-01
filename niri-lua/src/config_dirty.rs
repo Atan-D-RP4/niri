@@ -227,8 +227,10 @@ mod tests {
 
     #[test]
     fn test_clear_also_clears_dirty_paths() {
-        let mut flags = ConfigDirtyFlags::default();
-        flags.layout = true;
+        let mut flags = ConfigDirtyFlags {
+            layout: true,
+            ..Default::default()
+        };
         flags.mark_dirty("layout.gaps");
 
         flags.clear();

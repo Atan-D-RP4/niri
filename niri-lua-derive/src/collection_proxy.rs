@@ -80,7 +80,7 @@ pub fn generate_collection_proxy(
                 let new_item = <#item_type as #crate_path::traits::LuaFieldConvert>::from_lua(intermediate)?;
 
                 {
-                    let mut config = self.state.try_borrow_config()?;
+                    let mut config = self.state.borrow_config_mut();
                     #access_path.push(new_item);
                 }
 
@@ -90,7 +90,7 @@ pub fn generate_collection_proxy(
 
             pub fn remove(&self, index: usize) -> ::mlua::Result<()> {
                 {
-                    let mut config = self.state.try_borrow_config()?;
+                    let mut config = self.state.borrow_config_mut();
                     if index == 0 || index > #access_path.len() {
                         return Err(::mlua::Error::external(format!(
                             "Index {} out of bounds (length: {})",
@@ -107,7 +107,7 @@ pub fn generate_collection_proxy(
 
             pub fn clear(&self) -> ::mlua::Result<()> {
                 {
-                    let mut config = self.state.try_borrow_config()?;
+                    let mut config = self.state.borrow_config_mut();
                     #access_path.clear();
                 }
 
@@ -157,7 +157,7 @@ pub fn generate_collection_proxy(
                             return Ok((::mlua::Value::Nil, ::mlua::Value::Nil));
                         }
 
-                        let config = state.try_borrow_config()?;
+                        let config = state.borrow_config();
                         let item = &#access_path[(next_idx as usize) - 1];
                         let lua_val = <#item_type as #crate_path::traits::LuaFieldConvert>::to_lua(item);
                         drop(config);

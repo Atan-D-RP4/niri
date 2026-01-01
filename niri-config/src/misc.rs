@@ -1,4 +1,4 @@
-use niri_lua_derive::FromLuaTable;
+use niri_lua_derive::{ConfigProperties, FromLuaTable};
 
 use crate::appearance::{Color, WorkspaceShadow, WorkspaceShadowPart, DEFAULT_BACKDROP_COLOR};
 use crate::utils::{Flag, MergeWith};
@@ -16,7 +16,8 @@ pub struct SpawnShAtStartup {
     pub command: String,
 }
 
-#[derive(Debug, PartialEq, FromLuaTable)]
+#[derive(Debug, PartialEq, FromLuaTable, ConfigProperties)]
+#[config(prefix = "cursor")]
 pub struct Cursor {
     pub xcursor_theme: String,
     pub xcursor_size: u8,

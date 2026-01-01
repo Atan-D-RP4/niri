@@ -1,10 +1,12 @@
 use knuffel::errors::DecodeError;
 use knuffel::Decode as _;
+use niri_lua_derive::ConfigProperties;
 
 use crate::utils::{expect_only_children, parse_arg_node, MergeWith};
 use crate::FloatOrInt;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "animations")]
 pub struct Animations {
     pub off: bool,
     pub slowdown: f64,
@@ -101,7 +103,8 @@ impl MergeWith<AnimationsPart> for Animations {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, ConfigProperties)]
+#[config(prefix = "animations.animation")]
 pub struct Animation {
     pub off: bool,
     pub kind: Kind,
@@ -114,12 +117,6 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EasingParams {
-    pub duration_ms: u32,
-    pub curve: Curve,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Curve {
     Linear,
     EaseOutQuad,
@@ -128,7 +125,19 @@ pub enum Curve {
     CubicBezier(f64, f64, f64, f64),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, ConfigProperties)]
+#[config(prefix = "animations.kind.easing")]
+pub struct EasingParams {
+    pub duration_ms: u32,
+    #[config(
+        enum_type,
+        variants = "Linear,EaseOutQuad,EaseOutCubic,EaseOutExpo,CubicBezier"
+    )]
+    pub curve: Curve,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, ConfigProperties)]
+#[config(prefix = "animations.kind.spring")]
 pub struct SpringParams {
     pub damping_ratio: f64,
     pub stiffness: u32,
@@ -151,9 +160,11 @@ impl Default for WorkspaceSwitchAnim {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "animations.window_open")]
 pub struct WindowOpenAnim {
     pub anim: Animation,
+    #[config(skip)]
     pub custom_shader: Option<String>,
 }
 
@@ -172,9 +183,11 @@ impl Default for WindowOpenAnim {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "animations.window_close")]
 pub struct WindowCloseAnim {
     pub anim: Animation,
+    #[config(skip)]
     pub custom_shader: Option<String>,
 }
 
@@ -225,9 +238,11 @@ impl Default for WindowMovementAnim {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "animations.window_resize")]
 pub struct WindowResizeAnim {
     pub anim: Animation,
+    #[config(skip)]
     pub custom_shader: Option<String>,
 }
 

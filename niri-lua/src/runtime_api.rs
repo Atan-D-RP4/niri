@@ -362,7 +362,7 @@ pub fn register_runtime_api(lua: &Lua) -> Result<()> {
         })?,
     )?;
 
-state_table.set(
+    state_table.set(
         "reserved_space",
         lua.create_function(|lua, output_name: String| {
             let handle = get_state_handle(lua)?;

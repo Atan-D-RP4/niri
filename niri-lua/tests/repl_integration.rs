@@ -155,46 +155,6 @@ print("Line 3")
     }
 
     #[test]
-    fn test_ipc_executor_integration() {
-        use niri_lua::IpcLuaExecutor;
-
-        let runtime = create_runtime();
-        #[allow(clippy::arc_with_non_send_sync)]
-        let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
-
-        let (output, success) = executor.execute("return 1 + 1");
-        assert!(success, "Executor should succeed");
-        assert!(output.contains("2"), "Output should contain 2");
-    }
-
-    #[test]
-    fn test_ipc_executor_with_error() {
-        use niri_lua::IpcLuaExecutor;
-
-        let runtime = create_runtime();
-        #[allow(clippy::arc_with_non_send_sync)]
-        let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(Some(runtime))));
-        let (output, success) = executor.execute("error('test')");
-        assert!(!success, "Executor should fail on error");
-        assert!(output.contains("Error"), "Output should contain error");
-    }
-
-    #[test]
-    fn test_ipc_executor_no_runtime() {
-        use niri_lua::IpcLuaExecutor;
-
-        #[allow(clippy::arc_with_non_send_sync)]
-        let executor = IpcLuaExecutor::new(Arc::new(Mutex::new(None)));
-        let (output, success) = executor.execute("print('test')");
-
-        assert!(!success, "Executor should fail without runtime");
-        assert!(
-            output.contains("not initialized"),
-            "Output should indicate runtime not initialized"
-        );
-    }
-
-    #[test]
     fn test_consecutive_executions() {
         let runtime = create_runtime();
 

@@ -3,14 +3,15 @@
 //! This module provides the public interface for emitting events from Niri core
 //! to Lua event handlers registered via the `niri.events` proxy API.
 
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use mlua::prelude::*;
 
 use crate::event_handlers::EventHandlers;
 
-/// Thread-safe wrapper around EventHandlers for Lua integration
-pub type SharedEventHandlers = Arc<Mutex<EventHandlers>>;
+/// Shared wrapper around EventHandlers for Lua integration
+pub type SharedEventHandlers = Rc<RefCell<EventHandlers>>;
 
 /// Public interface for emitting events from Niri core
 pub struct EventSystem {
@@ -36,13 +37,13 @@ impl EventSystem {
     /// # Returns
     /// LuaResult indicating success or Lua error
     pub fn emit(&self, lua: &Lua, event_type: &str, event_data: LuaValue) -> LuaResult<()> {
-        let mut h = self.handlers.lock().unwrap();
+        let mut h = self.handlers.borrow_mut();
         h.emit_event(lua, event_type, event_data)
     }
 
     /// Get statistics about registered handlers
     pub fn stats(&self) -> EventSystemStats {
-        let h = self.handlers.lock().unwrap();
+        let h = self.handlers.borrow();
         EventSystemStats {
             total_handlers: h.total_handlers(),
             event_types: h.event_types().len(),
@@ -62,8 +63,7 @@ mod tests {
 
     fn create_test_system() -> (Lua, EventSystem) {
         let lua = Lua::new();
-        #[allow(clippy::arc_with_non_send_sync)]
-        let handlers = Arc::new(Mutex::new(EventHandlers::new()));
+        let handlers = Rc::new(RefCell::new(EventHandlers::new()));
         let event_system = EventSystem::new(handlers);
         (lua, event_system)
     }

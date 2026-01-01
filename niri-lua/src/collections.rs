@@ -38,10 +38,7 @@ pub trait CollectionProxyBase<T: Clone> {
         &self,
         f: impl FnOnce(&mut Config) -> mlua::Result<R>,
     ) -> mlua::Result<R> {
-        let mut config = self
-            .state()
-            .try_borrow_config()
-            .map_err(mlua::Error::external)?;
+        let mut config = self.state().borrow_config_mut();
         let result = f(&mut config)?;
         drop(config);
         self.state().mark_dirty(self.dirty_flag());
@@ -807,6 +804,150 @@ impl LuaUserData for LayerRulesCollection {
             })
         });
     }
+}
+
+define_collection!(
+    SpawnAtStartupCollection,
+    niri_config::SpawnAtStartup,
+    spawn_at_startup,
+    SpawnAtStartup
+);
+
+impl LuaUserData for SpawnAtStartupCollection {
+    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("len", |_, this, ()| Ok(CollectionProxyBase::len(this)));
+
+        methods.add_method("add", |_, this, value: LuaValue| {
+            this.with_dirty_config(|config| match &value {
+                LuaValue::Table(tbl) => {
+                    if tbl.contains_key(1)? {
+                        for pair in tbl.clone().pairs::<i64, LuaValue>() {
+                            let (_, item) = pair?;
+                            let spawn = extract_spawn_at_startup(&item)?;
+                            config.spawn_at_startup.push(spawn);
+                        }
+                    } else {
+                        let spawn = extract_spawn_at_startup_from_table(tbl)?;
+                        config.spawn_at_startup.push(spawn);
+                    }
+                    Ok(())
+                }
+                LuaValue::String(s) => {
+                    let cmd = s.to_str()?.to_string();
+                    config
+                        .spawn_at_startup
+                        .push(niri_config::SpawnAtStartup { command: vec![cmd] });
+                    Ok(())
+                }
+                _ => Err(LuaError::external(
+                    "spawn_at_startup:add() expects a table or string",
+                )),
+            })
+        });
+
+        methods.add_method("list", |lua, this, ()| {
+            this.with_config(|config| {
+                let result = lua.create_table()?;
+                for (i, spawn) in config.spawn_at_startup.iter().enumerate() {
+                    let tbl = lua.create_table()?;
+                    let cmd_tbl = lua.create_table()?;
+                    for (j, arg) in spawn.command.iter().enumerate() {
+                        cmd_tbl.set(j + 1, arg.as_str())?;
+                    }
+                    tbl.set("command", cmd_tbl)?;
+                    result.set(i + 1, tbl)?;
+                }
+                Ok(result)
+            })
+        });
+
+        methods.add_method("get", |lua, this, index: usize| {
+            this.with_config(|config| {
+                if index == 0 || index > config.spawn_at_startup.len() {
+                    return Ok(LuaValue::Nil);
+                }
+                let spawn = &config.spawn_at_startup[index - 1];
+                let tbl = lua.create_table()?;
+                let cmd_tbl = lua.create_table()?;
+                for (j, arg) in spawn.command.iter().enumerate() {
+                    cmd_tbl.set(j + 1, arg.as_str())?;
+                }
+                tbl.set("command", cmd_tbl)?;
+                Ok(LuaValue::Table(tbl))
+            })
+        });
+
+        methods.add_method("remove", |_, this, index: usize| {
+            this.with_dirty_config(|config| {
+                if index == 0 || index > config.spawn_at_startup.len() {
+                    return Err(LuaError::external(format!(
+                        "spawn_at_startup index {} out of bounds (1-{})",
+                        index,
+                        config.spawn_at_startup.len()
+                    )));
+                }
+                config.spawn_at_startup.remove(index - 1);
+                Ok(())
+            })
+        });
+
+        methods.add_method("clear", |_, this, ()| {
+            this.with_dirty_config(|config| {
+                if !config.spawn_at_startup.is_empty() {
+                    config.spawn_at_startup.clear();
+                }
+                Ok(())
+            })
+        });
+    }
+}
+
+fn extract_spawn_at_startup(value: &LuaValue) -> LuaResult<niri_config::SpawnAtStartup> {
+    match value {
+        LuaValue::Table(tbl) => extract_spawn_at_startup_from_table(tbl),
+        LuaValue::String(s) => Ok(niri_config::SpawnAtStartup {
+            command: vec![s.to_str()?.to_string()],
+        }),
+        _ => Err(LuaError::external(
+            "spawn_at_startup item must be a table or string",
+        )),
+    }
+}
+
+fn extract_spawn_at_startup_from_table(tbl: &LuaTable) -> LuaResult<niri_config::SpawnAtStartup> {
+    let cmd_val = tbl.get::<LuaValue>("command")?;
+    let command = match cmd_val {
+        LuaValue::Table(cmd_tbl) => {
+            let mut args = Vec::new();
+            for pair in cmd_tbl.pairs::<i64, String>() {
+                let (_, arg) = pair?;
+                args.push(arg);
+            }
+            args
+        }
+        LuaValue::String(s) => vec![s.to_str()?.to_string()],
+        LuaValue::Nil => {
+            if tbl.contains_key(1)? {
+                let mut args = Vec::new();
+                for pair in tbl.clone().pairs::<i64, String>() {
+                    let (_, arg) = pair?;
+                    args.push(arg);
+                }
+                args
+            } else {
+                return Err(LuaError::external(
+                    "spawn_at_startup requires a 'command' field or array of strings",
+                ));
+            }
+        }
+        _ => {
+            return Err(LuaError::external(
+                "spawn_at_startup command must be a string or array of strings",
+            ))
+        }
+    };
+
+    Ok(niri_config::SpawnAtStartup { command })
 }
 
 fn extract_layer_rule(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::LayerRule> {

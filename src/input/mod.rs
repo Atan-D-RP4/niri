@@ -10,6 +10,7 @@ use niri_config::{
     Action, Bind, Binds, Config, Key, ModKey, Modifiers, MruDirection, SwitchBinds, Trigger,
 };
 use niri_ipc::LayoutSwitchTarget;
+use niri_lua::state_handle::CursorPosition;
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, DeviceCapability, Event,
     GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _,
@@ -53,7 +54,6 @@ use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::{center, get_monotonic_time, ResizeEdge};
-use niri_lua::state_handle::CursorPosition;
 
 pub mod backend_ext;
 pub mod move_grab;
@@ -2830,7 +2830,6 @@ impl State {
 
         // Activate a new confinement if necessary.
         self.niri.maybe_activate_pointer_constraint();
-
 
         // We moved the pointer, show it.
         self.niri.pointer_visibility = PointerVisibility::Visible;

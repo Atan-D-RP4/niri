@@ -174,11 +174,8 @@ pub fn setup_runtime(
             state.niri.state_handle = Some(state_handle);
         }
 
-        // Register config wrapper API for reactive config access
-        // Pass a default config - the wrapper will be updated when apply_config_wrapper_changes is
-        // called
-        if let Err(e) = runtime.register_config_wrapper_api(Config::default()) {
-            warn!("Failed to register Lua config wrapper API: {}", e);
+        if let Err(e) = runtime.init_config_proxy_api(Config::default()) {
+            warn!("Failed to initialize Lua config proxy API: {}", e);
         }
 
         // Register action callback for IPC Lua execution

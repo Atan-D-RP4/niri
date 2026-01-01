@@ -1,4 +1,4 @@
-//! Tests for the derive macros (LuaEnum, LuaConfigProxy, and DirtyFlags).
+//! Tests for the derive macros (LuaEnum and DirtyFlags).
 //!
 //! These tests verify that the macro-generated code works correctly.
 
@@ -213,7 +213,8 @@ fn test_enum_case_sensitivity() {
 
 #[cfg(test)]
 mod lua_config_proxy_tests {
-    use std::sync::{Arc, Mutex};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use niri_config::Config;
 
@@ -225,8 +226,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_config_state_creation() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 
@@ -236,8 +237,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_config_state_clone() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state1 = ConfigState::new(config.clone(), dirty_flags.clone());
         let state2 = state1.clone();
@@ -253,8 +254,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_config_state_dirty_flags() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 
@@ -291,8 +292,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_with_config_closure() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 
@@ -308,8 +309,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_all_dirty_flag_variants() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 
@@ -346,23 +347,23 @@ mod lua_config_proxy_tests {
     }
 
     #[test]
-    fn test_clone_arcs() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+    fn test_clone_rcs() {
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config.clone(), dirty_flags.clone());
 
-        let (config2, dirty2) = state.clone_arcs();
+        let (config2, dirty2) = state.clone_rcs();
 
         // Should be same Arc (same pointer)
-        assert!(Arc::ptr_eq(&config, &config2));
-        assert!(Arc::ptr_eq(&dirty_flags, &dirty2));
+        assert!(Rc::ptr_eq(&config, &config2));
+        assert!(Rc::ptr_eq(&dirty_flags, &dirty2));
     }
 
     #[test]
     fn test_mark_specific_dirty_flags() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 
@@ -379,8 +380,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_config_state_borrow_dirty_flags() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 
@@ -402,8 +403,8 @@ mod lua_config_proxy_tests {
 
     #[test]
     fn test_config_modification_through_state() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty_flags = Arc::new(Mutex::new(ConfigDirtyFlags::new()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty_flags = Rc::new(RefCell::new(ConfigDirtyFlags::new()));
 
         let state = ConfigState::new(config, dirty_flags);
 

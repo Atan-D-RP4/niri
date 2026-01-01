@@ -124,6 +124,8 @@ end
 
 Niri uses a **reactive configuration proxy** that captures settings and applies them when config is loaded.
 
+> **Experimental:** A new dynamic property system is available as `niri.config_new` with direct field access for `cursor.*`, `clipboard.*`, `hotkey_overlay.*`, `debug.*`, `animations.*`, `config_notification.*`, `prefer_no_csd`, and `screenshot_path`. This will eventually replace the current proxy system.
+
 ### Setting Scalar Values
 
 ```lua

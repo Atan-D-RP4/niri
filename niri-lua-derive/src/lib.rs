@@ -1,40 +1,19 @@
 //! Derive macros for generating Lua configuration bindings.
 //!
-//! This crate provides three derive macros:
-//! - `LuaConfigProxy`: Generates proxy structs with UserData implementation for config structs
+//! This crate provides derive macros:
 //! - `LuaEnum`: Generates string conversion implementations for enums
 //! - `DirtyFlags`: Generates dirty flag tracking with enum and helper methods
+//! - `ConfigProperties`: Generates property registration code for config structs
+//! - `FromLuaTable`: Extracts Rust structs from Lua tables
 
 use proc_macro::TokenStream;
+use syn::parse_macro_input;
 
 mod attributes;
-mod collection_proxy;
-mod config_proxy;
+mod config_properties;
 mod dirty_flags;
 mod from_lua_table;
 mod lua_enum;
-
-/// Derive macro for generating Lua proxy types from config structs.
-///
-/// # Example
-/// ```ignore
-/// #[derive(LuaConfigProxy)]
-/// #[lua_proxy(parent_path = "layout", dirty = "layout")]
-/// pub struct FocusRing {
-///     #[lua_proxy(field)]
-///     pub width: f64,
-///     
-///     #[lua_proxy(nested)]
-///     pub gradient: Option<Gradient>,
-///     
-///     #[lua_proxy(skip)]
-///     internal: SomeType,
-/// }
-/// ```
-#[proc_macro_derive(LuaConfigProxy, attributes(lua_proxy))]
-pub fn derive_lua_config_proxy(input: TokenStream) -> TokenStream {
-    config_proxy::derive(input)
-}
 
 /// Derive macro for generating string conversion for enums.
 ///
@@ -72,6 +51,15 @@ pub fn derive_lua_enum(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(DirtyFlags)]
 pub fn derive_dirty_flags(input: TokenStream) -> TokenStream {
     dirty_flags::derive(input)
+}
+
+#[proc_macro_derive(ConfigProperties, attributes(config))]
+pub fn derive_config_properties(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    match config_properties::derive(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
 }
 
 /// Derive macro for extracting Rust structs from Lua tables.

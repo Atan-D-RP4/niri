@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use miette::miette;
+use niri_lua_derive::ConfigProperties;
 use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::input;
 
@@ -8,7 +9,8 @@ use crate::binds::Modifiers;
 use crate::utils::{Flag, MergeWith, Percent};
 use crate::FloatOrInt;
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, ConfigProperties)]
+#[config(prefix = "input")]
 pub struct Input {
     pub keyboard: Keyboard,
     pub touchpad: Touchpad,
@@ -21,7 +23,15 @@ pub struct Input {
     pub warp_mouse_to_focus: Option<WarpMouseToFocus>,
     pub focus_follows_mouse: Option<FocusFollowsMouse>,
     pub workspace_auto_back_and_forth: bool,
+    #[config(
+        enum_type,
+        variants = "Ctrl,Shift,Alt,Super,IsoLevel3Shift,IsoLevel5Shift"
+    )]
     pub mod_key: Option<ModKey>,
+    #[config(
+        enum_type,
+        variants = "Ctrl,Shift,Alt,Super,IsoLevel3Shift,IsoLevel5Shift"
+    )]
     pub mod_key_nested: Option<ModKey>,
 }
 
@@ -84,11 +94,13 @@ impl MergeWith<InputPart> for Input {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, ConfigProperties)]
+#[config(prefix = "input.keyboard")]
 pub struct Keyboard {
     pub xkb: Xkb,
     pub repeat_delay: u16,
     pub repeat_rate: u8,
+    #[config(enum_type, variants = "Global,Window")]
     pub track_layout: TrackLayout,
     pub numlock: bool,
 }
@@ -127,7 +139,8 @@ impl MergeWith<KeyboardPart> for Keyboard {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, PartialEq, Eq, Clone)]
+#[derive(knuffel::Decode, Debug, Default, PartialEq, Eq, Clone, ConfigProperties)]
+#[config(prefix = "input.keyboard.xkb")]
 pub struct Xkb {
     #[knuffel(child, unwrap(argument), default)]
     pub rules: String,
@@ -164,7 +177,8 @@ pub enum TrackLayout {
     Window,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, ConfigProperties)]
+#[config(prefix = "input.scroll_factor")]
 pub struct ScrollFactor {
     #[knuffel(argument)]
     pub base: Option<FloatOrInt<0, 100>>,
@@ -183,7 +197,8 @@ impl ScrollFactor {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "input.touchpad")]
 pub struct Touchpad {
     #[knuffel(child)]
     pub off: bool,
@@ -200,18 +215,22 @@ pub struct Touchpad {
     #[knuffel(child)]
     pub natural_scroll: bool,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "Clickfinger,ButtonAreas")]
     pub click_method: Option<ClickMethod>,
     #[knuffel(child, unwrap(argument), default)]
     pub accel_speed: FloatOrInt<-1, 1>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "Adaptive,Flat")]
     pub accel_profile: Option<AccelProfile>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "NoScroll,TwoFinger,Edge,OnButtonDown")]
     pub scroll_method: Option<ScrollMethod>,
     #[knuffel(child, unwrap(argument))]
     pub scroll_button: Option<u32>,
     #[knuffel(child)]
     pub scroll_button_lock: bool,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "LeftRightMiddle,LeftMiddleRight")]
     pub tap_button_map: Option<TapButtonMap>,
     #[knuffel(child)]
     pub left_handed: bool,
@@ -223,7 +242,8 @@ pub struct Touchpad {
     pub scroll_factor: Option<ScrollFactor>,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "input.mouse")]
 pub struct Mouse {
     #[knuffel(child)]
     pub off: bool,
@@ -232,8 +252,10 @@ pub struct Mouse {
     #[knuffel(child, unwrap(argument), default)]
     pub accel_speed: FloatOrInt<-1, 1>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "Adaptive,Flat")]
     pub accel_profile: Option<AccelProfile>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "NoScroll,TwoFinger,Edge,OnButtonDown")]
     pub scroll_method: Option<ScrollMethod>,
     #[knuffel(child, unwrap(argument))]
     pub scroll_button: Option<u32>,
@@ -247,7 +269,8 @@ pub struct Mouse {
     pub scroll_factor: Option<ScrollFactor>,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "input.trackpoint")]
 pub struct Trackpoint {
     #[knuffel(child)]
     pub off: bool,
@@ -256,8 +279,10 @@ pub struct Trackpoint {
     #[knuffel(child, unwrap(argument), default)]
     pub accel_speed: FloatOrInt<-1, 1>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "Adaptive,Flat")]
     pub accel_profile: Option<AccelProfile>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "NoScroll,TwoFinger,Edge,OnButtonDown")]
     pub scroll_method: Option<ScrollMethod>,
     #[knuffel(child, unwrap(argument))]
     pub scroll_button: Option<u32>,
@@ -269,7 +294,8 @@ pub struct Trackpoint {
     pub middle_emulation: bool,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "input.trackball")]
 pub struct Trackball {
     #[knuffel(child)]
     pub off: bool,
@@ -278,8 +304,10 @@ pub struct Trackball {
     #[knuffel(child, unwrap(argument), default)]
     pub accel_speed: FloatOrInt<-1, 1>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "Adaptive,Flat")]
     pub accel_profile: Option<AccelProfile>,
     #[knuffel(child, unwrap(argument, str))]
+    #[config(enum_type, variants = "NoScroll,TwoFinger,Edge,OnButtonDown")]
     pub scroll_method: Option<ScrollMethod>,
     #[knuffel(child, unwrap(argument))]
     pub scroll_button: Option<u32>,
@@ -355,7 +383,8 @@ impl From<TapButtonMap> for input::TapButtonMap {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "input.tablet")]
 pub struct Tablet {
     #[knuffel(child)]
     pub off: bool,
@@ -367,7 +396,8 @@ pub struct Tablet {
     pub left_handed: bool,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[config(prefix = "input.touch")]
 pub struct Touch {
     #[knuffel(child)]
     pub off: bool,
@@ -405,7 +435,7 @@ impl FromStr for WarpMouseToFocusMode {
             "center-xy" => Ok(Self::CenterXy),
             "center-xy-always" => Ok(Self::CenterXyAlways),
             _ => Err(miette!(
-                r#"invalid mode for warp-mouse-to-focus, can be "center-xy" or "center-xy-always" (or leave unset for separate centering)"#
+                r#"invalid mode for warp-mouse-to-focus, can be \"center-xy\" or \"center-xy-always\" (or leave unset for separate centering)"#
             )),
         }
     }
@@ -458,7 +488,7 @@ impl FromStr for ClickMethod {
             "clickfinger" => Ok(Self::Clickfinger),
             "button-areas" => Ok(Self::ButtonAreas),
             _ => Err(miette!(
-                r#"invalid click method, can be "button-areas" or "clickfinger""#
+                r#"invalid click method, can be \"button-areas\" or \"clickfinger\""#
             )),
         }
     }
@@ -472,7 +502,7 @@ impl FromStr for AccelProfile {
             "adaptive" => Ok(Self::Adaptive),
             "flat" => Ok(Self::Flat),
             _ => Err(miette!(
-                r#"invalid accel profile, can be "adaptive" or "flat""#
+                r#"invalid accel profile, can be \"adaptive\" or \"flat\""#
             )),
         }
     }
@@ -488,7 +518,7 @@ impl FromStr for ScrollMethod {
             "edge" => Ok(Self::Edge),
             "on-button-down" => Ok(Self::OnButtonDown),
             _ => Err(miette!(
-                r#"invalid scroll method, can be "no-scroll", "two-finger", "edge", or "on-button-down""#
+                r#"invalid scroll method, can be \"no-scroll\", \"two-finger\", \"edge\", or \"on-button-down\""#
             )),
         }
     }
@@ -502,7 +532,7 @@ impl FromStr for TapButtonMap {
             "left-right-middle" => Ok(Self::LeftRightMiddle),
             "left-middle-right" => Ok(Self::LeftMiddleRight),
             _ => Err(miette!(
-                r#"invalid tap button map, can be "left-right-middle" or "left-middle-right""#
+                r#"invalid tap button map, can be \"left-right-middle\" or \"left-middle-right\""#
             )),
         }
     }

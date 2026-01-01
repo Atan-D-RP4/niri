@@ -18,13 +18,101 @@ fn create_watch_runtime() -> LuaRuntime {
     runtime
 }
 
+fn create_config_runtime() -> LuaRuntime {
+    let mut runtime = create_runtime();
+    runtime.init_empty_config_wrapper().unwrap();
+    runtime.init_event_system().unwrap();
+    runtime
+}
+
+// ========================================================================
+// BORROW PANIC REGRESSION TESTS (P5.7)
+// ========================================================================
+
+#[test]
+fn nested_config_access_does_not_panic() {
+    let rt = create_config_runtime();
+
+    let code = r#"
+        local prefer_no_csd = niri.config.prefer_no_csd
+        return type(prefer_no_csd) == "boolean"
+    "#;
+
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Nested config access should not panic: {}", output);
+    assert!(
+        output.contains("true"),
+        "Expected truthy result, got: {}",
+        output
+    );
+}
+
+#[test]
+fn event_handler_registration_and_emit_does_not_panic() {
+    let rt = create_config_runtime();
+
+    let code = r#"
+        local fired = 0
+        niri.events:on("borrow:test", function(data)
+            fired = fired + 1
+        end)
+        niri.events:emit("borrow:test", { payload = true })
+        return fired
+    "#;
+
+    let (output, success) = rt.execute_string(code);
+    assert!(
+        success,
+        "Event registration/emit should not panic: {}",
+        output
+    );
+    assert_eq!(output, "1", "Handler should fire exactly once");
+}
+
+#[test]
+fn action_execution_from_lua_does_not_panic() {
+    let rt = create_runtime();
+
+    let code = r#"
+        niri.action:focus_column_left()
+        niri.action:focus_workspace(1)
+        niri.action:toggle_overview()
+        return "ok"
+    "#;
+
+    let (output, success) = rt.execute_string(code);
+    assert!(success, "Action execution should not panic: {}", output);
+    assert_eq!(output, "ok", "Action script should complete");
+}
+
+#[test]
+fn config_modification_inside_event_handler_does_not_panic() {
+    let rt = create_config_runtime();
+
+    let code = r#"
+        niri.events:on("cfg:modify", function()
+            -- Access a config field inside event handler
+            local _ = niri.config.prefer_no_csd
+        end)
+        niri.events:emit("cfg:modify", {})
+        return niri.config.prefer_no_csd
+    "#;
+
+    let (output, success) = rt.execute_string(code);
+    assert!(
+        success,
+        "Config access in handler should not panic: {}",
+        output
+    );
+}
+
 // ========================================================================
 // SCHEDULER WRAP TESTS
 // ========================================================================
 
 #[test]
 fn schedule_wrap_defers_execution() {
-    let mut runtime = create_watch_runtime();
+    let runtime = create_watch_runtime();
     runtime.init_scheduler().unwrap();
 
     let code = r#"
@@ -53,7 +141,7 @@ fn schedule_wrap_defers_execution() {
 
 #[test]
 fn schedule_wrap_preserves_arguments() {
-    let mut runtime = create_watch_runtime();
+    let runtime = create_watch_runtime();
     runtime.init_scheduler().unwrap();
 
     let code = r#"
@@ -83,7 +171,7 @@ fn schedule_wrap_preserves_arguments() {
 
 #[test]
 fn test_loop_defer_integration() {
-    let mut rt = create_watch_runtime();
+    let rt = create_watch_runtime();
 
     rt.load_string(
         r#"
@@ -108,7 +196,7 @@ fn test_loop_defer_integration() {
 
 #[test]
 fn state_watch_immediate_invokes_once() {
-    let mut rt = create_watch_runtime();
+    let rt = create_watch_runtime();
 
     let code = r#"
         __watch_calls = {}
@@ -133,7 +221,7 @@ fn state_watch_immediate_invokes_once() {
 
 #[test]
 fn state_watch_debounce_coalesces_events() {
-    let mut rt = create_watch_runtime();
+    let rt = create_watch_runtime();
 
     let code = r#"
         __call_count = 0
@@ -165,7 +253,7 @@ fn state_watch_debounce_coalesces_events() {
 
 #[test]
 fn state_watch_filter_blocks_payloads() {
-    let mut rt = create_watch_runtime();
+    let rt = create_watch_runtime();
 
     let code = r#"
         local count = 0
@@ -187,7 +275,7 @@ fn state_watch_filter_blocks_payloads() {
 
 #[test]
 fn state_watch_cancel_stops_callbacks() {
-    let mut rt = create_watch_runtime();
+    let rt = create_watch_runtime();
 
     let code = r#"
         local count = 0
@@ -209,7 +297,7 @@ fn state_watch_cancel_stops_callbacks() {
 
 #[test]
 fn state_watch_multiple_subscriptions_independent() {
-    let mut rt = create_watch_runtime();
+    let rt = create_watch_runtime();
 
     let code = r#"
         __count_a = 0

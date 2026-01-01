@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 use niri_ipc::state::EventStreamState;
 use niri_ipc::{KeyboardLayouts, Output, Window, Workspace};
@@ -38,16 +37,16 @@ pub struct StateHandle {
     event_stream_state: Rc<RefCell<EventStreamState>>,
 
     /// Outputs/monitors - values only (OutputId keys not exposed to Lua)
-    outputs: Arc<Mutex<Vec<Output>>>,
+    outputs: Rc<RefCell<Vec<Output>>>,
 
     /// Cursor position - updated on pointer motion
-    cursor_position: Arc<Mutex<Option<CursorPosition>>>,
+    cursor_position: Rc<RefCell<Option<CursorPosition>>>,
 
     /// Focus mode - updated on focus change
-    focus_mode: Arc<Mutex<FocusMode>>,
+    focus_mode: Rc<RefCell<FocusMode>>,
 
     /// Reserved space per output - updated on layer shell changes
-    reserved_spaces: Arc<Mutex<HashMap<String, ReservedSpace>>>,
+    reserved_spaces: Rc<RefCell<HashMap<String, ReservedSpace>>>,
 }
 
 impl StateHandle {
@@ -55,10 +54,10 @@ impl StateHandle {
     pub fn new(event_stream_state: Rc<RefCell<EventStreamState>>) -> Self {
         Self {
             event_stream_state,
-            outputs: Arc::new(Mutex::new(Vec::new())),
-            cursor_position: Arc::new(Mutex::new(None)),
-            focus_mode: Arc::new(Mutex::new(FocusMode::Normal)),
-            reserved_spaces: Arc::new(Mutex::new(HashMap::new())),
+            outputs: Rc::new(RefCell::new(Vec::new())),
+            cursor_position: Rc::new(RefCell::new(None)),
+            focus_mode: Rc::new(RefCell::new(FocusMode::Normal)),
+            reserved_spaces: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -82,10 +81,7 @@ impl StateHandle {
 
     /// Get all outputs as Vec
     pub fn outputs(&self) -> Vec<Output> {
-        match self.outputs.lock() {
-            Ok(guard) => guard.clone(),
-            Err(_) => Vec::new(),
-        }
+        self.outputs.borrow().clone()
     }
 
     /// Get keyboard layouts
@@ -155,72 +151,61 @@ impl StateHandle {
     /// Get output by name - O(n)
     pub fn output_by_name(&self, name: &str) -> Option<Output> {
         self.outputs
-            .lock()
-            .ok()
-            .and_then(|guard| guard.iter().find(|o| o.name == name).cloned())
+            .borrow()
+            .iter()
+            .find(|o| o.name == name)
+            .cloned()
     }
 
     // === Compositor State Queries ===
 
     pub fn cursor_position(&self) -> Option<CursorPosition> {
-        match self.cursor_position.lock() {
-            Ok(guard) => guard.clone(),
-            Err(_) => None,
-        }
+        self.cursor_position.borrow().clone()
     }
 
     pub fn focus_mode(&self) -> FocusMode {
-        match self.focus_mode.lock() {
-            Ok(guard) => *guard,
-            Err(_) => FocusMode::Normal,
-        }
+        *self.focus_mode.borrow()
     }
 
     pub fn reserved_space(&self, output_name: &str) -> ReservedSpace {
-        match self.reserved_spaces.lock() {
-            Ok(guard) => guard.get(output_name).cloned().unwrap_or_default(),
-            Err(_) => ReservedSpace::default(),
-        }
+        self.reserved_spaces
+            .borrow()
+            .get(output_name)
+            .cloned()
+            .unwrap_or_default()
     }
 
     // === Update Methods (called by compositor) ===
 
     /// Set the outputs list (called when IpcOutputMap changes)
     pub fn set_outputs(&self, outputs: Vec<Output>) {
-        if let Ok(mut guard) = self.outputs.lock() {
-            *guard = outputs;
-        }
+        *self.outputs.borrow_mut() = outputs;
     }
 
     pub fn set_cursor_position(&self, pos: Option<CursorPosition>) {
-        if let Ok(mut guard) = self.cursor_position.lock() {
-            *guard = pos;
-        }
+        *self.cursor_position.borrow_mut() = pos;
     }
 
     pub fn set_focus_mode(&self, mode: FocusMode) {
-        if let Ok(mut guard) = self.focus_mode.lock() {
-            *guard = mode;
-        }
+        *self.focus_mode.borrow_mut() = mode;
     }
 
     pub fn set_reserved_space(&self, output_name: &str, space: ReservedSpace) {
-        if let Ok(mut guard) = self.reserved_spaces.lock() {
-            guard.insert(output_name.to_string(), space);
-        }
+        self.reserved_spaces
+            .borrow_mut()
+            .insert(output_name.to_string(), space);
     }
 
     pub fn remove_reserved_space(&self, output_name: &str) {
-        if let Ok(mut guard) = self.reserved_spaces.lock() {
-            guard.remove(output_name);
-        }
+        self.reserved_spaces.borrow_mut().remove(output_name);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use niri_ipc::{Timestamp, WindowLayout};
+
     use super::*;
-    use niri_ipc::{LogicalOutput, Mode, Timestamp, Transform, WindowLayout};
 
     fn make_window(id: u64, is_focused: bool) -> Window {
         Window {
@@ -253,34 +238,6 @@ mod tests {
             is_active,
             is_focused: is_active,
             active_window_id: None,
-        }
-    }
-
-    fn make_output(name: &str) -> Output {
-        Output {
-            name: name.to_string(),
-            make: "Test".to_string(),
-            model: "Model".to_string(),
-            serial: Some("123".to_string()),
-            physical_size: Some((600, 340)),
-            modes: vec![Mode {
-                width: 1920,
-                height: 1080,
-                refresh_rate: 60000,
-                is_preferred: true,
-            }],
-            current_mode: Some(0),
-            is_custom_mode: false,
-            vrr_supported: false,
-            vrr_enabled: false,
-            logical: Some(LogicalOutput {
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-                scale: 1.0,
-                transform: Transform::Normal,
-            }),
         }
     }
 
@@ -319,14 +276,8 @@ mod tests {
     #[test]
     fn test_windows_returns_all() {
         let mut state = EventStreamState::default();
-        state
-            .windows
-            .windows
-            .insert(1, make_window(1, false));
-        state
-            .windows
-            .windows
-            .insert(2, make_window(2, true));
+        state.windows.windows.insert(1, make_window(1, false));
+        state.windows.windows.insert(2, make_window(2, true));
         let handle = create_handle_with_state(state);
 
         let windows = handle.windows();
@@ -338,10 +289,7 @@ mod tests {
     #[test]
     fn test_window_by_id_found() {
         let mut state = EventStreamState::default();
-        state
-            .windows
-            .windows
-            .insert(5, make_window(5, false));
+        state.windows.windows.insert(5, make_window(5, false));
         let handle = create_handle_with_state(state);
 
         let window = handle.window(5);
@@ -400,14 +348,8 @@ mod tests {
     #[test]
     fn test_focused_window() {
         let mut state = EventStreamState::default();
-        state
-            .windows
-            .windows
-            .insert(1, make_window(1, false));
-        state
-            .windows
-            .windows
-            .insert(2, make_window(2, true));
+        state.windows.windows.insert(1, make_window(1, false));
+        state.windows.windows.insert(2, make_window(2, true));
         let handle = create_handle_with_state(state);
 
         let focused = handle.focused_window();

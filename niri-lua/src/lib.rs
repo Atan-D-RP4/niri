@@ -25,28 +25,28 @@ pub mod module_loader;
 // Tier 2: Configuration API
 pub mod action_proxy;
 pub mod collections;
+pub mod config_accessors;
 pub mod config_api;
 pub mod config_dirty;
-pub mod config_proxies;
+pub mod config_proxy;
 pub mod config_state;
 pub mod config_wrapper;
 pub mod extractors;
 pub mod lua_types;
 pub mod parse_utils;
+pub mod property_registry;
 pub mod table_assignment;
 pub mod traits;
 
 // Tier 3: Runtime State Access
 pub mod event_data;
 pub mod ipc_bridge;
-pub mod ipc_repl;
 pub mod runtime_api;
 pub mod state_handle;
 
 // API Schema (for LSP type generation and testing)
 pub mod api_registry;
 pub mod lua_api_schema;
-
 
 // Tier 4: Async Primitives
 pub mod callback_registry;
@@ -66,6 +66,7 @@ pub use action_proxy::{register_action_proxy, ActionCallback, ActionProxy};
 pub use callback_registry::{CallbackRegistry, SharedCallbackRegistry};
 pub use config::{LuaConfig, LuaEvalResult};
 pub use config_dirty::ConfigDirtyFlags;
+pub use config_proxy::ConfigProxy;
 pub use config_state::{ConfigState, DirtyFlag};
 pub use config_wrapper::{register_config_wrapper, ConfigWrapper};
 // Tier 3 exports
@@ -76,7 +77,6 @@ pub use event_data::{
 pub use event_handlers::EventHandlers;
 pub use event_system::{EventSystem, SharedEventHandlers};
 pub use events_proxy::{register_events_proxy, EventsProxy};
-pub use ipc_repl::IpcLuaExecutor;
 pub use loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager, TimerManager,
     TimerState,
@@ -88,10 +88,14 @@ pub use process::{
     create_process_manager, parse_spawn_opts, ProcessHandle, ProcessManager, SharedProcessManager,
     SpawnOpts,
 };
+pub use property_registry::{
+    extract_bool, extract_integer, extract_number, extract_string, infer_dirty_flag,
+    parse_enum_variant, type_error, validate_array_elements, PropertyDescriptor, PropertyGetter,
+    PropertyRegistry, PropertySetter, PropertyType,
+};
 pub use runtime::LuaRuntime;
 pub use runtime_api::register_runtime_api;
 pub use state_handle::{CursorPosition, FocusMode, ReservedSpace, StateHandle};
-
 
 /// Trait for registering Lua components to the global context.
 ///

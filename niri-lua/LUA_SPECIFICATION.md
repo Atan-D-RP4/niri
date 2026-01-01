@@ -40,6 +40,7 @@ Comprehensive specification for niri's Lua scripting system. This document cover
 | Namespace | Purpose | Type |
 |-----------|---------|------|
 | `niri.config` | Configuration (KDL parity) | Table + Collections |
+| `niri.config_new` | Dynamic config (experimental) | PropertyRegistry |
 | `niri.state` | Runtime queries (read-only) | Table |
 | `niri.events` | Event subscriptions | Methods |
 | `niri.action` | Compositor actions | Methods |

@@ -43,7 +43,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mlua::prelude::*;
@@ -52,15 +52,17 @@ use niri_config::Config;
 
 use crate::action_proxy::{register_action_proxy, ActionCallback};
 use crate::config_api::ConfigApi;
+use crate::config_proxy::ConfigProxy;
+use crate::config_state::ConfigState;
 use crate::config_wrapper::{register_config_wrapper, ConfigWrapper};
 use crate::event_handlers::EventHandlers;
 use crate::event_system::EventSystem;
 use crate::events_proxy::register_events_proxy;
 use crate::loop_api::{
-    create_timer_manager, fire_due_timers, register_loop_api,
-    SharedTimerManager,
+    create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
 };
 use crate::process::{create_process_manager, CallbackPayload, SharedProcessManager};
+use crate::property_registry::PropertyRegistry;
 use crate::{CallbackRegistry, LuaComponent, NiriApi, SharedCallbackRegistry};
 
 /// Maximum callbacks to execute per flush cycle.
@@ -637,6 +639,35 @@ impl LuaRuntime {
         ConfigApi::register_to_lua(&self.lua, config)
     }
 
+    /// Initialize the dynamic ConfigProxy API and attach it to `niri.config`.
+    ///
+    /// This sets up the PropertyRegistry with metadata from `Config::property_metadata()`,
+    /// replaces placeholder accessors with real implementations via
+    /// `register_config_accessors()`, initializes ConfigState in Lua app data, and
+    /// attaches `ConfigProxy` as the `niri.config` global.
+    pub fn init_config_proxy_api(&mut self, config: Config) -> LuaResult<()> {
+        PropertyRegistry::init_from_config();
+
+        let config_rc = Rc::new(RefCell::new(config));
+        let dirty = Rc::new(RefCell::new(
+            crate::config_dirty::ConfigDirtyFlags::default(),
+        ));
+        let state = Rc::new(RefCell::new(ConfigState::new(
+            config_rc.clone(),
+            dirty.clone(),
+        )));
+        self.lua.set_app_data(state);
+
+        let globals = self.lua.globals();
+        let niri: LuaTable = globals.get("niri")?;
+        niri.set("config", ConfigProxy::default())?;
+
+        let wrapper = ConfigWrapper::new_with_shared_state(config_rc, dirty);
+        self.config_wrapper = Some(wrapper);
+
+        Ok(())
+    }
+
     /// Register the new config wrapper API.
     ///
     /// This provides direct access to niri_config::Config through the `niri.config` table.
@@ -656,9 +687,25 @@ impl LuaRuntime {
     ///
     /// Returns an error if configuration wrapper registration fails.
     pub fn register_config_wrapper_api(&mut self, config: Config) -> LuaResult<ConfigWrapper> {
-        let wrapper = ConfigWrapper::new(Arc::new(Mutex::new(config)));
+        let dirty = Rc::new(RefCell::new(
+            crate::config_dirty::ConfigDirtyFlags::default(),
+        ));
+        let wrapper = ConfigWrapper::new_with_shared_state(Rc::new(RefCell::new(config)), dirty);
         register_config_wrapper(&self.lua, wrapper.clone())?;
         self.config_wrapper = Some(wrapper.clone());
+
+        PropertyRegistry::init_from_config();
+
+        let state = Rc::new(RefCell::new(ConfigState::new(
+            wrapper.config.clone(),
+            wrapper.dirty.clone(),
+        )));
+        self.lua.set_app_data(state);
+
+        let globals = self.lua.globals();
+        let niri: LuaTable = globals.get("niri")?;
+        niri.set("config_new", ConfigProxy::default())?;
+
         Ok(wrapper)
     }
 
@@ -675,7 +722,20 @@ impl LuaRuntime {
     ///
     /// Returns an error if configuration wrapper initialization fails.
     pub fn init_empty_config_wrapper(&mut self) -> LuaResult<ConfigWrapper> {
-        let wrapper = ConfigWrapper::new_default();
+        PropertyRegistry::init_from_config();
+
+        let config_rc = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(
+            crate::config_dirty::ConfigDirtyFlags::default(),
+        ));
+
+        let state = Rc::new(RefCell::new(ConfigState::new(
+            config_rc.clone(),
+            dirty.clone(),
+        )));
+        self.lua.set_app_data(state);
+
+        let wrapper = ConfigWrapper::new_with_shared_state(config_rc, dirty);
         register_config_wrapper(&self.lua, wrapper.clone())?;
         self.config_wrapper = Some(wrapper.clone());
         Ok(wrapper)
@@ -707,9 +767,8 @@ impl LuaRuntime {
     /// # Errors
     ///
     /// Returns an error if the event system cannot be initialized.
-    #[allow(clippy::arc_with_non_send_sync)] // LuaFunction is !Send, but we only use this on main thread
     pub fn init_event_system(&mut self) -> LuaResult<()> {
-        let handlers = Arc::new(std::sync::Mutex::new(EventHandlers::new()));
+        let handlers = Rc::new(RefCell::new(EventHandlers::new()));
 
         // Register events proxy API (niri.events:on, niri.events:once, etc.)
         register_events_proxy(&self.lua, handlers.clone())?;

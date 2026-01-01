@@ -120,7 +120,9 @@ pub enum Msg {
         ///
         /// The code will be evaluated in the Niri Lua runtime context with access to all
         /// configured Lua APIs. Output from print() and return values will be displayed.
-        #[arg(last = true, required = true)]
+        ///
+        /// If no code is provided, starts an interactive REPL session.
+        #[arg(last = true)]
         code: Vec<String>,
     },
 }

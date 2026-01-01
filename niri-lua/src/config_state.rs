@@ -3,8 +3,9 @@
 //! This module provides the `ConfigState` type that wraps the shared configuration
 //! and dirty flags, allowing proxy objects to safely access and modify config values.
 
+use std::cell::{Ref, RefCell, RefMut};
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::rc::Rc;
 
 use niri_config::Config;
 
@@ -12,15 +13,15 @@ use crate::config_dirty::ConfigDirtyFlags;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigStateError {
-    ConfigMutexPoisoned,
-    DirtyFlagsMutexPoisoned,
+    ConfigBorrowError,
+    DirtyFlagsBorrowError,
 }
 
 impl fmt::Display for ConfigStateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ConfigMutexPoisoned => write!(f, "config mutex poisoned"),
-            Self::DirtyFlagsMutexPoisoned => write!(f, "dirty flags mutex poisoned"),
+            Self::ConfigBorrowError => write!(f, "config borrow error"),
+            Self::DirtyFlagsBorrowError => write!(f, "dirty flags borrow error"),
         }
     }
 }
@@ -90,20 +91,19 @@ pub enum DirtyFlag {
 ///
 /// # Thread Safety
 ///
-/// `ConfigState` uses `Arc<Mutex<_>>` internally, making it safe to share
-/// across threads. However, typical usage is single-threaded within the
-/// Lua runtime.
+/// `ConfigState` uses `Rc<RefCell<_>>` internally, which is suitable for the
+/// single-threaded Lua runtime.
 #[derive(Clone)]
 pub struct ConfigState {
     /// The configuration being edited
-    config: Arc<Mutex<Config>>,
+    config: Rc<RefCell<Config>>,
     /// Flags indicating which parts of the config have been modified
-    dirty_flags: Arc<Mutex<ConfigDirtyFlags>>,
+    dirty_flags: Rc<RefCell<ConfigDirtyFlags>>,
 }
 
 impl ConfigState {
     /// Create a new config state with the given config and dirty flags.
-    pub fn new(config: Arc<Mutex<Config>>, dirty_flags: Arc<Mutex<ConfigDirtyFlags>>) -> Self {
+    pub fn new(config: Rc<RefCell<Config>>, dirty_flags: Rc<RefCell<ConfigDirtyFlags>>) -> Self {
         Self {
             config,
             dirty_flags,
@@ -111,43 +111,37 @@ impl ConfigState {
     }
 
     /// Try to borrow the configuration for reading.
-    ///
-    /// Returns an error if the mutex is poisoned.
-    pub fn try_borrow_config(&self) -> Result<MutexGuard<'_, Config>, ConfigStateError> {
+    pub fn try_borrow_config(&self) -> Result<Ref<'_, Config>, ConfigStateError> {
         self.config
-            .lock()
-            .map_err(|_| ConfigStateError::ConfigMutexPoisoned)
+            .try_borrow()
+            .map_err(|_| ConfigStateError::ConfigBorrowError)
     }
 
-    /// Try to borrow the dirty flags for reading/writing.
-    ///
-    /// Returns an error if the mutex is poisoned.
-    pub fn try_borrow_dirty_flags(
-        &self,
-    ) -> Result<MutexGuard<'_, ConfigDirtyFlags>, ConfigStateError> {
+    /// Try to borrow the dirty flags for reading.
+    pub fn try_borrow_dirty_flags(&self) -> Result<Ref<'_, ConfigDirtyFlags>, ConfigStateError> {
         self.dirty_flags
-            .lock()
-            .map_err(|_| ConfigStateError::DirtyFlagsMutexPoisoned)
+            .try_borrow()
+            .map_err(|_| ConfigStateError::DirtyFlagsBorrowError)
     }
 
     /// Borrow the configuration for reading.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mutex is poisoned. Prefer `try_borrow_config` in
-    /// production code paths.
-    pub fn borrow_config(&self) -> MutexGuard<'_, Config> {
-        self.config.lock().expect("Config mutex poisoned")
+    pub fn borrow_config(&self) -> Ref<'_, Config> {
+        self.config.borrow()
     }
 
-    /// Borrow the dirty flags for reading/writing.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mutex is poisoned. Prefer `try_borrow_dirty_flags` in
-    /// production code paths.
-    pub fn borrow_dirty_flags(&self) -> MutexGuard<'_, ConfigDirtyFlags> {
-        self.dirty_flags.lock().expect("DirtyFlags mutex poisoned")
+    /// Borrow the configuration for writing.
+    pub fn borrow_config_mut(&self) -> RefMut<'_, Config> {
+        self.config.borrow_mut()
+    }
+
+    /// Borrow the dirty flags for reading.
+    pub fn borrow_dirty_flags(&self) -> Ref<'_, ConfigDirtyFlags> {
+        self.dirty_flags.borrow()
+    }
+
+    /// Borrow the dirty flags for writing.
+    pub fn borrow_dirty_flags_mut(&self) -> RefMut<'_, ConfigDirtyFlags> {
+        self.dirty_flags.borrow_mut()
     }
 
     /// Execute a closure with mutable access to the config.
@@ -157,7 +151,7 @@ impl ConfigState {
     where
         F: FnOnce(&mut Config) -> R,
     {
-        let mut config = self.borrow_config();
+        let mut config = self.borrow_config_mut();
         f(&mut config)
     }
 
@@ -166,7 +160,7 @@ impl ConfigState {
     where
         F: FnOnce(&mut ConfigDirtyFlags) -> R,
     {
-        let mut flags = self.borrow_dirty_flags();
+        let mut flags = self.borrow_dirty_flags_mut();
         f(&mut flags)
     }
 
@@ -174,7 +168,7 @@ impl ConfigState {
     ///
     /// This should be called after modifying any config value.
     pub fn mark_dirty(&self, flag: DirtyFlag) {
-        let mut flags = self.borrow_dirty_flags();
+        let mut flags = self.borrow_dirty_flags_mut();
         match flag {
             DirtyFlag::Input => flags.input = true,
             DirtyFlag::Outputs => flags.outputs = true,
@@ -206,9 +200,9 @@ impl ConfigState {
         flags.any()
     }
 
-    /// Get the raw Arc references for creating child proxies.
-    pub fn clone_arcs(&self) -> (Arc<Mutex<Config>>, Arc<Mutex<ConfigDirtyFlags>>) {
-        (Arc::clone(&self.config), Arc::clone(&self.dirty_flags))
+    /// Get the raw Rc references for creating child proxies.
+    pub fn clone_rcs(&self) -> (Rc<RefCell<Config>>, Rc<RefCell<ConfigDirtyFlags>>) {
+        (Rc::clone(&self.config), Rc::clone(&self.dirty_flags))
     }
 }
 
@@ -227,8 +221,8 @@ mod tests {
 
     #[test]
     fn test_config_state_creation() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty = Arc::new(Mutex::new(ConfigDirtyFlags::default()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(ConfigDirtyFlags::default()));
         let state = ConfigState::new(config, dirty);
 
         assert!(!state.is_any_dirty());
@@ -236,8 +230,8 @@ mod tests {
 
     #[test]
     fn test_config_state_clone() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty = Arc::new(Mutex::new(ConfigDirtyFlags::default()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(ConfigDirtyFlags::default()));
         let state1 = ConfigState::new(config, dirty);
         let state2 = state1.clone();
 
@@ -246,14 +240,14 @@ mod tests {
             flags.layout = true;
         });
 
-        // Should be visible via state2 (same Arc)
+        // Should be visible via state2 (same Rc)
         assert!(state2.is_any_dirty());
     }
 
     #[test]
     fn test_with_config() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty = Arc::new(Mutex::new(ConfigDirtyFlags::default()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(ConfigDirtyFlags::default()));
         let state = ConfigState::new(config, dirty);
 
         let original = state.with_config(|cfg| cfg.prefer_no_csd);
@@ -266,22 +260,22 @@ mod tests {
     }
 
     #[test]
-    fn test_clone_arcs() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty = Arc::new(Mutex::new(ConfigDirtyFlags::default()));
+    fn test_clone_rcs() {
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(ConfigDirtyFlags::default()));
         let state = ConfigState::new(config.clone(), dirty.clone());
 
-        let (config2, dirty2) = state.clone_arcs();
+        let (config2, dirty2) = state.clone_rcs();
 
-        // Should be same Arc (same pointer)
-        assert!(Arc::ptr_eq(&config, &config2));
-        assert!(Arc::ptr_eq(&dirty, &dirty2));
+        // Should be same Rc (same pointer)
+        assert!(Rc::ptr_eq(&config, &config2));
+        assert!(Rc::ptr_eq(&dirty, &dirty2));
     }
 
     #[test]
     fn test_mark_dirty() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty = Arc::new(Mutex::new(ConfigDirtyFlags::default()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(ConfigDirtyFlags::default()));
         let state = ConfigState::new(config, dirty);
 
         assert!(!state.is_any_dirty());
@@ -296,8 +290,8 @@ mod tests {
 
     #[test]
     fn test_all_dirty_flags() {
-        let config = Arc::new(Mutex::new(Config::default()));
-        let dirty = Arc::new(Mutex::new(ConfigDirtyFlags::default()));
+        let config = Rc::new(RefCell::new(Config::default()));
+        let dirty = Rc::new(RefCell::new(ConfigDirtyFlags::default()));
         let state = ConfigState::new(config, dirty);
 
         // Test that all DirtyFlag variants work

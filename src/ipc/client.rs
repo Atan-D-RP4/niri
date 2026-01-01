@@ -1,4 +1,4 @@
-use std::io::ErrorKind;
+use std::io::{self, BufRead, ErrorKind, Write};
 use std::iter::Peekable;
 use std::path::Path;
 use std::{env, slice};
@@ -48,6 +48,9 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::EventStream => Request::EventStream,
         Msg::RequestError => Request::ReturnError,
         Msg::OverviewState => Request::OverviewState,
+        Msg::Lua { code } if code.is_empty() => {
+            return run_lua_repl(json);
+        }
         Msg::Lua { code } => Request::ExecuteLua {
             code: code.join(" "),
         },
@@ -747,6 +750,61 @@ fn ensure_absolute_path(path: &mut String) -> anyhow::Result<()> {
             Err(cwd) => bail!("couldn't convert absolute path to string: {cwd:?}"),
         }
     }
+    Ok(())
+}
+
+fn run_lua_repl(json: bool) -> anyhow::Result<()> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+
+    if !json {
+        eprintln!("Niri Lua REPL. Type Lua code to execute. Press Ctrl+D to exit.");
+    }
+
+    loop {
+        if !json {
+            print!("niri> ");
+            stdout.flush().ok();
+        }
+
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => bail!("error reading input: {e}"),
+        }
+
+        let code = line.trim();
+        if code.is_empty() {
+            continue;
+        }
+
+        let mut socket = Socket::connect().context("error connecting to the niri socket")?;
+        let request = Request::ExecuteLua {
+            code: code.to_string(),
+        };
+
+        let response = socket
+            .send(request)
+            .context("error communicating with niri")?;
+
+        let Ok(Response::LuaResult(result)) = response else {
+            bail!("unexpected response: expected LuaResult, got {response:?}");
+        };
+
+        if json {
+            let output = serde_json::to_string(&result).context("error formatting response")?;
+            println!("{output}");
+        } else {
+            if !result.output.is_empty() {
+                println!("{}", result.output);
+            }
+            if !result.success {
+                eprintln!("Error: Lua execution failed");
+            }
+        }
+    }
+
     Ok(())
 }
 

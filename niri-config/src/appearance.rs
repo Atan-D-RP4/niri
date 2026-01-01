@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use knuffel::errors::DecodeError;
 use miette::{miette, IntoDiagnostic as _};
+use niri_lua_derive::ConfigProperties;
 use smithay::backend::renderer::Color32F;
 
 use crate::utils::{Flag, MergeWith};
@@ -338,7 +339,8 @@ impl MergeWith<BorderRule> for FocusRing {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, ConfigProperties)]
+#[config(prefix = "layout.shadow")]
 pub struct Shadow {
     pub on: bool,
     pub offset: ShadowOffset,
