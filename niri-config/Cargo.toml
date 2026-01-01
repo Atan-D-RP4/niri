@@ -17,6 +17,7 @@ niri-ipc = { version = "25.11.0", path = "../niri-ipc" }
 niri-lua-derive = { version = "25.11.0", path = "../niri-lua-derive" }
 niri-lua-traits = { version = "25.11.0", path = "../niri-lua-traits" }
 regex.workspace = true
+serde.workspace = true
 smithay = { workspace = true, features = ["backend_libinput"] }
 tracing.workspace = true
 tracy-client.workspace = true

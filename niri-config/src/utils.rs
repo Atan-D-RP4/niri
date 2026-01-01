@@ -3,15 +3,18 @@ use std::str::FromStr;
 use knuffel::errors::DecodeError;
 use miette::miette;
 use regex::Regex;
+use serde::Deserialize;
 
 mod merge_with;
 pub use merge_with::*;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(transparent)]
 pub struct Percent(pub f64);
 
 // MIN and MAX generics are only used during parsing to check the value.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[serde(transparent)]
 pub struct FloatOrInt<const MIN: i32, const MAX: i32>(pub f64);
 
 /// Flag, with an optional explicit value.

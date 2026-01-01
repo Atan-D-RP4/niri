@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use miette::miette;
 use niri_lua_derive::ConfigProperties;
+use serde::Deserialize;
 use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::input;
 
@@ -9,7 +10,8 @@ use crate::binds::Modifiers;
 use crate::utils::{Flag, MergeWith, Percent};
 use crate::FloatOrInt;
 
-#[derive(Debug, Default, PartialEq, ConfigProperties)]
+#[derive(Debug, Default, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input")]
 pub struct Input {
     pub keyboard: Keyboard,
@@ -94,7 +96,8 @@ impl MergeWith<InputPart> for Input {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, ConfigProperties)]
+#[derive(Debug, PartialEq, Eq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.keyboard")]
 pub struct Keyboard {
     pub xkb: Xkb,
@@ -139,7 +142,8 @@ impl MergeWith<KeyboardPart> for Keyboard {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, PartialEq, Eq, Clone, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, PartialEq, Eq, Clone, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.keyboard.xkb")]
 pub struct Xkb {
     #[knuffel(child, unwrap(argument), default)]
@@ -168,7 +172,8 @@ impl Xkb {
     }
 }
 
-#[derive(knuffel::DecodeScalar, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(knuffel::DecodeScalar, Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TrackLayout {
     /// The layout change is global.
     #[default]
@@ -177,7 +182,10 @@ pub enum TrackLayout {
     Window,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, ConfigProperties)]
+#[derive(
+    knuffel::Decode, Debug, Default, Clone, Copy, PartialEq, ConfigProperties, Deserialize,
+)]
+#[serde(default)]
 #[config(prefix = "input.scroll_factor")]
 pub struct ScrollFactor {
     #[knuffel(argument)]
@@ -197,7 +205,8 @@ impl ScrollFactor {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.touchpad")]
 pub struct Touchpad {
     #[knuffel(child)]
@@ -242,7 +251,8 @@ pub struct Touchpad {
     pub scroll_factor: Option<ScrollFactor>,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.mouse")]
 pub struct Mouse {
     #[knuffel(child)]
@@ -269,7 +279,8 @@ pub struct Mouse {
     pub scroll_factor: Option<ScrollFactor>,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.trackpoint")]
 pub struct Trackpoint {
     #[knuffel(child)]
@@ -294,7 +305,8 @@ pub struct Trackpoint {
     pub middle_emulation: bool,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.trackball")]
 pub struct Trackball {
     #[knuffel(child)]
@@ -319,7 +331,8 @@ pub struct Trackball {
     pub middle_emulation: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ClickMethod {
     Clickfinger,
     ButtonAreas,
@@ -334,7 +347,8 @@ impl From<ClickMethod> for input::ClickMethod {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum AccelProfile {
     Adaptive,
     Flat,
@@ -349,7 +363,8 @@ impl From<AccelProfile> for input::AccelProfile {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ScrollMethod {
     NoScroll,
     TwoFinger,
@@ -368,7 +383,8 @@ impl From<ScrollMethod> for input::ScrollMethod {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TapButtonMap {
     LeftRightMiddle,
     LeftMiddleRight,
@@ -383,7 +399,8 @@ impl From<TapButtonMap> for input::TapButtonMap {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.tablet")]
 pub struct Tablet {
     #[knuffel(child)]
@@ -396,7 +413,8 @@ pub struct Tablet {
     pub left_handed: bool,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq, ConfigProperties, Deserialize)]
+#[serde(default)]
 #[config(prefix = "input.touch")]
 pub struct Touch {
     #[knuffel(child)]
@@ -409,19 +427,22 @@ pub struct Touch {
     pub map_to_output: Option<String>,
 }
 
-#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq, Default, Deserialize)]
+#[serde(default)]
 pub struct FocusFollowsMouse {
     #[knuffel(property, str)]
     pub max_scroll_amount: Option<Percent>,
 }
 
-#[derive(knuffel::Decode, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(knuffel::Decode, Debug, PartialEq, Eq, Clone, Copy, Default, Deserialize)]
+#[serde(default)]
 pub struct WarpMouseToFocus {
     #[knuffel(property, str)]
     pub mode: Option<WarpMouseToFocusMode>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum WarpMouseToFocusMode {
     CenterXy,
     CenterXyAlways,
@@ -441,7 +462,8 @@ impl FromStr for WarpMouseToFocusMode {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ModKey {
     Ctrl,
     Shift,
