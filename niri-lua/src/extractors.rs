@@ -118,372 +118,101 @@ pub fn extract_environment(table: &LuaTable) -> LuaResult<Option<Environment>> {
 }
 
 // ============================================================================
-// Input configuration extractors
+// Input configuration extractors (serde-based)
 // ============================================================================
 
-/// Extract XKB configuration from Lua table.
-pub fn extract_xkb(table: &LuaTable) -> LuaResult<Option<Xkb>> {
-    let layout = extract_string_opt(table, "layout")?;
-    let model = extract_string_opt(table, "model")?;
-    let rules = extract_string_opt(table, "rules")?;
-    let variant = extract_string_opt(table, "variant")?;
-    let options = extract_string_opt(table, "options")?;
-    let file = extract_string_opt(table, "file")?;
-
-    if layout.is_some()
-        || model.is_some()
-        || rules.is_some()
-        || variant.is_some()
-        || options.is_some()
-        || file.is_some()
-    {
-        Ok(Some(Xkb {
-            layout: layout.unwrap_or_default(),
-            model: model.unwrap_or_default(),
-            rules: rules.unwrap_or_default(),
-            variant: variant.unwrap_or_default(),
-            options,
-            file,
-        }))
-    } else {
-        Ok(None)
+/// Extract XKB configuration from Lua value using serde.
+pub fn extract_xkb(lua: &Lua, value: LuaValue) -> LuaResult<Option<Xkb>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-/// Extract keyboard configuration from Lua table.
-pub fn extract_keyboard(table: &LuaTable) -> LuaResult<Option<Keyboard>> {
-    let xkb = if let Some(xkb_table) = extract_table_opt(table, "xkb")? {
-        extract_xkb(&xkb_table)?
-    } else {
-        None
-    };
-    let repeat_delay = extract_int_opt(table, "repeat_delay")?.map(|v| v as u16);
-    let repeat_rate = extract_int_opt(table, "repeat_rate")?.map(|v| v as u8);
-    let numlock = extract_bool_opt(table, "numlock")?;
-    let track_layout = extract_string_opt(table, "track_layout")?;
-
-    if xkb.is_some()
-        || repeat_delay.is_some()
-        || repeat_rate.is_some()
-        || numlock.is_some()
-        || track_layout.is_some()
-    {
-        let mut keyboard = Keyboard::default();
-        if let Some(x) = xkb {
-            keyboard.xkb = x;
-        }
-        if let Some(d) = repeat_delay {
-            keyboard.repeat_delay = d;
-        }
-        if let Some(r) = repeat_rate {
-            keyboard.repeat_rate = r;
-        }
-        if let Some(n) = numlock {
-            keyboard.numlock = n;
-        }
-        if let Some(t) = track_layout {
-            keyboard.track_layout = match t.as_str() {
-                "global" => TrackLayout::Global,
-                "window" => TrackLayout::Window,
-                _ => TrackLayout::Global,
-            };
-        }
-        Ok(Some(keyboard))
-    } else {
-        Ok(None)
+/// Extract keyboard configuration from Lua value using serde.
+pub fn extract_keyboard(lua: &Lua, value: LuaValue) -> LuaResult<Option<Keyboard>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-/// Extract touchpad configuration from Lua table.
-pub fn extract_touchpad(table: &LuaTable) -> LuaResult<Option<Touchpad>> {
-    let off = extract_bool_opt(table, "off")?;
-    let tap = extract_bool_opt(table, "tap")?;
-    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
-    let accel_speed = extract_float_opt(table, "accel_speed")?;
-    let accel_profile = extract_string_opt(table, "accel_profile")?;
-    let scroll_method = extract_string_opt(table, "scroll_method")?;
-    let disabled_on_external_mouse = extract_bool_opt(table, "disabled_on_external_mouse")?;
-    let dwt = extract_bool_opt(table, "dwt")?;
-    let dwtp = extract_bool_opt(table, "dwtp")?;
-    let left_handed = extract_bool_opt(table, "left_handed")?;
-    let middle_emulation = extract_bool_opt(table, "middle_emulation")?;
-    let tap_button_map = extract_string_opt(table, "tap_button_map")?;
-    let click_method = extract_string_opt(table, "click_method")?;
-
-    if off.is_some()
-        || tap.is_some()
-        || natural_scroll.is_some()
-        || accel_speed.is_some()
-        || accel_profile.is_some()
-        || scroll_method.is_some()
-        || disabled_on_external_mouse.is_some()
-        || dwt.is_some()
-        || dwtp.is_some()
-        || left_handed.is_some()
-        || middle_emulation.is_some()
-        || tap_button_map.is_some()
-        || click_method.is_some()
-    {
-        let mut touchpad = Touchpad::default();
-        if let Some(v) = off {
-            touchpad.off = v;
-        }
-        if let Some(v) = tap {
-            touchpad.tap = v;
-        }
-        if let Some(v) = natural_scroll {
-            touchpad.natural_scroll = v;
-        }
-        if let Some(v) = accel_speed {
-            touchpad.accel_speed = FloatOrInt(v);
-        }
-        if let Some(v) = accel_profile {
-            touchpad.accel_profile = parse_accel_profile(&v);
-        }
-        if let Some(v) = scroll_method {
-            touchpad.scroll_method = parse_scroll_method(&v);
-        }
-        if let Some(v) = disabled_on_external_mouse {
-            touchpad.disabled_on_external_mouse = v;
-        }
-        if let Some(v) = dwt {
-            touchpad.dwt = v;
-        }
-        if let Some(v) = dwtp {
-            touchpad.dwtp = v;
-        }
-        if let Some(v) = left_handed {
-            touchpad.left_handed = v;
-        }
-        if let Some(v) = middle_emulation {
-            touchpad.middle_emulation = v;
-        }
-        if let Some(v) = tap_button_map {
-            touchpad.tap_button_map = parse_tap_button_map(&v);
-        }
-        if let Some(v) = click_method {
-            touchpad.click_method = parse_click_method(&v);
-        }
-        Ok(Some(touchpad))
-    } else {
-        Ok(None)
+/// Extract touchpad configuration from Lua value using serde.
+pub fn extract_touchpad(lua: &Lua, value: LuaValue) -> LuaResult<Option<Touchpad>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-/// Extract mouse configuration from Lua table.
-pub fn extract_mouse(table: &LuaTable) -> LuaResult<Option<Mouse>> {
-    let off = extract_bool_opt(table, "off")?;
-    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
-    let accel_speed = extract_float_opt(table, "accel_speed")?;
-    let accel_profile = extract_string_opt(table, "accel_profile")?;
-    let scroll_method = extract_string_opt(table, "scroll_method")?;
-    let left_handed = extract_bool_opt(table, "left_handed")?;
-    let middle_emulation = extract_bool_opt(table, "middle_emulation")?;
-
-    if off.is_some()
-        || natural_scroll.is_some()
-        || accel_speed.is_some()
-        || accel_profile.is_some()
-        || scroll_method.is_some()
-        || left_handed.is_some()
-        || middle_emulation.is_some()
-    {
-        let mut mouse = Mouse::default();
-        if let Some(v) = off {
-            mouse.off = v;
-        }
-        if let Some(v) = natural_scroll {
-            mouse.natural_scroll = v;
-        }
-        if let Some(v) = accel_speed {
-            mouse.accel_speed = FloatOrInt(v);
-        }
-        if let Some(v) = accel_profile {
-            mouse.accel_profile = parse_accel_profile(&v);
-        }
-        if let Some(v) = scroll_method {
-            mouse.scroll_method = parse_scroll_method(&v);
-        }
-        if let Some(v) = left_handed {
-            mouse.left_handed = v;
-        }
-        if let Some(v) = middle_emulation {
-            mouse.middle_emulation = v;
-        }
-        Ok(Some(mouse))
-    } else {
-        Ok(None)
+/// Extract mouse configuration from Lua value using serde.
+pub fn extract_mouse(lua: &Lua, value: LuaValue) -> LuaResult<Option<Mouse>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-/// Extract trackpoint configuration from Lua table.
-pub fn extract_trackpoint(table: &LuaTable) -> LuaResult<Option<Trackpoint>> {
-    let off = extract_bool_opt(table, "off")?;
-    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
-    let accel_speed = extract_float_opt(table, "accel_speed")?;
-    let accel_profile = extract_string_opt(table, "accel_profile")?;
-    let scroll_method = extract_string_opt(table, "scroll_method")?;
-    let left_handed = extract_bool_opt(table, "left_handed")?;
-    let middle_emulation = extract_bool_opt(table, "middle_emulation")?;
-
-    if off.is_some()
-        || natural_scroll.is_some()
-        || accel_speed.is_some()
-        || accel_profile.is_some()
-        || scroll_method.is_some()
-        || left_handed.is_some()
-        || middle_emulation.is_some()
-    {
-        let mut trackpoint = Trackpoint::default();
-        if let Some(v) = off {
-            trackpoint.off = v;
-        }
-        if let Some(v) = natural_scroll {
-            trackpoint.natural_scroll = v;
-        }
-        if let Some(v) = accel_speed {
-            trackpoint.accel_speed = FloatOrInt(v);
-        }
-        if let Some(v) = accel_profile {
-            trackpoint.accel_profile = parse_accel_profile(&v);
-        }
-        if let Some(v) = scroll_method {
-            trackpoint.scroll_method = parse_scroll_method(&v);
-        }
-        if let Some(v) = left_handed {
-            trackpoint.left_handed = v;
-        }
-        if let Some(v) = middle_emulation {
-            trackpoint.middle_emulation = v;
-        }
-        Ok(Some(trackpoint))
-    } else {
-        Ok(None)
+/// Extract trackpoint configuration from Lua value using serde.
+pub fn extract_trackpoint(lua: &Lua, value: LuaValue) -> LuaResult<Option<Trackpoint>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-/// Extract touch configuration from Lua table.
-pub fn extract_touch(table: &LuaTable) -> LuaResult<Option<Touch>> {
-    let off = extract_bool_opt(table, "off")?;
-    let natural_scroll = extract_bool_opt(table, "natural_scroll")?;
-    let map_to_output = extract_string_opt(table, "map_to_output")?;
-
-    if off.is_some() || natural_scroll.is_some() || map_to_output.is_some() {
-        let mut touch = Touch::default();
-        if let Some(v) = off {
-            touch.off = v;
-        }
-        if let Some(v) = natural_scroll {
-            touch.natural_scroll = v;
-        }
-        if let Some(v) = map_to_output {
-            touch.map_to_output = Some(v);
-        }
-        Ok(Some(touch))
-    } else {
-        Ok(None)
+/// Extract touch configuration from Lua value using serde.
+pub fn extract_touch(lua: &Lua, value: LuaValue) -> LuaResult<Option<Touch>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-/// Extract full Input configuration from Lua table.
-pub fn extract_input(table: &LuaTable) -> LuaResult<Option<Input>> {
-    let keyboard = if let Some(kb_table) = extract_table_opt(table, "keyboard")? {
-        extract_keyboard(&kb_table)?
-    } else {
-        None
-    };
-    let touchpad = if let Some(tp_table) = extract_table_opt(table, "touchpad")? {
-        extract_touchpad(&tp_table)?
-    } else {
-        None
-    };
-    let mouse = if let Some(m_table) = extract_table_opt(table, "mouse")? {
-        extract_mouse(&m_table)?
-    } else {
-        None
-    };
-    let trackpoint = if let Some(tp_table) = extract_table_opt(table, "trackpoint")? {
-        extract_trackpoint(&tp_table)?
-    } else {
-        None
-    };
-    let touch = if let Some(t_table) = extract_table_opt(table, "touch")? {
-        extract_touch(&t_table)?
-    } else {
-        None
-    };
-    let disable_power_key_handling = extract_bool_opt(table, "disable_power_key_handling")?;
-    let workspace_auto_back_and_forth = extract_bool_opt(table, "workspace_auto_back_and_forth")?;
-
-    if keyboard.is_some()
-        || touchpad.is_some()
-        || mouse.is_some()
-        || trackpoint.is_some()
-        || touch.is_some()
-        || disable_power_key_handling.is_some()
-        || workspace_auto_back_and_forth.is_some()
-    {
-        let mut input = Input::default();
-        if let Some(kb) = keyboard {
-            input.keyboard = kb;
-        }
-        if let Some(tp) = touchpad {
-            input.touchpad = tp;
-        }
-        if let Some(m) = mouse {
-            input.mouse = m;
-        }
-        if let Some(tp) = trackpoint {
-            input.trackpoint = tp;
-        }
-        if let Some(t) = touch {
-            input.touch = t;
-        }
-        if let Some(v) = disable_power_key_handling {
-            input.disable_power_key_handling = v;
-        }
-        if let Some(v) = workspace_auto_back_and_forth {
-            input.workspace_auto_back_and_forth = v;
-        }
-        Ok(Some(input))
-    } else {
-        Ok(None)
+/// Extract full Input configuration from Lua value using serde.
+pub fn extract_input(lua: &Lua, value: LuaValue) -> LuaResult<Option<Input>> {
+    if value.is_nil() {
+        return Ok(None);
     }
+    lua.from_value(value).map(Some)
 }
 
-// Helper functions for parsing enum values
-fn parse_accel_profile(s: &str) -> Option<AccelProfile> {
-    match s.to_lowercase().as_str() {
-        "adaptive" => Some(AccelProfile::Adaptive),
-        "flat" => Some(AccelProfile::Flat),
-        _ => None,
-    }
+// Legacy table-based extractors (for backward compatibility with existing call sites)
+// These wrap the serde-based versions for code that still passes &LuaTable
+
+/// Extract XKB configuration from Lua table (legacy wrapper).
+pub fn extract_xkb_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Xkb>> {
+    extract_xkb(lua, LuaValue::Table(table.clone()))
 }
 
-fn parse_scroll_method(s: &str) -> Option<ScrollMethod> {
-    match s.to_lowercase().replace('-', "_").as_str() {
-        "no_scroll" | "none" => Some(ScrollMethod::NoScroll),
-        "two_finger" | "twofinger" => Some(ScrollMethod::TwoFinger),
-        "edge" => Some(ScrollMethod::Edge),
-        "on_button_down" | "button" => Some(ScrollMethod::OnButtonDown),
-        _ => None,
-    }
+/// Extract keyboard configuration from Lua table (legacy wrapper).
+pub fn extract_keyboard_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Keyboard>> {
+    extract_keyboard(lua, LuaValue::Table(table.clone()))
 }
 
-fn parse_tap_button_map(s: &str) -> Option<TapButtonMap> {
-    match s.to_lowercase().as_str() {
-        "left_right_middle" | "lrm" => Some(TapButtonMap::LeftRightMiddle),
-        "left_middle_right" | "lmr" => Some(TapButtonMap::LeftMiddleRight),
-        _ => None,
-    }
+/// Extract touchpad configuration from Lua table (legacy wrapper).
+pub fn extract_touchpad_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Touchpad>> {
+    extract_touchpad(lua, LuaValue::Table(table.clone()))
 }
 
-fn parse_click_method(s: &str) -> Option<ClickMethod> {
-    match s.to_lowercase().replace('-', "_").as_str() {
-        "button_areas" | "areas" => Some(ClickMethod::ButtonAreas),
-        "click_finger" | "clickfinger" => Some(ClickMethod::Clickfinger),
-        _ => None,
-    }
+/// Extract mouse configuration from Lua table (legacy wrapper).
+pub fn extract_mouse_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Mouse>> {
+    extract_mouse(lua, LuaValue::Table(table.clone()))
+}
+
+/// Extract trackpoint configuration from Lua table (legacy wrapper).
+pub fn extract_trackpoint_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Trackpoint>> {
+    extract_trackpoint(lua, LuaValue::Table(table.clone()))
+}
+
+/// Extract touch configuration from Lua table (legacy wrapper).
+pub fn extract_touch_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Touch>> {
+    extract_touch(lua, LuaValue::Table(table.clone()))
+}
+
+/// Extract full Input configuration from Lua table (legacy wrapper).
+pub fn extract_input_from_table(lua: &Lua, table: &LuaTable) -> LuaResult<Option<Input>> {
+    extract_input(lua, LuaValue::Table(table.clone()))
 }
 
 // ============================================================================
@@ -1593,13 +1322,13 @@ mod tests {
 
     #[test]
     fn snapshot_extract_xkb_complete_config() {
-        let (_lua, table) = create_test_table();
+        let (lua, table) = create_test_table();
         table.set("layout", "us,de").unwrap();
         table.set("model", "pc104").unwrap();
         table.set("variant", "dvorak").unwrap();
         table.set("options", "grp:alt_shift_toggle").unwrap();
 
-        let result = extract_xkb(&table).unwrap();
+        let result = extract_xkb_from_table(&lua, &table).unwrap();
         assert!(result.is_some());
         let xkb = result.unwrap();
 
@@ -1616,13 +1345,13 @@ mod tests {
 
     #[test]
     fn snapshot_extract_touchpad_config_structure() {
-        let (_lua, table) = create_test_table();
+        let (lua, table) = create_test_table();
         table.set("tap", true).unwrap();
         table.set("natural_scroll", true).unwrap();
         table.set("accel_speed", 0.5).unwrap();
         table.set("accel_profile", "adaptive").unwrap();
 
-        let result = extract_touchpad(&table).unwrap();
+        let result = extract_touchpad_from_table(&lua, &table).unwrap();
         assert!(result.is_some());
         let touchpad = result.unwrap();
 
@@ -1672,38 +1401,6 @@ mod tests {
         insta::assert_debug_snapshot!("extract_environment_var_names", names);
     }
 
-    #[test]
-    fn snapshot_parse_accel_profile_variants() {
-        let adaptive = parse_accel_profile("adaptive");
-        let flat = parse_accel_profile("flat");
-        let invalid = parse_accel_profile("invalid");
-
-        insta::assert_debug_snapshot!(
-            "parse_accel_profile_variants",
-            (adaptive.is_some(), flat.is_some(), invalid.is_none(),)
-        );
-    }
-
-    #[test]
-    fn snapshot_parse_scroll_method_variants() {
-        let two_finger = parse_scroll_method("two_finger");
-        let edge = parse_scroll_method("edge");
-        let on_button = parse_scroll_method("on_button_down");
-        let none = parse_scroll_method("no_scroll");
-        let invalid = parse_scroll_method("invalid");
-
-        insta::assert_debug_snapshot!(
-            "parse_scroll_method_variants",
-            (
-                two_finger.is_some(),
-                edge.is_some(),
-                on_button.is_some(),
-                none.is_some(),
-                invalid.is_none(),
-            )
-        );
-    }
-
     // ========================================================================
     // Additional Snapshot Tests for Error Messages and Edge Cases
     // ========================================================================
@@ -1728,58 +1425,6 @@ mod tests {
                 empty,
                 rgb_format,
             )
-        );
-    }
-
-    #[test]
-    fn snapshot_extractors_enum_parsing_invalid_accel_profile() {
-        let invalid = parse_accel_profile("invalid");
-        let typo = parse_accel_profile("adptive");
-        let uppercase = parse_accel_profile("ADAPTIVE");
-        let empty = parse_accel_profile("");
-
-        insta::assert_debug_snapshot!(
-            "extractors_enum_invalid_accel_profile",
-            (invalid, typo, uppercase, empty,)
-        );
-    }
-
-    #[test]
-    fn snapshot_extractors_enum_parsing_invalid_scroll_method() {
-        let invalid = parse_scroll_method("invalid");
-        let typo = parse_scroll_method("two_fingers");
-        let wrong_case = parse_scroll_method("TwoFinger");
-        let empty = parse_scroll_method("");
-
-        insta::assert_debug_snapshot!(
-            "extractors_enum_invalid_scroll_method",
-            (invalid, typo, wrong_case, empty,)
-        );
-    }
-
-    #[test]
-    fn snapshot_extractors_enum_parsing_invalid_tap_button_map() {
-        let invalid = parse_tap_button_map("invalid");
-        let typo = parse_tap_button_map("left_right_midle");
-        let wrong_case = parse_tap_button_map("LRM");
-        let empty = parse_tap_button_map("");
-
-        insta::assert_debug_snapshot!(
-            "extractors_enum_invalid_tap_button_map",
-            (invalid, typo, wrong_case, empty,)
-        );
-    }
-
-    #[test]
-    fn snapshot_extractors_enum_parsing_invalid_click_method() {
-        let invalid = parse_click_method("invalid");
-        let typo = parse_click_method("button_area");
-        let wrong_case = parse_click_method("ButtonAreas");
-        let empty = parse_click_method("");
-
-        insta::assert_debug_snapshot!(
-            "extractors_enum_invalid_click_method",
-            (invalid, typo, wrong_case, empty,)
         );
     }
 
