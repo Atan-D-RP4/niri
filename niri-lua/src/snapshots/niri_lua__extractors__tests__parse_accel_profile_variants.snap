@@ -1,9 +1,0 @@
----
-source: niri-lua/src/extractors.rs
-expression: "(adaptive.is_some(), flat.is_some(), invalid.is_none(),)"
----
-(
-    true,
-    true,
-    true,
-)

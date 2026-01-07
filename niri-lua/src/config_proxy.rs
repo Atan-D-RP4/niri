@@ -244,16 +244,12 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use mlua::{FromLua, Lua};
+    use mlua::Lua;
     use niri_config::Config;
 
     use super::*;
     use crate::config_dirty::ConfigDirtyFlags;
-    use crate::config_state::DirtyFlag;
     use crate::event_handlers::EventHandlers;
-    use crate::property_registry::{
-        extract_bool, extract_integer, extract_number, PropertyDescriptor,
-    };
 
     fn ensure_registry() {
         if PropertyRegistry::try_global().is_some() {

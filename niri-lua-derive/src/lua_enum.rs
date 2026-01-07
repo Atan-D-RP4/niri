@@ -105,7 +105,7 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 <Self as niri_lua::traits::LuaEnumConvert>::to_lua_string(self).to_owned()
             }
 
-            fn from_lua(value: ::std::string::String) -> ::std::result::Result<Self, ::mlua::Error> {
+            fn from_lua_field(value: ::std::string::String) -> ::std::result::Result<Self, ::mlua::Error> {
                 <Self as niri_lua::traits::LuaEnumConvert>::from_lua_string(&value)
             }
         }

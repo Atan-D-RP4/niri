@@ -1,469 +1,177 @@
+use mlua::prelude::{LuaError, LuaValue, *};
+use niri_config::appearance::TabIndicatorPosition;
+use niri_config::debug::PreviewRender;
+use niri_config::input::{AccelProfile, ScrollMethod, TapButtonMap};
+use niri_config::CenterFocusedColumn;
+use niri_config::PresetSize;
 use std::path::PathBuf;
 
-use mlua::prelude::{LuaError, LuaValue, *};
-use niri_config::debug::PreviewRender;
-use niri_config::input::{AccelProfile, ScrollMethod, TapButtonMap, TrackLayout};
-use niri_config::utils::FloatOrInt;
-use niri_config::CenterFocusedColumn;
-
-use crate::property_registry::{PropertyRegistry, PropertyType};
-use crate::traits::parse_color_string;
+use crate::accessor_macros::{
+    accessor_anim_kind, accessor_anim_kind_named, accessor_bool, accessor_color, accessor_enum,
+    accessor_float, accessor_float_or_int, accessor_int, accessor_inverted_bool,
+    accessor_option_bool, accessor_option_color, accessor_option_enum,
+    accessor_option_enum_normalize, accessor_option_gradient, accessor_option_int,
+    accessor_option_path, accessor_option_string, accessor_string, accessor_wrapped_option_string,
+};
+use crate::property_registry::PropertyRegistry;
+use crate::traits::{preset_sizes_from_lua, preset_sizes_to_lua, LuaFieldConvert, PresetSizeTable};
 
 pub fn register_config_accessors(registry: &mut PropertyRegistry) {
-    registry.update_accessor(
-        "animations.off",
-        |_lua, config| Ok(LuaValue::Boolean(config.animations.off)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.animations.off = v;
-            Ok(())
-        },
+    accessor_bool!(registry, "animations.off", animations.off);
+    accessor_float!(registry, "animations.slowdown", animations.slowdown);
+
+    accessor_anim_kind!(
+        registry,
+        "animations.workspace_switch.kind",
+        animations.workspace_switch
+    );
+    accessor_anim_kind_named!(
+        registry,
+        "animations.window_open.kind",
+        animations.window_open
+    );
+    accessor_anim_kind_named!(
+        registry,
+        "animations.window_close.kind",
+        animations.window_close
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.horizontal_view_movement.kind",
+        animations.horizontal_view_movement
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.window_movement.kind",
+        animations.window_movement
+    );
+    accessor_anim_kind_named!(
+        registry,
+        "animations.window_resize.kind",
+        animations.window_resize
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.config_notification_open_close.kind",
+        animations.config_notification_open_close
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.screenshot_ui_open.kind",
+        animations.screenshot_ui_open
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.exit_confirmation_open_close.kind",
+        animations.exit_confirmation_open_close
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.overview_open_close.kind",
+        animations.overview_open_close
+    );
+    accessor_anim_kind!(
+        registry,
+        "animations.recent_windows_close.kind",
+        animations.recent_windows_close
     );
 
-    registry.update_accessor(
-        "animations.slowdown",
-        |_lua, config| Ok(LuaValue::Number(config.animations.slowdown)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.animations.slowdown = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "prefer_no_csd",
-        |_lua, config| Ok(LuaValue::Boolean(config.prefer_no_csd)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.prefer_no_csd = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "cursor.xcursor_theme",
-        |_lua, config| {
-            Ok(LuaValue::String(
-                _lua.create_string(&config.cursor.xcursor_theme)?,
-            ))
-        },
-        |_lua, config, value| {
-            let s = String::from_lua(value, _lua)?;
-            config.cursor.xcursor_theme = s;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "cursor.xcursor_size",
-        |_lua, config| Ok(LuaValue::Integer(config.cursor.xcursor_size as i64)),
-        |_lua, config, value| {
-            let v = u8::from_lua(value, _lua)?;
-            config.cursor.xcursor_size = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "cursor.hide_when_typing",
-        |_lua, config| Ok(LuaValue::Boolean(config.cursor.hide_when_typing)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.cursor.hide_when_typing = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "cursor.hide_after_inactive_ms",
-        |_lua, config| match config.cursor.hide_after_inactive_ms {
-            Some(v) => Ok(LuaValue::Integer(v as i64)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<u32>::from_lua(value, _lua)?;
-            config.cursor.hide_after_inactive_ms = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.repeat_delay",
-        |_lua, config| Ok(LuaValue::Integer(config.input.keyboard.repeat_delay as i64)),
-        |_lua, config, value| {
-            let v = u16::from_lua(value, _lua)?;
-            config.input.keyboard.repeat_delay = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.repeat_rate",
-        |_lua, config| Ok(LuaValue::Integer(config.input.keyboard.repeat_rate as i64)),
-        |_lua, config, value| {
-            let v = u8::from_lua(value, _lua)?;
-            config.input.keyboard.repeat_rate = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.track_layout",
-        |_lua, config| match config.input.keyboard.track_layout {
-            TrackLayout::Global => Ok(LuaValue::String(_lua.create_string("global")?)),
-            TrackLayout::Window => Ok(LuaValue::String(_lua.create_string("window")?)),
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            config.input.keyboard.track_layout = match v.as_str() {
-                "global" => TrackLayout::Global,
-                "window" => TrackLayout::Window,
-                other => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.keyboard.track_layout value: {}",
-                        other
-                    )))
-                }
-            };
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.xkb.rules",
-        |_lua, config| {
-            Ok(LuaValue::String(
-                _lua.create_string(&config.input.keyboard.xkb.rules)?,
-            ))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            config.input.keyboard.xkb.rules = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.xkb.model",
-        |_lua, config| {
-            Ok(LuaValue::String(
-                _lua.create_string(&config.input.keyboard.xkb.model)?,
-            ))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            config.input.keyboard.xkb.model = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.xkb.layout",
-        |_lua, config| {
-            Ok(LuaValue::String(
-                _lua.create_string(&config.input.keyboard.xkb.layout)?,
-            ))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            config.input.keyboard.xkb.layout = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.xkb.variant",
-        |_lua, config| {
-            Ok(LuaValue::String(
-                _lua.create_string(&config.input.keyboard.xkb.variant)?,
-            ))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            config.input.keyboard.xkb.variant = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.xkb.options",
-        |_lua, config| match &config.input.keyboard.xkb.options {
-            Some(v) => Ok(LuaValue::String(_lua.create_string(v)?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.keyboard.xkb.options = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.keyboard.xkb.file",
-        |_lua, config| match &config.input.keyboard.xkb.file {
-            Some(v) => Ok(LuaValue::String(_lua.create_string(v)?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.keyboard.xkb.file = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "input.mouse.natural_scroll",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.mouse.natural_scroll)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.mouse.natural_scroll = v;
-            Ok(())
-        },
+        input.mouse.natural_scroll
     );
 
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "input.mouse.accel_speed",
-        |_lua, config| Ok(LuaValue::Number(config.input.mouse.accel_speed.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.input.mouse.accel_speed = FloatOrInt::<-1, 1>(v);
-            Ok(())
-        },
+        input.mouse.accel_speed,
+        -1,
+        1
     );
 
-    registry.update_accessor(
+    accessor_option_enum!(
+        registry,
         "input.mouse.accel_profile",
-        |_lua, config| match config.input.mouse.accel_profile {
-            Some(AccelProfile::Adaptive) => Ok(LuaValue::String(_lua.create_string("adaptive")?)),
-            Some(AccelProfile::Flat) => Ok(LuaValue::String(_lua.create_string("flat")?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.mouse.accel_profile = match v.as_deref() {
-                Some("adaptive") => Some(AccelProfile::Adaptive),
-                Some("flat") => Some(AccelProfile::Flat),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.mouse.accel_profile value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.mouse.accel_profile,
+        AccelProfile,
+        Adaptive => "adaptive",
+        Flat => "flat",
     );
 
-    registry.update_accessor(
+    accessor_option_enum_normalize!(
+        registry,
         "input.mouse.scroll_method",
-        |_lua, config| match config.input.mouse.scroll_method {
-            Some(ScrollMethod::NoScroll) => Ok(LuaValue::String(_lua.create_string("no_scroll")?)),
-            Some(ScrollMethod::TwoFinger) => {
-                Ok(LuaValue::String(_lua.create_string("two_finger")?))
-            }
-            Some(ScrollMethod::Edge) => Ok(LuaValue::String(_lua.create_string("edge")?)),
-            Some(ScrollMethod::OnButtonDown) => {
-                Ok(LuaValue::String(_lua.create_string("on_button_down")?))
-            }
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.mouse.scroll_method = match v
-                .as_deref()
-                .map(|s| s.replace('-', "_").to_lowercase())
-                .as_deref()
-            {
-                Some("no_scroll") => Some(ScrollMethod::NoScroll),
-                Some("two_finger") => Some(ScrollMethod::TwoFinger),
-                Some("edge") => Some(ScrollMethod::Edge),
-                Some("on_button_down") => Some(ScrollMethod::OnButtonDown),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.mouse.scroll_method value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.mouse.scroll_method,
+        ScrollMethod,
+        NoScroll => "no_scroll",
+        TwoFinger => "two_finger",
+        Edge => "edge",
+        OnButtonDown => "on_button_down",
     );
 
-    registry.update_accessor(
-        "input.touchpad.tap",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.touchpad.tap)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.touchpad.tap = v;
-            Ok(())
-        },
+    accessor_bool!(registry, "input.touchpad.tap", input.touchpad.tap);
+    accessor_bool!(registry, "input.touchpad.dwt", input.touchpad.dwt);
+    accessor_bool!(registry, "input.touchpad.dwtp", input.touchpad.dwtp);
+    accessor_option_bool!(registry, "input.touchpad.drag", input.touchpad.drag);
+    accessor_bool!(
+        registry,
+        "input.touchpad.drag_lock",
+        input.touchpad.drag_lock
     );
-
-    registry.update_accessor(
-        "input.touchpad.dwt",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.touchpad.dwt)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.touchpad.dwt = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "input.touchpad.dwtp",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.touchpad.dwtp)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.touchpad.dwtp = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "input.touchpad.natural_scroll",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.touchpad.natural_scroll)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.touchpad.natural_scroll = v;
-            Ok(())
-        },
+        input.touchpad.natural_scroll
     );
 
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "input.touchpad.accel_speed",
-        |_lua, config| Ok(LuaValue::Number(config.input.touchpad.accel_speed.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.input.touchpad.accel_speed = FloatOrInt::<-1, 1>(v);
-            Ok(())
-        },
+        input.touchpad.accel_speed,
+        -1,
+        1
     );
 
-    registry.update_accessor(
+    accessor_option_enum!(
+        registry,
         "input.touchpad.accel_profile",
-        |_lua, config| match config.input.touchpad.accel_profile {
-            Some(AccelProfile::Adaptive) => Ok(LuaValue::String(_lua.create_string("adaptive")?)),
-            Some(AccelProfile::Flat) => Ok(LuaValue::String(_lua.create_string("flat")?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.touchpad.accel_profile = match v.as_deref() {
-                Some("adaptive") => Some(AccelProfile::Adaptive),
-                Some("flat") => Some(AccelProfile::Flat),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.touchpad.accel_profile value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.touchpad.accel_profile,
+        AccelProfile,
+        Adaptive => "adaptive",
+        Flat => "flat",
     );
 
-    registry.update_accessor(
+    accessor_option_enum_normalize!(
+        registry,
         "input.touchpad.tap_button_map",
-        |_lua, config| match config.input.touchpad.tap_button_map {
-            Some(TapButtonMap::LeftRightMiddle) => {
-                Ok(LuaValue::String(_lua.create_string("left_right_middle")?))
-            }
-            Some(TapButtonMap::LeftMiddleRight) => {
-                Ok(LuaValue::String(_lua.create_string("left_middle_right")?))
-            }
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.touchpad.tap_button_map = match v
-                .as_deref()
-                .map(|s| s.replace('-', "_").to_lowercase())
-                .as_deref()
-            {
-                Some("left_right_middle") => Some(TapButtonMap::LeftRightMiddle),
-                Some("left_middle_right") => Some(TapButtonMap::LeftMiddleRight),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.touchpad.tap_button_map value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.touchpad.tap_button_map,
+        TapButtonMap,
+        LeftRightMiddle => "left_right_middle",
+        LeftMiddleRight => "left_middle_right",
     );
 
-    registry.update_accessor(
+    accessor_option_enum_normalize!(
+        registry,
         "input.touchpad.scroll_method",
-        |_lua, config| match config.input.touchpad.scroll_method {
-            Some(ScrollMethod::NoScroll) => Ok(LuaValue::String(_lua.create_string("no_scroll")?)),
-            Some(ScrollMethod::TwoFinger) => {
-                Ok(LuaValue::String(_lua.create_string("two_finger")?))
-            }
-            Some(ScrollMethod::Edge) => Ok(LuaValue::String(_lua.create_string("edge")?)),
-            Some(ScrollMethod::OnButtonDown) => {
-                Ok(LuaValue::String(_lua.create_string("on_button_down")?))
-            }
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.touchpad.scroll_method = match v
-                .as_deref()
-                .map(|s| s.replace('-', "_").to_lowercase())
-                .as_deref()
-            {
-                Some("no_scroll") => Some(ScrollMethod::NoScroll),
-                Some("two_finger") => Some(ScrollMethod::TwoFinger),
-                Some("edge") => Some(ScrollMethod::Edge),
-                Some("on_button_down") => Some(ScrollMethod::OnButtonDown),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.touchpad.scroll_method value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.touchpad.scroll_method,
+        ScrollMethod,
+        NoScroll => "no_scroll",
+        TwoFinger => "two_finger",
+        Edge => "edge",
+        OnButtonDown => "on_button_down",
     );
 
-    registry.update_accessor(
-        "input.touch.off",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.touch.off)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.touch.off = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
+    accessor_bool!(registry, "input.touch.off", input.touch.off);
+    accessor_bool!(
+        registry,
         "input.touch.natural_scroll",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.touch.natural_scroll)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.touch.natural_scroll = v;
-            Ok(())
-        },
+        input.touch.natural_scroll
     );
-
-    registry.update_accessor(
+    accessor_option_string!(
+        registry,
         "input.touch.map_to_output",
-        |lua, config| match &config.input.touch.map_to_output {
-            Some(s) => Ok(LuaValue::String(lua.create_string(s)?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.touch.map_to_output = v;
-            Ok(())
-        },
+        input.touch.map_to_output
     );
 
     registry.update_accessor(
@@ -486,278 +194,133 @@ pub fn register_config_accessors(registry: &mut PropertyRegistry) {
         },
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "input.trackpoint.natural_scroll",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.trackpoint.natural_scroll)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.trackpoint.natural_scroll = v;
-            Ok(())
-        },
+        input.trackpoint.natural_scroll
     );
 
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "input.trackpoint.accel_speed",
-        |_lua, config| Ok(LuaValue::Number(config.input.trackpoint.accel_speed.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.input.trackpoint.accel_speed = FloatOrInt::<-1, 1>(v);
-            Ok(())
-        },
+        input.trackpoint.accel_speed,
+        -1,
+        1
     );
 
-    registry.update_accessor(
+    accessor_option_enum!(
+        registry,
         "input.trackpoint.accel_profile",
-        |_lua, config| match config.input.trackpoint.accel_profile {
-            Some(AccelProfile::Adaptive) => Ok(LuaValue::String(_lua.create_string("adaptive")?)),
-            Some(AccelProfile::Flat) => Ok(LuaValue::String(_lua.create_string("flat")?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.trackpoint.accel_profile = match v.as_deref() {
-                Some("adaptive") => Some(AccelProfile::Adaptive),
-                Some("flat") => Some(AccelProfile::Flat),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.trackpoint.accel_profile value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.trackpoint.accel_profile,
+        AccelProfile,
+        Adaptive => "adaptive",
+        Flat => "flat",
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "input.trackball.natural_scroll",
-        |_lua, config| Ok(LuaValue::Boolean(config.input.trackball.natural_scroll)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.input.trackball.natural_scroll = v;
-            Ok(())
-        },
+        input.trackball.natural_scroll
     );
 
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "input.trackball.accel_speed",
-        |_lua, config| Ok(LuaValue::Number(config.input.trackball.accel_speed.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.input.trackball.accel_speed = FloatOrInt::<-1, 1>(v);
-            Ok(())
-        },
+        input.trackball.accel_speed,
+        -1,
+        1
     );
 
-    registry.update_accessor(
+    accessor_option_enum!(
+        registry,
         "input.trackball.accel_profile",
-        |_lua, config| match config.input.trackball.accel_profile {
-            Some(AccelProfile::Adaptive) => Ok(LuaValue::String(_lua.create_string("adaptive")?)),
-            Some(AccelProfile::Flat) => Ok(LuaValue::String(_lua.create_string("flat")?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.input.trackball.accel_profile = match v.as_deref() {
-                Some("adaptive") => Some(AccelProfile::Adaptive),
-                Some("flat") => Some(AccelProfile::Flat),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid input.trackball.accel_profile value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        input.trackball.accel_profile,
+        AccelProfile,
+        Adaptive => "adaptive",
+        Flat => "flat",
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "clipboard.disable_primary",
-        |_lua, config| Ok(LuaValue::Boolean(config.clipboard.disable_primary)),
-        |_lua, config, value| {
-            config.clipboard.disable_primary = match value {
-                LuaValue::Nil => false,
-                LuaValue::Boolean(b) => b,
-                _ => return Err(mlua::Error::runtime("expected boolean or nil")),
-            };
-            Ok(())
-        },
+        clipboard.disable_primary
     );
 
-    registry.update_accessor(
-        "screenshot_path",
-        |_lua, config| match &config.screenshot_path.0 {
-            Some(path) => Ok(LuaValue::String(_lua.create_string(path)?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.screenshot_path.0 = v;
-            Ok(())
-        },
-    );
+    accessor_wrapped_option_string!(registry, "screenshot_path", screenshot_path);
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "hotkey_overlay.skip_at_startup",
-        |_lua, config| Ok(LuaValue::Boolean(config.hotkey_overlay.skip_at_startup)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.hotkey_overlay.skip_at_startup = v;
-            Ok(())
-        },
+        hotkey_overlay.skip_at_startup
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "config_notification.disable_failed",
-        |_lua, config| Ok(LuaValue::Boolean(config.config_notification.disable_failed)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.config_notification.disable_failed = v;
-            Ok(())
-        },
+        config_notification.disable_failed
     );
 
-    registry.update_accessor(
+    accessor_string!(registry, "cursor.xcursor_theme", cursor.xcursor_theme);
+    accessor_int!(registry, "cursor.xcursor_size", cursor.xcursor_size, u8);
+    accessor_bool!(registry, "cursor.hide_when_typing", cursor.hide_when_typing);
+    accessor_option_int!(
+        registry,
+        "cursor.hide_after_inactive_ms",
+        cursor.hide_after_inactive_ms,
+        u32
+    );
+
+    accessor_option_enum!(
+        registry,
         "debug.preview_render",
-        |_lua, config| match config.debug.preview_render {
-            Some(PreviewRender::Screencast) => {
-                Ok(LuaValue::String(_lua.create_string("screencast")?))
-            }
-            Some(PreviewRender::ScreenCapture) => {
-                Ok(LuaValue::String(_lua.create_string("screen_capture")?))
-            }
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.debug.preview_render = match v.as_deref() {
-                Some("screencast") => Some(PreviewRender::Screencast),
-                Some("screen_capture") => Some(PreviewRender::ScreenCapture),
-                Some(other) => {
-                    return Err(LuaError::external(format!(
-                        "invalid debug.preview_render value: {}",
-                        other
-                    )))
-                }
-                None => None,
-            };
-            Ok(())
-        },
+        debug.preview_render,
+        PreviewRender,
+        Screencast => "screencast",
+        ScreenCapture => "screen_capture",
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.dbus_interfaces_in_non_session_instances",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.dbus_interfaces_in_non_session_instances,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.dbus_interfaces_in_non_session_instances = v;
-            Ok(())
-        },
+        debug.dbus_interfaces_in_non_session_instances
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.wait_for_frame_completion_before_queueing",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.wait_for_frame_completion_before_queueing,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.wait_for_frame_completion_before_queueing = v;
-            Ok(())
-        },
+        debug.wait_for_frame_completion_before_queueing
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.enable_overlay_planes",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.enable_overlay_planes)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.enable_overlay_planes = v;
-            Ok(())
-        },
+        debug.enable_overlay_planes
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.disable_cursor_plane",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.disable_cursor_plane)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.disable_cursor_plane = v;
-            Ok(())
-        },
+        debug.disable_cursor_plane
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.disable_direct_scanout",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.disable_direct_scanout)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.disable_direct_scanout = v;
-            Ok(())
-        },
+        debug.disable_direct_scanout
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.keep_max_bpc_unchanged",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.keep_max_bpc_unchanged)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.keep_max_bpc_unchanged = v;
-            Ok(())
-        },
+        debug.keep_max_bpc_unchanged
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.restrict_primary_scanout_to_matching_format",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.restrict_primary_scanout_to_matching_format,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.restrict_primary_scanout_to_matching_format = v;
-            Ok(())
-        },
+        debug.restrict_primary_scanout_to_matching_format
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.force_disable_connectors_on_resume",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.force_disable_connectors_on_resume,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.force_disable_connectors_on_resume = v;
-            Ok(())
-        },
+        debug.force_disable_connectors_on_resume
     );
 
-    registry.update_accessor(
-        "debug.render_drm_device",
-        |_lua, config| match &config.debug.render_drm_device {
-            Some(path) => Ok(LuaValue::String(
-                _lua.create_string(&*path.to_string_lossy())?,
-            )),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            let v = Option::<String>::from_lua(value, _lua)?;
-            config.debug.render_drm_device = v.map(PathBuf::from);
-            Ok(())
-        },
-    );
+    accessor_option_path!(registry, "debug.render_drm_device", debug.render_drm_device);
 
     registry.update_accessor(
         "debug.ignored_drm_devices",
@@ -778,299 +341,116 @@ pub fn register_config_accessors(registry: &mut PropertyRegistry) {
         },
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.force_pipewire_invalid_modifier",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.force_pipewire_invalid_modifier,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.force_pipewire_invalid_modifier = v;
-            Ok(())
-        },
+        debug.force_pipewire_invalid_modifier
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.emulate_zero_presentation_time",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.emulate_zero_presentation_time,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.emulate_zero_presentation_time = v;
-            Ok(())
-        },
+        debug.emulate_zero_presentation_time
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.disable_resize_throttling",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.disable_resize_throttling)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.disable_resize_throttling = v;
-            Ok(())
-        },
+        debug.disable_resize_throttling
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.disable_transactions",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.disable_transactions)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.disable_transactions = v;
-            Ok(())
-        },
+        debug.disable_transactions
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.keep_laptop_panel_on_when_lid_is_closed",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.keep_laptop_panel_on_when_lid_is_closed,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.keep_laptop_panel_on_when_lid_is_closed = v;
-            Ok(())
-        },
+        debug.keep_laptop_panel_on_when_lid_is_closed
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.disable_monitor_names",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.disable_monitor_names)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.disable_monitor_names = v;
-            Ok(())
-        },
+        debug.disable_monitor_names
     );
 
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.strict_new_window_focus_policy",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.strict_new_window_focus_policy,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.strict_new_window_focus_policy = v;
-            Ok(())
-        },
+        debug.strict_new_window_focus_policy
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.honor_xdg_activation_with_invalid_serial",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.honor_xdg_activation_with_invalid_serial,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.honor_xdg_activation_with_invalid_serial = v;
-            Ok(())
-        },
+        debug.honor_xdg_activation_with_invalid_serial
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.deactivate_unfocused_windows",
-        |_lua, config| Ok(LuaValue::Boolean(config.debug.deactivate_unfocused_windows)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.deactivate_unfocused_windows = v;
-            Ok(())
-        },
+        debug.deactivate_unfocused_windows
     );
-
-    registry.update_accessor(
+    accessor_bool!(
+        registry,
         "debug.skip_cursor_only_updates_during_vrr",
-        |_lua, config| {
-            Ok(LuaValue::Boolean(
-                config.debug.skip_cursor_only_updates_during_vrr,
-            ))
-        },
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.debug.skip_cursor_only_updates_during_vrr = v;
-            Ok(())
-        },
+        debug.skip_cursor_only_updates_during_vrr
     );
 
-    registry.update_accessor(
-        "layout.gaps",
-        |_lua, config| Ok(LuaValue::Number(config.layout.gaps)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.gaps = v;
-            Ok(())
-        },
-    );
+    accessor_float!(registry, "layout.gaps", layout.gaps);
 
-    registry.update_accessor(
+    accessor_enum!(
+        registry,
         "layout.center_focused_column",
-        |_lua, config| {
-            let value = match config.layout.center_focused_column {
-                CenterFocusedColumn::Never => "never",
-                CenterFocusedColumn::Always => "always",
-                CenterFocusedColumn::OnOverflow => "on_overflow",
-            };
-            Ok(LuaValue::String(_lua.create_string(value)?))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            config.layout.center_focused_column = match v.as_str() {
-                "never" => CenterFocusedColumn::Never,
-                "always" => CenterFocusedColumn::Always,
-                "on_overflow" => CenterFocusedColumn::OnOverflow,
-                other => {
-                    return Err(LuaError::external(format!(
-                        "invalid layout.center_focused_column value: {}",
-                        other
-                    )))
-                }
-            };
-            Ok(())
-        },
+        layout.center_focused_column,
+        CenterFocusedColumn,
+        Never => "never",
+        Always => "always",
+        OnOverflow => "on_overflow",
     );
 
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "layout.struts.left",
-        |_lua, config| Ok(LuaValue::Number(config.layout.struts.left.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.struts.left = FloatOrInt::<-65535, 65535>(v);
-            Ok(())
-        },
+        layout.struts.left,
+        -65535,
+        65535
     );
-
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "layout.struts.right",
-        |_lua, config| Ok(LuaValue::Number(config.layout.struts.right.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.struts.right = FloatOrInt::<-65535, 65535>(v);
-            Ok(())
-        },
+        layout.struts.right,
+        -65535,
+        65535
     );
-
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "layout.struts.top",
-        |_lua, config| Ok(LuaValue::Number(config.layout.struts.top.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.struts.top = FloatOrInt::<-65535, 65535>(v);
-            Ok(())
-        },
+        layout.struts.top,
+        -65535,
+        65535
     );
-
-    registry.update_accessor(
+    accessor_float_or_int!(
+        registry,
         "layout.struts.bottom",
-        |_lua, config| Ok(LuaValue::Number(config.layout.struts.bottom.0)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.struts.bottom = FloatOrInt::<-65535, 65535>(v);
-            Ok(())
-        },
+        layout.struts.bottom,
+        -65535,
+        65535
     );
 
-    registry.update_accessor(
-        "layout.shadow.on",
-        |_lua, config| Ok(LuaValue::Boolean(config.layout.shadow.on)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.layout.shadow.on = v;
-            Ok(())
-        },
-    );
+    accessor_bool!(registry, "layout.shadow.on", layout.shadow.on);
 
-    registry.update_accessor_with_type(
-        "layout.shadow.off",
-        PropertyType::Bool,
-        |_lua, config| Ok(LuaValue::Boolean(!config.layout.shadow.on)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.layout.shadow.on = !v;
-            Ok(())
-        },
-    );
+    accessor_inverted_bool!(registry, "layout.shadow.off", layout.shadow.on);
 
-    registry.update_accessor(
-        "layout.shadow.softness",
-        |_lua, config| Ok(LuaValue::Number(config.layout.shadow.softness)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.shadow.softness = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "layout.shadow.spread",
-        |_lua, config| Ok(LuaValue::Number(config.layout.shadow.spread)),
-        |_lua, config, value| {
-            let v = f64::from_lua(value, _lua)?;
-            config.layout.shadow.spread = v;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
+    accessor_float!(registry, "layout.shadow.softness", layout.shadow.softness);
+    accessor_float!(registry, "layout.shadow.spread", layout.shadow.spread);
+    accessor_bool!(
+        registry,
         "layout.shadow.draw_behind_window",
-        |_lua, config| Ok(LuaValue::Boolean(config.layout.shadow.draw_behind_window)),
-        |_lua, config, value| {
-            let v = bool::from_lua(value, _lua)?;
-            config.layout.shadow.draw_behind_window = v;
-            Ok(())
-        },
+        layout.shadow.draw_behind_window
     );
 
-    registry.update_accessor(
-        "layout.shadow.color",
-        |_lua, config| {
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (config.layout.shadow.color.r * 255.) as u8,
-                (config.layout.shadow.color.g * 255.) as u8,
-                (config.layout.shadow.color.b * 255.) as u8,
-                (config.layout.shadow.color.a * 255.) as u8,
-            ))?))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.shadow.color = color;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
+    accessor_color!(registry, "layout.shadow.color", layout.shadow.color);
+    accessor_option_color!(
+        registry,
         "layout.shadow.inactive_color",
-        |_lua, config| match &config.layout.shadow.inactive_color {
-            Some(color) => Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?)),
-            None => Ok(LuaValue::Nil),
-        },
-        |_lua, config, value| {
-            if value.is_nil() {
-                config.layout.shadow.inactive_color = None;
-            } else {
-                let v = String::from_lua(value, _lua)?;
-                let color = parse_color_string(&v)?;
-                config.layout.shadow.inactive_color = Some(color);
-            }
-            Ok(())
-        },
+        layout.shadow.inactive_color
     );
 
     registry.update_accessor(
@@ -1078,182 +458,351 @@ pub fn register_config_accessors(registry: &mut PropertyRegistry) {
         |_lua, config| Ok(LuaValue::Number(config.layout.shadow.offset.x.0)),
         |_lua, config, value| {
             let v = f64::from_lua(value, _lua)?;
-            config.layout.shadow.offset.x = FloatOrInt(v);
+            config.layout.shadow.offset.x = niri_config::utils::FloatOrInt(v);
             Ok(())
         },
     );
-
     registry.update_accessor(
         "layout.shadow.offset.y",
         |_lua, config| Ok(LuaValue::Number(config.layout.shadow.offset.y.0)),
         |_lua, config, value| {
             let v = f64::from_lua(value, _lua)?;
-            config.layout.shadow.offset.y = FloatOrInt(v);
+            config.layout.shadow.offset.y = niri_config::utils::FloatOrInt(v);
             Ok(())
         },
     );
 
-    registry.update_accessor_with_type(
-        "layout.focus_ring.off",
-        PropertyType::Bool,
-        |_lua, config| Ok(LuaValue::Boolean(config.layout.focus_ring.off)),
-        |_lua, config, value| {
-            config.layout.focus_ring.off = bool::from_lua(value, _lua)?;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor(
-        "layout.focus_ring.width",
-        |_lua, config| Ok(LuaValue::Number(config.layout.focus_ring.width)),
-        |_lua, config, value| {
-            config.layout.focus_ring.width = f64::from_lua(value, _lua)?;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor_with_type(
+    accessor_bool!(registry, "layout.focus_ring.off", layout.focus_ring.off);
+    accessor_float!(registry, "layout.focus_ring.width", layout.focus_ring.width);
+    accessor_color!(
+        registry,
         "layout.focus_ring.active_color",
-        PropertyType::String,
-        |_lua, config| {
-            let color = &config.layout.focus_ring.active_color;
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.focus_ring.active_color = color;
-            Ok(())
-        },
+        layout.focus_ring.active_color
     );
-
-    registry.update_accessor_with_type(
+    accessor_color!(
+        registry,
         "layout.focus_ring.inactive_color",
-        PropertyType::String,
-        |_lua, config| {
-            let color = &config.layout.focus_ring.inactive_color;
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.focus_ring.inactive_color = color;
-            Ok(())
-        },
+        layout.focus_ring.inactive_color
     );
-
-    registry.update_accessor_with_type(
+    accessor_color!(
+        registry,
         "layout.focus_ring.urgent_color",
-        PropertyType::String,
+        layout.focus_ring.urgent_color
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.focus_ring.active_gradient",
+        layout.focus_ring.active_gradient
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.focus_ring.inactive_gradient",
+        layout.focus_ring.inactive_gradient
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.focus_ring.urgent_gradient",
+        layout.focus_ring.urgent_gradient
+    );
+
+    accessor_bool!(registry, "layout.border.off", layout.border.off);
+    accessor_float!(registry, "layout.border.width", layout.border.width);
+    accessor_color!(
+        registry,
+        "layout.border.active_color",
+        layout.border.active_color
+    );
+    accessor_color!(
+        registry,
+        "layout.border.inactive_color",
+        layout.border.inactive_color
+    );
+    accessor_color!(
+        registry,
+        "layout.border.urgent_color",
+        layout.border.urgent_color
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.border.active_gradient",
+        layout.border.active_gradient
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.border.inactive_gradient",
+        layout.border.inactive_gradient
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.border.urgent_gradient",
+        layout.border.urgent_gradient
+    );
+
+    // Additional layout accessors
+    accessor_bool!(
+        registry,
+        "layout.always_center_single_column",
+        layout.always_center_single_column
+    );
+    accessor_bool!(
+        registry,
+        "layout.empty_workspace_above_first",
+        layout.empty_workspace_above_first
+    );
+    accessor_color!(registry, "layout.background_color", layout.background_color);
+
+    // Tab indicator accessors
+    accessor_bool!(
+        registry,
+        "layout.tab_indicator.off",
+        layout.tab_indicator.off
+    );
+    accessor_bool!(
+        registry,
+        "layout.tab_indicator.hide_when_single_tab",
+        layout.tab_indicator.hide_when_single_tab
+    );
+    accessor_bool!(
+        registry,
+        "layout.tab_indicator.place_within_column",
+        layout.tab_indicator.place_within_column
+    );
+    accessor_float!(
+        registry,
+        "layout.tab_indicator.gap",
+        layout.tab_indicator.gap
+    );
+    accessor_float!(
+        registry,
+        "layout.tab_indicator.width",
+        layout.tab_indicator.width
+    );
+    accessor_float!(
+        registry,
+        "layout.tab_indicator.gaps_between_tabs",
+        layout.tab_indicator.gaps_between_tabs
+    );
+    accessor_float!(
+        registry,
+        "layout.tab_indicator.corner_radius",
+        layout.tab_indicator.corner_radius
+    );
+    accessor_enum!(
+        registry,
+        "layout.tab_indicator.position",
+        layout.tab_indicator.position,
+        TabIndicatorPosition,
+        Left => "left",
+        Right => "right",
+        Top => "top",
+        Bottom => "bottom",
+    );
+    accessor_option_color!(
+        registry,
+        "layout.tab_indicator.active_color",
+        layout.tab_indicator.active_color
+    );
+    accessor_option_color!(
+        registry,
+        "layout.tab_indicator.inactive_color",
+        layout.tab_indicator.inactive_color
+    );
+    accessor_option_color!(
+        registry,
+        "layout.tab_indicator.urgent_color",
+        layout.tab_indicator.urgent_color
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.tab_indicator.active_gradient",
+        layout.tab_indicator.active_gradient
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.tab_indicator.inactive_gradient",
+        layout.tab_indicator.inactive_gradient
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.tab_indicator.urgent_gradient",
+        layout.tab_indicator.urgent_gradient
+    );
+
+    // Insert hint accessors
+    accessor_bool!(registry, "layout.insert_hint.off", layout.insert_hint.off);
+    accessor_color!(
+        registry,
+        "layout.insert_hint.color",
+        layout.insert_hint.color
+    );
+    accessor_option_gradient!(
+        registry,
+        "layout.insert_hint.gradient",
+        layout.insert_hint.gradient
+    );
+
+    // Gestures accessors
+    accessor_float!(
+        registry,
+        "gestures.dnd_edge_view_scroll.trigger_width",
+        gestures.dnd_edge_view_scroll.trigger_width
+    );
+    accessor_int!(
+        registry,
+        "gestures.dnd_edge_view_scroll.delay_ms",
+        gestures.dnd_edge_view_scroll.delay_ms,
+        u16
+    );
+    accessor_float!(
+        registry,
+        "gestures.dnd_edge_view_scroll.max_speed",
+        gestures.dnd_edge_view_scroll.max_speed
+    );
+    accessor_float!(
+        registry,
+        "gestures.dnd_edge_workspace_switch.trigger_height",
+        gestures.dnd_edge_workspace_switch.trigger_height
+    );
+    accessor_int!(
+        registry,
+        "gestures.dnd_edge_workspace_switch.delay_ms",
+        gestures.dnd_edge_workspace_switch.delay_ms,
+        u16
+    );
+    accessor_float!(
+        registry,
+        "gestures.dnd_edge_workspace_switch.max_speed",
+        gestures.dnd_edge_workspace_switch.max_speed
+    );
+    accessor_bool!(
+        registry,
+        "gestures.hot_corners.off",
+        gestures.hot_corners.off
+    );
+    accessor_bool!(
+        registry,
+        "gestures.hot_corners.top_left",
+        gestures.hot_corners.top_left
+    );
+    accessor_bool!(
+        registry,
+        "gestures.hot_corners.top_right",
+        gestures.hot_corners.top_right
+    );
+    accessor_bool!(
+        registry,
+        "gestures.hot_corners.bottom_left",
+        gestures.hot_corners.bottom_left
+    );
+    accessor_bool!(
+        registry,
+        "gestures.hot_corners.bottom_right",
+        gestures.hot_corners.bottom_right
+    );
+
+    // Overview accessors
+    accessor_float!(registry, "overview.zoom", overview.zoom);
+    accessor_color!(registry, "overview.backdrop_color", overview.backdrop_color);
+    accessor_bool!(
+        registry,
+        "overview.workspace_shadow.off",
+        overview.workspace_shadow.off
+    );
+    accessor_float!(
+        registry,
+        "overview.workspace_shadow.softness",
+        overview.workspace_shadow.softness
+    );
+    accessor_float!(
+        registry,
+        "overview.workspace_shadow.spread",
+        overview.workspace_shadow.spread
+    );
+    accessor_color!(
+        registry,
+        "overview.workspace_shadow.color",
+        overview.workspace_shadow.color
+    );
+    registry.update_accessor(
+        "overview.workspace_shadow.offset.x",
         |_lua, config| {
-            let color = &config.layout.focus_ring.urgent_color;
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?))
+            Ok(LuaValue::Number(
+                config.overview.workspace_shadow.offset.x.0,
+            ))
         },
         |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.focus_ring.urgent_color = color;
+            let v = f64::from_lua(value, _lua)?;
+            config.overview.workspace_shadow.offset.x = niri_config::utils::FloatOrInt(v);
+            Ok(())
+        },
+    );
+    registry.update_accessor(
+        "overview.workspace_shadow.offset.y",
+        |_lua, config| {
+            Ok(LuaValue::Number(
+                config.overview.workspace_shadow.offset.y.0,
+            ))
+        },
+        |_lua, config, value| {
+            let v = f64::from_lua(value, _lua)?;
+            config.overview.workspace_shadow.offset.y = niri_config::utils::FloatOrInt(v);
             Ok(())
         },
     );
 
-    registry.update_accessor_with_type(
-        "layout.border.off",
-        PropertyType::Bool,
-        |_lua, config| Ok(LuaValue::Boolean(config.layout.border.off)),
-        |_lua, config, value| {
-            config.layout.border.off = bool::from_lua(value, _lua)?;
+    // Hotkey overlay accessor
+    accessor_bool!(
+        registry,
+        "hotkey_overlay.hide_not_bound",
+        hotkey_overlay.hide_not_bound
+    );
+
+    // Column width and height preset accessors
+    registry.update_accessor(
+        "layout.default_column_width",
+        |lua, config| match config.layout.default_column_width.as_ref() {
+            Some(size) => {
+                let tbl: PresetSizeTable = LuaFieldConvert::to_lua(size);
+                tbl.into_lua(lua)
+            }
+            None => Ok(mlua::Nil),
+        },
+        |lua, config, value| {
+            if value.is_nil() {
+                config.layout.default_column_width = None;
+            } else {
+                let pst = PresetSizeTable::from_lua(value, lua)?;
+                let size = PresetSize::from_lua_field(pst)?;
+                config.layout.default_column_width = Some(size);
+            }
             Ok(())
         },
     );
 
     registry.update_accessor(
-        "layout.border.width",
-        |_lua, config| Ok(LuaValue::Number(config.layout.border.width)),
+        "layout.preset_column_widths",
+        |lua, config| preset_sizes_to_lua(lua, &config.layout.preset_column_widths),
         |_lua, config, value| {
-            config.layout.border.width = f64::from_lua(value, _lua)?;
+            config.layout.preset_column_widths = preset_sizes_from_lua(value)?;
             Ok(())
         },
     );
 
-    registry.update_accessor_with_type(
-        "layout.border.active_color",
-        PropertyType::String,
-        |_lua, config| {
-            let color = &config.layout.border.active_color;
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?))
-        },
+    registry.update_accessor(
+        "layout.preset_window_heights",
+        |lua, config| preset_sizes_to_lua(lua, &config.layout.preset_window_heights),
         |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.border.active_color = color;
+            config.layout.preset_window_heights = preset_sizes_from_lua(value)?;
             Ok(())
         },
     );
 
-    registry.update_accessor_with_type(
-        "layout.border.inactive_color",
-        PropertyType::String,
-        |_lua, config| {
-            let color = &config.layout.border.inactive_color;
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.border.inactive_color = color;
-            Ok(())
-        },
-    );
-
-    registry.update_accessor_with_type(
-        "layout.border.urgent_color",
-        PropertyType::String,
-        |_lua, config| {
-            let color = &config.layout.border.urgent_color;
-            Ok(LuaValue::String(_lua.create_string(&format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                (color.r * 255.) as u8,
-                (color.g * 255.) as u8,
-                (color.b * 255.) as u8,
-                (color.a * 255.) as u8,
-            ))?))
-        },
-        |_lua, config, value| {
-            let v = String::from_lua(value, _lua)?;
-            let color = parse_color_string(&v)?;
-            config.layout.border.urgent_color = color;
-            Ok(())
-        },
+    accessor_enum!(
+        registry,
+        "layout.default_column_display",
+        layout.default_column_display,
+        niri_ipc::ColumnDisplay,
+        Normal => "normal",
+        Tabbed => "tabbed",
     );
 }

@@ -23,6 +23,7 @@ pub mod events_proxy;
 pub mod module_loader;
 
 // Tier 2: Configuration API
+pub mod accessor_macros;
 pub mod action_proxy;
 pub mod collections;
 pub mod config_accessors;
@@ -35,6 +36,7 @@ pub mod extractors;
 pub mod lua_types;
 pub mod parse_utils;
 pub mod property_registry;
+pub mod rule_api;
 pub mod table_assignment;
 pub mod traits;
 

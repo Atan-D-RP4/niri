@@ -7,8 +7,6 @@ use common::create_runtime;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use crate::create_runtime;
 
     #[test]

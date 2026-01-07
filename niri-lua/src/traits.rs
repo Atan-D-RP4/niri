@@ -19,7 +19,7 @@ pub trait LuaFieldConvert: Sized {
     fn to_lua(&self) -> Self::LuaType;
 
     /// Convert from Lua representation to Rust
-    fn from_lua(value: Self::LuaType) -> LuaResult<Self>;
+    fn from_lua_field(value: Self::LuaType) -> LuaResult<Self>;
 }
 
 /// Trait for enums that convert to/from Lua strings.
@@ -51,7 +51,7 @@ macro_rules! impl_lua_field_convert_copy {
                     *self
                 }
 
-                fn from_lua(value: $ty) -> LuaResult<Self> {
+                fn from_lua_field(value: $ty) -> LuaResult<Self> {
                     Ok(value)
                 }
             }
@@ -68,7 +68,7 @@ impl LuaFieldConvert for String {
         self.clone()
     }
 
-    fn from_lua(value: String) -> LuaResult<Self> {
+    fn from_lua_field(value: String) -> LuaResult<Self> {
         Ok(value)
     }
 }
@@ -93,7 +93,7 @@ impl LuaFieldConvert for Duration {
         self.as_millis() as u64
     }
 
-    fn from_lua(value: u64) -> LuaResult<Self> {
+    fn from_lua_field(value: u64) -> LuaResult<Self> {
         Ok(Duration::from_millis(value))
     }
 }
@@ -117,7 +117,7 @@ impl LuaFieldConvert for Color {
         format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a)
     }
 
-    fn from_lua(value: String) -> LuaResult<Self> {
+    fn from_lua_field(value: String) -> LuaResult<Self> {
         parse_color_string(&value)
     }
 }
@@ -218,7 +218,7 @@ impl LuaFieldConvert for Gradient {
         }
     }
 
-    fn from_lua(value: GradientTable) -> LuaResult<Self> {
+    fn from_lua_field(value: GradientTable) -> LuaResult<Self> {
         use niri_config::GradientInterpolation;
 
         let from = parse_color_string(&value.from)?;
@@ -322,7 +322,7 @@ impl<const MIN: i32, const MAX: i32> LuaFieldConvert for FloatOrInt<MIN, MAX> {
         self.0
     }
 
-    fn from_lua(value: f64) -> LuaResult<Self> {
+    fn from_lua_field(value: f64) -> LuaResult<Self> {
         Ok(FloatOrInt(value))
     }
 }
@@ -348,7 +348,7 @@ macro_rules! impl_lua_enum {
                 .to_string()
             }
 
-            fn from_lua(value: String) -> LuaResult<Self> {
+            fn from_lua_field(value: String) -> LuaResult<Self> {
                 match value.as_str() {
                     $($str => Ok(Self::$variant),)+
                     _ => Err(LuaError::external(format!(
@@ -428,6 +428,109 @@ impl_lua_enum!(
 );
 
 // ============================================================================
+// PresetSize Implementation
+// ============================================================================
+
+use niri_config::PresetSize;
+
+/// Lua table representation of PresetSize: { proportion = 0.5 } or { fixed = 1920 }
+#[derive(Debug, Clone)]
+pub struct PresetSizeTable {
+    pub proportion: Option<f64>,
+    pub fixed: Option<i32>,
+}
+
+impl IntoLua for PresetSizeTable {
+    fn into_lua(self, lua: &Lua) -> LuaResult<Value> {
+        let tbl = lua.create_table()?;
+        if let Some(p) = self.proportion {
+            tbl.set("proportion", p)?;
+        }
+        if let Some(f) = self.fixed {
+            tbl.set("fixed", f)?;
+        }
+        Ok(Value::Table(tbl))
+    }
+}
+
+impl FromLua for PresetSizeTable {
+    fn from_lua(value: Value, _lua: &Lua) -> LuaResult<Self> {
+        match value {
+            Value::Table(tbl) => Ok(PresetSizeTable {
+                proportion: tbl.get("proportion").ok(),
+                fixed: tbl.get("fixed").ok(),
+            }),
+            Value::Number(n) => Ok(PresetSizeTable {
+                proportion: Some(n),
+                fixed: None,
+            }),
+            Value::Integer(n) => Ok(PresetSizeTable {
+                proportion: None,
+                fixed: Some(n as i32),
+            }),
+            _ => Err(LuaError::external(
+                "PresetSize must be a table { proportion = <f64> } or { fixed = <i32> }, or a number",
+            )),
+        }
+    }
+}
+
+impl LuaFieldConvert for PresetSize {
+    type LuaType = PresetSizeTable;
+
+    fn to_lua(&self) -> PresetSizeTable {
+        match self {
+            PresetSize::Proportion(p) => PresetSizeTable {
+                proportion: Some(*p),
+                fixed: None,
+            },
+            PresetSize::Fixed(f) => PresetSizeTable {
+                proportion: None,
+                fixed: Some(*f),
+            },
+        }
+    }
+
+    fn from_lua_field(value: PresetSizeTable) -> LuaResult<Self> {
+        if let Some(p) = value.proportion {
+            Ok(PresetSize::Proportion(p))
+        } else if let Some(f) = value.fixed {
+            Ok(PresetSize::Fixed(f))
+        } else {
+            Err(LuaError::external(
+                "PresetSize must have either 'proportion' or 'fixed' field",
+            ))
+        }
+    }
+}
+
+pub fn preset_sizes_to_lua(lua: &Lua, sizes: &[PresetSize]) -> LuaResult<Value> {
+    let arr = lua.create_table()?;
+    for (i, size) in sizes.iter().enumerate() {
+        let tbl: PresetSizeTable = size.to_lua();
+        arr.set(i + 1, tbl)?;
+    }
+    Ok(Value::Table(arr))
+}
+
+pub fn preset_sizes_from_lua(value: Value) -> LuaResult<Vec<PresetSize>> {
+    match value {
+        Value::Table(tbl) => {
+            let mut sizes = Vec::new();
+            for pair in tbl.pairs::<i64, PresetSizeTable>() {
+                let (_, pst) = pair?;
+                sizes.push(PresetSize::from_lua_field(pst)?);
+            }
+            Ok(sizes)
+        }
+        Value::Nil => Ok(Vec::new()),
+        _ => Err(LuaError::external(
+            "preset sizes must be an array of { proportion = <f64> } or { fixed = <i32> }",
+        )),
+    }
+}
+
+// ============================================================================
 // SpawnAtStartup Implementation
 // ============================================================================
 
@@ -442,7 +545,7 @@ impl LuaFieldConvert for SpawnAtStartup {
         }
     }
 
-    fn from_lua(value: SpawnAtStartupTable) -> LuaResult<Self> {
+    fn from_lua_field(value: SpawnAtStartupTable) -> LuaResult<Self> {
         Ok(SpawnAtStartup {
             command: value.command,
         })
@@ -480,13 +583,13 @@ impl FromLua for SpawnAtStartupTable {
 // Helper functions for complex field types
 // =============================================================================
 
-use niri_config::{GradientColorSpace, GradientInterpolation, HueInterpolation, ShadowOffset};
+use niri_config::{GradientColorSpace, GradientInterpolation, HueInterpolation};
 
 /// Convert a Gradient to a Lua table representation.
 pub fn gradient_to_table(lua: &mlua::Lua, gradient: &Gradient) -> mlua::Result<mlua::Table> {
     let table = lua.create_table()?;
-    table.set("from", color_to_hex(&gradient.from))?;
-    table.set("to", color_to_hex(&gradient.to))?;
+    table.set("from", Color::to_lua(&gradient.from))?;
+    table.set("to", Color::to_lua(&gradient.to))?;
     table.set("angle", gradient.angle)?;
     table.set(
         "relative_to",
@@ -591,24 +694,6 @@ pub fn table_to_gradient(table: mlua::Table) -> mlua::Result<Gradient> {
     })
 }
 
-/// Convert a ShadowOffset to a Lua {x, y} table.
-pub fn offset_to_table(lua: &mlua::Lua, offset: &ShadowOffset) -> mlua::Result<mlua::Table> {
-    let table = lua.create_table()?;
-    table.set("x", offset.x.0)?;
-    table.set("y", offset.y.0)?;
-    Ok(table)
-}
-
-/// Parse a ShadowOffset from a Lua {x, y} table.
-pub fn table_to_offset(table: mlua::Table) -> mlua::Result<ShadowOffset> {
-    let x: f64 = table.get("x")?;
-    let y: f64 = table.get("y")?;
-    Ok(ShadowOffset {
-        x: FloatOrInt(x),
-        y: FloatOrInt(y),
-    })
-}
-
 use niri_config::animations::{Curve, EasingParams, Kind, SpringParams};
 
 /// Convert an animation Kind to a Lua table representation.
@@ -699,15 +784,6 @@ pub fn table_to_anim_kind(table: mlua::Table) -> mlua::Result<Kind> {
     }
 }
 
-/// Convert a Color to a hex string with alpha (e.g., "#rrggbbaa").
-fn color_to_hex(color: &Color) -> String {
-    let r = (color.r * 255.0).round() as u8;
-    let g = (color.g * 255.0).round() as u8;
-    let b = (color.b * 255.0).round() as u8;
-    let a = (color.a * 255.0).round() as u8;
-    format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,19 +791,25 @@ mod tests {
     #[test]
     fn test_bool_convert() {
         assert!(<bool as LuaFieldConvert>::to_lua(&true));
-        assert!(!<bool as LuaFieldConvert>::from_lua(false).unwrap());
+        assert!(!<bool as LuaFieldConvert>::from_lua_field(false).unwrap());
     }
 
     #[test]
     fn test_int_convert() {
         assert_eq!(LuaFieldConvert::to_lua(&42i32), 42);
-        assert_eq!(<i32 as LuaFieldConvert>::from_lua(123).unwrap(), 123i32);
+        assert_eq!(
+            <i32 as LuaFieldConvert>::from_lua_field(123).unwrap(),
+            123i32
+        );
     }
 
     #[test]
     fn test_float_convert() {
         assert_eq!(LuaFieldConvert::to_lua(&1.5f64), 1.5);
-        assert_eq!(<f64 as LuaFieldConvert>::from_lua(2.5).unwrap(), 2.5f64);
+        assert_eq!(
+            <f64 as LuaFieldConvert>::from_lua_field(2.5).unwrap(),
+            2.5f64
+        );
     }
 
     #[test]
@@ -735,7 +817,7 @@ mod tests {
         let s = "hello".to_string();
         assert_eq!(LuaFieldConvert::to_lua(&s), "hello".to_string());
         assert_eq!(
-            <String as LuaFieldConvert>::from_lua("world".to_string()).unwrap(),
+            <String as LuaFieldConvert>::from_lua_field("world".to_string()).unwrap(),
             "world".to_string()
         );
     }
@@ -745,7 +827,7 @@ mod tests {
         let dur = Duration::from_millis(1500);
         assert_eq!(dur.to_lua(), 1500);
         assert_eq!(
-            Duration::from_lua(2000).unwrap(),
+            Duration::from_lua_field(2000).unwrap(),
             Duration::from_millis(2000)
         );
     }
@@ -753,7 +835,6 @@ mod tests {
     #[test]
     fn test_color_parsing_rgb() {
         let color = parse_color_string("#f0a").unwrap();
-        // #f0a expands to #ff00aa
         assert!((color.r - 1.0).abs() < 0.01);
         assert!((color.g - 0.0).abs() < 0.01);
         assert!((color.b - 0.666).abs() < 0.01);
@@ -763,7 +844,6 @@ mod tests {
     #[test]
     fn test_color_parsing_rgba() {
         let color = parse_color_string("#f0a8").unwrap();
-        // #f0a8 expands to #ff00aa88
         assert!((color.r - 1.0).abs() < 0.01);
         assert!((color.g - 0.0).abs() < 0.01);
         assert!((color.b - 0.666).abs() < 0.01);
@@ -792,7 +872,7 @@ mod tests {
     fn test_color_roundtrip() {
         let original = Color::from_rgba8_unpremul(255, 128, 64, 200);
         let hex = LuaFieldConvert::to_lua(&original);
-        let parsed: Color = <Color as LuaFieldConvert>::from_lua(hex).unwrap();
+        let parsed: Color = <Color as LuaFieldConvert>::from_lua_field(hex).unwrap();
 
         assert!((original.r - parsed.r).abs() < 0.01);
         assert!((original.g - parsed.g).abs() < 0.01);
@@ -841,7 +921,7 @@ mod tests {
         let foi: FloatOrInt<0, 100> = FloatOrInt(42.5);
         assert_eq!(LuaFieldConvert::to_lua(&foi), 42.5);
         assert_eq!(
-            <FloatOrInt<0, 100> as LuaFieldConvert>::from_lua(1.75).unwrap(),
+            <FloatOrInt<0, 100> as LuaFieldConvert>::from_lua_field(1.75).unwrap(),
             FloatOrInt::<0, 100>(1.75)
         );
     }
@@ -853,18 +933,18 @@ mod tests {
         let adaptive = AccelProfile::Adaptive;
         assert_eq!(LuaFieldConvert::to_lua(&adaptive), "adaptive");
         assert_eq!(
-            <AccelProfile as LuaFieldConvert>::from_lua("adaptive".to_string()).unwrap(),
+            <AccelProfile as LuaFieldConvert>::from_lua_field("adaptive".to_string()).unwrap(),
             AccelProfile::Adaptive
         );
 
         let flat = AccelProfile::Flat;
         assert_eq!(LuaFieldConvert::to_lua(&flat), "flat");
         assert_eq!(
-            <AccelProfile as LuaFieldConvert>::from_lua("flat".to_string()).unwrap(),
+            <AccelProfile as LuaFieldConvert>::from_lua_field("flat".to_string()).unwrap(),
             AccelProfile::Flat
         );
 
-        assert!(<AccelProfile as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+        assert!(<AccelProfile as LuaFieldConvert>::from_lua_field("invalid".to_string()).is_err());
     }
 
     #[test]
@@ -874,18 +954,18 @@ mod tests {
         let button_areas = ClickMethod::ButtonAreas;
         assert_eq!(LuaFieldConvert::to_lua(&button_areas), "button-areas");
         assert_eq!(
-            <ClickMethod as LuaFieldConvert>::from_lua("button-areas".to_string()).unwrap(),
+            <ClickMethod as LuaFieldConvert>::from_lua_field("button-areas".to_string()).unwrap(),
             ClickMethod::ButtonAreas
         );
 
         let clickfinger = ClickMethod::Clickfinger;
         assert_eq!(LuaFieldConvert::to_lua(&clickfinger), "clickfinger");
         assert_eq!(
-            <ClickMethod as LuaFieldConvert>::from_lua("clickfinger".to_string()).unwrap(),
+            <ClickMethod as LuaFieldConvert>::from_lua_field("clickfinger".to_string()).unwrap(),
             ClickMethod::Clickfinger
         );
 
-        assert!(<ClickMethod as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+        assert!(<ClickMethod as LuaFieldConvert>::from_lua_field("invalid".to_string()).is_err());
     }
 
     #[test]
@@ -897,7 +977,7 @@ mod tests {
             "no-scroll"
         );
         assert_eq!(
-            <ScrollMethod as LuaFieldConvert>::from_lua("no-scroll".to_string()).unwrap(),
+            <ScrollMethod as LuaFieldConvert>::from_lua_field("no-scroll".to_string()).unwrap(),
             ScrollMethod::NoScroll
         );
 
@@ -906,13 +986,13 @@ mod tests {
             "two-finger"
         );
         assert_eq!(
-            <ScrollMethod as LuaFieldConvert>::from_lua("two-finger".to_string()).unwrap(),
+            <ScrollMethod as LuaFieldConvert>::from_lua_field("two-finger".to_string()).unwrap(),
             ScrollMethod::TwoFinger
         );
 
         assert_eq!(LuaFieldConvert::to_lua(&ScrollMethod::Edge), "edge");
         assert_eq!(
-            <ScrollMethod as LuaFieldConvert>::from_lua("edge".to_string()).unwrap(),
+            <ScrollMethod as LuaFieldConvert>::from_lua_field("edge".to_string()).unwrap(),
             ScrollMethod::Edge
         );
 
@@ -921,11 +1001,12 @@ mod tests {
             "on-button-down"
         );
         assert_eq!(
-            <ScrollMethod as LuaFieldConvert>::from_lua("on-button-down".to_string()).unwrap(),
+            <ScrollMethod as LuaFieldConvert>::from_lua_field("on-button-down".to_string())
+                .unwrap(),
             ScrollMethod::OnButtonDown
         );
 
-        assert!(<ScrollMethod as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+        assert!(<ScrollMethod as LuaFieldConvert>::from_lua_field("invalid".to_string()).is_err());
     }
 
     #[test]
@@ -935,18 +1016,20 @@ mod tests {
         let lrm = TapButtonMap::LeftRightMiddle;
         assert_eq!(LuaFieldConvert::to_lua(&lrm), "left-right-middle");
         assert_eq!(
-            <TapButtonMap as LuaFieldConvert>::from_lua("left-right-middle".to_string()).unwrap(),
+            <TapButtonMap as LuaFieldConvert>::from_lua_field("left-right-middle".to_string())
+                .unwrap(),
             TapButtonMap::LeftRightMiddle
         );
 
         let lmr = TapButtonMap::LeftMiddleRight;
         assert_eq!(LuaFieldConvert::to_lua(&lmr), "left-middle-right");
         assert_eq!(
-            <TapButtonMap as LuaFieldConvert>::from_lua("left-middle-right".to_string()).unwrap(),
+            <TapButtonMap as LuaFieldConvert>::from_lua_field("left-middle-right".to_string())
+                .unwrap(),
             TapButtonMap::LeftMiddleRight
         );
 
-        assert!(<TapButtonMap as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+        assert!(<TapButtonMap as LuaFieldConvert>::from_lua_field("invalid".to_string()).is_err());
     }
 
     #[test]
@@ -956,18 +1039,18 @@ mod tests {
         let global = TrackLayout::Global;
         assert_eq!(LuaFieldConvert::to_lua(&global), "global");
         assert_eq!(
-            <TrackLayout as LuaFieldConvert>::from_lua("global".to_string()).unwrap(),
+            <TrackLayout as LuaFieldConvert>::from_lua_field("global".to_string()).unwrap(),
             TrackLayout::Global
         );
 
         let window = TrackLayout::Window;
         assert_eq!(LuaFieldConvert::to_lua(&window), "window");
         assert_eq!(
-            <TrackLayout as LuaFieldConvert>::from_lua("window".to_string()).unwrap(),
+            <TrackLayout as LuaFieldConvert>::from_lua_field("window".to_string()).unwrap(),
             TrackLayout::Window
         );
 
-        assert!(<TrackLayout as LuaFieldConvert>::from_lua("invalid".to_string()).is_err());
+        assert!(<TrackLayout as LuaFieldConvert>::from_lua_field("invalid".to_string()).is_err());
     }
 
     #[test]
@@ -978,15 +1061,13 @@ mod tests {
             command: vec!["kitty".to_string(), "-e".to_string(), "fish".to_string()],
         };
 
-        // Test to_lua
         let table = LuaFieldConvert::to_lua(&spawn);
         assert_eq!(table.command, vec!["kitty", "-e", "fish"]);
 
-        // Test from_lua
         let spawn_table = SpawnAtStartupTable {
             command: vec!["alacritty".to_string()],
         };
-        let result: SpawnAtStartup = LuaFieldConvert::from_lua(spawn_table).unwrap();
+        let result: SpawnAtStartup = SpawnAtStartup::from_lua_field(spawn_table).unwrap();
         assert_eq!(result.command, vec!["alacritty"]);
     }
 }

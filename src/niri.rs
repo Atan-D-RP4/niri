@@ -876,10 +876,9 @@ impl State {
             } else {
                 self.emit_overview_close();
             }
-            self.niri
-                .state_handle
-                .as_ref()
-                .map(|h| h.set_focus_mode(self.current_focus_mode()));
+            if let Some(h) = self.niri.state_handle.as_ref() {
+                h.set_focus_mode(self.current_focus_mode())
+            }
         }
 
         // Detect layout mode (floating/tiling) changes and emit Lua events.
@@ -1478,10 +1477,9 @@ impl State {
             // FIXME: can be more granular.
             self.niri.queue_redraw_all();
 
-            self.niri
-                .state_handle
-                .as_ref()
-                .map(|h| h.set_focus_mode(self.current_focus_mode()));
+            if let Some(h) = self.niri.state_handle.as_ref() {
+                h.set_focus_mode(self.current_focus_mode())
+            }
         }
     }
 

@@ -437,7 +437,7 @@ impl LuaUserData for WindowRulesCollection {
     }
 }
 
-fn extract_window_rule(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::WindowRule> {
+pub fn extract_window_rule(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::WindowRule> {
     use niri_config::window_rule::WindowRule;
 
     let mut rule = WindowRule::default();
@@ -612,7 +612,7 @@ impl LuaUserData for WorkspacesCollection {
     }
 }
 
-fn extract_workspace(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::Workspace> {
+pub fn extract_workspace(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::Workspace> {
     use niri_config::workspace::WorkspaceName;
     use niri_config::Workspace;
 
@@ -950,7 +950,7 @@ fn extract_spawn_at_startup_from_table(tbl: &LuaTable) -> LuaResult<niri_config:
     Ok(niri_config::SpawnAtStartup { command })
 }
 
-fn extract_layer_rule(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::LayerRule> {
+pub fn extract_layer_rule(_lua: &Lua, tbl: &LuaTable) -> LuaResult<niri_config::LayerRule> {
     use niri_config::layer_rule::LayerRule;
 
     let mut rule = LayerRule::default();
@@ -1004,7 +1004,7 @@ fn parse_block_out_from(s: &str) -> LuaResult<niri_config::BlockOutFrom> {
     }
 }
 
-fn extract_bind(_lua: &Lua, tbl: &LuaTable) -> LuaResult<Bind> {
+pub fn extract_bind(_lua: &Lua, tbl: &LuaTable) -> LuaResult<Bind> {
     let key_str = extract_string_opt(tbl, "key")?
         .ok_or_else(|| LuaError::external("bind requires 'key' field (e.g., 'Mod+Return')"))?;
 
@@ -1725,7 +1725,7 @@ fn extract_workspace_reference_config(tbl: &LuaTable) -> LuaResult<WorkspaceRefe
     extract_workspace_reference(tbl).map(WorkspaceReference::from)
 }
 
-fn extract_size_change(tbl: &LuaTable) -> LuaResult<SizeChange> {
+pub fn extract_size_change(tbl: &LuaTable) -> LuaResult<SizeChange> {
     if let Some(fixed) = extract_int_opt(tbl, "fixed")? {
         return Ok(SizeChange::SetFixed(fixed as i32));
     }

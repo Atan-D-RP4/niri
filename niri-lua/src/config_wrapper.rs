@@ -147,7 +147,7 @@ impl UserData for ConfigWrapper {
                 }
                 let state = this.state();
                 let config = state.borrow_config();
-                return (desc.getter)(lua, &*config);
+                return (desc.getter)(lua, &config);
             }
 
             if registry.is_nested(&key) {
@@ -170,7 +170,7 @@ impl UserData for ConfigWrapper {
                     if !matches!(desc.ty, PropertyType::Nested) {
                         let state = this.state();
                         let mut config = state.borrow_config_mut();
-                        (desc.setter)(lua, &mut *config, value)?;
+                        (desc.setter)(lua, &mut config, value)?;
                         state.mark_dirty(desc.dirty_flag);
                         state.with_dirty_flags(|flags| flags.mark_dirty(&key));
                         return Ok(());
@@ -224,6 +224,9 @@ impl UserData for ConfigWrapper {
 pub fn register_config_wrapper(lua: &Lua, wrapper: ConfigWrapper) -> LuaResult<()> {
     let globals = lua.globals();
     let niri: LuaTable = globals.get("niri")?;
+
+    crate::rule_api::register_all(lua, &niri, wrapper.state())?;
+
     niri.set("config", wrapper)?;
     Ok(())
 }

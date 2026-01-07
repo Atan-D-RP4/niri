@@ -172,7 +172,7 @@ fn test_enum_lua_field_convert_to_lua() {
 
 #[test]
 fn test_enum_lua_field_convert_from_lua() {
-    let result = <TestDirection as LuaFieldConvert>::from_lua("right-side".to_string());
+    let result = <TestDirection as LuaFieldConvert>::from_lua_field("right-side".to_string());
     assert_eq!(result.unwrap(), TestDirection::RightSide);
 }
 
@@ -180,13 +180,12 @@ fn test_enum_lua_field_convert_from_lua() {
 fn test_enum_lua_field_convert_roundtrip() {
     let original = TestMode::SlowMode;
     let lua_repr = <TestMode as LuaFieldConvert>::to_lua(&original);
-    let converted = <TestMode as LuaFieldConvert>::from_lua(lua_repr).unwrap();
+    let converted = <TestMode as LuaFieldConvert>::from_lua_field(lua_repr).unwrap();
     assert_eq!(original, converted);
 }
 
 #[test]
 fn test_enum_lua_field_convert_all_variants() {
-    // Test that all variants can roundtrip through LuaFieldConvert
     for variant in [
         TestDirection::Up,
         TestDirection::Down,
@@ -194,7 +193,7 @@ fn test_enum_lua_field_convert_all_variants() {
         TestDirection::RightSide,
     ] {
         let lua_repr = <TestDirection as LuaFieldConvert>::to_lua(&variant);
-        let converted = <TestDirection as LuaFieldConvert>::from_lua(lua_repr).unwrap();
+        let converted = <TestDirection as LuaFieldConvert>::from_lua_field(lua_repr).unwrap();
         assert_eq!(variant, converted);
     }
 }

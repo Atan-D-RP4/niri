@@ -39,13 +39,13 @@ use std::str::FromStr;
 use mlua::prelude::*;
 use mlua::LuaSerdeExt;
 use niri_config::appearance::*;
-use niri_config::debug::{Debug, PreviewRender};
+use niri_config::debug::Debug;
 use niri_config::gestures::Gestures;
 use niri_config::input::*;
 use niri_config::layout::*;
 use niri_config::misc::*;
-use niri_config::recent_windows::{MruHighlight, MruPreviews, RecentWindows};
-use niri_config::{ConfigNotification, FloatOrInt, XwaylandSatellite};
+use niri_config::recent_windows::{MruHighlight, MruPreviews};
+use niri_config::{ConfigNotification, XwaylandSatellite};
 pub use niri_lua_traits::{
     extract_bool_opt, extract_float_opt, extract_int_opt, extract_string_opt, extract_table_opt,
     ExtractField, FromLuaTable,
@@ -199,40 +199,6 @@ pub fn extract_shadow(lua: &Lua, value: LuaValue) -> LuaResult<Option<Shadow>> {
         return Ok(None);
     }
     lua.from_value(value).map(Some)
-}
-
-/// Extract preset sizes (column widths or window heights) from Lua table.
-fn extract_preset_sizes(table: &LuaTable, field: &str) -> LuaResult<Option<Vec<PresetSize>>> {
-    if let Some(array_table) = extract_table_opt(table, field)? {
-        let mut sizes = Vec::new();
-        // Iterate as array (1-indexed in Lua)
-        for i in 1..=array_table.len()? {
-            if let Ok(item_table) = array_table.get::<LuaTable>(i) {
-                if let Some(size) = extract_size_change(&item_table)? {
-                    sizes.push(size);
-                }
-            }
-        }
-        if !sizes.is_empty() {
-            return Ok(Some(sizes));
-        }
-    }
-    Ok(None)
-}
-
-// ============================================================================
-// Window rule extractors
-// ============================================================================
-
-/// Extract a single size change (proportion or fixed).
-fn extract_size_change(table: &LuaTable) -> LuaResult<Option<PresetSize>> {
-    if let Some(proportion) = extract_float_opt(table, "proportion")? {
-        return Ok(Some(PresetSize::Proportion(proportion)));
-    }
-    if let Some(fixed) = extract_int_opt(table, "fixed")? {
-        return Ok(Some(PresetSize::Fixed(fixed as i32)));
-    }
-    Ok(None)
 }
 
 // ============================================================================
@@ -996,60 +962,6 @@ mod tests {
                 no_hash_invalid,
                 empty,
                 rgb_format,
-            )
-        );
-    }
-
-    #[test]
-    fn snapshot_extractors_size_parsing_valid() {
-        let (lua, _) = create_test_table();
-
-        // Proportion size
-        let proportion_table = lua.create_table().unwrap();
-        proportion_table.set("proportion", 0.5).unwrap();
-        let proportion_result = extract_size_change(&proportion_table).unwrap();
-
-        // Fixed size
-        let fixed_table = lua.create_table().unwrap();
-        fixed_table.set("fixed", 1920i64).unwrap();
-        let fixed_result = extract_size_change(&fixed_table).unwrap();
-
-        insta::assert_debug_snapshot!(
-            "extractors_size_parsing_valid",
-            (proportion_result, fixed_result,)
-        );
-    }
-
-    #[test]
-    fn snapshot_extractors_size_parsing_edge_cases() {
-        let (lua, _) = create_test_table();
-
-        // Empty table (no proportion or fixed)
-        let empty_table = lua.create_table().unwrap();
-        let empty_result = extract_size_change(&empty_table).unwrap();
-
-        // Both proportion and fixed (proportion takes precedence)
-        let both_table = lua.create_table().unwrap();
-        both_table.set("proportion", 0.5).unwrap();
-        both_table.set("fixed", 100i64).unwrap();
-        let both_result = extract_size_change(&both_table).unwrap();
-
-        // Zero values
-        let zero_proportion_table = lua.create_table().unwrap();
-        zero_proportion_table.set("proportion", 0.0).unwrap();
-        let zero_proportion_result = extract_size_change(&zero_proportion_table).unwrap();
-
-        let zero_fixed_table = lua.create_table().unwrap();
-        zero_fixed_table.set("fixed", 0i64).unwrap();
-        let zero_fixed_result = extract_size_change(&zero_fixed_table).unwrap();
-
-        insta::assert_debug_snapshot!(
-            "extractors_size_parsing_edge_cases",
-            (
-                empty_result,
-                both_result,
-                zero_proportion_result,
-                zero_fixed_result,
             )
         );
     }
