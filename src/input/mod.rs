@@ -2378,6 +2378,10 @@ impl State {
                     self.niri.queue_redraw_mru_output();
                 }
             }
+            Action::SetCursorZoom(factor) => {
+                self.niri.cursor_zoom_factor = factor.max(1.0);
+                self.niri.queue_redraw_all();
+            }
         }
     }
 
