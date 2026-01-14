@@ -50,22 +50,57 @@
 //!     stderr = "",        -- Captured stderr (if capture_stderr=true)
 //! }
 //! ```
+//!
+//! # Thread Safety
+//!
+//! [`ProcessManager`] is designed for single-threaded use only. It must be
+//! accessed only from the main Lua thread (where the Lua runtime lives).
+//! Worker threads for reading process output communicate with the manager
+//! via `mpsc::channel` messages, not by directly accessing the manager.
+//!
+//! This design allows using `Rc<RefCell<>>` instead of `Arc<Mutex<>>`,
+//! matching the pattern used by [`SharedTimerManager`] and [`SharedEventHandlers`].
+//!
+//! # Callback ID Lifecycle
+//!
+//! When callbacks are registered via [`parse_spawn_opts()`], callback IDs are
+//! returned and stored in [`SpawnOpts`]. These IDs are automatically unregistered
+//! by [`LuaRuntime::process_callbacks()`]` when the process exits.
+//!
+//! [`CallbackRegistry::unregister()`] returns the Lua registry key so it can
+//! be properly cleaned up from the Lua state.
+//!
+//! # Detached Worker Threads
+//!
+//! Worker threads for stdout/stderr reading and process waiting are detached.
+//! Join handles are not stored because deterministic shutdown is not required.
+//! The compositor may exit without explicitly joining these threads.
+//!
+//! [`SharedTimerManager`]: crate::loop_api::SharedTimerManager
+//! [`SharedEventHandlers`]: crate::event_system::SharedEventHandlers
+//! [`parse_spawn_opts()`]: crate::process::parse_spawn_opts
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::process::{ChildStdin, Command, ExitStatus, Stdio};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread::{self, JoinHandle};
+use std::sync::RwLock;
+use std::thread;
 use std::time::Duration;
 
 use mlua::prelude::*;
 use niri_config::Environment;
 use nix::libc;
 
-use crate::CallbackRegistry;
+use crate::SharedCallbackRegistry;
+
+/// Pending callback event from process_events().
+/// Fields: (callback_id, handle_id, data, stream_name, text_mode, is_exit)
+pub type PendingCallback = (u64, u64, Vec<u8>, &'static str, bool, bool);
 
 pub static CHILD_ENV: RwLock<Environment> = RwLock::new(Environment(Vec::new()));
 pub static CHILD_WAYLAND_DISPLAY: RwLock<Option<String>> = RwLock::new(None);
@@ -86,13 +121,8 @@ pub fn set_child_env(env: Environment) {
 /// Grace period after SIGTERM before sending SIGKILL (configurable).
 pub const SIGTERM_GRACE_MS: u64 = 1000;
 
-/// Maximum callbacks to process per flush cycle.
 pub const MAX_CALLBACKS_PER_FLUSH: usize = 16;
 
-/// Maximum event queue size to prevent unbounded memory growth.
-pub const MAX_QUEUE_SIZE: usize = 1000;
-
-/// Counter for generating unique process handle IDs.
 static NEXT_HANDLE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Options for spawning a process.
@@ -198,58 +228,22 @@ impl SpawnResult {
     }
 }
 
-/// Events sent from worker threads to the main thread.
 #[derive(Debug)]
-pub enum ProcessEvent {
-    /// Chunk of stdout data.
-    StdoutChunk(u64, Vec<u8>),
-    /// Chunk of stderr data.
-    StderrChunk(u64, Vec<u8>),
-    /// Process exited.
-    Exit(u64, SpawnResult),
-    /// Error occurred.
-    Error(u64, String),
+enum WorkerMsg {
+    Stdout { handle: u64, data: Vec<u8> },
+    Stderr { handle: u64, data: Vec<u8> },
+    StdoutClosed { handle: u64 },
+    StderrClosed { handle: u64 },
+    Exit { handle: u64, result: SpawnResult },
+    Error { handle: u64, message: String },
 }
 
-/// Payload types for callback events.
-#[derive(Debug, Clone)]
-pub enum CallbackPayload {
-    /// Stdout data chunk.
-    Stdout(Vec<u8>),
-    /// Stderr data chunk.
-    Stderr(Vec<u8>),
-    /// Process exit result.
-    Exit(SpawnResult),
-}
-
-/// Event sent to main thread for callback invocation.
-#[derive(Debug, Clone)]
-pub struct CallbackEvent {
-    /// Callback ID to invoke.
-    pub callback_id: u64,
-    /// Process handle ID.
-    pub handle_id: u64,
-    /// Payload data for the callback.
-    pub payload: CallbackPayload,
-    /// Whether output is in text mode.
-    pub text_mode: bool,
-}
-
-/// Internal state for a managed process.
 struct ProcessState {
-    /// Process ID.
     pid: u32,
-    /// Child process handle (for wait/kill).
-    #[allow(dead_code)] // Will be used for streaming callbacks in Phase 2
-    child: Option<Child>,
-    /// Stdin writer (if stdin="pipe").
     stdin: Option<ChildStdin>,
-    /// Whether stdin has been closed.
     stdin_closed: bool,
-    /// Whether we're in text mode.
-    #[allow(dead_code)] // Will be used for streaming callbacks in Phase 2
+    /// Text mode for streaming callbacks (carried to event dispatch).
     text_mode: bool,
-    /// Captured stdout buffer.
     stdout_buffer: Vec<u8>,
     /// Captured stderr buffer.
     stderr_buffer: Vec<u8>,
@@ -263,35 +257,24 @@ struct ProcessState {
     pub stderr_callback: Option<u64>,
     /// Registry key for on_exit callback.
     pub on_exit_callback: Option<u64>,
-    /// Receiver for exit result (from waiter thread).
-    exit_receiver: Option<Receiver<SpawnResult>>,
-    /// Cached exit result (after process exits).
+    /// Cached exit result (after process exits)
+    stdout_done: bool,
+    stderr_done: bool,
+    pending_exit: Option<SpawnResult>,
     exit_result: Option<SpawnResult>,
-    /// Worker thread handles (for cleanup).
-    _worker_threads: Vec<JoinHandle<()>>,
 }
 
-/// Manages all spawned processes and their events.
 pub struct ProcessManager {
-    /// All managed processes.
     processes: HashMap<u64, ProcessState>,
-    /// Event queue from worker threads.
-    #[allow(dead_code)] // Will be used for streaming callbacks in Phase 2
-    event_queue: Arc<Mutex<Vec<ProcessEvent>>>,
-    /// Sender for worker threads to push events.
-    event_sender: Sender<ProcessEvent>,
-    /// Receiver for events (polled on main thread).
-    #[allow(dead_code)] // Will be used for streaming callbacks in Phase 2
-    event_receiver: Receiver<ProcessEvent>,
+    event_sender: Sender<WorkerMsg>,
+    event_receiver: Receiver<WorkerMsg>,
 }
 
 impl ProcessManager {
-    /// Create a new process manager.
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             processes: HashMap::new(),
-            event_queue: Arc::new(Mutex::new(Vec::new())),
             event_sender: tx,
             event_receiver: rx,
         }
@@ -327,33 +310,22 @@ impl ProcessManager {
             cmd.env_clear();
         }
 
-        // Set WAYLAND_DISPLAY from compositor (critical for spawned apps to connect)
-        let wayland_display = CHILD_WAYLAND_DISPLAY.read().unwrap();
-        if let Some(ref display) = *wayland_display {
+        // propagate compositor environment
+        if let Some(ref display) = *CHILD_WAYLAND_DISPLAY.read().unwrap() {
             cmd.env("WAYLAND_DISPLAY", display);
         }
-        drop(wayland_display);
-
-        // Set DISPLAY (X11) from compositor
-        let x_display = CHILD_DISPLAY.read().unwrap();
-        if let Some(ref display) = *x_display {
-            cmd.env("DISPLAY", display);
+        if let Some(ref d) = *CHILD_DISPLAY.read().unwrap() {
+            cmd.env("DISPLAY", d);
         } else {
             cmd.env_remove("DISPLAY");
         }
-        drop(x_display);
-
-        // Set configured environment from compositor config
-        let child_env = CHILD_ENV.read().unwrap();
-        for var in &child_env.0 {
-            if let Some(value) = &var.value {
-                cmd.env(&var.name, value);
+        for var in &CHILD_ENV.read().unwrap().0 {
+            if let Some(v) = &var.value {
+                cmd.env(&var.name, v);
             } else {
                 cmd.env_remove(&var.name);
             }
         }
-        drop(child_env);
-
         // Set user-provided environment (overrides compositor env)
         if let Some(ref env) = opts.env {
             for (k, v) in env {
@@ -363,13 +335,9 @@ impl ProcessManager {
 
         // Configure stdio
         match &opts.stdin {
-            StdinMode::Closed => {
-                cmd.stdin(Stdio::null());
-            }
-            StdinMode::Data(_) | StdinMode::Pipe => {
-                cmd.stdin(Stdio::piped());
-            }
-        }
+            StdinMode::Closed => cmd.stdin(Stdio::null()),
+            StdinMode::Data(_) | StdinMode::Pipe => cmd.stdin(Stdio::piped()),
+        };
 
         if opts.capture_stdout || opts.stdout_callback.is_some() {
             cmd.stdout(Stdio::piped());
@@ -383,143 +351,127 @@ impl ProcessManager {
             cmd.stderr(Stdio::null());
         }
 
-        // Spawn the process
         let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
         let pid = child.id();
 
-        // Handle stdin data
+        // handle stdin data (immediately for Data; keep pipe for Pipe)
         let mut stdin_handle = child.stdin.take();
         let stdin_closed = match &opts.stdin {
-            StdinMode::Data(data) => {
-                if let Some(ref mut stdin) = stdin_handle {
-                    let _ = stdin.write_all(data.as_bytes());
+            StdinMode::Data(s) => {
+                if let Some(ref mut st) = stdin_handle {
+                    let _ = st.write_all(s.as_bytes());
                 }
-                stdin_handle = None; // Close after writing
+                stdin_handle = None;
                 true
             }
             StdinMode::Closed => true,
             StdinMode::Pipe => false,
         };
 
-        // Set up reader threads
-        let mut worker_threads = Vec::new();
-        let event_sender = self.event_sender.clone();
-
-        // Stdout reader thread
+        // spawn reader threads (they send WorkerMsg to manager)
+        let tx = self.event_sender.clone();
+        let has_stdout = child.stdout.is_some();
+        let has_stderr = child.stderr.is_some();
         if let Some(stdout) = child.stdout.take() {
-            let tx = event_sender.clone();
+            let tx_clone = tx.clone();
             let id = handle_id;
             let text_mode = opts.text;
-            let handle = thread::spawn(move || {
-                read_stream(stdout, id, tx, text_mode, true);
-            });
-            worker_threads.push(handle);
+            thread::spawn(move || read_stream(stdout, id, tx_clone, text_mode, true));
         }
-
-        // Stderr reader thread
         if let Some(stderr) = child.stderr.take() {
-            let tx = event_sender.clone();
+            let tx_clone = tx.clone();
             let id = handle_id;
             let text_mode = opts.text;
-            let handle = thread::spawn(move || {
-                read_stream(stderr, id, tx, text_mode, false);
-            });
-            worker_threads.push(handle);
+            thread::spawn(move || read_stream(stderr, id, tx_clone, text_mode, false));
         }
 
-        // Exit waiter thread
-        let (exit_tx, exit_rx) = mpsc::channel();
-        let exit_sender = event_sender;
-        let waiter_child = child;
+        // waiter thread — sends Exit(handle_id, SpawnResult)
+        let tx_clone = self.event_sender.clone();
         let id = handle_id;
-        let capture_stdout = opts.capture_stdout;
-        let capture_stderr = opts.capture_stderr;
-
-        // We need to wait in a separate thread
+        let _capture_out = opts.capture_stdout;
+        let _capture_err = opts.capture_stderr;
         thread::spawn(move || {
-            wait_for_exit(
-                waiter_child,
-                id,
-                exit_sender,
-                exit_tx,
-                capture_stdout,
-                capture_stderr,
-            );
+            let status = match child.wait() {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx_clone.send(WorkerMsg::Error {
+                        handle: id,
+                        message: format!("wait error: {}", e),
+                    });
+                    return;
+                }
+            };
+            // Buffers are empty here - process_events populates them from WorkerMsg chunks
+            // and transfers them to SpawnResult when Exit is processed
+            let res = exit_status_to_result(status);
+            let _ = tx_clone.send(WorkerMsg::Exit {
+                handle: id,
+                result: res,
+            });
         });
 
-        // Store process state
+        // NOTE: We don't hold join handles; threads are detached.
+        // Manager will receive the Exit WorkerMsg and update state.exit_result accordingly.
         let state = ProcessState {
             pid,
-            child: None, // Child moved to waiter thread
             stdin: stdin_handle,
             stdin_closed,
             text_mode: opts.text,
-            stdout_buffer: Vec::new(),
-            stderr_buffer: Vec::new(),
             capture_stdout: opts.capture_stdout,
             capture_stderr: opts.capture_stderr,
+            stdout_buffer: Vec::new(),
+            stderr_buffer: Vec::new(),
             stdout_callback: opts.stdout_callback,
             stderr_callback: opts.stderr_callback,
             on_exit_callback: opts.on_exit_callback,
-            exit_receiver: Some(exit_rx),
+            stdout_done: !has_stdout,
+            stderr_done: !has_stderr,
+            pending_exit: None,
             exit_result: None,
-            _worker_threads: worker_threads,
         };
-
         self.processes.insert(handle_id, state);
 
         Ok((handle_id, pid))
     }
 
-    /// Spawn a shell command with options.
     pub fn spawn_shell_command(
         &mut self,
         command: String,
         opts: SpawnOpts,
     ) -> Result<(u64, u32), String> {
-        // Use /bin/sh -c "command"
         self.spawn_command(vec!["sh".to_string(), "-c".to_string(), command], opts)
     }
 
-    /// Get the PID for a handle.
     pub fn get_pid(&self, handle_id: u64) -> Option<u32> {
         self.processes.get(&handle_id).map(|s| s.pid)
     }
 
-    /// Write to a process's stdin.
     pub fn write_stdin(&mut self, handle_id: u64, data: &[u8]) -> Result<(), String> {
         let state = self
             .processes
             .get_mut(&handle_id)
             .ok_or("Process not found")?;
-
         if state.stdin_closed {
-            return Err("Stdin is closed".to_string());
+            return Err("Stdin closed".to_string());
         }
-
-        let stdin = state.stdin.as_mut().ok_or("Stdin not available")?;
-
+        let stdin = state.stdin.as_mut().ok_or("stdin not available")?;
         stdin
             .write_all(data)
-            .map_err(|e| format!("Write failed: {}", e))?;
-        stdin.flush().map_err(|e| format!("Flush failed: {}", e))?;
-
+            .map_err(|e| format!("write failed: {}", e))?;
+        stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
         Ok(())
     }
 
-    /// Close a process's stdin.
     pub fn close_stdin(&mut self, handle_id: u64) -> Result<(), String> {
         let state = self
             .processes
             .get_mut(&handle_id)
             .ok_or("Process not found")?;
-
         state.stdin = None;
         state.stdin_closed = true;
-        Ok(())
+        return Ok(());
     }
 
-    /// Check if stdin is closed.
     pub fn is_stdin_closed(&self, handle_id: u64) -> bool {
         self.processes
             .get(&handle_id)
@@ -527,151 +479,132 @@ impl ProcessManager {
             .unwrap_or(true)
     }
 
-    /// Kill a process with a signal.
     pub fn kill(&mut self, handle_id: u64, signal: i32) -> Result<bool, String> {
-        let state = self
-            .processes
-            .get_mut(&handle_id)
-            .ok_or("Process not found")?;
-
-        // Use libc to send signal
+        let state = self.processes.get(&handle_id).ok_or("Process not found")?;
         #[cfg(unix)]
         {
-            let result = unsafe { libc::kill(state.pid as i32, signal) };
-            Ok(result == 0)
+            let res = unsafe { libc::kill(state.pid as i32, signal) };
+            Ok(res == 0)
         }
-
         #[cfg(not(unix))]
         {
-            Err("kill() not supported on this platform".to_string())
+            Err("kill not supported".to_string())
         }
     }
 
-    /// Wait for a process to exit (blocking).
+    /// Wait for process to exit (blocks). We use cached result when manager has processed Exit.
     pub fn wait(&mut self, handle_id: u64, timeout_ms: Option<u64>) -> Result<SpawnResult, String> {
-        // First, check if already exited and get necessary info
-        let (pid, receiver) = {
-            let state = self
-                .processes
-                .get_mut(&handle_id)
-                .ok_or("Process not found")?;
-
-            // If already exited, return cached result
-            if let Some(ref result) = state.exit_result {
-                return Ok(result.clone());
-            }
-
-            // Take the receiver
-            let receiver = state
-                .exit_receiver
-                .take()
-                .ok_or("Already waiting on this process")?;
-
-            (state.pid, receiver)
-        };
-
-        let result = if let Some(timeout) = timeout_ms {
-            // Wait with timeout
-            match receiver.recv_timeout(Duration::from_millis(timeout)) {
-                Ok(result) => result,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Timeout - send SIGTERM
-                    log::debug!("Process {} timed out, sending SIGTERM", pid);
-                    let _ = self.kill(handle_id, libc::SIGTERM);
-
-                    // Wait grace period
-                    match receiver.recv_timeout(Duration::from_millis(SIGTERM_GRACE_MS)) {
-                        Ok(result) => result,
-                        Err(_) => {
-                            // Still not exited - send SIGKILL
-                            log::debug!(
-                                "Process {} didn't exit after SIGTERM, sending SIGKILL",
-                                pid
-                            );
-                            let _ = self.kill(handle_id, libc::SIGKILL);
-
-                            // Wait indefinitely now
-                            receiver.recv().map_err(|e| format!("Wait failed: {}", e))?
-                        }
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("Process waiter thread disconnected".to_string());
-                }
+        // If already have exit_result, return
+        if let Some(state) = self.processes.get(&handle_id) {
+            if let Some(ref r) = state.exit_result {
+                return Ok(r.clone());
             }
         } else {
-            // Wait indefinitely
-            receiver.recv().map_err(|e| format!("Wait failed: {}", e))?
-        };
+            return Err("Process not found".to_string());
+        }
 
-        // Cache the result
-        let state = self.processes.get_mut(&handle_id).unwrap();
-        state.exit_result = Some(result.clone());
+        // Simple loop that pumps events until exit_result is available or timeout occurs.
+        let start = std::time::Instant::now();
+        loop {
+            // check and process pending events (small, non-blocking)
+            let _callbacks = self.process_events();
+            // user of the manager should invoke these callbacks on main thread via registry.
+            // See below: process_events returns tuples (we'll call registry there).
+            // After processing, check exit_result again.
+            if let Some(state) = self.processes.get(&handle_id) {
+                if let Some(ref r) = state.exit_result {
+                    return Ok(r.clone());
+                }
+            }
 
-        Ok(result)
+            if let Some(to) = timeout_ms {
+                if start.elapsed() > Duration::from_millis(to) {
+                    // escalate: SIGTERM then SIGKILL after grace
+                    let _pid = self.get_pid(handle_id).ok_or("Process not found")?;
+                    let _ = self.kill(handle_id, libc::SIGTERM);
+                    std::thread::sleep(Duration::from_millis(SIGTERM_GRACE_MS));
+                    // after grace, check again
+                    if let Some(state) = self.processes.get(&handle_id) {
+                        if state.exit_result.is_some() {
+                            return Ok(state.exit_result.clone().unwrap());
+                        }
+                    }
+                    let _ = self.kill(handle_id, libc::SIGKILL);
+                    // now wait indefinitely until exit_result appears
+                    loop {
+                        let _ = self.process_events();
+                        if let Some(state) = self.processes.get(&handle_id) {
+                            if let Some(ref r) = state.exit_result {
+                                return Ok(r.clone());
+                            }
+                        }
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            }
+            // small sleep to avoid busy-loop
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
-    /// Process pending events from worker threads.
-    ///
-    /// Returns callbacks to invoke on the main thread.
-    pub fn process_events(&mut self) -> Vec<CallbackEvent> {
-        let mut callbacks = Vec::new();
+    /// Pull up to MAX_CALLBACKS_PER_FLUSH messages and prepare callbacks to invoke on the main thread.
+    /// Returns a vector of tuples: (callback_id, handle_id, payload_bytes, stream, text_mode, is_exit)
+    /// where stream is "stdout" or "stderr" for streaming callbacks.
+    /// Manager/user must use CallbackRegistry to actually invoke Lua callbacks on main thread.
+    pub fn process_events(&mut self) -> Vec<PendingCallback> {
+        let mut result: Vec<PendingCallback> = Vec::new();
         let mut count = 0;
-
         while count < MAX_CALLBACKS_PER_FLUSH {
             match self.event_receiver.try_recv() {
-                Ok(event) => {
+                Ok(msg) => {
                     count += 1;
-                    match event {
-                        ProcessEvent::StdoutChunk(id, data) => {
+                    match msg {
+                        WorkerMsg::Stdout { handle: id, data } => {
                             if let Some(state) = self.processes.get_mut(&id) {
-                                // Buffer for capture
                                 if state.capture_stdout {
                                     state.stdout_buffer.extend(&data);
                                 }
-                                // Queue callback for streaming
-                                if let Some(callback_id) = state.stdout_callback {
-                                    callbacks.push(CallbackEvent {
-                                        callback_id,
-                                        handle_id: id,
-                                        payload: CallbackPayload::Stdout(data),
-                                        text_mode: state.text_mode,
-                                    });
+                                if let Some(cb) = state.stdout_callback {
+                                    result.push((cb, id, data, "stdout", state.text_mode, false));
                                 }
                             }
                         }
-                        ProcessEvent::StderrChunk(id, data) => {
+                        WorkerMsg::Stderr { handle: id, data } => {
                             if let Some(state) = self.processes.get_mut(&id) {
                                 if state.capture_stderr {
                                     state.stderr_buffer.extend(&data);
                                 }
-                                // Queue callback for streaming
-                                if let Some(callback_id) = state.stderr_callback {
-                                    callbacks.push(CallbackEvent {
-                                        callback_id,
-                                        handle_id: id,
-                                        payload: CallbackPayload::Stderr(data),
-                                        text_mode: state.text_mode,
-                                    });
+                                if let Some(cb) = state.stderr_callback {
+                                    result.push((cb, id, data, "stderr", state.text_mode, false));
                                 }
                             }
                         }
-                        ProcessEvent::Exit(id, result) => {
+                        WorkerMsg::StdoutClosed { handle: id } => {
                             if let Some(state) = self.processes.get_mut(&id) {
-                                state.exit_result = Some(result.clone());
-                                // Queue on_exit callback
-                                if let Some(callback_id) = state.on_exit_callback {
-                                    callbacks.push(CallbackEvent {
-                                        callback_id,
-                                        handle_id: id,
-                                        payload: CallbackPayload::Exit(result),
-                                        text_mode: state.text_mode,
-                                    });
-                                }
+                                state.stdout_done = true;
+                                Self::try_finalize_exit(state, id, &mut result);
                             }
                         }
-                        ProcessEvent::Error(id, msg) => {
-                            log::error!("Process {} error: {}", id, msg);
+                        WorkerMsg::StderrClosed { handle: id } => {
+                            if let Some(state) = self.processes.get_mut(&id) {
+                                state.stderr_done = true;
+                                Self::try_finalize_exit(state, id, &mut result);
+                            }
+                        }
+                        WorkerMsg::Exit {
+                            handle: id,
+                            result: res,
+                        } => {
+                            if let Some(state) = self.processes.get_mut(&id) {
+                                state.pending_exit = Some(res);
+                                Self::try_finalize_exit(state, id, &mut result);
+                            }
+                        }
+                        WorkerMsg::Error {
+                            handle: id,
+                            message: msg,
+                        } => {
+                            log::error!("Process {}: {}", id, msg);
                         }
                     }
                 }
@@ -679,11 +612,29 @@ impl ProcessManager {
                 Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
-
-        callbacks
+        result
     }
 
-    /// Check if a process has exited.
+    fn try_finalize_exit(state: &mut ProcessState, id: u64, result: &mut Vec<PendingCallback>) {
+        if !state.stdout_done || !state.stderr_done || state.pending_exit.is_none() {
+            return;
+        }
+        if state.exit_result.is_some() {
+            return;
+        }
+        let mut exit_result = state.pending_exit.take().unwrap();
+        if state.capture_stdout {
+            exit_result.stdout = state.stdout_buffer.clone();
+        }
+        if state.capture_stderr {
+            exit_result.stderr = state.stderr_buffer.clone();
+        }
+        state.exit_result = Some(exit_result);
+        if let Some(cb) = state.on_exit_callback {
+            result.push((cb, id, Vec::new(), "exit", state.text_mode, true));
+        }
+    }
+
     pub fn has_exited(&self, handle_id: u64) -> bool {
         self.processes
             .get(&handle_id)
@@ -691,36 +642,25 @@ impl ProcessManager {
             .unwrap_or(true)
     }
 
-    /// Get the exit result if available.
     pub fn get_exit_result(&self, handle_id: u64) -> Option<SpawnResult> {
         self.processes
             .get(&handle_id)
             .and_then(|s| s.exit_result.clone())
     }
 
-    /// Remove a process from the manager and return its callback IDs for cleanup.
     pub fn remove(&mut self, handle_id: u64) -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
-        self.processes.remove(&handle_id).map(|state| {
-            (
-                state.stdout_callback,
-                state.stderr_callback,
-                state.on_exit_callback,
-            )
-        })
+        self.processes
+            .remove(&handle_id)
+            .map(|s| (s.stdout_callback, s.stderr_callback, s.on_exit_callback))
     }
 
-    /// Get callback IDs for a process (for cleanup when process exits).
     pub fn get_callback_ids(
         &self,
         handle_id: u64,
     ) -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
-        self.processes.get(&handle_id).map(|state| {
-            (
-                state.stdout_callback,
-                state.stderr_callback,
-                state.on_exit_callback,
-            )
-        })
+        self.processes
+            .get(&handle_id)
+            .map(|s| (s.stdout_callback, s.stderr_callback, s.on_exit_callback))
     }
 }
 
@@ -730,92 +670,81 @@ impl Default for ProcessManager {
     }
 }
 
-/// Read from a stream and send chunks to the event channel.
-fn read_stream<R: Read>(
+/// Read stream (text line or binary chunk) and send WorkerMsg to manager.
+fn read_stream<R: Read + Send + 'static>(
     stream: R,
     handle_id: u64,
-    sender: Sender<ProcessEvent>,
+    sender: Sender<WorkerMsg>,
     text_mode: bool,
     is_stdout: bool,
 ) {
-    let reader = BufReader::new(stream);
-
+    let mut reader = BufReader::new(stream);
     if text_mode {
-        // Line-by-line reading for text mode
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let data = line.into_bytes();
-                    let event = if is_stdout {
-                        ProcessEvent::StdoutChunk(handle_id, data)
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let bytes = line.clone().into_bytes();
+                    // strip trailing newline? keep it — caller can decide.
+                    let _ = sender.send(if is_stdout {
+                        WorkerMsg::Stdout {
+                            handle: handle_id,
+                            data: bytes,
+                        }
                     } else {
-                        ProcessEvent::StderrChunk(handle_id, data)
-                    };
-                    if sender.send(event).is_err() {
-                        break;
-                    }
+                        WorkerMsg::Stderr {
+                            handle: handle_id,
+                            data: bytes,
+                        }
+                    });
                 }
                 Err(e) => {
-                    let _ =
-                        sender.send(ProcessEvent::Error(handle_id, format!("Read error: {}", e)));
+                    let _ = sender.send(WorkerMsg::Error {
+                        handle: handle_id,
+                        message: format!("read error: {}", e),
+                    });
                     break;
                 }
             }
         }
     } else {
-        // Chunked reading for binary mode
-        let mut reader = reader;
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf) {
-                Ok(0) => break, // EOF
+                Ok(0) => break,
                 Ok(n) => {
                     let data = buf[..n].to_vec();
-                    let event = if is_stdout {
-                        ProcessEvent::StdoutChunk(handle_id, data)
+                    let _ = sender.send(if is_stdout {
+                        WorkerMsg::Stdout {
+                            handle: handle_id,
+                            data,
+                        }
                     } else {
-                        ProcessEvent::StderrChunk(handle_id, data)
-                    };
-                    if sender.send(event).is_err() {
-                        break;
-                    }
+                        WorkerMsg::Stderr {
+                            handle: handle_id,
+                            data,
+                        }
+                    });
                 }
                 Err(e) => {
-                    let _ =
-                        sender.send(ProcessEvent::Error(handle_id, format!("Read error: {}", e)));
+                    let _ = sender.send(WorkerMsg::Error {
+                        handle: handle_id,
+                        message: format!("read error: {}", e),
+                    });
                     break;
                 }
             }
         }
     }
+    let _ = sender.send(if is_stdout {
+        WorkerMsg::StdoutClosed { handle: handle_id }
+    } else {
+        WorkerMsg::StderrClosed { handle: handle_id }
+    });
 }
 
-/// Wait for a child process to exit and send the result.
-fn wait_for_exit(
-    mut child: Child,
-    handle_id: u64,
-    event_sender: Sender<ProcessEvent>,
-    result_sender: Sender<SpawnResult>,
-    _capture_stdout: bool,
-    _capture_stderr: bool,
-) {
-    // Wait for the process
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(e) => {
-            let _ = event_sender.send(ProcessEvent::Error(handle_id, format!("Wait error: {}", e)));
-            return;
-        }
-    };
-
-    let result = exit_status_to_result(status);
-
-    // Send to both channels
-    let _ = event_sender.send(ProcessEvent::Exit(handle_id, result.clone()));
-    let _ = result_sender.send(result);
-}
-
-/// Convert an ExitStatus to SpawnResult.
 fn exit_status_to_result(status: ExitStatus) -> SpawnResult {
     #[cfg(unix)]
     {
@@ -827,7 +756,6 @@ fn exit_status_to_result(status: ExitStatus) -> SpawnResult {
             stderr: Vec::new(),
         }
     }
-
     #[cfg(not(unix))]
     {
         SpawnResult {
@@ -839,19 +767,17 @@ fn exit_status_to_result(status: ExitStatus) -> SpawnResult {
     }
 }
 
-/// Shared process manager for use across Lua and the compositor.
-pub type SharedProcessManager = Arc<Mutex<ProcessManager>>;
+pub type SharedProcessManager = Rc<RefCell<ProcessManager>>;
 
-/// Create a new shared process manager.
 pub fn create_process_manager() -> SharedProcessManager {
-    Arc::new(Mutex::new(ProcessManager::new()))
+    Rc::new(RefCell::new(ProcessManager::new()))
 }
 
 /// Parse spawn options from a Lua table.
 pub fn parse_spawn_opts(
     lua: &Lua,
     table: &LuaTable,
-    registry: Option<&Arc<CallbackRegistry>>,
+    registry: Option<&SharedCallbackRegistry>,
 ) -> LuaResult<SpawnOpts> {
     let mut opts = SpawnOpts::default();
 
@@ -923,7 +849,7 @@ pub fn parse_spawn_opts(
             LuaValue::Function(f) => {
                 opts.capture_stdout = true;
                 if let Some(registry) = registry {
-                    let id = registry.register(lua, f)?;
+                    let id = registry.borrow_mut().register(lua, f)?;
                     opts.stdout_callback = Some(id);
                 } else {
                     return Err(LuaError::external("Process manager not initialized; callback functions require a callback registry"));
@@ -943,7 +869,7 @@ pub fn parse_spawn_opts(
             LuaValue::Function(f) => {
                 opts.capture_stderr = true;
                 if let Some(registry) = registry {
-                    let id = registry.register(lua, f)?;
+                    let id = registry.borrow_mut().register(lua, f)?;
                     opts.stderr_callback = Some(id);
                 } else {
                     return Err(LuaError::external("Process manager not initialized; callback functions require a callback registry"));
@@ -967,7 +893,7 @@ pub fn parse_spawn_opts(
     // on_exit: function?
     if let Ok(Some(f)) = table.get::<Option<LuaFunction>>("on_exit") {
         if let Some(registry) = registry {
-            let id = registry.register(lua, f)?;
+            let id = registry.borrow_mut().register(lua, f)?;
             opts.on_exit_callback = Some(id);
         } else {
             return Err(LuaError::external(
@@ -979,7 +905,7 @@ pub fn parse_spawn_opts(
     Ok(opts)
 }
 
-/// ProcessHandle userdata for Lua.
+/// ProcessHandle userdata for Lua - returned from spawn with options.
 pub struct ProcessHandle {
     /// Unique handle ID.
     pub id: u64,
@@ -1001,7 +927,7 @@ impl LuaUserData for ProcessHandle {
         // handle:wait(timeout_ms?) -> result_table
         methods.add_method("wait", |lua, this, timeout_ms: Option<u64>| {
             let result = {
-                let mut manager = this.manager.lock().unwrap();
+                let mut manager = this.manager.borrow_mut();
                 manager.wait(this.id, timeout_ms)
             };
 
@@ -1033,7 +959,7 @@ impl LuaUserData for ProcessHandle {
             };
 
             let result = {
-                let mut manager = this.manager.lock().unwrap();
+                let mut manager = this.manager.borrow_mut();
                 manager.kill(this.id, sig)
             };
 
@@ -1047,7 +973,7 @@ impl LuaUserData for ProcessHandle {
         methods.add_method("write", |_lua, this, data: LuaString| {
             let bytes = data.as_bytes();
             let result = {
-                let mut manager = this.manager.lock().unwrap();
+                let mut manager = this.manager.borrow_mut();
                 manager.write_stdin(this.id, &bytes)
             };
 
@@ -1060,7 +986,7 @@ impl LuaUserData for ProcessHandle {
         // handle:close_stdin()
         methods.add_method("close_stdin", |_lua, this, ()| {
             let result = {
-                let mut manager = this.manager.lock().unwrap();
+                let mut manager = this.manager.borrow_mut();
                 manager.close_stdin(this.id)
             };
 
@@ -1072,7 +998,7 @@ impl LuaUserData for ProcessHandle {
 
         // handle:is_closing() -> boolean
         methods.add_method("is_closing", |_lua, this, ()| {
-            let manager = this.manager.lock().unwrap();
+            let manager = this.manager.borrow();
             Ok(manager.is_stdin_closed(this.id))
         });
 
@@ -1096,13 +1022,15 @@ impl LuaUserData for ProcessHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::thread;
     use std::time::Duration;
 
     use mlua::prelude::{Lua, LuaFunction, LuaTable, LuaValue};
 
     use super::*;
+    use crate::CallbackRegistry;
 
     #[test]
     fn test_spawn_opts_default() {
@@ -1283,7 +1211,7 @@ mod tests {
     #[test]
     fn test_parse_spawn_opts_with_registry_stdout_callback() {
         let lua = Lua::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let table = lua.create_table().unwrap();
 
         // Create a function and set it as stdout callback
@@ -1297,7 +1225,7 @@ mod tests {
         let id = opts.stdout_callback.unwrap();
 
         // Verify the function can be retrieved
-        let retrieved = registry.get(&lua, id).unwrap().unwrap();
+        let retrieved = registry.borrow().get(&lua, id).unwrap().unwrap();
         let result: String = retrieved.call(()).unwrap();
         assert_eq!(result, "test");
     }
@@ -1305,7 +1233,7 @@ mod tests {
     #[test]
     fn test_parse_spawn_opts_with_registry_stderr_callback() {
         let lua = Lua::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let table = lua.create_table().unwrap();
 
         // Create a function and set it as stderr callback
@@ -1321,7 +1249,7 @@ mod tests {
         let id = opts.stderr_callback.unwrap();
 
         // Verify the function can be retrieved
-        let retrieved = registry.get(&lua, id).unwrap().unwrap();
+        let retrieved = registry.borrow().get(&lua, id).unwrap().unwrap();
         let result: String = retrieved.call(()).unwrap();
         assert_eq!(result, "stderr");
     }
@@ -1329,7 +1257,7 @@ mod tests {
     #[test]
     fn test_parse_spawn_opts_with_registry_on_exit_callback() {
         let lua = Lua::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let table = lua.create_table().unwrap();
 
         // Create a function and set it as on_exit callback
@@ -1342,7 +1270,7 @@ mod tests {
         let id = opts.on_exit_callback.unwrap();
 
         // Verify the function can be retrieved
-        let retrieved = registry.get(&lua, id).unwrap().unwrap();
+        let retrieved = registry.borrow().get(&lua, id).unwrap().unwrap();
         let result: String = retrieved.call(()).unwrap();
         assert_eq!(result, "exit");
     }
@@ -1350,7 +1278,7 @@ mod tests {
     #[test]
     fn test_parse_spawn_opts_with_registry_unique_ids() {
         let lua = Lua::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
 
         // Create multiple tables with callbacks
         let table1 = lua.create_table().unwrap();
@@ -1401,7 +1329,7 @@ mod tests {
     #[test]
     fn test_process_events_returns_callback_events() {
         let mut manager = ProcessManager::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let lua = Lua::new();
 
         // Create a process with callbacks
@@ -1431,25 +1359,20 @@ mod tests {
         assert!(!events.is_empty(), "Expected events from echo command");
 
         // Check that events have correct callback IDs and types
-        for event in events {
-            match &event.payload {
-                CallbackPayload::Stdout(_) => {
-                    assert_eq!(event.handle_id, handle_id);
-                    assert!(event.callback_id > 0);
-                }
-                CallbackPayload::Exit(_) => {
-                    assert_eq!(event.handle_id, handle_id);
-                    assert!(event.callback_id > 0);
-                }
-                _ => {}
-            }
+        // Tuple format: (callback_id, handle_id, data, stream, text_mode, is_exit)
+        for event in &events {
+            let (callback_id, event_handle_id, _data, _stream, _text_mode, _is_exit) = event;
+            assert_eq!(*event_handle_id, handle_id);
+            assert!(*callback_id > 0);
+            // For exit events, is_exit should be true; for streaming callbacks, stream should be set
+            // (we can't assert stream here since it's &str and we only check if callback_id is valid)
         }
     }
 
     #[test]
     fn test_stdout_streaming_callback_receives_lines() {
         let mut manager = ProcessManager::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let lua = Lua::new();
 
         // Create a global table to collect output lines
@@ -1461,7 +1384,7 @@ mod tests {
         let stdout_func: LuaFunction = lua
             .load(
                 r#"
-            function(err, data)
+            function(stream, err, data)
                 if data then
                     local lines = collected_lines
                     lines[#lines + 1] = data
@@ -1488,9 +1411,8 @@ mod tests {
         for _ in 0..100 {
             thread::sleep(Duration::from_millis(20));
             let events = manager.process_events();
-            let has_exit = events
-                .iter()
-                .any(|e| matches!(e.payload, CallbackPayload::Exit(_)));
+            // Tuple format: (callback_id, handle_id, data, stream, text_mode, is_exit)
+            let has_exit = events.iter().any(|e| e.5);
             all_events.extend(events);
             if has_exit {
                 break;
@@ -1499,11 +1421,10 @@ mod tests {
 
         // Invoke callbacks manually (simulating fire_process_events)
         for event in &all_events {
-            if let Some(func) = registry.get(&lua, event.callback_id).unwrap() {
-                if let CallbackPayload::Stdout(data) = &event.payload {
-                    let data_str = String::from_utf8_lossy(data).to_string();
-                    let _: () = func.call((LuaValue::Nil, data_str)).unwrap();
-                }
+            let (callback_id, _handle_id, data, _stream, _text_mode, _is_exit) = event;
+            if let Some(func) = registry.borrow().get(&lua, *callback_id).unwrap() {
+                let data_str = String::from_utf8_lossy(data).to_string();
+                let _: () = func.call(("stdout", LuaValue::Nil, data_str)).unwrap();
             }
         }
 
@@ -1538,7 +1459,7 @@ mod tests {
     #[test]
     fn test_stderr_streaming_callback() {
         let mut manager = ProcessManager::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let lua = Lua::new();
 
         // Create a global to store stderr output
@@ -1548,7 +1469,7 @@ mod tests {
         let stderr_func: LuaFunction = lua
             .load(
                 r#"
-            function(err, data)
+            function(stream, err, data)
                 if data then
                     stderr_output = stderr_output .. data
                 end
@@ -1571,9 +1492,8 @@ mod tests {
         for _ in 0..100 {
             thread::sleep(Duration::from_millis(20));
             let events = manager.process_events();
-            let has_exit = events
-                .iter()
-                .any(|e| matches!(e.payload, CallbackPayload::Exit(_)));
+            // Tuple format: (callback_id, handle_id, data, stream, text_mode, is_exit)
+            let has_exit = events.iter().any(|e| e.5);
             all_events.extend(events);
             if has_exit {
                 break;
@@ -1582,10 +1502,11 @@ mod tests {
 
         // Invoke stderr callbacks
         for event in &all_events {
-            if let Some(func) = registry.get(&lua, event.callback_id).unwrap() {
-                if let CallbackPayload::Stderr(data) = &event.payload {
+            let (callback_id, _handle_id, data, stream, _text_mode, _is_exit) = event;
+            if *stream == "stderr" {
+                if let Some(func) = registry.borrow().get(&lua, *callback_id).unwrap() {
                     let data_str = String::from_utf8_lossy(data).to_string();
-                    let _: () = func.call((LuaValue::Nil, data_str)).unwrap();
+                    let _: () = func.call(("stderr", LuaValue::Nil, data_str)).unwrap();
                 }
             }
         }
@@ -1607,7 +1528,7 @@ mod tests {
     #[test]
     fn test_on_exit_callback_receives_result() {
         let mut manager = ProcessManager::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let lua = Lua::new();
 
         // Create a global to store exit result
@@ -1638,8 +1559,9 @@ mod tests {
         for _ in 0..100 {
             thread::sleep(Duration::from_millis(20));
             let events = manager.process_events();
+            // Tuple format: (callback_id, handle_id, data, is_stdout, text_mode, is_exit)
             for event in events {
-                if let CallbackPayload::Exit(_) = &event.payload {
+                if event.5 {
                     exit_event = Some(event);
                     break;
                 }
@@ -1652,12 +1574,11 @@ mod tests {
         assert!(exit_event.is_some(), "Expected exit event");
 
         // Invoke on_exit callback
-        let event = exit_event.unwrap();
-        if let Some(func) = registry.get(&lua, event.callback_id).unwrap() {
-            if let CallbackPayload::Exit(result) = &event.payload {
-                let result_table = result.to_lua_table(&lua, true).unwrap();
-                let _: () = func.call(result_table).unwrap();
-            }
+        let (callback_id, handle_id, _data, _is_stdout, _text_mode, _is_exit) = exit_event.unwrap();
+        if let Some(func) = registry.borrow().get(&lua, callback_id).unwrap() {
+            let result = manager.get_exit_result(handle_id).unwrap();
+            let result_table = result.to_lua_table(&lua, true).unwrap();
+            let _: () = func.call(result_table).unwrap();
         }
 
         // Verify exit code
@@ -1668,7 +1589,7 @@ mod tests {
     #[test]
     fn test_multiple_processes_callbacks_isolated() {
         let mut manager = ProcessManager::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let lua = Lua::new();
 
         // Create globals to track which process produced which output
@@ -1723,10 +1644,8 @@ mod tests {
         for _ in 0..100 {
             thread::sleep(Duration::from_millis(20));
             let events = manager.process_events();
-            exits += events
-                .iter()
-                .filter(|e| matches!(e.payload, CallbackPayload::Exit(_)))
-                .count();
+            // Tuple format: (callback_id, handle_id, data, is_stdout, text_mode, is_exit)
+            exits += events.iter().filter(|e| e.5).count();
             all_events.extend(events);
             if exits >= 2 {
                 break;
@@ -1735,17 +1654,16 @@ mod tests {
 
         // Invoke callbacks, checking isolation
         for event in &all_events {
-            if let Some(func) = registry.get(&lua, event.callback_id).unwrap() {
-                if let CallbackPayload::Stdout(data) = &event.payload {
-                    let data_str = String::from_utf8_lossy(data).to_string();
-                    // Verify callback ID matches the correct process
-                    if event.handle_id == handle1 {
-                        assert_eq!(event.callback_id, callback_id1);
-                    } else if event.handle_id == handle2 {
-                        assert_eq!(event.callback_id, callback_id2);
-                    }
-                    let _: () = func.call((LuaValue::Nil, data_str)).unwrap();
+            let (callback_id, event_handle_id, data, _is_stdout, _text_mode, _is_exit) = event;
+            if let Some(func) = registry.borrow().get(&lua, *callback_id).unwrap() {
+                let data_str = String::from_utf8_lossy(data).to_string();
+                // Verify callback ID matches the correct process
+                if *event_handle_id == handle1 {
+                    assert_eq!(*callback_id, callback_id1);
+                } else if *event_handle_id == handle2 {
+                    assert_eq!(*callback_id, callback_id2);
                 }
+                let _: () = func.call((LuaValue::Nil, data_str)).unwrap();
             }
         }
 
@@ -1896,7 +1814,7 @@ mod tests {
     #[test]
     fn test_max_callbacks_per_flush_limits_events() {
         let mut manager = ProcessManager::new();
-        let registry = Arc::new(CallbackRegistry::new());
+        let registry = Rc::new(RefCell::new(CallbackRegistry::new()));
         let lua = Lua::new();
 
         // Create stdout callback

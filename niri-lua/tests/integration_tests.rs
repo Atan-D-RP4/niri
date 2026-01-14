@@ -1436,7 +1436,8 @@ mod process_integration_tests {
     // ------------------------------------------------------------------------
     // Callback event processing tests
     // These tests verify that streaming callbacks fire when events are processed
-    // Callback signature: (err, data) for stdout/stderr, (result, err) for on_exit
+    // Callback signature: (stream, err, data) for stdout/stderr, (result, err) for on_exit
+    // where stream is "stdout" or "stderr" for streaming callbacks
     // ------------------------------------------------------------------------
 
     #[test]
@@ -1444,14 +1445,14 @@ mod process_integration_tests {
         let runtime = create_runtime();
 
         // Set up callback and spawn process
-        // Callback signature is (err, data) where err is nil on success
+        // Callback signature is (stream, err, data) where err is nil on success
         let setup = r#"
             _G.received_lines = {}
             _G.callback_called = false
             local handle = niri.action:spawn(
                 {"echo", "callback_line_123"},
                 {
-                    stdout = function(err, data)
+                    stdout = function(stream, err, data)
                         _G.callback_called = true
                         if data then
                             table.insert(_G.received_lines, data)
@@ -1530,14 +1531,14 @@ mod process_integration_tests {
     fn test_stderr_callback_receives_output() {
         let runtime = create_runtime();
 
-        // Callback signature is (err, data)
+        // Callback signature is (stream, err, data)
         let setup = r#"
             _G.stderr_lines = {}
             _G.stderr_called = false
             local handle = niri.action:spawn(
                 {"sh", "-c", "echo stderr_test_line >&2"},
                 {
-                    stderr = function(err, data)
+                    stderr = function(stream, err, data)
                         _G.stderr_called = true
                         if data then
                             table.insert(_G.stderr_lines, data)
@@ -1574,7 +1575,7 @@ mod process_integration_tests {
     fn test_multiple_processes_isolated_callbacks() {
         let runtime = create_runtime();
 
-        // Callback signature is (err, data)
+        // Callback signature is (stream, err, data)
         let setup = r#"
             _G.proc1_lines = {}
             _G.proc2_lines = {}
@@ -1584,7 +1585,7 @@ mod process_integration_tests {
             niri.action:spawn(
                 {"echo", "PROC1_OUTPUT"},
                 {
-                    stdout = function(err, data)
+                    stdout = function(stream, err, data)
                         _G.proc1_called = true
                         if data then table.insert(_G.proc1_lines, data) end
                     end
@@ -1594,7 +1595,7 @@ mod process_integration_tests {
             niri.action:spawn(
                 {"echo", "PROC2_OUTPUT"},
                 {
-                    stdout = function(err, data)
+                    stdout = function(stream, err, data)
                         _G.proc2_called = true
                         if data then table.insert(_G.proc2_lines, data) end
                     end

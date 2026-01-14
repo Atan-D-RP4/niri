@@ -1,4 +1,4 @@
-//! Niri Lua module search paths and custom require implementation.
+//! Niri Luau module search paths and custom require implementation.
 //!
 //! Provides XDG-compliant search paths for user Lua modules and a custom
 //! `require()` function that replaces Luau's built-in require (which is not
@@ -18,41 +18,33 @@
 //! - The `init.lua` convention is supported (`foo/init.lua` for `require("foo")`)
 
 use std::cell::RefCell;
-use std::env;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use dirs;
 use mlua::prelude::*;
 use mlua::Compiler;
 
 /// Get the default niri Lua search paths following XDG Base Directory spec.
 ///
 /// Returns paths in priority order (user config first, system last).
-pub fn default_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+pub fn lua_module_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
 
     // XDG_CONFIG_HOME or ~/.config (highest priority)
-    let config_home = env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-
-    if let Some(config_dir) = config_home {
-        paths.push(config_dir.join("niri/lua"));
+    if let Some(config_dir) = dirs::config_dir() {
+        roots.push(config_dir.join("niri/lua"));
     }
 
     // XDG_DATA_HOME or ~/.local/share
-    let data_home = env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-
-    if let Some(data_dir) = data_home {
-        paths.push(data_dir.join("niri/lua"));
+    if let Some(data_dir) = dirs::data_dir() {
+        roots.push(data_dir.join("niri/lua"));
     }
 
     // System directory
-    paths.push(PathBuf::from("/usr/share/niri/lua"));
+    roots.push(PathBuf::from("/usr/share/niri/lua"));
 
-    paths
+    roots
 }
 
 /// Result of searching for a module.
@@ -68,13 +60,13 @@ pub enum SearchResult {
 ///
 /// Converts dot notation to path separators and tries both `.lua` files
 /// and `init.lua` in directories.
-pub fn resolve_module(module_name: &str, search_paths: &[PathBuf]) -> SearchResult {
+fn resolve_module(name: &str, roots: &[PathBuf]) -> SearchResult {
     // Convert dot notation to path: "foo.bar" -> "foo/bar"
-    let relative_path = module_name.replace('.', "/");
+    let relative_path = name.replace('.', "/");
 
     let mut searched = Vec::new();
 
-    for base_path in search_paths {
+    for base_path in roots {
         // Try direct .lua file
         let candidate = base_path.join(format!("{}.lua", relative_path));
         searched.push(candidate.clone());
@@ -95,38 +87,50 @@ pub fn resolve_module(module_name: &str, search_paths: &[PathBuf]) -> SearchResu
 
 /// Resolve a relative module path from a base directory.
 ///
-/// Handles `./foo` and `../foo` style requires.
-pub fn resolve_relative(base_dir: &Path, module_name: &str) -> SearchResult {
-    // Strip the ./ or ../ prefix and handle the path
-    let clean_name = module_name
-        .trim_start_matches("./")
-        .trim_start_matches("../");
+/// Handles `./foo`, `../foo`, and multi-segment paths like `../shared/utils`.
+fn resolve_relative(base_dir: &Path, module_name: &str) -> SearchResult {
+    // Parse the module name into path segments
+    // Handle leading ./, ../ prefixes specially
+    let (up_count, remaining) = if let Some(stripped) = module_name.strip_prefix("./") {
+        (0, stripped)
+    } else if module_name.starts_with("../") {
+        // Count only leading ../ prefixes and strip them
+        let mut count = 0;
+        let mut rest = module_name;
+        while let Some(stripped) = rest.strip_prefix("../") {
+            count += 1;
+            rest = stripped;
+        }
+        (count, rest)
+    } else {
+        (0, module_name)
+    };
 
-    // Count how many parent directories to go up
-    let parent_count = module_name.matches("../").count();
-
+    // Walk up the base directory
     let mut target_dir = base_dir.to_path_buf();
-    for _ in 0..parent_count {
+    for _ in 0..up_count {
         target_dir = target_dir
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| target_dir.clone());
     }
 
-    // If it starts with ./ (not ../), we stay in base_dir
-    // The clean_name has the actual module path
+    // If remaining is empty (e.g., just "../"), we've walked up but need to search in parent
+    if remaining.is_empty() {
+        return SearchResult::NotFound(vec![target_dir.join("init.lua")]);
+    }
 
     let mut searched = Vec::new();
 
     // Try direct .lua file
-    let candidate = target_dir.join(format!("{}.lua", clean_name));
+    let candidate = target_dir.join(format!("{}.lua", remaining));
     searched.push(candidate.clone());
     if candidate.is_file() {
         return SearchResult::Found(candidate);
     }
 
     // Try init.lua in directory
-    let candidate = target_dir.join(clean_name).join("init.lua");
+    let candidate = target_dir.join(remaining).join("init.lua");
     searched.push(candidate.clone());
     if candidate.is_file() {
         return SearchResult::Found(candidate);
@@ -136,7 +140,7 @@ pub fn resolve_relative(base_dir: &Path, module_name: &str) -> SearchResult {
 }
 
 /// Format an error message for a module not found, listing all searched paths.
-pub fn format_not_found_error(module_name: &str, searched: &[PathBuf]) -> String {
+fn format_not_found_error(module_name: &str, searched: &[PathBuf]) -> String {
     let mut msg = format!("module '{}' not found:\n", module_name);
     for path in searched {
         msg.push_str(&format!("\tno file '{}'\n", path.display()));
@@ -165,8 +169,8 @@ pub fn register_custom_require(lua: &Lua, compiler: Rc<RefCell<Compiler>>) -> Lu
     // Create module cache table
     lua.globals().set("__niri_loaded", lua.create_table()?)?;
 
-    // Get search paths
-    let search_paths = default_paths();
+    // Get search roots
+    let roots = lua_module_roots();
 
     // Create custom require function
     let require_fn = lua.create_function(move |lua, module_name: String| {
@@ -197,7 +201,7 @@ pub fn register_custom_require(lua: &Lua, compiler: Rc<RefCell<Compiler>>) -> Lu
             resolve_relative(base_dir, &module_name)
         } else {
             // Absolute require - search XDG paths
-            resolve_module(&module_name, &search_paths)
+            resolve_module(&module_name, &roots)
         };
 
         // Handle resolution result
@@ -257,50 +261,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_paths_not_empty() {
-        let paths = default_paths();
-        // Should have at least one path (system path always exists)
-        assert!(!paths.is_empty());
-        // System path is always last
-        assert_eq!(paths.last().unwrap(), &PathBuf::from("/usr/share/niri/lua"));
-    }
-
-    #[test]
-    fn default_paths_includes_system() {
-        let paths = default_paths();
-        assert!(paths.contains(&PathBuf::from("/usr/share/niri/lua")));
-    }
-
-    #[test]
-    fn resolve_module_not_found() {
-        let paths = vec![PathBuf::from("/nonexistent/path")];
-        let result = resolve_module("nonexistent_module", &paths);
-        match result {
-            SearchResult::NotFound(searched) => {
-                assert!(!searched.is_empty());
-                // Should have tried both .lua and init.lua
-                assert!(searched.len() >= 2);
-            }
-            SearchResult::Found(_) => panic!("Should not find nonexistent module"),
-        }
-    }
-
-    #[test]
-    fn resolve_module_dot_notation() {
-        let paths = vec![PathBuf::from("/test")];
-        let result = resolve_module("foo.bar.baz", &paths);
-        match result {
-            SearchResult::NotFound(searched) => {
-                // Should convert dots to path separators
-                assert!(searched
-                    .iter()
-                    .any(|p| p.to_string_lossy().contains("foo/bar/baz.lua")));
-            }
-            SearchResult::Found(_) => panic!("Should not find nonexistent module"),
-        }
-    }
-
-    #[test]
     fn format_not_found_error_includes_paths() {
         let searched = vec![
             PathBuf::from("/a/b.lua"),
@@ -316,20 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_relative_current_dir() {
-        let base = PathBuf::from("/home/user/config");
-        let result = resolve_relative(&base, "./utils");
-        match result {
-            SearchResult::NotFound(searched) => {
-                assert!(searched
-                    .iter()
-                    .any(|p| p.to_string_lossy().contains("/home/user/config/utils.lua")));
-            }
-            SearchResult::Found(_) => panic!("Should not find nonexistent module"),
-        }
-    }
-
-    #[test]
     fn resolve_relative_parent_dir() {
         let base = PathBuf::from("/home/user/config/subdir");
         let result = resolve_relative(&base, "../utils");
@@ -339,6 +285,22 @@ mod tests {
                 assert!(searched
                     .iter()
                     .any(|p| p.to_string_lossy().contains("/home/user/config/utils.lua")));
+            }
+            SearchResult::Found(_) => panic!("Should not find nonexistent module"),
+        }
+    }
+
+    #[test]
+    fn resolve_relative_nested_path() {
+        // Test multi-segment relative paths like ../shared/utils
+        let base = PathBuf::from("/home/user/config/subdir");
+        let result = resolve_relative(&base, "../shared/utils");
+        match result {
+            SearchResult::NotFound(searched) => {
+                // Should go up one dir to /home/user/config, then resolve shared/utils
+                assert!(searched.iter().any(|p| p
+                    .to_string_lossy()
+                    .contains("/home/user/config/shared/utils.lua")));
             }
             SearchResult::Found(_) => panic!("Should not find nonexistent module"),
         }

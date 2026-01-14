@@ -43,7 +43,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mlua::prelude::*;
@@ -61,7 +60,7 @@ use crate::events_proxy::register_events_proxy;
 use crate::loop_api::{
     create_timer_manager, fire_due_timers, register_loop_api, SharedTimerManager,
 };
-use crate::process::{create_process_manager, CallbackPayload, SharedProcessManager};
+use crate::process::{create_process_manager, SharedProcessManager};
 use crate::property_registry::PropertyRegistry;
 use crate::{CallbackRegistry, LuaComponent, NiriApi, SharedCallbackRegistry};
 
@@ -507,28 +506,44 @@ impl LuaRuntime {
         let mut errors = Vec::new();
 
         if let Some(ref manager) = self.process_manager {
-            let events = manager.lock().unwrap().process_events();
+            let events = manager.borrow_mut().process_events();
 
+            // Tuple format: (callback_id, handle_id, data, stream, text_mode, is_exit)
             for event in events.into_iter().take(MAX_CALLBACKS_PER_FLUSH) {
+                let (callback_id, handle_id, data, stream, text_mode, is_exit) = event;
+
                 if let Some(ref registry) = self.callback_registry {
-                    match registry.get(&self.lua, event.callback_id) {
+                    let callback_result = registry.borrow().get(&self.lua, callback_id);
+                    match callback_result {
                         Ok(Some(callback)) => {
-                            let result = match &event.payload {
-                                CallbackPayload::Stdout(data) | CallbackPayload::Stderr(data) => {
-                                    if event.text_mode {
-                                        let text = String::from_utf8_lossy(data);
-                                        self.call_with_timeout(&callback, (LuaValue::Nil, text))
-                                    } else {
-                                        self.call_with_timeout(
-                                            &callback,
-                                            (LuaValue::Nil, self.lua.create_string(data).unwrap()),
-                                        )
-                                    }
-                                }
-                                CallbackPayload::Exit(result) => {
+                            let result = if is_exit {
+                                // Exit event - get result from manager
+                                if let Some(exit_result) =
+                                    manager.borrow().get_exit_result(handle_id)
+                                {
                                     let table =
-                                        result.to_lua_table(&self.lua, event.text_mode).unwrap();
+                                        exit_result.to_lua_table(&self.lua, text_mode).unwrap();
                                     self.call_with_timeout(&callback, (table, LuaValue::Nil))
+                                } else {
+                                    Err(LuaError::external("Exit result not found"))
+                                }
+                            } else {
+                                // Streaming event (stdout or stderr)
+                                if text_mode {
+                                    let text = String::from_utf8_lossy(&data);
+                                    self.call_with_timeout(
+                                        &callback,
+                                        (stream, LuaValue::Nil, text.to_string()),
+                                    )
+                                } else {
+                                    self.call_with_timeout(
+                                        &callback,
+                                        (
+                                            stream,
+                                            LuaValue::Nil,
+                                            self.lua.create_string(&data).unwrap(),
+                                        ),
+                                    )
                                 }
                             };
 
@@ -542,27 +557,27 @@ impl LuaRuntime {
                             }
 
                             // For exit events, clean up callbacks
-                            if let CallbackPayload::Exit(_) = &event.payload {
+                            if is_exit {
                                 if let Some((stdout_id, stderr_id, exit_id)) =
-                                    manager.lock().unwrap().get_callback_ids(event.handle_id)
+                                    manager.borrow().get_callback_ids(handle_id)
                                 {
                                     if let Some(id) = stdout_id {
-                                        let _ = registry.unregister(id);
+                                        let _ = registry.borrow_mut().unregister(id);
                                     }
                                     if let Some(id) = stderr_id {
-                                        let _ = registry.unregister(id);
+                                        let _ = registry.borrow_mut().unregister(id);
                                     }
                                     if let Some(id) = exit_id {
-                                        let _ = registry.unregister(id);
+                                        let _ = registry.borrow_mut().unregister(id);
                                     }
                                 }
                             }
                         }
                         Ok(None) => {
-                            log::warn!("Callback {} not found in registry", event.callback_id);
+                            log::warn!("Callback {} not found in registry", callback_id);
                         }
                         Err(e) => {
-                            log::error!("Failed to get callback {}: {}", event.callback_id, e);
+                            log::error!("Failed to get callback {}: {}", callback_id, e);
                             errors.push(e);
                         }
                     }
@@ -825,7 +840,7 @@ impl LuaRuntime {
     /// managed spawning support.
     pub fn init_process_manager(&mut self) {
         self.process_manager = Some(create_process_manager());
-        self.callback_registry = Some(Arc::new(CallbackRegistry::new()));
+        self.callback_registry = Some(Rc::new(RefCell::new(CallbackRegistry::new())));
     }
 
     /// Get the process manager, if initialized.
@@ -1673,9 +1688,10 @@ mod tests {
         assert!(step2); // Both completed
 
         // Subsequent call should have nothing to do
-        let (timers2, scheduled2, _process2, errors2) = rt.process_async();
-        assert_eq!(timers2, 0);
-        assert_eq!(scheduled2, 0);
+        let (timers2, scheduled2, process2, errors2) = rt.process_async();
+        assert_eq!(timers2, 0); // no timers
+        assert_eq!(scheduled2, 0); // no scheduled
+        assert_eq!(process2, 0); // no process events
         assert!(errors2.is_empty());
     }
 

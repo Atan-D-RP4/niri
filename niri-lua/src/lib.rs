@@ -11,7 +11,6 @@
 //! ```
 
 pub mod config;
-pub mod fs_utils;
 pub mod niri_api;
 pub mod os_utils;
 pub mod runtime;
@@ -37,7 +36,6 @@ pub mod lua_types;
 pub mod parse_utils;
 pub mod property_registry;
 pub mod rule_api;
-pub mod table_assignment;
 pub mod traits;
 
 // Tier 3: Runtime State Access

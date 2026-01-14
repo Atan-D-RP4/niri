@@ -15,5 +15,4 @@ expression: paths
     "niri.overview",
     "niri.screenshot",
     "niri.os",
-    "niri.fs",
 ]

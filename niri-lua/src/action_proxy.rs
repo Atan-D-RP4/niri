@@ -393,7 +393,7 @@ impl LuaUserData for ActionProxy {
                         })?;
 
                         let (handle_id, pid, text_mode) = {
-                            let mut manager = process_manager.lock().unwrap();
+                            let mut manager = process_manager.borrow_mut();
                             let text_mode = spawn_opts.text;
                             let (id, pid) = manager
                                 .spawn_command(command, spawn_opts)
@@ -445,7 +445,7 @@ impl LuaUserData for ActionProxy {
                         })?;
 
                         let (handle_id, pid, text_mode) = {
-                            let mut manager = process_manager.lock().unwrap();
+                            let mut manager = process_manager.borrow_mut();
                             let text_mode = spawn_opts.text;
                             let (id, pid) = manager
                                 .spawn_shell_command(command, spawn_opts)
