@@ -971,7 +971,7 @@ impl WindowMruUi {
             MruCloseRequest::Confirm => inner.wmru.current_id,
         };
 
-        if !inner.is_fully_open() {
+        if inner.clock.now_unadjusted() < inner.open_at {
             // Hasn't displayed yet, no need to fade out.
             let UiState::Closed { previous_scope } = &mut self.state else {
                 unreachable!()
@@ -1031,10 +1031,6 @@ impl WindowMruUi {
         let UiState::Open(inner) = &mut self.state else {
             return None;
         };
-        // Don't handle pointer until the UI is visible.
-        if !inner.is_fully_open() {
-            return None;
-        }
 
         inner.freeze_view = true;
 
@@ -1108,7 +1104,7 @@ impl WindowMruUi {
             UiState::Closed { .. } => return,
             UiState::Closing { inner, anim } => (inner, anim.clamped_value()),
             UiState::Open(inner) => {
-                if inner.is_fully_open() {
+                if inner.open_at <= inner.clock.now_unadjusted() {
                     (inner, 1.)
                 } else {
                     return;
@@ -1285,10 +1281,6 @@ impl Inner {
             }
             self.view_pos.offset(delta);
         }
-    }
-
-    fn is_fully_open(&self) -> bool {
-        self.open_at <= self.clock.now_unadjusted()
     }
 
     fn animate_view_pos_from(&mut self, from: f64) {

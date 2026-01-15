@@ -255,8 +255,7 @@ mod imp {
 
 glib::wrapper! {
     pub struct SmithayView(ObjectSubclass<imp::SmithayView>)
-        @extends gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+        @extends gtk::Widget;
 }
 
 impl SmithayView {

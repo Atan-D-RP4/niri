@@ -20,7 +20,6 @@ use smithay::backend::input::{
     TabletToolTipState, TouchEvent,
 };
 use smithay::backend::libinput::LibinputInputBackend;
-use smithay::input::dnd::DnDGrab;
 use smithay::input::keyboard::{keysyms, FilterResult, Keysym, Layout, ModifiersState};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GestureHoldBeginEvent,
@@ -33,11 +32,10 @@ use smithay::input::touch::{
 };
 use smithay::input::SeatHandler;
 use smithay::output::Output;
-use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
+use smithay::wayland::selection::data_device::DnDGrab;
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 use touch_overview_grab::TouchOverviewGrab;
 
@@ -2568,35 +2566,6 @@ impl State {
             }
         }
 
-        // Warp pointer across the screen during the spatial movement grabs.
-        let spatial_grab = pointer.with_grab(|_, grab| {
-            let grab = grab.as_any();
-            if let Some(grab) = grab.downcast_ref::<SpatialMovementGrab>() {
-                if let Some(output) = grab.view_offset_output() {
-                    return Some((output.clone(), true));
-                } else if let Some(output) = grab.workspace_switch_output() {
-                    return Some((output.clone(), false));
-                }
-            } else if let Some(grab) = grab.downcast_ref::<MoveGrab>() {
-                if let Some(output) = grab.view_offset_output() {
-                    return Some((output.clone(), true));
-                }
-            }
-            None
-        });
-        if let Some((output, horizontal)) = spatial_grab.flatten() {
-            if let Some(geo) = self.niri.global_space.output_geometry(&output) {
-                let geo = geo.to_f64();
-                if horizontal {
-                    new_pos.x = (new_pos.x - geo.loc.x).rem_euclid(geo.size.w) + geo.loc.x;
-                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo.loc.y + geo.size.h - 1.);
-                } else {
-                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo.loc.x + geo.size.w - 1.);
-                    new_pos.y = (new_pos.y - geo.loc.y).rem_euclid(geo.size.h) + geo.loc.y;
-                }
-            }
-        }
-
         if self
             .niri
             .global_space
@@ -2727,9 +2696,10 @@ impl State {
         self.niri.maybe_activate_pointer_constraint();
 
         // Inform the layout of an ongoing DnD operation.
-        let is_dnd_grab = pointer
-            .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
-            .unwrap_or(false);
+        let mut is_dnd_grab = false;
+        pointer.with_grab(|_, grab| {
+            is_dnd_grab = grab.as_any().is::<DnDGrab<Self>>();
+        });
         if is_dnd_grab {
             if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
                 let output = output.clone();
@@ -2841,9 +2811,10 @@ impl State {
         self.niri.tablet_cursor_location = None;
 
         // Inform the layout of an ongoing DnD operation.
-        let is_dnd_grab = pointer
-            .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
-            .unwrap_or(false);
+        let mut is_dnd_grab = false;
+        pointer.with_grab(|_, grab| {
+            is_dnd_grab = grab.as_any().is::<DnDGrab<Self>>();
+        });
         if is_dnd_grab {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
                 let output = output.clone();
@@ -3028,22 +2999,8 @@ impl State {
                             location,
                         };
                         let start_data = PointerOrTouchStartData::Pointer(start_data);
-                        let icon = CursorIcon::Grabbing;
-                        if let Some(grab) =
-                            MoveGrab::new(self, start_data, window.clone(), false, Some(icon))
-                        {
+                        if let Some(grab) = MoveGrab::new(self, start_data, window.clone(), false) {
                             pointer.set_grab(self, grab, serial, Focus::Clear);
-
-                            // Set the cursor to Grabbing right away for Mod+LMB since it doesn't
-                            // do any other gesture.
-                            //
-                            // In the overview, we click to activate window and close the overview,
-                            // in this case setting the cursor right away would be distracting.
-                            if !is_overview_open {
-                                self.niri
-                                    .cursor_manager
-                                    .set_cursor_image(CursorImageStatus::Named(icon));
-                            }
                         }
                     }
                 }
@@ -3220,7 +3177,7 @@ impl State {
             pointer
                 .current_focus()
                 .map(|surface| self.niri.find_root_shell_surface(&surface))
-                .is_none_or(|root| {
+                .map_or(true, |root| {
                     !self
                         .niri
                         .mapped_layer_surfaces
@@ -4300,8 +4257,7 @@ impl State {
                         location: pos,
                     };
                     let start_data = PointerOrTouchStartData::Touch(start_data);
-                    if let Some(grab) = MoveGrab::new(self, start_data, window.clone(), true, None)
-                    {
+                    if let Some(grab) = MoveGrab::new(self, start_data, window.clone(), true) {
                         handle.set_grab(self, grab, serial);
                     }
                 }
@@ -4515,9 +4471,10 @@ impl State {
         );
 
         // Inform the layout of an ongoing DnD operation.
-        let is_dnd_grab = handle
-            .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
-            .unwrap_or(false);
+        let mut is_dnd_grab = false;
+        handle.with_grab(|_, grab| {
+            is_dnd_grab = grab.as_any().is::<DnDGrab<Self>>();
+        });
         if is_dnd_grab {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
                 let output = output.clone();
@@ -4567,13 +4524,6 @@ impl State {
         if let Some(action) = action {
             self.do_action(action, true);
         }
-    }
-
-    pub fn is_dnd_grab(grab: &dyn Any) -> bool {
-        // Normal DnD
-        grab.is::<DnDGrab<Self, WlDataSource, WlSurface>>()
-            // Null-source DnD: weston-dnd --self-only
-            || grab.is::<DnDGrab<Self, WlSurface, WlSurface>>()
     }
 }
 

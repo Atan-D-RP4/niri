@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use glam::{Mat3, Vec2};
 use niri_config::{
@@ -198,7 +197,7 @@ impl BorderRenderElement {
             None,
             scale,
             alpha,
-            Rc::new([
+            vec![
                 Uniform::new("colorspace", colorspace),
                 Uniform::new("hue_interpolation", hue_interpolation),
                 Uniform::new("color_from", color_from.to_array_unpremul()),
@@ -210,7 +209,7 @@ impl BorderRenderElement {
                 Uniform::new("geo_size", geo_size.to_array()),
                 Uniform::new("outer_radius", <[f32; 4]>::from(corner_radius)),
                 Uniform::new("border_width", border_width),
-            ]),
+            ],
             HashMap::new(),
         );
     }

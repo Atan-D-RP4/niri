@@ -282,7 +282,6 @@ impl From<&super::OverviewProgress> for OverviewProgress {
         match value {
             super::OverviewProgress::Animation(anim) => Self::Animation(anim.clone()),
             super::OverviewProgress::Gesture(gesture) => Self::Value(gesture.value),
-            super::OverviewProgress::Open => Self::Value(1.),
         }
     }
 }
@@ -871,7 +870,9 @@ impl<W: LayoutElement> Monitor<W> {
         let new_id = self.workspaces[new_idx].id();
 
         let activate = activate.map_smart(|| {
-            window.is_none_or(|win| self.active_window().map(|win| win.id()) == Some(win))
+            window.map_or(true, |win| {
+                self.active_window().map(|win| win.id()) == Some(win)
+            })
         });
 
         let workspace = &mut self.workspaces[source_workspace_idx];

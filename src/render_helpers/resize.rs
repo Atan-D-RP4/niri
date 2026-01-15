@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use glam::{Mat3, Vec2};
 use niri_config::CornerRadius;
@@ -91,7 +90,7 @@ impl ResizeRenderElement {
                 None,
                 scale.x,
                 result_alpha,
-                Rc::new([
+                vec![
                     mat3_uniform("niri_input_to_curr_geo", input_to_curr_geo),
                     mat3_uniform("niri_curr_geo_to_prev_geo", curr_geo_to_prev_geo),
                     mat3_uniform("niri_curr_geo_to_next_geo", curr_geo_to_next_geo),
@@ -102,7 +101,7 @@ impl ResizeRenderElement {
                     Uniform::new("niri_clamped_progress", clamped_progress),
                     Uniform::new("niri_corner_radius", <[f32; 4]>::from(corner_radius)),
                     Uniform::new("niri_clip_to_geometry", clip_to_geometry),
-                ]),
+                ],
                 HashMap::from([
                     (String::from("niri_tex_prev"), texture_prev),
                     (String::from("niri_tex_next"), texture_next),
