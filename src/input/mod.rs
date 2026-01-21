@@ -2389,6 +2389,14 @@ impl State {
                 if let Some(output) = target_output {
                     if let Some(monitor) = self.niri.layout.monitor_for_output_mut(&output) {
                         monitor.zoom_enabled = !monitor.zoom_enabled;
+                        let zoom_state = niri_ipc::ZoomState {
+                            factor: monitor.zoom_factor,
+                            enabled: monitor.zoom_enabled,
+                            movement: monitor.zoom_movement,
+                            threshold: monitor.zoom_threshold,
+                            frozen: monitor.zoom_frozen,
+                        };
+                        self.ipc_send_zoom_state_change(&output.name(), zoom_state);
                     }
                     self.niri.queue_redraw_all();
                 }
@@ -2401,6 +2409,14 @@ impl State {
                 if let Some(output) = target_output {
                     if let Some(monitor) = self.niri.layout.monitor_for_output_mut(&output) {
                         monitor.zoom_frozen = !monitor.zoom_frozen;
+                        let zoom_state = niri_ipc::ZoomState {
+                            factor: monitor.zoom_factor,
+                            enabled: monitor.zoom_enabled,
+                            movement: monitor.zoom_movement,
+                            threshold: monitor.zoom_threshold,
+                            frozen: monitor.zoom_frozen,
+                        };
+                        self.ipc_send_zoom_state_change(&output.name(), zoom_state);
                     }
                     self.niri.queue_redraw_all();
                 }
@@ -2425,6 +2441,14 @@ impl State {
                             }
                             Err(_) => {}
                         }
+                        let zoom_state = niri_ipc::ZoomState {
+                            factor: monitor.zoom_factor,
+                            enabled: monitor.zoom_enabled,
+                            movement: monitor.zoom_movement,
+                            threshold: monitor.zoom_threshold,
+                            frozen: monitor.zoom_frozen,
+                        };
+                        self.ipc_send_zoom_state_change(&output.name(), zoom_state);
                     }
                     self.niri.queue_redraw_all();
                 }
@@ -2437,6 +2461,14 @@ impl State {
                 if let Some(output) = target_output {
                     if let Some(monitor) = self.niri.layout.monitor_for_output_mut(&output) {
                         monitor.zoom_movement = movement;
+                        let zoom_state = niri_ipc::ZoomState {
+                            factor: monitor.zoom_factor,
+                            enabled: monitor.zoom_enabled,
+                            movement: monitor.zoom_movement,
+                            threshold: monitor.zoom_threshold,
+                            frozen: monitor.zoom_frozen,
+                        };
+                        self.ipc_send_zoom_state_change(&output.name(), zoom_state);
                     }
                     self.niri.queue_redraw_all();
                 }
@@ -2449,6 +2481,14 @@ impl State {
                 if let Some(output) = target_output {
                     if let Some(monitor) = self.niri.layout.monitor_for_output_mut(&output) {
                         monitor.zoom_threshold = threshold.clamp(0.0, 1.0);
+                        let zoom_state = niri_ipc::ZoomState {
+                            factor: monitor.zoom_factor,
+                            enabled: monitor.zoom_enabled,
+                            movement: monitor.zoom_movement,
+                            threshold: monitor.zoom_threshold,
+                            frozen: monitor.zoom_frozen,
+                        };
+                        self.ipc_send_zoom_state_change(&output.name(), zoom_state);
                     }
                     self.niri.queue_redraw_all();
                 }
