@@ -2,12 +2,14 @@ use std::any::Any;
 use std::cmp::min;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use calloop::timer::{TimeoutAction, Timer};
 use input::event::gesture::GestureEventCoordinates as _;
 use niri_config::{
     Action, Bind, Binds, Config, Key, ModKey, Modifiers, MruDirection, SwitchBinds, Trigger, Xkb,
+    ZoomMovementMode,
 };
 use niri_ipc::LayoutSwitchTarget;
 use smithay::backend::input::{
@@ -34,7 +36,7 @@ use smithay::input::SeatHandler;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
@@ -46,7 +48,7 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 #[cfg(feature = "dbus")]
 use crate::dbus::freedesktop_a11y::KbMonBlock;
 use crate::layout::scrolling::ScrollDirection;
-use crate::layout::{ActivateWindow, LayoutElement as _};
+use crate::layout::{ActivateWindow, LayoutElement as _, OutputZoomState};
 use crate::niri::{CastTarget, PointerVisibility, State};
 use crate::protocols::virtual_keyboard::VirtualKeyboard;
 use crate::ui::mru::{WindowMru, WindowMruUi};
@@ -2407,6 +2409,28 @@ impl State {
                     self.niri.queue_redraw_mru_output();
                 }
             }
+            Action::SetZoomLevel { level, output } => {
+                let target_output = match output {
+                    Some(name) => self.niri.output_by_name_match(&name).cloned(),
+                    None => self.niri.layout.active_output().cloned(),
+                };
+                if let Some(output) = target_output {
+                    let zoom_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+                    let mut zoom_state = zoom_state.lock().unwrap();
+                    let factor_str = level.trim();
+                    let is_relative = factor_str.starts_with('+') || factor_str.starts_with('-');
+                    match factor_str.parse::<f64>() {
+                        Ok(f) if !is_relative => {
+                            zoom_state.level = f.max(1.0);
+                        }
+                        Ok(delta) => {
+                            zoom_state.level = (zoom_state.level + delta).clamp(1.0, 100.0);
+                        }
+                        Err(_) => {}
+                    }
+                    self.niri.queue_redraw(&output);
+                }
+            }
         }
     }
 
@@ -2652,6 +2676,76 @@ impl State {
             if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
                 let output = output.clone();
                 self.niri.layout.dnd_update(output, pos_within_output);
+            }
+        }
+
+        if let Some((output, new_pos_within_output)) = self.niri.output_under(new_pos) {
+            let mut output_state = output
+                .user_data()
+                .get::<Mutex<OutputZoomState>>()
+                .unwrap()
+                .lock()
+                .unwrap();
+
+            let zoom_factor = output_state.level;
+
+            if zoom_factor <= 1.0 {
+                return;
+            }
+
+            let output_geometry = self
+                .niri
+                .global_space
+                .output_geometry(output)
+                .unwrap()
+                .to_f64();
+
+            let cursor_position = new_pos_within_output;
+
+            let focal_point = output_state.focal_point;
+            let zoomed_geometry = {
+                let mut geo = output_geometry;
+                geo.loc = Point::from((0.0, 0.0));
+                geo.loc -= focal_point;
+                geo = geo.downscale(zoom_factor);
+                geo.loc += focal_point;
+                geo
+            };
+
+            let movement = &self.niri.config.borrow().zoom.movement_mode;
+
+            match movement {
+                ZoomMovementMode::CursorFollow => {
+                    let new_zoomed_loc =
+                        cursor_position - zoomed_geometry.size.downscale(2.0).to_point();
+
+                    let denom_w = output_geometry.size.w - zoomed_geometry.size.w;
+                    let denom_h = output_geometry.size.h - zoomed_geometry.size.h;
+
+                    if denom_w.abs() > f64::EPSILON && denom_h.abs() > f64::EPSILON {
+                        let scale_factor_w = output_geometry.size.w / denom_w;
+                        let scale_factor_h = output_geometry.size.h / denom_h;
+
+                        let mut new_focal = Point::from((
+                            new_zoomed_loc.x * scale_factor_w,
+                            new_zoomed_loc.y * scale_factor_h,
+                        ));
+
+                        new_focal.x = new_focal.x.clamp(0.0, output_geometry.size.w.next_down());
+                        new_focal.y = new_focal.y.clamp(0.0, output_geometry.size.h.next_down());
+
+                        output_state.focal_point = new_focal;
+                    }
+                }
+                ZoomMovementMode::OnEdge => {
+                    let thresholded_geo = zoomed_geometry.downscale(Scale::from(0.9));
+                    let original_rect = Rectangle::new(new_pos, Size::from((16.0, 16.0)));
+                    if !thresholded_geo.overlaps_or_touches(original_rect) {
+
+                    } else {
+                    }
+                }
+                ZoomMovementMode::Locked => {}
             }
         }
 

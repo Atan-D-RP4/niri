@@ -389,6 +389,11 @@ pub enum Action {
     MruSetScope(MruScope),
     #[knuffel(skip)]
     MruCycleScope,
+    #[knuffel(skip)]
+    SetZoomLevel {
+        level: String,
+        output: Option<String>,
+    },
 }
 
 impl From<niri_ipc::Action> for Action {
@@ -700,6 +705,9 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::SetWindowUrgent { id } => Self::SetWindowUrgent(id),
             niri_ipc::Action::UnsetWindowUrgent { id } => Self::UnsetWindowUrgent(id),
             niri_ipc::Action::LoadConfigFile {} => Self::LoadConfigFile,
+            niri_ipc::Action::SetZoomLevel { level, output } => {
+                Self::SetZoomLevel { level, output }
+            }
         }
     }
 }

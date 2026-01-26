@@ -139,6 +139,7 @@ use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{
     HitType, Layout, LayoutElement as _, LayoutElementRenderElement, MonitorRenderElement,
+    OutputZoomState,
 };
 use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
@@ -4025,6 +4026,95 @@ impl Niri {
         }
     }
 
+    pub fn zoom_render_elements<R: NiriRenderer>(
+        &self,
+        elements: Vec<OutputRenderElements<R>>,
+        output: &Output,
+    ) -> Vec<OutputRenderElements<R>> {
+        let zoom_state = match output.user_data().get::<Mutex<OutputZoomState>>() {
+            Some(guard) => guard.lock().unwrap(),
+            None => return elements,
+        };
+
+        let output_scale = Scale::from(output.current_scale().fractional_scale());
+        let output_geo = self.global_space.output_geometry(output).unwrap();
+        let output_size = output_geo.size.to_physical_precise_round(output_scale);
+        let zoom_factor = zoom_state.level;
+        let zoom_focal_point = zoom_state.focal_point;
+
+        let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
+
+        // Generate match arms for each OutputRenderElement variant.
+        macro_rules! apply_zoom {
+            ($elem:expr, $($variant:ident),*) => {
+                match $elem {
+                    OutputRenderElements::Pointer(_) if !scale_with_zoom => {
+                        Some($elem)
+                    }
+                    $(
+                        OutputRenderElements::$variant(elem) => {
+                            CropRenderElement::from_element(
+                                RescaleRenderElement::from_element(
+                                    elem,
+                                    zoom_focal_point.to_physical_precise_round(output_scale),
+                                    zoom_factor
+                                ),
+                                output_scale,
+                                Rectangle::from_size(output_size)
+                            )
+                            .map(Into::into)
+                            .into()
+                        }
+                    )*
+                    // Other elements pass through unchanged
+                    _ => Some($elem),
+                }
+            }
+        }
+
+        elements
+            .into_iter()
+            .filter_map(|elem| {
+                apply_zoom!(
+                    elem,
+                    Monitor,
+                    RescaledTile,
+                    LayerSurface,
+                    Pointer,
+                    Wayland,
+                    SolidColor,
+                    Texture,
+                    RelocatedColor,
+                    RelocatedLayerSurface
+                )
+            })
+            .collect()
+    }
+
+    pub fn render_for_color_pick<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<OutputRenderElements<R>>
+    where
+        R: NiriRenderer,
+    {
+        let mut elements = Vec::new();
+
+        self.render_inner(renderer, output, false, RenderTarget::Output, &mut |elem| {
+            elements.push(elem)
+        });
+
+        elements = self.zoom_render_elements(elements, output);
+
+        if self.debug_draw_opaque_regions {
+            let output_scale = Scale::from(output.current_scale().fractional_scale());
+            draw_opaque_regions(&mut elements, output_scale);
+        }
+
+        elements
+    }
+
     pub fn render<R: NiriRenderer>(
         &self,
         renderer: &mut R,
@@ -4033,9 +4123,13 @@ impl Niri {
         target: RenderTarget,
     ) -> Vec<OutputRenderElements<R>> {
         let mut elements = Vec::new();
+
         self.render_inner(renderer, output, include_pointer, target, &mut |elem| {
             elements.push(elem)
         });
+
+        // Apply zoom to the render elements when needed.
+        elements = self.zoom_render_elements(elements, output);
 
         if self.debug_draw_opaque_regions {
             let output_scale = Scale::from(output.current_scale().fractional_scale());
@@ -6164,5 +6258,22 @@ niri_render_elements! {
         Texture = PrimaryGpuTextureRenderElement,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
+
+        // Zoomed elements
+        ZoomedMonitor = CropRenderElement<RescaleRenderElement<MonitorRenderElement<R>>>,
+        ZoomedRescaledTile = CropRenderElement<RescaleRenderElement<RescaleRenderElement<TileRenderElement<R>>>>,
+        ZoomedLayerSurface = CropRenderElement<RescaleRenderElement<LayerSurfaceRenderElement<R>>>,
+        ZoomedRelocatedSurface = CropRenderElement<RescaleRenderElement<
+            CropRenderElement<RelocateRenderElement<RescaleRenderElement<
+                LayerSurfaceRenderElement<R>
+            >>
+        >>>,
+        ZoomedRelocatedColor = CropRenderElement<RescaleRenderElement<CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<SolidColorRenderElement>>
+        >>>,
+        ZoomedPointer = CropRenderElement<RescaleRenderElement<PointerRenderElements<R>>>,
+        ZoomedWayland = CropRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<R>>>,
+        ZoomedSolidColor = CropRenderElement<RescaleRenderElement<SolidColorRenderElement>>,
+        ZoomedTexture = CropRenderElement<RescaleRenderElement<PrimaryGpuTextureRenderElement>>,
     }
 }

@@ -937,6 +937,15 @@ pub enum Action {
     /// Can be useful for scripts changing the config file, to avoid waiting the small duration for
     /// niri's config file watcher to notice the changes.
     LoadConfigFile {},
+    /// Set the zoom level of an output.
+    SetZoomLevel {
+        /// Zoom level to set (absolute like "2.0" or relative like "+0.5", "-0.5").
+        #[cfg_attr(feature = "clap", arg())]
+        level: String,
+        /// Optional Output name to set the zoom level for.
+        #[cfg_attr(feature = "clap", arg())]
+        output: Option<String>,
+    },
 }
 
 /// Change in window or column size.

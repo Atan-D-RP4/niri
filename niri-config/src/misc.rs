@@ -14,12 +14,57 @@ pub struct SpawnShAtStartup {
     pub command: String,
 }
 
+#[derive(knuffel::DecodeScalar, Default, Clone, Debug, PartialEq)]
+pub enum ZoomMovementMode {
+    #[default]
+    CursorFollow,
+    Locked,
+    OnEdge,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, knuffel::DecodeScalar)]
+pub enum ZoomIncrementType {
+    #[default]
+    Linear,
+    Exponential,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Zoom {
+    pub movement_mode: ZoomMovementMode,
+    pub increment_type: ZoomIncrementType,
+}
+
+impl Default for Zoom {
+    fn default() -> Self {
+        Self {
+            movement_mode: ZoomMovementMode::CursorFollow,
+            increment_type: ZoomIncrementType::Linear,
+        }
+    }
+}
+
+#[derive(knuffel::Decode, Debug, PartialEq)]
+pub struct ZoomPart {
+    #[knuffel(child, unwrap(argument))]
+    pub movement_mode: Option<ZoomMovementMode>,
+    #[knuffel(child, unwrap(argument))]
+    pub increment_type: Option<ZoomIncrementType>,
+}
+
+impl MergeWith<ZoomPart> for Zoom {
+    fn merge_with(&mut self, part: &ZoomPart) {
+        merge_clone!((self, part), movement_mode, increment_type);
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Cursor {
     pub xcursor_theme: String,
     pub xcursor_size: u8,
     pub hide_when_typing: bool,
     pub hide_after_inactive_ms: Option<u32>,
+    pub scale_with_zoom: bool,
 }
 
 impl Default for Cursor {
@@ -29,6 +74,7 @@ impl Default for Cursor {
             xcursor_size: 24,
             hide_when_typing: false,
             hide_after_inactive_ms: None,
+            scale_with_zoom: false,
         }
     }
 }
@@ -43,12 +89,14 @@ pub struct CursorPart {
     pub hide_when_typing: Option<Flag>,
     #[knuffel(child, unwrap(argument))]
     pub hide_after_inactive_ms: Option<u32>,
+    #[knuffel(child)]
+    pub scale_with_zoom: Option<Flag>,
 }
 
 impl MergeWith<CursorPart> for Cursor {
     fn merge_with(&mut self, part: &CursorPart) {
         merge_clone!((self, part), xcursor_theme, xcursor_size);
-        merge!((self, part), hide_when_typing);
+        merge!((self, part), hide_when_typing, scale_with_zoom);
         merge_clone_opt!((self, part), hide_after_inactive_ms);
     }
 }
