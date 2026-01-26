@@ -4043,20 +4043,45 @@ impl Niri {
         let zoom_focal_point = zoom_state.focal_point;
 
         let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
+        let focal_point_physical = zoom_focal_point.to_physical_precise_round(output_scale);
 
         // Generate match arms for each OutputRenderElement variant.
         macro_rules! apply_zoom {
             ($elem:expr, $($variant:ident),*) => {
                 match $elem {
-                    OutputRenderElements::Pointer(_) if !scale_with_zoom => {
-                        Some($elem)
+                    OutputRenderElements::Pointer(ref pointer_elem) if !scale_with_zoom => {
+                        // When scale_with_zoom is false, relocate the pointer to match the
+                        // zoomed content position. The pointer's logical position maps to:
+                        // focal + (pos - focal) * zoom, so the relocation offset is:
+                        // (pos - focal) * (zoom - 1)
+                        let pointer_geo = pointer_elem.geometry(output_scale);
+                        let pointer_pos = pointer_geo.loc;
+                        let offset = Point::from((
+                            ((pointer_pos.x - focal_point_physical.x) as f64
+                                * (zoom_factor - 1.0))
+                                .round() as i32,
+                            ((pointer_pos.y - focal_point_physical.y) as f64
+                                * (zoom_factor - 1.0))
+                                .round() as i32,
+                        ));
+
+                        if let OutputRenderElements::Pointer(pointer_elem) = $elem {
+                            let relocated = RelocateRenderElement::from_element(
+                                pointer_elem,
+                                offset,
+                                Relocate::Relative,
+                            );
+                            Some(OutputRenderElements::RelocatedPointer(relocated))
+                        } else {
+                            unreachable!()
+                        }
                     }
                     $(
                         OutputRenderElements::$variant(elem) => {
                             CropRenderElement::from_element(
                                 RescaleRenderElement::from_element(
                                     elem,
-                                    zoom_focal_point.to_physical_precise_round(output_scale),
+                                    focal_point_physical,
                                     zoom_factor
                                 ),
                                 output_scale,
@@ -6275,5 +6300,6 @@ niri_render_elements! {
         ZoomedWayland = CropRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<R>>>,
         ZoomedSolidColor = CropRenderElement<RescaleRenderElement<SolidColorRenderElement>>,
         ZoomedTexture = CropRenderElement<RescaleRenderElement<PrimaryGpuTextureRenderElement>>,
+        RelocatedPointer = RelocateRenderElement<PointerRenderElements<R>>,
     }
 }

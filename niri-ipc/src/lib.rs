@@ -940,7 +940,7 @@ pub enum Action {
     /// Set the zoom level of an output.
     SetZoomLevel {
         /// Zoom level to set (absolute like "2.0" or relative like "+0.5", "-0.5").
-        #[cfg_attr(feature = "clap", arg())]
+        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
         level: String,
         /// Optional Output name to set the zoom level for.
         #[cfg_attr(feature = "clap", arg())]

@@ -36,7 +36,7 @@ use smithay::input::SeatHandler;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
@@ -2700,15 +2700,27 @@ impl State {
                 .unwrap()
                 .to_f64();
 
+            // cursor_position is in output-local coordinates
             let cursor_position = new_pos_within_output;
 
             let focal_point = output_state.focal_point;
-            let zoomed_geometry = {
-                let mut geo = output_geometry;
-                geo.loc = Point::from((0.0, 0.0));
+
+            // Calculate zoomed_geometry in LOCAL coordinates (origin at 0,0)
+            let zoomed_geometry_local = {
+                let mut geo: Rectangle<f64, Logical> = Rectangle::from_size(output_geometry.size);
                 geo.loc -= focal_point;
                 geo = geo.downscale(zoom_factor);
                 geo.loc += focal_point;
+                geo
+            };
+
+            // Calculate zoomed_geometry in GLOBAL coordinates (for OnEdge checks)
+            let zoomed_geometry_global = {
+                let focal_point_global = focal_point + output_geometry.loc;
+                let mut geo = output_geometry;
+                geo.loc -= focal_point_global;
+                geo = geo.downscale(zoom_factor);
+                geo.loc += focal_point_global;
                 geo
             };
 
@@ -2716,11 +2728,14 @@ impl State {
 
             match movement {
                 ZoomMovementMode::CursorFollow => {
+                    output_state.focal_point = cursor_position;
+                }
+                ZoomMovementMode::Centered => {
                     let new_zoomed_loc =
-                        cursor_position - zoomed_geometry.size.downscale(2.0).to_point();
+                        cursor_position - zoomed_geometry_local.size.downscale(2.0).to_point();
 
-                    let denom_w = output_geometry.size.w - zoomed_geometry.size.w;
-                    let denom_h = output_geometry.size.h - zoomed_geometry.size.h;
+                    let denom_w = output_geometry.size.w - zoomed_geometry_local.size.w;
+                    let denom_h = output_geometry.size.h - zoomed_geometry_local.size.h;
 
                     if denom_w.abs() > f64::EPSILON && denom_h.abs() > f64::EPSILON {
                         let scale_factor_w = output_geometry.size.w / denom_w;
@@ -2738,11 +2753,62 @@ impl State {
                     }
                 }
                 ZoomMovementMode::OnEdge => {
-                    let thresholded_geo = zoomed_geometry.downscale(Scale::from(0.9));
-                    let original_rect = Rectangle::new(new_pos, Size::from((16.0, 16.0)));
-                    if !thresholded_geo.overlaps_or_touches(original_rect) {
+                    let original_rect = Rectangle::new(pos, (16.0, 16.0).into());
 
-                    } else {
+                    if !zoomed_geometry_global.overlaps_or_touches(original_rect) {
+                        // Case 1: Cursor teleported far outside - recenter viewport on cursor
+                        let new_zoomed_loc =
+                            cursor_position - zoomed_geometry_local.size.downscale(2.0).to_point();
+
+                        let denom_w = output_geometry.size.w - zoomed_geometry_local.size.w;
+                        let denom_h = output_geometry.size.h - zoomed_geometry_local.size.h;
+
+                        if denom_w.abs() > f64::EPSILON && denom_h.abs() > f64::EPSILON {
+                            let scale_factor_w = output_geometry.size.w / denom_w;
+                            let scale_factor_h = output_geometry.size.h / denom_h;
+
+                            let mut new_focal = Point::from((
+                                new_zoomed_loc.x * scale_factor_w,
+                                new_zoomed_loc.y * scale_factor_h,
+                            ));
+
+                            new_focal.x =
+                                new_focal.x.clamp(0.0, output_geometry.size.w.next_down());
+                            new_focal.y =
+                                new_focal.y.clamp(0.0, output_geometry.size.h.next_down());
+
+                            output_state.focal_point = new_focal;
+                        }
+                    } else if !zoomed_geometry_global.contains(new_pos) {
+                        // Case 2: Cursor at edge - move focal point to bring cursor inside
+                        // Calculate how far outside the viewport the cursor is
+                        let mut offset: Point<f64, Logical> = Point::from((0.0, 0.0));
+
+                        if new_pos.x < zoomed_geometry_global.loc.x {
+                            offset.x = new_pos.x - zoomed_geometry_global.loc.x;
+                        } else if new_pos.x
+                            >= zoomed_geometry_global.loc.x + zoomed_geometry_global.size.w
+                        {
+                            offset.x = new_pos.x
+                                - (zoomed_geometry_global.loc.x + zoomed_geometry_global.size.w)
+                                + 1.0;
+                        }
+
+                        if new_pos.y < zoomed_geometry_global.loc.y {
+                            offset.y = new_pos.y - zoomed_geometry_global.loc.y;
+                        } else if new_pos.y
+                            >= zoomed_geometry_global.loc.y + zoomed_geometry_global.size.h
+                        {
+                            offset.y = new_pos.y
+                                - (zoomed_geometry_global.loc.y + zoomed_geometry_global.size.h)
+                                + 1.0;
+                        }
+
+                        let mut new_focal = focal_point + offset.upscale(zoom_factor);
+                        new_focal.x = new_focal.x.clamp(0.0, output_geometry.size.w.next_down());
+                        new_focal.y = new_focal.y.clamp(0.0, output_geometry.size.h.next_down());
+
+                        output_state.focal_point = new_focal;
                     }
                 }
                 ZoomMovementMode::Locked => {}

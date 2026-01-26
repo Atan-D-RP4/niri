@@ -18,8 +18,9 @@ pub struct SpawnShAtStartup {
 pub enum ZoomMovementMode {
     #[default]
     CursorFollow,
-    Locked,
+    Centered,
     OnEdge,
+    Locked,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, knuffel::DecodeScalar)]
