@@ -331,6 +331,7 @@ pub struct Layout<W: LayoutElement> {
 pub struct OutputZoomState {
     pub level: f64,
     pub focal_point: Point<f64, Logical>,
+    pub locked: bool,
 }
 
 #[derive(Debug)]

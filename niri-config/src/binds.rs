@@ -394,6 +394,10 @@ pub enum Action {
         level: String,
         output: Option<String>,
     },
+    #[knuffel(skip)]
+    ToggleZoomLock {
+        output: Option<String>,
+    },
 }
 
 impl From<niri_ipc::Action> for Action {
@@ -708,6 +712,7 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::SetZoomLevel { level, output } => {
                 Self::SetZoomLevel { level, output }
             }
+            niri_ipc::Action::ToggleZoomLock { output } => Self::ToggleZoomLock { output },
         }
     }
 }

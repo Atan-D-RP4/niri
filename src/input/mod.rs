@@ -2431,6 +2431,17 @@ impl State {
                     self.niri.queue_redraw(&output);
                 }
             }
+            Action::ToggleZoomLock { output } => {
+                let target_output = match output {
+                    Some(name) => self.niri.output_by_name_match(&name).cloned(),
+                    None => self.niri.layout.active_output().cloned(),
+                };
+                if let Some(output) = target_output {
+                    let zoom_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+                    let mut zoom_state = zoom_state.lock().unwrap();
+                    zoom_state.locked = !zoom_state.locked;
+                }
+            }
         }
     }
 
@@ -2680,14 +2691,14 @@ impl State {
         }
 
         if let Some((output, new_pos_within_output)) = self.niri.output_under(new_pos) {
-            let mut output_state = output
-                .user_data()
-                .get::<Mutex<OutputZoomState>>()
-                .unwrap()
-                .lock()
-                .unwrap();
+            let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+            let mut zoom_state = output_state.lock().unwrap();
 
-            let zoom_factor = output_state.level;
+            if zoom_state.locked {
+                return;
+            }
+
+            let zoom_factor = zoom_state.level;
 
             if zoom_factor <= 1.0 {
                 return;
@@ -2703,7 +2714,7 @@ impl State {
             // cursor_position is in output-local coordinates
             let cursor_position = new_pos_within_output;
 
-            let focal_point = output_state.focal_point;
+            let focal_point = zoom_state.focal_point;
 
             // Calculate zoomed_geometry in LOCAL coordinates (origin at 0,0)
             let zoomed_geometry_local = {
@@ -2728,7 +2739,7 @@ impl State {
 
             match movement {
                 ZoomMovementMode::CursorFollow => {
-                    output_state.focal_point = cursor_position;
+                    zoom_state.focal_point = cursor_position;
                 }
                 ZoomMovementMode::Centered => {
                     let new_zoomed_loc =
@@ -2749,7 +2760,7 @@ impl State {
                         new_focal.x = new_focal.x.clamp(0.0, output_geometry.size.w.next_down());
                         new_focal.y = new_focal.y.clamp(0.0, output_geometry.size.h.next_down());
 
-                        output_state.focal_point = new_focal;
+                        zoom_state.focal_point = new_focal;
                     }
                 }
                 ZoomMovementMode::OnEdge => {
@@ -2777,7 +2788,7 @@ impl State {
                             new_focal.y =
                                 new_focal.y.clamp(0.0, output_geometry.size.h.next_down());
 
-                            output_state.focal_point = new_focal;
+                            zoom_state.focal_point = new_focal;
                         }
                     } else if !zoomed_geometry_global.contains(new_pos) {
                         // Case 2: Cursor at edge - move focal point to bring cursor inside
@@ -2808,10 +2819,9 @@ impl State {
                         new_focal.x = new_focal.x.clamp(0.0, output_geometry.size.w.next_down());
                         new_focal.y = new_focal.y.clamp(0.0, output_geometry.size.h.next_down());
 
-                        output_state.focal_point = new_focal;
+                        zoom_state.focal_point = new_focal;
                     }
                 }
-                ZoomMovementMode::Locked => {}
             }
         }
 

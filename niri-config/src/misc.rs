@@ -20,7 +20,6 @@ pub enum ZoomMovementMode {
     CursorFollow,
     Centered,
     OnEdge,
-    Locked,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, knuffel::DecodeScalar)]

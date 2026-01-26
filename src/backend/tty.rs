@@ -1360,6 +1360,7 @@ impl Tty {
                     logical_size.w / 2.0,
                     logical_size.h / 2.0,
                 ),
+                locked: false,
             })
         });
 

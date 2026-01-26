@@ -946,6 +946,12 @@ pub enum Action {
         #[cfg_attr(feature = "clap", arg())]
         output: Option<String>,
     },
+    /// Toggle the zoom lock of an output.
+    ToggleZoomLock {
+        /// Optional Output name to toggle the zoom lock for.
+        #[cfg_attr(feature = "clap", arg())]
+        output: Option<String>,
+    },
 }
 
 /// Change in window or column size.
