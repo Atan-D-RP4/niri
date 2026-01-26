@@ -119,6 +119,8 @@ pub enum Request {
     OverviewState,
     /// Request information about screencasts.
     Casts,
+    /// Request information about zoom state.
+    ZoomState,
 }
 
 /// Reply from niri to client.
@@ -165,6 +167,8 @@ pub enum Response {
     OverviewState(Overview),
     /// Information about screencasts.
     Casts(Vec<Cast>),
+    /// Zoom state information.
+    ZoomState(HashMap<String, Zoom>),
 }
 
 /// Overview information.
@@ -1539,6 +1543,16 @@ pub struct Cast {
     /// This is `None` for wlr-screencopy casts, and also for PipeWire casts before the node is
     /// created (when the cast is just starting up).
     pub pw_node_id: Option<u32>,
+}
+
+/// Zoom State
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct Zoom {
+    /// Current zoom level
+    pub level: f64,
+    /// Whether zoom focal point is locked
+    pub is_locked: bool,
 }
 
 /// Kind of screencast.
