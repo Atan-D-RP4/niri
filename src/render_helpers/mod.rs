@@ -11,6 +11,7 @@ use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::{Bind, Color32F, ExportMem, Frame, Offscreen, Renderer};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_shm;
+use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shm;
 use solid_color::{SolidColorBuffer, SolidColorRenderElement};
@@ -27,6 +28,7 @@ pub mod clipped_surface;
 pub mod damage;
 pub mod debug;
 pub mod effect_buffer;
+pub mod framebuffer_effect;
 pub mod gradient_fade_texture;
 pub mod memory;
 pub mod offscreen;
@@ -345,6 +347,13 @@ fn render_elements(
 
         if let Some(mut damage) = output_rect.intersection(dst) {
             damage.loc -= dst.loc;
+
+            let cache = UserDataMap::new();
+            if element.is_framebuffer_effect() {
+                element
+                    .capture_framebuffer(&mut frame, src, dst, &cache)
+                    .context("error in capture_framebuffer()")?;
+            }
             element
                 .draw(&mut frame, src, dst, &[damage], &[])
                 .context("error drawing element")?;
