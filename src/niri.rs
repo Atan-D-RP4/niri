@@ -4299,7 +4299,7 @@ impl Niri {
     ) -> Vec<OutputRenderElements<R>> {
         let mut elements = Vec::new();
 
-        self.render_inner(ctx, output, include_pointer, &mut |elem| {
+        self.render(ctx, output, include_pointer, &mut |elem| {
             // Apply zoom to the render elements when needed.
             let elem = self.zoomed_element(elem, output);
 
@@ -4309,7 +4309,7 @@ impl Niri {
         elements
     }
 
-    pub fn render_inner<R: NiriRenderer>(
+    pub fn render<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
         output: &Output,
@@ -5393,7 +5393,7 @@ impl Niri {
             let screenshot = targets.map(|target| {
                 let ctx = RenderCtx { renderer, target };
                 let mut elements = Vec::new();
-                self.render_inner(ctx, &output, false, &mut |elem| {
+                self.render(ctx, &output, false, &mut |elem| {
                     // Use un-zoomed elements to sample at the correct position in the screenshot.
                     elements.push(elem)
                 });

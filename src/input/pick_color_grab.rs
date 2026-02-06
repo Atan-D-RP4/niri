@@ -72,7 +72,7 @@ impl PickColorGrab {
                     // This is an interactive operation so we can render without blocking out.
                     target: RenderTarget::Output,
                 };
-                data.niri.render_inner(ctx, &output, false, &mut |elem| {
+                data.niri.render(ctx, &output, false, &mut |elem| {
                     // Use un-zoomed elements and sample at logical position.
                     elements.push(elem)
                 });
