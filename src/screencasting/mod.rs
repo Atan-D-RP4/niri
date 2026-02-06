@@ -579,7 +579,7 @@ impl Niri {
                     renderer,
                     target: RenderTarget::Screencast,
                 };
-                self.render_inner(ctx, output, false, &mut |elem| {
+                self.render(ctx, output, false, &mut |elem| {
                     // Apply zoom to the elements here since that's what the pointer will be
                     // rendered on top of, and OBS will sample from the elements for the pointer
                     // position regardless.
