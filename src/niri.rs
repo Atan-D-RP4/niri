@@ -4296,9 +4296,12 @@ impl Niri {
         let output_scale = Scale::from(output.current_scale().fractional_scale());
         let output_geo = self.global_space.output_geometry(output).unwrap();
         let output_size = output_geo.size.to_physical_precise_round(output_scale);
-        let zoom_factor = zoom_state.base_level;
-        let zoom_focal_point = zoom_state.base_focal;
         let cursor_logical_pos = zoom_state.cursor_logical_pos;
+
+        let (zoom_factor, zoom_focal_point) = match &zoom_state.progress {
+            Some(progress) => (progress.level(), progress.focal_point()),
+            None => (zoom_state.base_level, zoom_state.base_focal),
+        };
 
         let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
 
@@ -4444,7 +4447,7 @@ impl Niri {
             .user_data()
             .get::<Mutex<OutputZoomState>>()
             .and_then(|m| m.lock().ok())
-            .filter(|state| state.base_level > 1.0)
+            .filter(|state| state.base_level > 1.0 || state.progress.is_some())
         {
             elements = self.zoom_render_elements(elements, output, &zoom_state);
         }
