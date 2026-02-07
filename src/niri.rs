@@ -3031,12 +3031,12 @@ impl Niri {
         target_level: f64,
         clock: &Clock,
         anim_config: niri_config::Animation,
-    ) -> bool {
+    ) {
         let Some(mutex) = output.user_data().get::<Mutex<OutputZoomState>>() else {
-            return false;
+            return;
         };
         let Ok(mut zoom_state) = mutex.lock() else {
-            return false;
+            return;
         };
 
         let current_level = zoom_state
@@ -3045,7 +3045,7 @@ impl Niri {
             .map_or(zoom_state.base_level, |p| p.level());
 
         if (target_level - current_level).abs() < 0.001 {
-            return false;
+            return;
         }
 
         let cursor_pos_global = self
@@ -3081,7 +3081,7 @@ impl Niri {
                 0.0, // lerp 0..1
                 1.0,
                 0.0,
-                anim_config.clone(),
+                anim_config,
             ))
         } else {
             None
@@ -3119,8 +3119,6 @@ impl Niri {
         if let Some(cursor) = cursor_local {
             zoom_state.cursor_logical_pos = Some(cursor);
         }
-
-        true
     }
 
     /// Update the zoom focal point for the given output based on cursor position.
