@@ -131,18 +131,20 @@ struct DmaNegotiation {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum CastState {
+    // dma_negotiation = Some(_) means DMA sharing
+    // dma_negotiation = None    means SHM sharing
     ResizePending {
         pending_size: Size<u32, Physical>,
     },
     ConfirmationPending {
         size: Size<u32, Physical>,
         alpha: bool,
-        dma_negotiation: DmaNegotiation,
+        dma_negotiation: Option<DmaNegotiation>,
     },
     Ready {
         size: Size<u32, Physical>,
         alpha: bool,
-        dma_negotiation: DmaNegotiation,
+        dma_negotiation: Option<DmaNegotiation>,
         // Lazily-initialized to keep the initialization to a single place.
         damage_tracker: Option<OutputDamageTracker>,
         cursor_damage_tracker: Option<OutputDamageTracker>,
@@ -509,10 +511,10 @@ impl PipeWire {
                             *state = CastState::ConfirmationPending {
                                 size: format_size,
                                 alpha: format_has_alpha,
-                                dma_negotiation: DmaNegotiation {
+                                dma_negotiation: Some(DmaNegotiation {
                                     modifier,
                                     plane_count: plane_count as i32,
-                                },
+                                }),
                             };
 
                             let fixated_format = FormatSet::from_iter([Format {
@@ -550,12 +552,12 @@ impl PipeWire {
                                 CastState::ConfirmationPending {
                                     size,
                                     alpha,
-                                    dma_negotiation,
+                                    dma_negotiation: Some(dma_negotiation),
                                 }
                                 | CastState::Ready {
                                     size,
                                     alpha,
-                                    dma_negotiation,
+                                    dma_negotiation: Some(dma_negotiation),
                                     ..
                                 } if *alpha == format_has_alpha
                                     && dma_negotiation.modifier
@@ -582,7 +584,7 @@ impl PipeWire {
                                     *state = CastState::Ready {
                                         size,
                                         alpha,
-                                        dma_negotiation,
+                                        dma_negotiation: Some(dma_negotiation),
                                         damage_tracker,
                                         cursor_damage_tracker,
                                         last_cursor_location: None,
@@ -616,10 +618,10 @@ impl PipeWire {
                                     *state = CastState::Ready {
                                         size: format_size,
                                         alpha: format_has_alpha,
-                                        dma_negotiation: DmaNegotiation {
+                                        dma_negotiation: Some(DmaNegotiation {
                                             modifier,
                                             plane_count: plane_count as i32,
-                                        },
+                                        }),
                                         damage_tracker: None,
                                         cursor_damage_tracker: None,
                                         last_cursor_location: None,
@@ -712,77 +714,82 @@ impl PipeWire {
                     let _span = debug_span!("add_buffer", %stream_id).entered();
                     let mut inner = inner.borrow_mut();
 
-                    let (size, alpha, modifier) = if let CastState::Ready {
-                        size,
-                        alpha,
-                        dma_negotiation,
-                        ..
-                    } = &inner.state
-                    {
-                        (*size, *alpha, dma_negotiation.modifier)
-                    } else {
-                        trace!("add_buffer, but not ready yet");
-                        return;
-                    };
+                    match inner.state {
+                        CastState::Ready {
+                            size,
+                            alpha,
+                            dma_negotiation,
+                            ..
+                        } => {
+                            match dma_negotiation {
+                                Some(DmaNegotiation { modifier, .. }) => {
+                                    trace!("size={size:?}, alpha={alpha}, modifier={modifier:?}");
+                                    unsafe {
+                                        let spa_buffer = (*buffer).buffer;
 
-                    trace!("size={size:?}, alpha={alpha}, modifier={modifier:?}");
+                                        let fourcc = if alpha {
+                                            Fourcc::Argb8888
+                                        } else {
+                                            Fourcc::Xrgb8888
+                                        };
 
-                    unsafe {
-                        let spa_buffer = (*buffer).buffer;
+                                        let dmabuf = match allocate_dmabuf(&gbm, size, fourcc, modifier) {
+                                            Ok(dmabuf) => dmabuf,
+                                            Err(err) => {
+                                                warn!("error allocating dmabuf: {err:?}");
+                                                stop_cast();
+                                                return;
+                                            }
+                                        };
 
-                        let fourcc = if alpha {
-                            Fourcc::Argb8888
-                        } else {
-                            Fourcc::Xrgb8888
-                        };
+                                        let plane_count = dmabuf.num_planes();
+                                        assert_eq!((*spa_buffer).n_datas as usize, plane_count);
 
-                        let dmabuf = match allocate_dmabuf(&gbm, size, fourcc, modifier) {
-                            Ok(dmabuf) => dmabuf,
-                            Err(err) => {
-                                warn!("error allocating dmabuf: {err:?}");
-                                stop_cast();
-                                return;
+                                        for (i, (fd, (stride, offset))) in
+                                            zip(dmabuf.handles(), zip(dmabuf.strides(), dmabuf.offsets()))
+                                                .enumerate()
+                                        {
+                                            let spa_data = (*spa_buffer).datas.add(i);
+                                            assert!((*spa_data).type_ & (1 << DataType::DmaBuf.as_raw()) > 0);
+
+                                            (*spa_data).type_ = DataType::DmaBuf.as_raw();
+
+                                            // With DMA-BUFs, consumers should ignore the maxsize field, and
+                                            // producers are allowed to set it to 0.
+                                            //
+                                            // https://docs.pipewire.org/page_dma_buf.html
+                                            (*spa_data).maxsize = 1;
+                                            (*spa_data).fd = fd.as_raw_fd() as i64;
+                                            (*spa_data).flags = SPA_DATA_FLAG_READWRITE;
+
+                                            let chunk = (*spa_data).chunk;
+                                            (*chunk).stride = stride as i32;
+                                            (*chunk).offset = offset;
+
+                                            trace!(
+                                                "pw buffer plane: fd={}, stride={stride}, offset={offset}",
+                                                (*spa_data).fd
+                                            );
+                                        }
+
+                                        let fd = (*(*spa_buffer).datas).fd;
+                                        assert!(inner.dmabufs.insert(fd, dmabuf).is_none());
+                                    }
+
+                                    // During size re-negotiation, the stream sometimes just keeps running, in
+                                    // which case we may need to force a redraw once we got a newly sized buffer.
+                                    if inner.dmabufs.len() == 1 && stream.state() == StreamState::Streaming {
+                                        redraw_();
+                                    }
+                                },
+                                None => {
+                                    warn!("pw stream: shared memory sharing hasn't been implemented")
+                                }
                             }
-                        };
-
-                        let plane_count = dmabuf.num_planes();
-                        assert_eq!((*spa_buffer).n_datas as usize, plane_count);
-
-                        for (i, (fd, (stride, offset))) in
-                            zip(dmabuf.handles(), zip(dmabuf.strides(), dmabuf.offsets()))
-                                .enumerate()
-                        {
-                            let spa_data = (*spa_buffer).datas.add(i);
-                            assert!((*spa_data).type_ & (1 << DataType::DmaBuf.as_raw()) > 0);
-
-                            (*spa_data).type_ = DataType::DmaBuf.as_raw();
-
-                            // With DMA-BUFs, consumers should ignore the maxsize field, and
-                            // producers are allowed to set it to 0.
-                            //
-                            // https://docs.pipewire.org/page_dma_buf.html
-                            (*spa_data).maxsize = 1;
-                            (*spa_data).fd = fd.as_raw_fd() as i64;
-                            (*spa_data).flags = SPA_DATA_FLAG_READWRITE;
-
-                            let chunk = (*spa_data).chunk;
-                            (*chunk).stride = stride as i32;
-                            (*chunk).offset = offset;
-
-                            trace!(
-                                "pw buffer plane: fd={}, stride={stride}, offset={offset}",
-                                (*spa_data).fd
-                            );
+                        },
+                        _ => {
+                            trace!("pw stream: add buffer, but not ready yet");
                         }
-
-                        let fd = (*(*spa_buffer).datas).fd;
-                        assert!(inner.dmabufs.insert(fd, dmabuf).is_none());
-                    }
-
-                    // During size re-negotiation, the stream sometimes just keeps running, in
-                    // which case we may need to force a redraw once we got a newly sized buffer.
-                    if inner.dmabufs.len() == 1 && stream.state() == StreamState::Streaming {
-                        redraw_();
                     }
                 }
             })
