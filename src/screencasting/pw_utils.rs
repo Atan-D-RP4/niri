@@ -60,6 +60,7 @@ use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
 
 // Give a 0.1 ms allowance for presentation time errors.
 const CAST_DELAY_ALLOWANCE: Duration = Duration::from_micros(100);
+const SHM_BLOCKS: usize = 1;
 
 const CURSOR_FORMAT: spa_video_format = SPA_VIDEO_FORMAT_BGRA;
 const CURSOR_BPP: u32 = 4;
@@ -571,7 +572,7 @@ impl PipeWire {
                     //
                     // 3. Modifier doesn't exist
                     //
-                    //    TODO: set CastState to Ready and set buffer to SHM.
+                    //    Set CastState to Ready and set buffer to SHM.
 
                     let object = pod.as_object().unwrap();
                     let maybe_prop_modifier = object.find_prop(spa::utils::Id(FormatProperties::VideoModifier.0));
@@ -636,121 +637,163 @@ impl PipeWire {
                                 stop_cast();
                             }
                         }
-                        Some(_) => {
-                            // Verify that alpha and modifier didn't change.
-                            let plane_count = match &*state {
-                                CastState::ConfirmationPending {
-                                    size,
-                                    alpha,
-                                    dma_negotiation: Some(dma_negotiation),
-                                }
-                                | CastState::Ready {
-                                    size,
-                                    alpha,
-                                    dma_negotiation: Some(dma_negotiation),
-                                    ..
-                                } if *alpha == format_has_alpha
-                                    && dma_negotiation.modifier
-                                        == Modifier::from(format.modifier()) =>
-                                {
-                                    let size = *size;
-                                    let alpha = *alpha;
-                                    let dma_negotiation = *dma_negotiation;
-
-                                    let (damage_tracker, cursor_damage_tracker) =
-                                        if let CastState::Ready {
-                                            damage_tracker,
-                                            cursor_damage_tracker,
+                        _ => {
+                            let o1 = match maybe_prop_modifier {
+                                Some(_) => {
+                                    // Verify that alpha and modifier didn't change.
+                                    let plane_count = match &*state {
+                                        CastState::ConfirmationPending {
+                                            size,
+                                            alpha,
+                                            dma_negotiation: Some(dma_negotiation),
+                                        }
+                                        | CastState::Ready {
+                                            size,
+                                            alpha,
+                                            dma_negotiation: Some(dma_negotiation),
                                             ..
-                                        } = &mut *state
+                                        } if *alpha == format_has_alpha
+                                            && dma_negotiation.modifier == Modifier::from(format.modifier()) =>
                                         {
-                                            (damage_tracker.take(), cursor_damage_tracker.take())
-                                        } else {
-                                            (None, None)
-                                        };
+                                            let size = *size;
+                                            let alpha = *alpha;
+                                            let dma_negotiation = *dma_negotiation;
 
-                                    debug!("moving to ready state");
+                                            let (damage_tracker, cursor_damage_tracker) =
+                                                if let CastState::Ready {
+                                                    damage_tracker,
+                                                    cursor_damage_tracker,
+                                                    ..
+                                                } = &mut *state
+                                                {
+                                                    (damage_tracker.take(), cursor_damage_tracker.take())
+                                                } else {
+                                                    (None, None)
+                                                };
 
-                                    *state = CastState::Ready {
-                                        size,
-                                        alpha,
-                                        dma_negotiation: Some(dma_negotiation),
-                                        damage_tracker,
-                                        cursor_damage_tracker,
-                                        last_cursor_location: None,
-                                    };
+                                            debug!("moving to ready state");
 
-                                    dma_negotiation.plane_count
-                                }
-                                _ => {
-                                    // We're negotiating a single modifier, or alpha or modifier changed,
-                                    // so we need to do a test allocation.
-                                    let (modifier, plane_count) = match find_preferred_modifier(
-                                        &gbm,
-                                        format_size,
-                                        fourcc,
-                                        vec![format.modifier() as i64],
-                                    ) {
-                                        Ok(x) => x,
-                                        Err(err) => {
-                                            warn!("test allocation failed: {err:?}");
-                                            stop_cast();
-                                            return;
+                                            *state = CastState::Ready {
+                                                size,
+                                                alpha,
+                                                dma_negotiation: Some(dma_negotiation),
+                                                damage_tracker,
+                                                cursor_damage_tracker,
+                                                last_cursor_location: None,
+                                            };
+
+                                            dma_negotiation.plane_count
+                                        }
+                                        _ => {
+                                            // We're negotiating a single modifier, or alpha or modifier changed,
+                                            // so we need to do a test allocation.
+                                            let (modifier, plane_count) = match find_preferred_modifier(
+                                                &gbm,
+                                                format_size,
+                                                fourcc,
+                                                vec![format.modifier() as i64],
+                                            ) {
+                                                Ok(x) => x,
+                                                Err(err) => {
+                                                    warn!("test allocation failed: {err:?}");
+                                                    stop_cast();
+                                                    return;
+                                                }
+                                            };
+
+                                            debug!(
+                                                "allocation successful \
+                                                 (modifier={modifier:?}, plane_count={plane_count}), \
+                                                 moving to ready"
+                                            );
+
+                                            *state = CastState::Ready {
+                                                size: format_size,
+                                                alpha: format_has_alpha,
+                                                dma_negotiation: Some(DmaNegotiation {
+                                                    modifier,
+                                                    plane_count: plane_count as i32,
+                                                }),
+                                                damage_tracker: None,
+                                                cursor_damage_tracker: None,
+                                                last_cursor_location: None,
+                                            };
+
+                                            plane_count as i32
                                         }
                                     };
 
-                                    debug!(
-                                        "allocation successful \
-                                         (modifier={modifier:?}, plane_count={plane_count}), \
-                                         moving to ready"
-                                    );
+                                    // const BPP: u32 = 4;
+                                    // let stride = format.size().width * BPP;
+                                    // let size = stride * format.size().height;
 
+                                    pod::object!(
+                                        SpaTypes::ObjectParamBuffers,
+                                        ParamType::Buffers,
+                                        Property::new(
+                                            SPA_PARAM_BUFFERS_buffers,
+                                            pod::Value::Choice(ChoiceValue::Int(Choice(
+                                                ChoiceFlags::empty(),
+                                                ChoiceEnum::Range {
+                                                    default: 8,
+                                                    min: 2,
+                                                    max: 16
+                                                }
+                                            ))),
+                                        ),
+                                        Property::new(SPA_PARAM_BUFFERS_blocks, pod::Value::Int(plane_count)),
+                                        Property::new(
+                                            SPA_PARAM_BUFFERS_dataType,
+                                            pod::Value::Choice(ChoiceValue::Int(Choice(
+                                                ChoiceFlags::empty(),
+                                                ChoiceEnum::Flags {
+                                                    default: 1 << DataType::DmaBuf.as_raw(),
+                                                    flags: vec![1 << DataType::DmaBuf.as_raw()],
+                                                },
+                                            ))),
+                                        ),
+                                    )
+                                },
+                                None => {
                                     *state = CastState::Ready {
                                         size: format_size,
                                         alpha: format_has_alpha,
-                                        dma_negotiation: Some(DmaNegotiation {
-                                            modifier,
-                                            plane_count: plane_count as i32,
-                                        }),
+                                        dma_negotiation: None,
                                         damage_tracker: None,
                                         cursor_damage_tracker: None,
                                         last_cursor_location: None,
                                     };
-
-                                    plane_count as i32
+                                    pod::object!(
+                                        SpaTypes::ObjectParamBuffers,
+                                        ParamType::Buffers,
+                                        Property::new(
+                                            SPA_PARAM_BUFFERS_buffers,
+                                            pod::Value::Choice(ChoiceValue::Int(Choice(
+                                                ChoiceFlags::empty(),
+                                                ChoiceEnum::Range {
+                                                    default: 8,
+                                                    min: 2,
+                                                    max: 16
+                                                }
+                                            ))),
+                                        ),
+                                        Property::new(
+                                            SPA_PARAM_BUFFERS_blocks,
+                                            pod::Value::Int(SHM_BLOCKS as i32),
+                                        ),
+                                        Property::new(
+                                            SPA_PARAM_BUFFERS_dataType,
+                                            pod::Value::Choice(ChoiceValue::Int(Choice(
+                                                ChoiceFlags::empty(),
+                                                ChoiceEnum::Flags {
+                                                    default: 1 << DataType::MemFd.as_raw(),
+                                                    flags: vec![1 << DataType::MemFd.as_raw()],
+                                                },
+                                            ))),
+                                        ),
+                                    )
                                 }
                             };
-
-                            // const BPP: u32 = 4;
-                            // let stride = format.size().width * BPP;
-                            // let size = stride * format.size().height;
-
-                            let o1 = pod::object!(
-                                SpaTypes::ObjectParamBuffers,
-                                ParamType::Buffers,
-                                Property::new(
-                                    SPA_PARAM_BUFFERS_buffers,
-                                    pod::Value::Choice(ChoiceValue::Int(Choice(
-                                        ChoiceFlags::empty(),
-                                        ChoiceEnum::Range {
-                                            default: 8,
-                                            min: 2,
-                                            max: 16
-                                        }
-                                    ))),
-                                ),
-                                Property::new(SPA_PARAM_BUFFERS_blocks, pod::Value::Int(plane_count)),
-                                Property::new(
-                                    SPA_PARAM_BUFFERS_dataType,
-                                    pod::Value::Choice(ChoiceValue::Int(Choice(
-                                        ChoiceFlags::empty(),
-                                        ChoiceEnum::Flags {
-                                            default: 1 << DataType::DmaBuf.as_raw(),
-                                            flags: vec![1 << DataType::DmaBuf.as_raw()],
-                                        },
-                                    ))),
-                                ),
-                            );
 
                             let o2 = pod::object!(
                                 SpaTypes::ObjectParamMeta,
@@ -764,8 +807,10 @@ impl PipeWire {
                                     pod::Value::Int(size_of::<spa_meta_header>() as i32)
                                 ),
                             );
+
                             let mut b1 = vec![];
                             let mut b2 = vec![];
+
                             let mut params = vec![make_pod(&mut b1, o1), make_pod(&mut b2, o2)];
 
                             let mut b_cursor = vec![];
@@ -789,10 +834,6 @@ impl PipeWire {
                                 warn!("error updating stream params: {err:?}");
                                 stop_cast();
                             }
-                        }
-                        None => {
-                            warn!("pw stream: modifier prop missing and we don't support shared memory sharing currently");
-                            stop_cast();
                         }
                     };
                 }
