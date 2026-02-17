@@ -35,7 +35,7 @@ use pipewire::sys::{pw_buffer, pw_check_library_version, pw_stream_queue_buffer}
 use smithay::backend::allocator::dmabuf::{AsDmabuf, Dmabuf};
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::{GbmBuffer, GbmBufferFlags, GbmDevice};
-use smithay::backend::allocator::{Format, Fourcc};
+use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
@@ -211,24 +211,131 @@ impl<'a, E: Element> CursorData<'a, E> {
     }
 }
 
+fn make_video_params(
+    format: VideoFormat,
+    modifiers: &[Modifier],
+    size: Size<u32, Physical>,
+    refresh: u32,
+) -> pod::Object {
+    let mut properties = vec![
+        pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+        pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+        pod::property!(
+            FormatProperties::VideoSize,
+            Rectangle,
+            Rectangle {
+                width: size.w,
+                height: size.h,
+            }
+        ),
+        pod::property!(
+            FormatProperties::VideoFramerate,
+            Fraction,
+            Fraction { num: 0, denom: 1 }
+        ),
+        pod::property!(
+            FormatProperties::VideoMaxFramerate,
+            Choice,
+            Range,
+            Fraction,
+            Fraction {
+                num: refresh,
+                denom: 1000
+            },
+            Fraction { num: 1, denom: 1 },
+            Fraction {
+                num: refresh,
+                denom: 1000
+            }
+        ),
+        pod::property!(FormatProperties::VideoFormat, Id, format),
+    ];
+
+    if !modifiers.is_empty() {
+        let dont_fixate = if modifiers.len() > 1 {
+            PropertyFlags::DONT_FIXATE
+        } else {
+            PropertyFlags::empty()
+        };
+        let flags = PropertyFlags::MANDATORY | dont_fixate;
+        let modifiers_i64 = modifiers
+            .iter()
+            .map(|m| u64::from(*m) as i64)
+            .collect::<Vec<_>>();
+
+        let prop = Property {
+            key: FormatProperties::VideoModifier.as_raw(),
+            flags,
+            value: pod::Value::Choice(ChoiceValue::Long(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Enum {
+                    default: modifiers_i64[0],
+                    alternatives: modifiers_i64,
+                },
+            ))),
+        };
+
+        properties.push(prop);
+    }
+
+    pod::Object {
+        type_: SpaTypes::ObjectParamFormat.as_raw(),
+        id: ParamType::EnumFormat.as_raw(),
+        properties,
+    }
+}
+
+fn make_initial_video_params(
+    possible_modifiers: &FormatSet,
+    size: Size<u32, Physical>,
+    refresh: u32,
+    alpha: bool,
+) -> Vec<pod::Object> {
+    let mut rv = Vec::new();
+
+    let mut push_alpha = |alpha| {
+        let format = if alpha {
+            VideoFormat::BGRA
+        } else {
+            VideoFormat::BGRx
+        };
+
+        let fourcc = if alpha {
+            Fourcc::Argb8888
+        } else {
+            Fourcc::Xrgb8888
+        };
+
+        let modifiers: Vec<_> = possible_modifiers
+            .iter()
+            .filter_map(|f| (f.code == fourcc).then_some(f.modifier))
+            .collect();
+
+        trace!("offering: {modifiers:?}");
+
+        if !modifiers.is_empty() {
+            rv.push(make_video_params(format, &modifiers, size, refresh));
+        }
+        rv.push(make_video_params(format, &[], size, refresh));
+    };
+
+    if alpha {
+        push_alpha(true);
+    }
+    push_alpha(false);
+
+    rv
+}
+
 macro_rules! make_params {
     ($params:ident, $formats:expr, $size:expr, $refresh:expr, $alpha:expr) => {
-        let mut b1 = Vec::new();
-        let mut b2 = Vec::new();
-
-        let o1 = make_video_params($formats, $size, $refresh, false);
-        let pod1 = make_pod(&mut b1, o1);
-
-        let mut p1;
-        let mut p2;
-        $params = if $alpha {
-            let o2 = make_video_params($formats, $size, $refresh, true);
-            p2 = [pod1, make_pod(&mut b2, o2)];
-            &mut p2[..]
-        } else {
-            p1 = [pod1];
-            &mut p1[..]
-        };
+        let $params = make_initial_video_params($formats, $size, $refresh, $alpha);
+        let mut bufs = [const { Vec::new() }; 4]; // Maximum possible params len.
+        let mut $params: Vec<_> = $params
+            .into_iter()
+            .zip(&mut bufs)
+            .map(|(obj, buf)| make_pod(buf, obj))
+            .collect();
     };
 }
 
@@ -517,29 +624,12 @@ impl PipeWire {
                                 }),
                             };
 
-                            let fixated_format = FormatSet::from_iter([Format {
-                                code: fourcc,
-                                modifier,
-                            }]);
+                            let o = make_video_params(format.format(), &[modifier], format_size, inner.refresh);
+                            let mut b = Vec::new();
+                            let pod = make_pod(&mut b, o);
 
-                            let mut b1 = Vec::new();
-                            let mut b2 = Vec::new();
-
-                            let o1 = make_video_params(
-                                &fixated_format,
-                                format_size,
-                                inner.refresh,
-                                format_has_alpha,
-                            );
-                            let pod1 = make_pod(&mut b1, o1);
-
-                            let o2 = make_video_params(
-                                &formats,
-                                format_size,
-                                inner.refresh,
-                                format_has_alpha,
-                            );
-                            let mut params = [pod1, make_pod(&mut b2, o2)];
+                            make_params!(params, &formats, format_size, inner.refresh, format_has_alpha);
+                            params.insert(0, pod);
 
                             if let Err(err) = stream.update_params(&mut params) {
                                 warn!("error updating stream params: {err:?}");
@@ -821,14 +911,13 @@ impl PipeWire {
             "starting pw stream with size={pending_size:?}, refresh={refresh:?}"
         );
 
-        let params;
         make_params!(params, &formats, pending_size, refresh, alpha);
         stream
             .connect(
                 Direction::Output,
                 None,
                 StreamFlags::DRIVER | StreamFlags::ALLOC_BUFFERS,
-                params,
+                &mut params,
             )
             .context("error connecting stream")?;
 
@@ -883,7 +972,6 @@ impl Cast {
             pending_size: new_size,
         };
 
-        let params;
         make_params!(
             params,
             &self.formats,
@@ -892,7 +980,7 @@ impl Cast {
             self.offer_alpha
         );
         self.stream
-            .update_params(params)
+            .update_params(&mut params)
             .context("error updating stream params")?;
 
         Ok(CastSizeChange::Pending)
@@ -910,10 +998,9 @@ impl Cast {
         inner.refresh = refresh;
 
         let size = inner.state.expected_format_size();
-        let params;
         make_params!(params, &self.formats, size, refresh, self.offer_alpha);
         self.stream
-            .update_params(params)
+            .update_params(&mut params)
             .context("error updating stream params")?;
 
         Ok(())
@@ -1271,85 +1358,6 @@ fn pw_version_supports_cursor_metadata() -> bool {
     // This PipeWire version fixed a critical memory issue with cursor metadata:
     // https://gitlab.freedesktop.org/pipewire/pipewire/-/merge_requests/2538
     unsafe { pw_check_library_version(1, 4, 8) }
-}
-
-fn make_video_params(
-    formats: &FormatSet,
-    size: Size<u32, Physical>,
-    refresh: u32,
-    alpha: bool,
-) -> pod::Object {
-    let format = if alpha {
-        VideoFormat::BGRA
-    } else {
-        VideoFormat::BGRx
-    };
-
-    let fourcc = if alpha {
-        Fourcc::Argb8888
-    } else {
-        Fourcc::Xrgb8888
-    };
-
-    let formats: Vec<_> = formats
-        .iter()
-        .filter_map(|f| (f.code == fourcc).then_some(u64::from(f.modifier) as i64))
-        .collect();
-
-    trace!("offering: {formats:?}");
-
-    let dont_fixate = if formats.len() > 1 {
-        PropertyFlags::DONT_FIXATE
-    } else {
-        PropertyFlags::empty()
-    };
-
-    pod::object!(
-        SpaTypes::ObjectParamFormat,
-        ParamType::EnumFormat,
-        pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
-        pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
-        pod::property!(FormatProperties::VideoFormat, Id, format),
-        Property {
-            key: FormatProperties::VideoModifier.as_raw(),
-            flags: PropertyFlags::MANDATORY | dont_fixate,
-            value: pod::Value::Choice(ChoiceValue::Long(Choice(
-                ChoiceFlags::empty(),
-                ChoiceEnum::Enum {
-                    default: formats[0],
-                    alternatives: formats,
-                }
-            )))
-        },
-        pod::property!(
-            FormatProperties::VideoSize,
-            Rectangle,
-            Rectangle {
-                width: size.w,
-                height: size.h,
-            }
-        ),
-        pod::property!(
-            FormatProperties::VideoFramerate,
-            Fraction,
-            Fraction { num: 0, denom: 1 }
-        ),
-        pod::property!(
-            FormatProperties::VideoMaxFramerate,
-            Choice,
-            Range,
-            Fraction,
-            Fraction {
-                num: refresh,
-                denom: 1000
-            },
-            Fraction { num: 1, denom: 1 },
-            Fraction {
-                num: refresh,
-                denom: 1000
-            }
-        ),
-    )
 }
 
 fn make_pod(buffer: &mut Vec<u8>, object: pod::Object) -> &Pod {
