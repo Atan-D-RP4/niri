@@ -2462,8 +2462,7 @@ impl State {
 
                     // If the zoom is locked, we need to update the base focal point to keep the
                     // content under the cursor consistent.
-                    self.niri
-                        .update_zoom_base_focal(&output, cursor_local, None);
+                    self.niri.update_zoom_base_focal(&output, cursor_pos, None);
 
                     self.niri.queue_redraw(&output);
                 }
