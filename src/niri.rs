@@ -1626,7 +1626,7 @@ impl State {
                 // Update the focal point so that if the user changes the movement mode again while
                 // zoomed, it will be correct.
                 self.niri
-                    .update_zoom_base_focal(&output, cursor_local, None);
+                    .update_zoom_base_focal(&output, global_pointer_pos, None);
 
                 self.niri.queue_redraw(&output);
             }
