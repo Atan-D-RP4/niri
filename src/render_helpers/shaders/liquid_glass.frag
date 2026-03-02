@@ -1,10 +1,17 @@
 #version 100
 
+//_DEFINES_
+
 precision highp float;
 
+#if defined(EXTERNAL)
+#extension GL_OES_EGL_image_external : require
+uniform samplerExternalOES tex;
+#else
 uniform sampler2D tex;
-uniform float niri_alpha;
-uniform vec4 geo_to_tex;
+#endif
+
+uniform float alpha;
 
 // Liquid glass parameters
 uniform float lg_tint;
@@ -25,6 +32,10 @@ uniform float niri_scale;
 uniform vec2 geo_size;
 uniform vec4 corner_radius;
 uniform mat3 input_to_geo;
+
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
 
 varying vec2 v_coords;
 
@@ -65,7 +76,6 @@ vec2 distort_uv(vec2 uv, float strength) {
 void main() {
     vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
     vec2 local_uv = v_coords - lg_local_origin / lg_window_size;
-    vec2 base_tex = v_coords * geo_to_tex.xy + geo_to_tex.zw;
 
     vec4 color;
 
@@ -76,46 +86,42 @@ void main() {
 
     if (lg_quality == 0) {
         // LOW: No distortion, no chromatic aberration
-        color = texture2D(tex, base_tex);
+        color = texture2D(tex, v_coords);
     } else if (lg_quality == 1) {
         // MEDIUM: Distortion + 2-sample chromatic aberration (swizzle trick)
-        vec2 distorted_uv = distort_uv(v_coords, lg_distortion);
+        vec2 distorted = distort_uv(v_coords, lg_distortion);
 
         // Pointer-influenced additional lens bulge
         vec2 pointer_uv = lg_pointer / lg_window_size;
         vec2 to_pointer = local_uv - pointer_uv;
         float p_dist = length(to_pointer);
         float p_influence = 1.0 - smoothstep(0.0, 0.2, p_dist);
-        distorted_uv += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
-
-        vec2 distorted_tex = distorted_uv * geo_to_tex.xy + geo_to_tex.zw;
+        distorted += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
 
         float ca_offset = lg_aberration / max(lg_window_size.x, lg_window_size.y) * edge_factor;
         vec2 ca_dir = sdf_gradient(local_uv) * ca_offset;
 
-        vec4 sample_rg = texture2D(tex, distorted_tex + ca_dir);
-        vec4 sample_gb = texture2D(tex, distorted_tex - ca_dir);
+        vec4 sample_rg = texture2D(tex, distorted + ca_dir);
+        vec4 sample_gb = texture2D(tex, distorted - ca_dir);
 
         color = vec4(sample_rg.r, (sample_rg.g + sample_gb.g) * 0.5, sample_gb.b, 1.0);
     } else {
         // HIGH: Full distortion + 3-sample chromatic aberration
-        vec2 distorted_uv = distort_uv(v_coords, lg_distortion);
+        vec2 distorted = distort_uv(v_coords, lg_distortion);
 
         // Pointer-influenced additional lens bulge
         vec2 pointer_uv = lg_pointer / lg_window_size;
         vec2 to_pointer = local_uv - pointer_uv;
         float p_dist = length(to_pointer);
         float p_influence = 1.0 - smoothstep(0.0, 0.2, p_dist);
-        distorted_uv += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
-
-        vec2 distorted_tex = distorted_uv * geo_to_tex.xy + geo_to_tex.zw;
+        distorted += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
 
         float ca_offset = lg_aberration / max(lg_window_size.x, lg_window_size.y) * edge_factor;
         vec2 ca_dir = sdf_gradient(local_uv) * ca_offset;
 
-        float r = texture2D(tex, distorted_tex + ca_dir).r;
-        float g = texture2D(tex, distorted_tex).g;
-        float b = texture2D(tex, distorted_tex - ca_dir).b;
+        float r = texture2D(tex, distorted + ca_dir).r;
+        float g = texture2D(tex, distorted).g;
+        float b = texture2D(tex, distorted - ca_dir).b;
         color = vec4(r, g, b, 1.0);
     }
 
@@ -150,17 +156,19 @@ void main() {
         color.rgb += (gradient_noise(gl_FragCoord.xy) - 0.5) * noise;
     }
 
-    // Clip outside geometry (same as clipped_surface.frag)
     if (coords_geo.x < 0.0 || 1.0 < coords_geo.x || coords_geo.y < 0.0 || 1.0 < coords_geo.y) {
         gl_FragColor = vec4(0.0);
         return;
     }
 
-    // Corner rounding
     color *= niri_rounding_alpha(coords_geo.xy * geo_size, geo_size, corner_radius);
 
-    // Final alpha
-    color *= niri_alpha;
+    color = color * alpha;
+
+#if defined(DEBUG_FLAGS)
+    if (tint == 1.0)
+        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
+#endif
 
     gl_FragColor = color;
 }
