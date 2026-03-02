@@ -1861,6 +1861,8 @@ mod tests {
                         blur: None,
                         noise: None,
                         saturation: None,
+                        animate: None,
+                        custom_shader: None,
                     },
                     popups: PopupsRule {
                         opacity: None,
@@ -1912,6 +1914,8 @@ mod tests {
                         blur: None,
                         noise: None,
                         saturation: None,
+                        animate: None,
+                        custom_shader: None,
                     },
                     popups: PopupsRule {
                         opacity: None,

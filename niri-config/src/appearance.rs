@@ -1055,7 +1055,7 @@ impl MergeWith<BlurPart> for Blur {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffectRule {
     #[knuffel(child, unwrap(argument))]
     pub xray: Option<bool>,
@@ -1065,10 +1065,14 @@ pub struct BackgroundEffectRule {
     pub noise: Option<FloatOrInt<0, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub saturation: Option<FloatOrInt<0, 1000>>,
+    #[knuffel(child, unwrap(argument))]
+    pub animate: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub custom_shader: Option<String>,
 }
 
 /// Resolved background effect rule.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffect {
     /// Whether to render with xray effect (see through).
     ///
@@ -1087,6 +1091,8 @@ pub struct BackgroundEffect {
 
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub animate: Option<bool>,
+    pub custom_shader: Option<String>,
 }
 
 impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
@@ -1100,6 +1106,8 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
         if let Some(x) = part.saturation {
             self.saturation = Some(x.0);
         }
+
+        merge_clone_opt!((self, part), animate, custom_shader);
     }
 }
 

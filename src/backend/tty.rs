@@ -826,6 +826,19 @@ impl Tty {
             if let Some(src) = config.animations.window_open.custom_shader.as_deref() {
                 shaders::set_custom_open_program(gles_renderer, Some(src));
             }
+            let custom_bg = config
+                .window_rules
+                .iter()
+                .find_map(|r| r.background_effect.custom_shader.as_deref())
+                .or_else(|| {
+                    config
+                        .layer_rules
+                        .iter()
+                        .find_map(|r| r.background_effect.custom_shader.as_deref())
+                });
+            if let Some(src) = custom_bg {
+                shaders::set_custom_background_effect_program(gles_renderer, Some(src));
+            }
             drop(config);
 
             niri.update_shaders();
@@ -1865,10 +1878,13 @@ impl Tty {
         };
 
         // Render the elements.
+        let pointer_pos = niri.seat.get_pointer().map(|p| p.current_location());
         let ctx = RenderCtx {
             renderer: &mut renderer,
             target: RenderTarget::Output,
             xray: None,
+            pointer_position: pointer_pos,
+            time: niri.start_time.elapsed().as_secs_f32(),
         };
         let mut elements = niri.render_to_vec(ctx, output, true);
 

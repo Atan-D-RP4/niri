@@ -150,6 +150,7 @@ use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
 use crate::protocols::virtual_pointer::VirtualPointerManagerState;
+use crate::render_helpers::adaptive_quality::AdaptiveQualityController;
 use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::debug::push_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
@@ -396,6 +397,8 @@ pub struct Niri {
 
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,
+
+    pub adaptive_quality: AdaptiveQualityController,
 
     #[cfg(feature = "dbus")]
     pub dbus: Option<crate::dbus::DBusServers>,
@@ -1564,6 +1567,35 @@ impl State {
             shaders_changed = true;
         }
 
+        {
+            let new_custom = config
+                .window_rules
+                .iter()
+                .find_map(|r| r.background_effect.custom_shader.as_deref())
+                .or_else(|| {
+                    config
+                        .layer_rules
+                        .iter()
+                        .find_map(|r| r.background_effect.custom_shader.as_deref())
+                });
+            let old_custom = old_config
+                .window_rules
+                .iter()
+                .find_map(|r| r.background_effect.custom_shader.as_deref())
+                .or_else(|| {
+                    old_config
+                        .layer_rules
+                        .iter()
+                        .find_map(|r| r.background_effect.custom_shader.as_deref())
+                });
+            if new_custom != old_custom {
+                self.backend.with_primary_renderer(|renderer| {
+                    shaders::set_custom_background_effect_program(renderer, new_custom);
+                });
+                shaders_changed = true;
+            }
+        }
+
         if config.cursor.hide_after_inactive_ms != old_config.cursor.hide_after_inactive_ms {
             cursor_inactivity_timeout_changed = true;
         }
@@ -2041,6 +2073,8 @@ impl State {
                     target: RenderTarget::Output,
                     renderer,
                     xray: None,
+                    pointer_position: None,
+                    time: 0.,
                 };
 
                 self.niri.fill_xray_elements(ctx.r(), output);
@@ -2597,6 +2631,8 @@ impl Niri {
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
+
+            adaptive_quality: AdaptiveQualityController::new(),
 
             #[cfg(feature = "dbus")]
             dbus: None,
@@ -4117,6 +4153,15 @@ impl Niri {
         }
     }
 
+    fn propagate_adaptive_quality(&mut self) {
+        let quality = self.adaptive_quality.quality();
+        self.layout.set_adaptive_quality(quality);
+
+        for mapped in self.mapped_layer_surfaces.values_mut() {
+            mapped.set_adaptive_quality(quality);
+        }
+    }
+
     pub fn render_to_vec<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,
@@ -4138,6 +4183,12 @@ impl Niri {
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
         let _span = tracy_client::span!("Niri::render");
+
+        // Convert pointer from global compositor space to output-local space.
+        if let Some(pos) = ctx.pointer_position {
+            let output_pos = self.global_space.output_geometry(output).unwrap().loc;
+            ctx.pointer_position = Some(pos - output_pos.to_f64());
+        }
 
         if ctx.target == RenderTarget::Output {
             if let Some(preview) = self.config.borrow().debug.preview_render {
@@ -4588,7 +4639,13 @@ impl Niri {
             }
 
             // Render.
+            let render_start = Instant::now();
             res = backend.render(self, output, target_presentation_time);
+
+            // Record frame time for adaptive quality.
+            let frame_ms = render_start.elapsed().as_secs_f64() * 1000.0;
+            self.adaptive_quality.record_frame(frame_ms);
+            self.propagate_adaptive_quality();
         }
 
         let is_locked = self.is_locked();
@@ -5242,6 +5299,8 @@ impl Niri {
                         renderer,
                         target: RenderTarget::ScreenCapture,
                         xray: None,
+                        pointer_position: None,
+                        time: 0.,
                     };
                     let offset = screencopy.region_loc().upscale(-1);
                     let mut elements = Vec::new();
@@ -5320,6 +5379,8 @@ impl Niri {
             renderer,
             target: RenderTarget::ScreenCapture,
             xray: None,
+            pointer_position: None,
+            time: 0.,
         };
         let offset = screencopy.region_loc().upscale(-1);
         let mut elements = Vec::new();
@@ -5445,6 +5506,8 @@ impl Niri {
                     renderer,
                     target,
                     xray: None,
+                    pointer_position: None,
+                    time: 0.,
                 };
                 let elements = self.render_to_vec(ctx, &output, false);
                 let elements = elements.iter().rev();
@@ -5527,6 +5590,8 @@ impl Niri {
             renderer,
             target: RenderTarget::ScreenCapture,
             xray: None,
+            pointer_position: None,
+            time: 0.,
         };
         let elements = self.render_to_vec(ctx, output, include_pointer);
         let elements = elements.iter().rev();
@@ -5582,6 +5647,8 @@ impl Niri {
             renderer,
             target: RenderTarget::ScreenCapture,
             xray: None,
+            pointer_position: None,
+            time: 0.,
         };
         mapped.render(
             ctx,
@@ -5748,6 +5815,8 @@ impl Niri {
             renderer,
             target: RenderTarget::ScreenCapture,
             xray: None,
+            pointer_position: None,
+            time: 0.,
         };
         let elements = self.render_to_vec(ctx, &output, include_pointer);
         let elements = elements.iter().rev();
@@ -6226,6 +6295,8 @@ impl Niri {
                         renderer,
                         target,
                         xray: None,
+                        pointer_position: None,
+                        time: 0.,
                     };
                     let elements = self.render_to_vec(ctx, &output, false);
                     let elements = elements.iter().rev();

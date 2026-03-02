@@ -4,13 +4,15 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::{LayerSurface, PopupKind, PopupManager};
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size};
-use smithay::wayland::compositor::{remove_pre_commit_hook, HookId};
+use smithay::wayland::compositor::{remove_pre_commit_hook, with_states, HookId};
 use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
 
 use super::ResolvedLayerRules;
 use crate::animation::Clock;
+use crate::handlers::background_effect::get_cached_blur_region;
 use crate::layout::shadow::Shadow;
 use crate::niri_render_elements;
+use crate::render_helpers::background_effect::BackgroundEffect;
 use crate::render_helpers::background_effect::BackgroundEffectElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
@@ -41,6 +43,9 @@ pub struct MappedLayer {
 
     /// The shadow around the surface.
     shadow: Shadow,
+
+    /// Per-layer background effect state.
+    background_effect: BackgroundEffect,
 
     /// The blur config, passed for background effect rendering.
     blur_config: niri_config::Blur,
@@ -88,6 +93,7 @@ impl MappedLayer {
             view_size,
             scale,
             shadow: Shadow::new(shadow_config),
+            background_effect: BackgroundEffect::new(),
             blur_config: config.blur,
             clock,
         }
@@ -107,6 +113,10 @@ impl MappedLayer {
         self.shadow.update_shaders();
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.background_effect.set_adaptive_quality(quality);
+    }
+
     pub fn update_sizes(&mut self, view_size: Size<f64, Logical>, scale: f64) {
         self.view_size = view_size;
         self.scale = scale;
@@ -124,10 +134,21 @@ impl MappedLayer {
         // FIXME: is_active based on keyboard focus?
         self.shadow
             .update_render_elements(size, true, radius, self.scale, 1.);
+
+        let has_blur_region = with_states(self.surface.wl_surface(), |states| {
+            get_cached_blur_region(states)
+                .as_ref()
+                .is_some_and(|r| !r.is_empty())
+        });
+        self.background_effect.update_render_elements(
+            radius,
+            &self.rules.background_effect,
+            has_blur_region,
+        );
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
-        self.rules.baba_is_float
+        self.rules.baba_is_float || self.background_effect.needs_continuous_damage()
     }
 
     pub fn surface(&self) -> &LayerSurface {
@@ -246,7 +267,7 @@ impl MappedLayer {
             surface_anim_scale,
             self.blur_config,
             radius,
-            self.rules.background_effect,
+            self.rules.background_effect.clone(),
             should_block_out,
             xray_pos,
             &mut |elem| push(elem.into()),
@@ -272,7 +293,7 @@ impl MappedLayer {
         let surface = self.surface.wl_surface();
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
             let popup_rules = match popup {
-                PopupKind::Xdg(_) => self.rules.popups,
+                PopupKind::Xdg(_) => self.rules.popups.clone(),
                 // IME popups aren't affected by rules for regular popups.
                 PopupKind::InputMethod(_) => niri_config::ResolvedPopupsRules::default(),
             };

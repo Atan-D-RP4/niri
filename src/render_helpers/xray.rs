@@ -30,6 +30,14 @@ pub struct Xray {
     pub workspaces: Vec<(Rectangle<f64, Logical>, Color32F)>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EffectParams {
+    pub noise: f32,
+    pub saturation: f32,
+    pub pointer: Option<(f32, f32)>,
+    pub time: f32,
+}
+
 /// Position for drawing xray background.
 #[derive(Debug, Clone, Copy)]
 pub struct XrayPos {
@@ -79,8 +87,11 @@ pub struct XrayElement {
     blur: bool,
     noise: f32,
     saturation: f32,
+    pointer: Option<(f32, f32)>,
+    time: f32,
     bg_color: Color32F,
     program: Option<GlesTexProgram>,
+    is_custom_shader: bool,
 }
 
 impl Xray {
@@ -100,11 +111,17 @@ impl Xray {
         params: RenderParams,
         xray_pos: XrayPos,
         blur: bool,
-        noise: f32,
-        saturation: f32,
+        effect: EffectParams,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        let program = Shaders::get(ctx.renderer).postprocess_and_clip.clone();
+        // Fallback chain: custom_background_effect → postprocess_and_clip
+        let custom_program = Shaders::get(ctx.renderer)
+            .custom_background_effect
+            .borrow()
+            .clone();
+        let is_custom_shader = custom_program.is_some();
+        let program =
+            custom_program.or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone());
 
         let zoom = xray_pos.zoom;
         let pos_in_backdrop = xray_pos.pos_in_backdrop.upscale(zoom);
@@ -198,10 +215,13 @@ impl Xray {
                     corner_radius,
                     scale: params.scale as f32,
                     blur,
-                    noise,
-                    saturation,
+                    noise: effect.noise,
+                    saturation: effect.saturation,
+                    pointer: effect.pointer,
+                    time: effect.time,
                     bg_color: *bg_color,
                     program: program.clone(),
+                    is_custom_shader,
                 };
                 push(elem);
             }
@@ -248,10 +268,13 @@ impl Xray {
                 corner_radius: corner_radius.scaled_by(zoom as f32),
                 scale: params.scale as f32,
                 blur,
-                noise,
-                saturation,
+                noise: effect.noise,
+                saturation: effect.saturation,
+                pointer: effect.pointer,
+                time: effect.time,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
+                is_custom_shader,
             };
             push(elem);
         }
@@ -259,16 +282,32 @@ impl Xray {
 }
 
 impl XrayElement {
-    fn compute_uniforms(&self) -> [Uniform<'static>; 7] {
-        [
-            Uniform::new("niri_scale", self.scale),
-            Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
-            Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
-            mat3_uniform("input_to_geo", self.input_to_clip_geo),
-            Uniform::new("noise", self.noise),
-            Uniform::new("saturation", self.saturation),
-            Uniform::new("bg_color", self.bg_color.components()),
-        ]
+    fn compute_uniforms(&self) -> Vec<Uniform<'static>> {
+        if self.is_custom_shader {
+            let pointer = self.pointer.unwrap_or((-1f32, -1.));
+            vec![
+                Uniform::new("niri_scale", self.scale),
+                Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
+                Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+                mat3_uniform("input_to_geo", self.input_to_clip_geo),
+                Uniform::new("noise", self.noise),
+                Uniform::new("saturation", self.saturation),
+                Uniform::new("bg_color", self.bg_color.components()),
+                Uniform::new("niri_pointer", [pointer.0, pointer.1]),
+                Uniform::new("niri_window_size", <[f32; 2]>::from(self.clip_geo_size)),
+                Uniform::new("niri_time", self.time),
+            ]
+        } else {
+            vec![
+                Uniform::new("niri_scale", self.scale),
+                Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
+                Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+                mat3_uniform("input_to_geo", self.input_to_clip_geo),
+                Uniform::new("noise", self.noise),
+                Uniform::new("saturation", self.saturation),
+                Uniform::new("bg_color", self.bg_color.components()),
+            ]
+        }
     }
 }
 
@@ -306,6 +345,8 @@ impl RenderElement<GlesRenderer> for XrayElement {
         _opaque_regions: &[Rectangle<i32, Physical>],
         _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
+        debug_assert!(self.is_custom_shader || self.pointer.is_none());
+
         let mut buffer = self.buffer.borrow_mut();
         let texture = match buffer.render(frame, self.blur) {
             Ok(x) => x,
@@ -340,7 +381,7 @@ impl RenderElement<GlesRenderer> for XrayElement {
         };
 
         let uniforms = self.program.is_some().then(|| self.compute_uniforms());
-        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..]);
+        let uniforms = uniforms.as_deref().unwrap_or(&[]);
 
         frame.render_texture_from_to(
             &texture,
