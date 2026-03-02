@@ -13,9 +13,6 @@ use smithay::utils::{Buffer, Size};
 
 use crate::render_helpers::shaders::Shaders;
 
-/// Tile size for tiled blur rendering (512×512 pixels).
-const TILE_SIZE: i32 = 512;
-
 /// Threshold above which tiled blur rendering is used (2048×2048 pixels).
 const TILING_THRESHOLD: i32 = 2048;
 
@@ -182,7 +179,10 @@ impl Blur {
 
         let size = source.size();
         if size.w > TILING_THRESHOLD || size.h > TILING_THRESHOLD {
-            return self.render_tiled(frame, source, options);
+            trace!(
+                "tiled blur not implemented yet, falling back to non-tiled path for {}x{}",
+                size.w, size.h
+            );
         }
 
         ensure!(
@@ -364,15 +364,4 @@ impl Blur {
         Ok(self.textures[0].clone())
     }
 
-    pub fn render_tiled(
-        &mut self,
-        frame: &mut GlesFrame,
-        source: &GlesTexture,
-        options: BlurOptions,
-    ) -> anyhow::Result<GlesTexture> {
-        let _span = tracy_client::span!("Blur::render_tiled");
-        trace!("rendering blur with tiled approach");
-
-        self.render(frame, source, options)
-    }
 }
