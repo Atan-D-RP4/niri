@@ -29,6 +29,8 @@ pub struct BackgroundEffect {
     corner_radius: CornerRadius,
     blur_config: niri_config::Blur,
     options: Options,
+    /// Adaptive quality level from the controller (0=low, 1=medium, 2=high).
+    adaptive_quality_level: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -200,7 +202,12 @@ impl BackgroundEffect {
             corner_radius: CornerRadius::default(),
             blur_config,
             options: Options::default(),
+            adaptive_quality_level: 2,
         }
+    }
+
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.adaptive_quality_level = quality;
     }
 
     pub fn update_config(&mut self, config: niri_config::Blur) {
@@ -242,7 +249,7 @@ impl BackgroundEffect {
             lg_highlight: effect.liquid_glass.map(|lg| lg.highlight.0).unwrap_or(0.3),
             lg_tint: effect.liquid_glass.map(|lg| lg.tint.0).unwrap_or(0.1),
             lg_animate: effect.liquid_glass.map(|lg| lg.animate).unwrap_or(false),
-            lg_quality: 1,
+            lg_quality: self.adaptive_quality_level,
         };
 
         // If we have some background effect but xray wasn't explicitly set, default it to true
@@ -254,6 +261,10 @@ impl BackgroundEffect {
         // FIXME: do we also need to damage when subregion changes? Then we'll need to pass
         // subregion in update_render_elements().
         if self.options == options && self.corner_radius == corner_radius {
+            // Animated glass needs continuous damage since pointer uniforms change every frame.
+            if self.options.liquid_glass && self.options.lg_animate {
+                self.damage.damage_all();
+            }
             return;
         }
 
@@ -264,6 +275,10 @@ impl BackgroundEffect {
 
     pub fn is_visible(&self) -> bool {
         self.options.is_visible()
+    }
+
+    pub fn has_animated_glass(&self) -> bool {
+        self.options.liquid_glass && self.options.lg_animate
     }
 
     pub fn render(
@@ -296,6 +311,16 @@ impl BackgroundEffect {
         };
         let saturation = self.options.saturation.unwrap_or(saturation) as f32;
 
+        // Transform pointer to window-local coordinates for animated liquid glass.
+        let lg_pointer = if self.options.lg_animate {
+            ctx.pointer_position.map(|pos| {
+                let local = pos - params.geometry.loc;
+                (local.x as f32, local.y as f32)
+            })
+        } else {
+            None
+        };
+
         if self.options.xray {
             let Some(xray) = ctx.xray else {
                 return;
@@ -314,6 +339,7 @@ impl BackgroundEffect {
                 self.options.lg_aberration as f32,
                 self.options.lg_highlight as f32,
                 self.options.lg_quality as i32,
+                lg_pointer,
                 &mut |elem| push(elem.into()),
             );
         } else {
@@ -333,6 +359,7 @@ impl BackgroundEffect {
                 self.options.lg_quality as i32,
                 None,
                 None,
+                lg_pointer,
             ) {
                 push(damage.into());
                 push(elem.into());

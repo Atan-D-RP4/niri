@@ -99,6 +99,10 @@ impl MappedLayer {
         self.shadow.update_shaders();
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.background_effect.set_adaptive_quality(quality);
+    }
+
     pub fn update_sizes(&mut self, view_size: Size<f64, Logical>, scale: f64) {
         self.view_size = view_size;
         self.scale = scale;
@@ -126,7 +130,7 @@ impl MappedLayer {
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
-        self.rules.baba_is_float
+        self.rules.baba_is_float || self.background_effect.has_animated_glass()
     }
 
     pub fn surface(&self) -> &LayerSurface {

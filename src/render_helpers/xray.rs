@@ -51,6 +51,7 @@ pub struct XrayElement {
     lg_highlight: f32,
     lg_quality: i32,
     lg_window_size: (f32, f32),
+    lg_pointer: (f32, f32),
 }
 
 impl Xray {
@@ -76,6 +77,7 @@ impl Xray {
         lg_aberration: f32,
         lg_highlight: f32,
         lg_quality: i32,
+        lg_pointer: Option<(f32, f32)>,
         push: &mut dyn FnMut(XrayElement),
     ) {
         let program = if liquid_glass {
@@ -175,6 +177,7 @@ impl Xray {
                     lg_highlight,
                     lg_quality,
                     lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
+                    lg_pointer: lg_pointer.unwrap_or((0.0, 0.0)),
                 };
                 push(elem);
             }
@@ -233,6 +236,7 @@ impl Xray {
                 lg_highlight,
                 lg_quality,
                 lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
+                lg_pointer: lg_pointer.unwrap_or((0.0, 0.0)),
             };
             push(elem);
         }
@@ -253,6 +257,7 @@ impl XrayElement {
                     [self.lg_window_size.0, self.lg_window_size.1],
                 ),
                 Uniform::new("lg_local_origin", [0f32, 0.]),
+                Uniform::new("lg_pointer", [self.lg_pointer.0, self.lg_pointer.1]),
                 Uniform::new("noise", self.noise),
                 Uniform::new("saturation", self.saturation),
                 Uniform::new("niri_scale", self.scale),

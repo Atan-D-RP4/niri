@@ -14,6 +14,7 @@ uniform float lg_highlight;
 uniform int lg_quality;
 uniform vec2 lg_window_size;
 uniform vec2 lg_local_origin;
+uniform vec2 lg_pointer;
 
 // Reused from postprocess
 uniform float noise;
@@ -79,6 +80,14 @@ void main() {
     } else if (lg_quality == 1) {
         // MEDIUM: Distortion + 2-sample chromatic aberration (swizzle trick)
         vec2 distorted_uv = distort_uv(v_coords, lg_distortion);
+
+        // Pointer-influenced additional lens bulge
+        vec2 pointer_uv = lg_pointer / lg_window_size;
+        vec2 to_pointer = local_uv - pointer_uv;
+        float p_dist = length(to_pointer);
+        float p_influence = 1.0 - smoothstep(0.0, 0.2, p_dist);
+        distorted_uv += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
+
         vec2 distorted_tex = distorted_uv * geo_to_tex.xy + geo_to_tex.zw;
 
         float ca_offset = lg_aberration / max(lg_window_size.x, lg_window_size.y) * edge_factor;
@@ -91,6 +100,14 @@ void main() {
     } else {
         // HIGH: Full distortion + 3-sample chromatic aberration
         vec2 distorted_uv = distort_uv(v_coords, lg_distortion);
+
+        // Pointer-influenced additional lens bulge
+        vec2 pointer_uv = lg_pointer / lg_window_size;
+        vec2 to_pointer = local_uv - pointer_uv;
+        float p_dist = length(to_pointer);
+        float p_influence = 1.0 - smoothstep(0.0, 0.2, p_dist);
+        distorted_uv += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
+
         vec2 distorted_tex = distorted_uv * geo_to_tex.xy + geo_to_tex.zw;
 
         float ca_offset = lg_aberration / max(lg_window_size.x, lg_window_size.y) * edge_factor;
@@ -111,6 +128,14 @@ void main() {
         vec2 light_dir = normalize(vec2(-0.5, -0.7));
         float spec = max(dot(grad, light_dir), 0.0);
         spec = pow(spec, 4.0) * lg_highlight * edge_factor;
+
+        // Pointer influence: increase specular near cursor
+        vec2 pointer_uv = lg_pointer / lg_window_size;
+        vec2 to_pointer = local_uv - pointer_uv;
+        float pointer_dist = length(to_pointer);
+        float influence = 1.0 - smoothstep(0.0, 0.2, pointer_dist);
+        spec += influence * lg_highlight * 0.3;
+
         color.rgb += spec;
     }
 

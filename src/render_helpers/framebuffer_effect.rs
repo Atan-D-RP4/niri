@@ -45,6 +45,7 @@ pub struct FramebufferEffectElement {
     lg_quality: i32,
     lg_window_size: Option<(f32, f32)>,
     lg_local_origin: Option<(f32, f32)>,
+    lg_pointer: Option<(f32, f32)>,
     inner: Rc<RefCell<Option<Inner>>>,
 }
 
@@ -81,6 +82,7 @@ impl FramebufferEffect {
         lg_quality: i32,
         lg_window_size: Option<(f32, f32)>,
         lg_local_origin: Option<(f32, f32)>,
+        lg_pointer: Option<(f32, f32)>,
     ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
@@ -104,6 +106,7 @@ impl FramebufferEffect {
             lg_quality,
             lg_window_size,
             lg_local_origin,
+            lg_pointer,
             inner: self.inner.clone(),
         };
 
@@ -442,6 +445,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
             let window_size = self.lg_window_size.unwrap_or(clip_geo_size);
             let local_origin = self.lg_local_origin.unwrap_or((0.0, 0.0));
+            let pointer = self.lg_pointer.unwrap_or((0.0, 0.0));
 
             (
                 Some(liquid_glass),
@@ -453,6 +457,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
                     Uniform::new("lg_quality", self.lg_quality),
                     Uniform::new("lg_window_size", [window_size.0, window_size.1]),
                     Uniform::new("lg_local_origin", [local_origin.0, local_origin.1]),
+                    Uniform::new("lg_pointer", [pointer.0, pointer.1]),
                     Uniform::new("noise", self.noise),
                     Uniform::new("saturation", self.saturation),
                     Uniform::new("niri_scale", self.scale),

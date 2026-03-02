@@ -341,6 +341,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        for col in &mut self.columns {
+            col.set_adaptive_quality(quality);
+        }
+    }
+
     pub fn advance_animations(&mut self) {
         if let ViewOffset::Animation(anim) = &self.view_offset {
             if anim.is_done() {
@@ -4074,6 +4080,12 @@ impl<W: LayoutElement> Column<W> {
         }
 
         self.tab_indicator.update_shaders();
+    }
+
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        for tile in &mut self.tiles {
+            tile.set_adaptive_quality(quality);
+        }
     }
 
     pub fn advance_animations(&mut self) {

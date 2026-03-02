@@ -265,6 +265,10 @@ impl<W: LayoutElement> Tile<W> {
         self.shadow.update_shaders();
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.background_effect.set_adaptive_quality(quality);
+    }
+
     pub fn update_window(&mut self) {
         let prev_sizing_mode = self.sizing_mode;
         self.sizing_mode = self.window.sizing_mode();
@@ -446,7 +450,9 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
-        self.are_transitions_ongoing() || self.window.rules().baba_is_float == Some(true)
+        self.are_transitions_ongoing()
+            || self.window.rules().baba_is_float == Some(true)
+            || self.background_effect.has_animated_glass()
     }
 
     pub fn are_transitions_ongoing(&self) -> bool {
@@ -1479,6 +1485,7 @@ impl<W: LayoutElement> Tile<W> {
                 target: RenderTarget::Output,
                 renderer,
                 xray: xray.as_deref(),
+                pointer_position: None,
             },
             Point::from((0., 0.)),
             pos_in_backdrop,
@@ -1531,6 +1538,7 @@ impl<W: LayoutElement> Tile<W> {
                         target: RenderTarget::Output,
                         renderer,
                         xray: Some(xray),
+                        pointer_position: None,
                     },
                     Point::from((0., 0.)),
                     pos_in_backdrop,
@@ -1552,6 +1560,7 @@ impl<W: LayoutElement> Tile<W> {
                 target: RenderTarget::Screencast,
                 renderer,
                 xray: xray.as_deref(),
+                pointer_position: None,
             },
             Point::from((0., 0.)),
             pos_in_backdrop,

@@ -245,6 +245,12 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        for tile in &mut self.tiles {
+            tile.set_adaptive_quality(quality);
+        }
+    }
+
     pub fn advance_animations(&mut self) {
         for tile in &mut self.tiles {
             tile.advance_animations();
