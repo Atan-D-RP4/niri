@@ -4139,6 +4139,12 @@ impl Niri {
     ) {
         let _span = tracy_client::span!("Niri::render");
 
+        // Convert pointer from global compositor space to output-local space.
+        if let Some(pos) = ctx.pointer_position {
+            let output_pos = self.global_space.output_geometry(output).unwrap().loc;
+            ctx.pointer_position = Some(pos - output_pos.to_f64());
+        }
+
         if ctx.target == RenderTarget::Output {
             if let Some(preview) = self.config.borrow().debug.preview_render {
                 ctx.target = match preview {

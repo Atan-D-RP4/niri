@@ -125,6 +125,7 @@ impl TestCase for Tile {
             renderer,
             target: RenderTarget::Output,
             xray: None,
+            pointer_position: None,
         };
         self.tile
             .render(ctx, location, location, 1., true, &mut |elem| {

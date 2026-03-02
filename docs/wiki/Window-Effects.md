@@ -3,7 +3,7 @@
 <sup>Since: next release</sup>
 
 You can apply background effects to windows and layer-shell surfaces.
-These include blur, xray, saturation, and noise.
+These include blur, xray, liquid glass, saturation, and noise.
 They can be enabled in the `background-effect {}` section of [window](./Configuration:-Window-Rules.md#background-effect) or [layer](./Configuration:-Layer-Rules.md#background-effect) rules.
 
 The window needs to be semitransparent for you to see the background effect (otherwise it's fully covered by the opaque window).
@@ -65,3 +65,49 @@ Fixing this requries subframe support in the Smithay rendering code.
 You can see this if you enable non-xray effects on a bottom or background layer surface, then open the [Overview](./Overview.md).
 Bottom and background layer surfaces are cloned on all workspaces that you can see in the Overview, causing interference.
 Fixing this requires support for framebuffer effect clones in the Smithay rendering code.
+
+### Liquid Glass
+
+<sup>Since: next release</sup>
+
+Liquid glass applies an SDF-based lens distortion effect to the window background, simulating a glass surface with chromatic aberration and specular highlights.
+It composes on top of blur, so you typically want blur enabled as well for the best visual result.
+
+You can enable it with `liquid-glass true` in a background effect [window](./Configuration:-Window-Rules.md#background-effect) or [layer](./Configuration:-Layer-Rules.md#background-effect) rule:
+
+```kdl
+window-rule {
+    match app-id="^foot$"
+
+    background-effect {
+        blur true
+        liquid-glass true
+    }
+}
+```
+
+Liquid glass has several tunable parameters:
+
+- `lg-distortion`: strength of the lens distortion effect. Default: `0.04`.
+- `lg-aberration`: chromatic aberration spread in pixels. Default: `2.0`.
+- `lg-highlight`: intensity of the specular rim highlight. Default: `0.25`.
+- `lg-tint`: glass tint opacity, where `1.0` is fully tinted and `0.0` is clear. Default: `0.92`.
+- `lg-animate`: set to `true` to make the glass respond to the pointer position. Default: `false`.
+
+```kdl
+window-rule {
+    match app-id="^foot$"
+
+    background-effect {
+        blur true
+        liquid-glass true
+        lg-distortion 0.08
+        lg-aberration 3.0
+        lg-highlight 0.4
+        lg-tint 0.85
+        lg-animate true
+    }
+}
+```
+
+Niri automatically adjusts the liquid glass detail level based on GPU performance to maintain smooth frame rates.
