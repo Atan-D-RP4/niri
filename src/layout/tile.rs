@@ -18,7 +18,7 @@ use super::{
 use crate::animation::{Animation, Clock};
 use crate::layout::SizingMode;
 use crate::niri_render_elements;
-use crate::render_helpers::background_effect::BackgroundEffectElement;
+use crate::render_helpers::background_effect::{BackgroundEffect, BackgroundEffectElement};
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::clipped_surface::{ClippedSurfaceRenderElement, RoundedCornerDamage};
 use crate::render_helpers::damage::ExtraDamage;
@@ -49,6 +49,9 @@ pub struct Tile<W: LayoutElement> {
 
     /// The shadow around the window.
     shadow: Shadow,
+
+    /// Per-window background effect state.
+    background_effect: BackgroundEffect,
 
     /// This tile's current sizing mode.
     ///
@@ -197,6 +200,7 @@ impl<W: LayoutElement> Tile<W> {
             border: FocusRing::new(border_config.into()),
             focus_ring: FocusRing::new(focus_ring_config),
             shadow: Shadow::new(shadow_config),
+            background_effect: BackgroundEffect::new(),
             sizing_mode,
             fullscreen_backdrop: SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.]),
             restore_to_floating: false,
@@ -263,6 +267,10 @@ impl<W: LayoutElement> Tile<W> {
         self.border.update_shaders();
         self.focus_ring.update_shaders();
         self.shadow.update_shaders();
+    }
+
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.background_effect.set_adaptive_quality(quality);
     }
 
     pub fn update_window(&mut self) {
@@ -446,7 +454,9 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
-        self.are_transitions_ongoing() || self.window.rules().baba_is_float == Some(true)
+        self.are_transitions_ongoing()
+            || self.window.rules().baba_is_float == Some(true)
+            || self.background_effect.needs_continuous_damage()
     }
 
     pub fn are_transitions_ongoing(&self) -> bool {
@@ -1459,6 +1469,8 @@ impl<W: LayoutElement> Tile<W> {
                 target: RenderTarget::Output,
                 renderer,
                 xray: xray.as_deref(),
+                pointer_position: None,
+                time: 0.,
             },
             Point::from((0., 0.)),
             xray_pos,
@@ -1510,6 +1522,8 @@ impl<W: LayoutElement> Tile<W> {
                         target: RenderTarget::Output,
                         renderer,
                         xray: Some(xray),
+                        pointer_position: None,
+                        time: 0.,
                     },
                     Point::from((0., 0.)),
                     xray_pos,
@@ -1530,6 +1544,8 @@ impl<W: LayoutElement> Tile<W> {
                 target: RenderTarget::Screencast,
                 renderer,
                 xray: xray.as_deref(),
+                pointer_position: None,
+                time: 0.,
             },
             Point::from((0., 0.)),
             xray_pos,

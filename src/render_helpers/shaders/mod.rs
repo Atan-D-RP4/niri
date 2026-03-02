@@ -21,6 +21,7 @@ pub struct Shaders {
     pub custom_resize: RefCell<Option<ShaderProgram>>,
     pub custom_close: RefCell<Option<ShaderProgram>>,
     pub custom_open: RefCell<Option<ShaderProgram>>,
+    pub custom_background_effect: RefCell<Option<GlesTexProgram>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -159,6 +160,7 @@ impl Shaders {
             custom_resize: RefCell::new(None),
             custom_close: RefCell::new(None),
             custom_open: RefCell::new(None),
+            custom_background_effect: RefCell::new(None),
         }
     }
 
@@ -194,6 +196,13 @@ impl Shaders {
         program: Option<ShaderProgram>,
     ) -> Option<ShaderProgram> {
         self.custom_open.replace(program)
+    }
+
+    pub fn replace_custom_background_effect_program(
+        &self,
+        program: Option<GlesTexProgram>,
+    ) -> Option<GlesTexProgram> {
+        self.custom_background_effect.replace(program)
     }
 
     pub fn program(&self, program: ProgramType) -> Option<ShaderProgram> {
@@ -351,6 +360,65 @@ pub fn set_custom_open_program(renderer: &mut GlesRenderer, src: Option<&str>) {
             warn!("error destroying previous custom open shader: {err:?}");
         }
     }
+}
+
+fn compile_custom_background_effect_program(
+    renderer: &mut GlesRenderer,
+    src: &str,
+) -> Result<GlesTexProgram, GlesError> {
+    let template = concat!(
+        include_str!("custom_background_effect.frag"),
+        include_str!("rounding_alpha.frag"),
+    );
+
+    // Inject user code between the section markers, replacing the no-op default implementation.
+    let marker = "// ============ USER CUSTOM SHADER SECTION ============";
+    let start = template.find(marker).ok_or(GlesError::ShaderCompileError)?;
+    let end_search = &template[start + marker.len()..];
+    let end_offset = end_search
+        .find(marker)
+        .ok_or(GlesError::ShaderCompileError)?;
+    let end = start + marker.len() + end_offset + marker.len();
+
+    let mut shader = String::new();
+    shader.push_str(&template[..start]);
+    shader.push_str(src);
+    shader.push('\n');
+    shader.push_str(&template[end..]);
+
+    renderer.compile_custom_texture_shader(
+        &shader,
+        &[
+            UniformName::new("niri_scale", UniformType::_1f),
+            UniformName::new("geo_size", UniformType::_2f),
+            UniformName::new("corner_radius", UniformType::_4f),
+            UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("noise", UniformType::_1f),
+            UniformName::new("saturation", UniformType::_1f),
+            UniformName::new("bg_color", UniformType::_4f),
+            UniformName::new("niri_pointer", UniformType::_2f),
+            UniformName::new("niri_window_size", UniformType::_2f),
+            UniformName::new("niri_time", UniformType::_1f),
+        ],
+    )
+}
+
+pub fn set_custom_background_effect_program(renderer: &mut GlesRenderer, src: Option<&str>) {
+    let program = if let Some(src) = src {
+        match compile_custom_background_effect_program(renderer, src) {
+            Ok(program) => Some(program),
+            Err(err) => {
+                warn!("error compiling custom background shader: {err:?}");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
+    let prev = Shaders::get(renderer).replace_custom_background_effect_program(program);
+    // GlesTexProgram does not have a .destroy() method unlike ShaderProgram — just drop it.
+    drop(prev);
 }
 
 pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform<'_> {

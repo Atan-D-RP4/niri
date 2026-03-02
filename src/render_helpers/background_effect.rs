@@ -11,7 +11,7 @@ use crate::niri_render_elements;
 use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::damage::ExtraDamage;
 use crate::render_helpers::framebuffer_effect::{FramebufferEffect, FramebufferEffectElement};
-use crate::render_helpers::xray::{XrayElement, XrayPos};
+use crate::render_helpers::xray::{EffectParams as XrayEffectParams, XrayElement, XrayPos};
 use crate::render_helpers::RenderCtx;
 use crate::utils::region::TransformedRegion;
 use crate::utils::surface_geo;
@@ -28,6 +28,8 @@ pub struct BackgroundEffect {
     corner_radius: CornerRadius,
     blur_config: niri_config::Blur,
     options: Options,
+    /// Adaptive quality level from the controller (0=low, 1=medium, 2=high).
+    adaptive_quality_level: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -36,12 +38,15 @@ pub struct Options {
     pub xray: bool,
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub animate: bool,
+    pub has_custom_shader: bool,
 }
 
 impl Options {
     fn is_visible(&self) -> bool {
         self.xray
             || self.blur
+            || self.has_custom_shader
             || self.noise.is_some_and(|x| x > 0.)
             || self.saturation.is_some_and(|x| x != 1.)
     }
@@ -89,7 +94,12 @@ impl BackgroundEffect {
             corner_radius: CornerRadius::default(),
             blur_config: niri_config::Blur::default(),
             options: Options::default(),
+            adaptive_quality_level: 2,
         }
+    }
+
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.adaptive_quality_level = quality;
     }
 
     /// Damage the background effect, for example when a blur subregion changes.
@@ -111,7 +121,7 @@ impl BackgroundEffect {
     pub fn update_render_elements(
         &mut self,
         corner_radius: CornerRadius,
-        effect: niri_config::BackgroundEffect,
+        effect: &niri_config::BackgroundEffect,
         has_blur_region: bool,
     ) {
         // If the surface explicitly requests a blur region, default blur to true.
@@ -121,20 +131,21 @@ impl BackgroundEffect {
             effect.blur == Some(true)
         };
 
-        let mut options = Options {
+        let options = Options {
             blur,
             xray: effect.xray == Some(true),
             noise: effect.noise,
             saturation: effect.saturation,
+            animate: effect.animate.unwrap_or(false),
+            has_custom_shader: effect.custom_shader.is_some(),
         };
 
-        // If we have some background effect but xray wasn't explicitly set, default it to true
-        // since it's cheaper.
-        if options.is_visible() && effect.xray.is_none() {
-            options.xray = true;
-        }
-
         if self.options == options && self.corner_radius == corner_radius {
+            // Animated glass needs continuous damage since pointer uniforms change every frame.
+            if self.options.needs_continuous_damage() {
+                debug!("forcing full damage for animated custom shader");
+                self.damage.damage_all();
+            }
             return;
         }
 
@@ -146,6 +157,10 @@ impl BackgroundEffect {
 
     pub fn is_visible(&self) -> bool {
         self.options.is_visible()
+    }
+
+    pub fn needs_continuous_damage(&self) -> bool {
+        self.options.needs_continuous_damage()
     }
 
     pub fn render(
@@ -170,7 +185,15 @@ impl BackgroundEffect {
         // Use noise/saturation from options, falling back to blur defaults if blurred, and
         // to no effect if not blurred.
         let blur = self.options.blur && !self.blur_config.off;
-        let blur_options = blur.then_some(BlurOptions::from(self.blur_config));
+        let blur_options = blur.then_some({
+            let mut opts = BlurOptions::from(self.blur_config);
+            match self.adaptive_quality_level {
+                0 => opts.passes = 1,
+                1 => opts.passes = (opts.passes / 2).max(1),
+                _ => {}
+            }
+            opts
+        });
         let noise = if blur { self.blur_config.noise } else { 0. };
         let noise = self.options.noise.unwrap_or(noise) as f32;
         let saturation = if blur {
@@ -179,6 +202,15 @@ impl BackgroundEffect {
             1.
         };
         let saturation = self.options.saturation.unwrap_or(saturation) as f32;
+        let pointer = if self.options.needs_continuous_damage() {
+            ctx.pointer_position.map(|pos| {
+                let local = pos - params.geometry.loc;
+                (local.x as f32, local.y as f32)
+            })
+        } else {
+            None
+        };
+        let time = ctx.time;
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
@@ -191,15 +223,19 @@ impl BackgroundEffect {
                 params,
                 xray_pos,
                 blur,
-                noise,
-                saturation,
-                &mut |elem| push(elem.into()),
+                XrayEffectParams {
+                    noise,
+                    saturation,
+                    pointer,
+                    time,
+                },
+                &mut |elem: XrayElement| push(elem.into()),
             );
         } else {
             // Render non-xray effect.
-            let elem = self
-                .nonxray
-                .render(ns, params, blur_options, noise, saturation);
+            let elem =
+                self.nonxray
+                    .render(ns, params, blur_options, noise, saturation, pointer, time);
             push(elem.into());
         }
     }
@@ -272,6 +308,12 @@ impl SurfaceBackgroundEffect {
     }
 }
 
+impl Options {
+    fn needs_continuous_damage(&self) -> bool {
+        self.animate && self.has_custom_shader
+    }
+}
+
 pub fn damage_surface(states: &SurfaceData) {
     if let Some(effect) = states.data_map.get::<SurfaceBackgroundEffect>() {
         effect.0.lock().unwrap().damage();
@@ -305,7 +347,7 @@ pub fn render_for_tile(
         let has_blur_region = blur_region.as_ref().is_some_and(|r| !r.is_empty());
 
         background_effect.update_config(blur_config);
-        background_effect.update_render_elements(radius, effect, has_blur_region);
+        background_effect.update_render_elements(radius, &effect, has_blur_region);
 
         if !background_effect.is_visible() {
             return;

@@ -26,6 +26,7 @@ use self::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::xray::Xray;
 
+pub mod adaptive_quality;
 pub mod background_effect;
 pub mod blur;
 pub mod border;
@@ -58,6 +59,9 @@ pub struct RenderCtx<'a, R> {
     pub renderer: &'a mut R,
     pub target: RenderTarget,
     pub xray: Option<&'a Xray>,
+    /// Current pointer position in output-logical coordinates.
+    pub pointer_position: Option<Point<f64, Logical>>,
+    pub time: f32,
 }
 
 impl<'a, R> RenderCtx<'a, R> {
@@ -68,6 +72,8 @@ impl<'a, R> RenderCtx<'a, R> {
             renderer: self.renderer,
             target: self.target,
             xray: self.xray,
+            pointer_position: self.pointer_position,
+            time: self.time,
         }
     }
 }
@@ -78,6 +84,8 @@ impl<'a, R: AsGlesRenderer> RenderCtx<'a, R> {
             renderer: self.renderer.as_gles_renderer(),
             target: self.target,
             xray: self.xray,
+            pointer_position: self.pointer_position,
+            time: self.time,
         }
     }
 }
