@@ -46,6 +46,9 @@ pub struct XrayElement {
     program: Option<GlesTexProgram>,
     liquid_glass: bool,
     lg_tint: f32,
+    lg_distortion: f32,
+    lg_aberration: f32,
+    lg_highlight: f32,
     lg_quality: i32,
     lg_window_size: (f32, f32),
 }
@@ -69,6 +72,9 @@ impl Xray {
         saturation: f32,
         liquid_glass: bool,
         lg_tint: f32,
+        lg_distortion: f32,
+        lg_aberration: f32,
+        lg_highlight: f32,
         lg_quality: i32,
         push: &mut dyn FnMut(XrayElement),
     ) {
@@ -164,6 +170,9 @@ impl Xray {
                     program: program.clone(),
                     liquid_glass,
                     lg_tint,
+                    lg_distortion,
+                    lg_aberration,
+                    lg_highlight,
                     lg_quality,
                     lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
                 };
@@ -219,6 +228,9 @@ impl Xray {
                 program: program.clone(),
                 liquid_glass,
                 lg_tint,
+                lg_distortion,
+                lg_aberration,
+                lg_highlight,
                 lg_quality,
                 lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
             };
@@ -232,12 +244,17 @@ impl XrayElement {
         if self.liquid_glass {
             vec![
                 Uniform::new("lg_tint", self.lg_tint),
+                Uniform::new("lg_distortion", self.lg_distortion),
+                Uniform::new("lg_aberration", self.lg_aberration),
+                Uniform::new("lg_highlight", self.lg_highlight),
                 Uniform::new("lg_quality", self.lg_quality),
                 Uniform::new(
                     "lg_window_size",
                     [self.lg_window_size.0, self.lg_window_size.1],
                 ),
                 Uniform::new("lg_local_origin", [0f32, 0.]),
+                Uniform::new("noise", self.noise),
+                Uniform::new("saturation", self.saturation),
                 Uniform::new("niri_scale", self.scale),
                 Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
                 Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
