@@ -1159,24 +1159,30 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
             self.saturation = Some(x.0);
         }
 
-        if part.liquid_glass.is_some() {
-            let mut lg = self.liquid_glass.clone().unwrap_or_default();
-            if let Some(x) = part.lg_distortion {
-                lg.distortion = x;
+        match part.liquid_glass {
+            Some(true) => {
+                let mut lg = self.liquid_glass.unwrap_or_default();
+                if let Some(x) = part.lg_distortion {
+                    lg.distortion = x;
+                }
+                if let Some(x) = part.lg_aberration {
+                    lg.aberration = x;
+                }
+                if let Some(x) = part.lg_highlight {
+                    lg.highlight = x;
+                }
+                if let Some(x) = part.lg_tint {
+                    lg.tint = x;
+                }
+                if let Some(x) = part.lg_animate {
+                    lg.animate = x;
+                }
+                self.liquid_glass = Some(lg);
             }
-            if let Some(x) = part.lg_aberration {
-                lg.aberration = x;
+            Some(false) => {
+                self.liquid_glass = None;
             }
-            if let Some(x) = part.lg_highlight {
-                lg.highlight = x;
-            }
-            if let Some(x) = part.lg_tint {
-                lg.tint = x;
-            }
-            if let Some(x) = part.lg_animate {
-                lg.animate = x;
-            }
-            self.liquid_glass = Some(lg);
+            None => {}
         }
     }
 }
@@ -1525,6 +1531,33 @@ mod tests {
         assert_eq!(lg.highlight.0, 0.25);
         assert_eq!(lg.tint.0, 0.92);
         assert!(lg.animate);
+    }
+
+    #[test]
+    fn liquid_glass_rule_explicit_disable() {
+        let config = Config::parse_mem(
+            r##"
+            window-rule {
+                background-effect {
+                    liquid-glass true
+                    lg-distortion 0.1
+                }
+            }
+            window-rule {
+                background-effect {
+                    liquid-glass false
+                }
+            }
+            "##,
+        )
+        .unwrap();
+
+        let mut effect = BackgroundEffect::default();
+        for rule in &config.window_rules {
+            effect.merge_with(&rule.background_effect);
+        }
+
+        assert!(effect.liquid_glass.is_none());
     }
 
     #[test]

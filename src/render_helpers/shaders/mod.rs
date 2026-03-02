@@ -5,6 +5,7 @@ use smithay::backend::renderer::gles::{
     GlesError, GlesFrame, GlesRenderer, GlesTexProgram, Uniform, UniformName, UniformType,
     UniformValue,
 };
+use tracing::debug;
 
 use super::renderer::NiriRenderer;
 use super::shader_element::ShaderProgram;
@@ -166,6 +167,7 @@ impl Shaders {
                     UniformName::new("lg_pointer", UniformType::_2f),
                     UniformName::new("noise", UniformType::_1f),
                     UniformName::new("saturation", UniformType::_1f),
+                    UniformName::new("bg_color", UniformType::_4f),
                     UniformName::new("niri_scale", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
                     UniformName::new("corner_radius", UniformType::_4f),
@@ -176,6 +178,11 @@ impl Shaders {
                 warn!("error compiling liquid glass shader: {err:?}");
             })
             .ok();
+
+        debug!(
+            liquid_glass_available = liquid_glass.is_some(),
+            "liquid glass shader compilation result"
+        );
 
         Self {
             border,

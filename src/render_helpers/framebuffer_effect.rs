@@ -13,6 +13,7 @@ use smithay::backend::renderer::{Frame as _, FrameContext, Offscreen, Texture as
 use smithay::gpu_span_location;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
+use tracing::{debug, warn};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::background_effect::{EffectSubregion, RenderParams};
@@ -84,6 +85,17 @@ impl FramebufferEffect {
         lg_local_origin: Option<(f32, f32)>,
         lg_pointer: Option<(f32, f32)>,
     ) -> Option<FramebufferEffectElement> {
+        let shader_available = Shaders::get(renderer).liquid_glass.is_some();
+        let use_liquid_glass = liquid_glass && shader_available;
+        if liquid_glass {
+            debug!(
+                shader_available,
+                blur = blur_options.is_some(),
+                quality = lg_quality,
+                "framebuffer liquid-glass activation"
+            );
+        }
+
         let (clip_geo, corner_radius) = params
             .clip
             .unwrap_or((params.geometry, CornerRadius::default()));
@@ -98,7 +110,7 @@ impl FramebufferEffect {
             blur_options,
             noise,
             saturation,
-            liquid_glass,
+            liquid_glass: use_liquid_glass,
             lg_tint,
             lg_distortion,
             lg_aberration,
@@ -122,6 +134,9 @@ impl FramebufferEffect {
 
             if blur_options.is_some() && inner.blur.is_none() {
                 // Blur is requested but the shader is unavailable.
+                warn!(
+                    "framebuffer effect requested blur, but blur shader is unavailable; skipping element"
+                );
                 return None;
             }
         }
@@ -428,6 +443,12 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
         } else {
             None
         };
+        if self.liquid_glass {
+            debug!(
+                shader_available = lg_program.is_some(),
+                "framebuffer liquid-glass draw program selection"
+            );
+        }
         let (program, uniforms) = if let Some(liquid_glass) = lg_program {
             // Compute liquid glass uniforms.
             let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
@@ -461,6 +482,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
                     Uniform::new("lg_pointer", [pointer.0, pointer.1]),
                     Uniform::new("noise", self.noise),
                     Uniform::new("saturation", self.saturation),
+                    Uniform::new("bg_color", [0f32, 0., 0., 0.]),
                     Uniform::new("niri_scale", self.scale),
                     Uniform::new("geo_size", clip_geo_size),
                     Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),

@@ -2,14 +2,14 @@
 
 //_DEFINES_
 
-precision highp float;
-
 #if defined(EXTERNAL)
 #extension GL_OES_EGL_image_external : require
 uniform samplerExternalOES tex;
 #else
 uniform sampler2D tex;
 #endif
+
+precision highp float;
 
 uniform float alpha;
 
@@ -26,6 +26,7 @@ uniform vec2 lg_pointer;
 // Reused from postprocess
 uniform float noise;
 uniform float saturation;
+uniform vec4 bg_color;
 
 // Rounding + clipping (same as clipped_surface.frag)
 uniform float niri_scale;
@@ -103,8 +104,9 @@ void main() {
 
         vec4 sample_rg = texture2D(tex, distorted + ca_dir);
         vec4 sample_gb = texture2D(tex, distorted - ca_dir);
+        vec4 sample_a = texture2D(tex, distorted);
 
-        color = vec4(sample_rg.r, (sample_rg.g + sample_gb.g) * 0.5, sample_gb.b, 1.0);
+        color = vec4(sample_rg.r, (sample_rg.g + sample_gb.g) * 0.5, sample_gb.b, sample_a.a);
     } else {
         // HIGH: Full distortion + 3-sample chromatic aberration
         vec2 distorted = distort_uv(v_coords, lg_distortion);
@@ -120,9 +122,10 @@ void main() {
         vec2 ca_dir = sdf_gradient(local_uv) * ca_offset;
 
         float r = texture2D(tex, distorted + ca_dir).r;
-        float g = texture2D(tex, distorted).g;
+        vec4 sample_a = texture2D(tex, distorted);
+        float g = sample_a.g;
         float b = texture2D(tex, distorted - ca_dir).b;
-        color = vec4(r, g, b, 1.0);
+        color = vec4(r, g, b, sample_a.a);
     }
 
     // Glass tint (all LOD levels)
@@ -155,6 +158,9 @@ void main() {
     if (noise > 0.0) {
         color.rgb += (gradient_noise(gl_FragCoord.xy) - 0.5) * noise;
     }
+
+    // Mix bg_color behind the texture (both premultiplied alpha).
+    color = color + bg_color * (1.0 - color.a);
 
     if (coords_geo.x < 0.0 || 1.0 < coords_geo.x || coords_geo.y < 0.0 || 1.0 < coords_geo.y) {
         gl_FragColor = vec4(0.0);

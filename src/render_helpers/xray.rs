@@ -11,6 +11,7 @@ use smithay::backend::renderer::gles::{
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
 use smithay::backend::renderer::Color32F;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Size, Transform};
+use tracing::debug;
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::background_effect::{EffectSubregion, RenderParams};
@@ -86,6 +87,14 @@ impl Xray {
             None
         };
         let use_liquid_glass = liquid_glass_program.is_some();
+        if liquid_glass {
+            debug!(
+                shader_available = use_liquid_glass,
+                blur,
+                quality = lg_quality,
+                "xray liquid-glass activation"
+            );
+        }
         let program = liquid_glass_program
             .or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone());
 
@@ -260,6 +269,7 @@ impl XrayElement {
                 Uniform::new("lg_pointer", [self.lg_pointer.0, self.lg_pointer.1]),
                 Uniform::new("noise", self.noise),
                 Uniform::new("saturation", self.saturation),
+                Uniform::new("bg_color", self.bg_color.components()),
                 Uniform::new("niri_scale", self.scale),
                 Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
                 Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),

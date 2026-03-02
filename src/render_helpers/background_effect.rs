@@ -4,6 +4,7 @@ use std::sync::Arc;
 use niri_config::CornerRadius;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
+use tracing::{debug, warn};
 
 use crate::niri_render_elements;
 use crate::render_helpers::blur::BlurOptions;
@@ -255,7 +256,22 @@ impl BackgroundEffect {
         // If we have some background effect but xray wasn't explicitly set, default it to true
         // since it's cheaper.
         if options.is_visible() && effect.xray.is_none() {
-            options.xray = true;
+            options.xray = !options.liquid_glass;
+        }
+
+        if effect.liquid_glass.is_some() {
+            debug!(
+                liquid_glass = options.liquid_glass,
+                xray = options.xray,
+                blur = options.blur,
+                quality = options.lg_quality,
+                tint = options.lg_tint,
+                distortion = options.lg_distortion,
+                aberration = options.lg_aberration,
+                highlight = options.lg_highlight,
+                animate = options.lg_animate,
+                "background effect liquid-glass options resolved"
+            );
         }
 
         // FIXME: do we also need to damage when subregion changes? Then we'll need to pass
@@ -263,6 +279,7 @@ impl BackgroundEffect {
         if self.options == options && self.corner_radius == corner_radius {
             // Animated glass needs continuous damage since pointer uniforms change every frame.
             if self.options.liquid_glass && self.options.lg_animate {
+                debug!("forcing full damage for animated liquid-glass");
                 self.damage.damage_all();
             }
             return;
@@ -323,6 +340,9 @@ impl BackgroundEffect {
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
+                if self.options.liquid_glass {
+                    warn!("liquid-glass requested xray path, but xray context is unavailable");
+                }
                 return;
             };
 
@@ -363,6 +383,11 @@ impl BackgroundEffect {
             ) {
                 push(damage.into());
                 push(elem.into());
+            } else if self.options.liquid_glass {
+                warn!(
+                    blur,
+                    "liquid-glass framebuffer path produced no element; check shader and blur availability"
+                );
             }
         }
     }
