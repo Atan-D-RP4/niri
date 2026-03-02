@@ -44,6 +44,10 @@ pub struct XrayElement {
     saturation: f32,
     bg_color: Color32F,
     program: Option<GlesTexProgram>,
+    liquid_glass: bool,
+    lg_tint: f32,
+    lg_quality: i32,
+    lg_window_size: (f32, f32),
 }
 
 impl Xray {
@@ -63,9 +67,19 @@ impl Xray {
         blur: bool,
         noise: f32,
         saturation: f32,
+        liquid_glass: bool,
+        lg_tint: f32,
+        lg_quality: i32,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        let program = Shaders::get(ctx.renderer).postprocess_and_clip.clone();
+        let program = if liquid_glass {
+            Shaders::get(ctx.renderer)
+                .liquid_glass
+                .clone()
+                .or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone())
+        } else {
+            Shaders::get(ctx.renderer).postprocess_and_clip.clone()
+        };
 
         let (clip_geo, corner_radius) = params
             .clip
@@ -148,6 +162,10 @@ impl Xray {
                     saturation,
                     bg_color: *bg_color,
                     program: program.clone(),
+                    liquid_glass,
+                    lg_tint,
+                    lg_quality,
+                    lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
                 };
                 push(elem);
             }
@@ -199,6 +217,10 @@ impl Xray {
                 saturation,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
+                liquid_glass,
+                lg_tint,
+                lg_quality,
+                lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
             };
             push(elem);
         }
@@ -206,16 +228,32 @@ impl Xray {
 }
 
 impl XrayElement {
-    fn compute_uniforms(&self) -> [Uniform<'static>; 7] {
-        [
-            Uniform::new("niri_scale", self.scale),
-            Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
-            Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
-            mat3_uniform("input_to_geo", self.input_to_clip_geo),
-            Uniform::new("noise", self.noise),
-            Uniform::new("saturation", self.saturation),
-            Uniform::new("bg_color", self.bg_color.components()),
-        ]
+    fn compute_uniforms(&self) -> Vec<Uniform<'static>> {
+        if self.liquid_glass {
+            vec![
+                Uniform::new("lg_tint", self.lg_tint),
+                Uniform::new("lg_quality", self.lg_quality),
+                Uniform::new(
+                    "lg_window_size",
+                    [self.lg_window_size.0, self.lg_window_size.1],
+                ),
+                Uniform::new("lg_local_origin", [0f32, 0.]),
+                Uniform::new("niri_scale", self.scale),
+                Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
+                Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+                mat3_uniform("input_to_geo", self.input_to_clip_geo),
+            ]
+        } else {
+            vec![
+                Uniform::new("niri_scale", self.scale),
+                Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
+                Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+                mat3_uniform("input_to_geo", self.input_to_clip_geo),
+                Uniform::new("noise", self.noise),
+                Uniform::new("saturation", self.saturation),
+                Uniform::new("bg_color", self.bg_color.components()),
+            ]
+        }
     }
 }
 
@@ -284,7 +322,7 @@ impl RenderElement<GlesRenderer> for XrayElement {
         };
 
         let uniforms = self.program.is_some().then(|| self.compute_uniforms());
-        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..]);
+        let uniforms = uniforms.as_deref().unwrap_or(&[]);
 
         frame.render_texture_from_to(
             &texture,

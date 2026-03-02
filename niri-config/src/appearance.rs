@@ -1056,6 +1056,32 @@ impl MergeWith<BlurPart> for Blur {
     }
 }
 
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+pub struct LiquidGlass {
+    #[knuffel(property, default)]
+    pub distortion: FloatOrInt<0, 100>,
+    #[knuffel(property, default)]
+    pub aberration: FloatOrInt<0, 100>,
+    #[knuffel(property, default)]
+    pub highlight: FloatOrInt<0, 100>,
+    #[knuffel(property, default)]
+    pub tint: FloatOrInt<0, 100>,
+    #[knuffel(property, default)]
+    pub animate: bool,
+}
+
+impl Default for LiquidGlass {
+    fn default() -> Self {
+        Self {
+            distortion: FloatOrInt(0.04),
+            aberration: FloatOrInt(2.0),
+            highlight: FloatOrInt(0.25),
+            tint: FloatOrInt(0.92),
+            animate: false,
+        }
+    }
+}
+
 #[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
 pub struct BackgroundEffectRule {
     #[knuffel(child, unwrap(argument))]
@@ -1066,11 +1092,35 @@ pub struct BackgroundEffectRule {
     pub noise: Option<FloatOrInt<0, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub saturation: Option<FloatOrInt<0, 1000>>,
+    #[knuffel(child, unwrap(argument))]
+    pub liquid_glass: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub lg_distortion: Option<FloatOrInt<0, 100>>,
+    #[knuffel(child, unwrap(argument))]
+    pub lg_aberration: Option<FloatOrInt<0, 100>>,
+    #[knuffel(child, unwrap(argument))]
+    pub lg_highlight: Option<FloatOrInt<0, 100>>,
+    #[knuffel(child, unwrap(argument))]
+    pub lg_tint: Option<FloatOrInt<0, 100>>,
+    #[knuffel(child, unwrap(argument))]
+    pub lg_animate: Option<bool>,
 }
 
 impl MergeWith<Self> for BackgroundEffectRule {
     fn merge_with(&mut self, part: &Self) {
-        merge_clone_opt!((self, part), xray, blur, noise, saturation);
+        merge_clone_opt!(
+            (self, part),
+            xray,
+            blur,
+            noise,
+            saturation,
+            liquid_glass,
+            lg_distortion,
+            lg_aberration,
+            lg_highlight,
+            lg_tint,
+            lg_animate
+        );
     }
 }
 
@@ -1094,6 +1144,7 @@ pub struct BackgroundEffect {
 
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub liquid_glass: Option<LiquidGlass>,
 }
 
 impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
@@ -1106,6 +1157,26 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
 
         if let Some(x) = part.saturation {
             self.saturation = Some(x.0);
+        }
+
+        if part.liquid_glass.is_some() {
+            let mut lg = self.liquid_glass.clone().unwrap_or_default();
+            if let Some(x) = part.lg_distortion {
+                lg.distortion = x;
+            }
+            if let Some(x) = part.lg_aberration {
+                lg.aberration = x;
+            }
+            if let Some(x) = part.lg_highlight {
+                lg.highlight = x;
+            }
+            if let Some(x) = part.lg_tint {
+                lg.tint = x;
+            }
+            if let Some(x) = part.lg_animate {
+                lg.animate = x;
+            }
+            self.liquid_glass = Some(lg);
         }
     }
 }
