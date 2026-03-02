@@ -440,6 +440,11 @@ impl<W: LayoutElement> Workspace<W> {
         self.shadow.update_shaders();
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        self.scrolling.set_adaptive_quality(quality);
+        self.floating.set_adaptive_quality(quality);
+    }
+
     pub fn windows(&self) -> impl Iterator<Item = &W> + '_ {
         self.tiles().map(Tile::window)
     }

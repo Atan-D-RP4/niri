@@ -1228,6 +1228,12 @@ impl<W: LayoutElement> Monitor<W> {
         self.insert_hint_element.update_shaders();
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        for ws in &mut self.workspaces {
+            ws.set_adaptive_quality(quality);
+        }
+    }
+
     pub fn update_output_size(&mut self) {
         self.scale = self.output.current_scale();
         self.view_size = output_size(&self.output);

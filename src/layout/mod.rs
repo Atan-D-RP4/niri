@@ -2791,6 +2791,25 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
+    pub fn set_adaptive_quality(&mut self, quality: u8) {
+        if let Some(InteractiveMoveState::Moving(move_)) = &mut self.interactive_move {
+            move_.tile.set_adaptive_quality(quality);
+        }
+
+        match &mut self.monitor_set {
+            MonitorSet::Normal { monitors, .. } => {
+                for mon in monitors {
+                    mon.set_adaptive_quality(quality);
+                }
+            }
+            MonitorSet::NoOutputs { workspaces, .. } => {
+                for ws in workspaces {
+                    ws.set_adaptive_quality(quality);
+                }
+            }
+        }
+    }
+
     fn update_insert_hint(&mut self, output: Option<&Output>) {
         let _span = tracy_client::span!("Layout::update_insert_hint");
 

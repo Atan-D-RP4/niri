@@ -1839,10 +1839,12 @@ impl Tty {
         };
 
         // Render the elements.
+        let pointer_pos = niri.seat.get_pointer().map(|p| p.current_location());
         let ctx = RenderCtx {
             renderer: &mut renderer,
             target: RenderTarget::Output,
             xray: None,
+            pointer_position: pointer_pos,
         };
         let mut elements = niri.render_to_vec(ctx, output, true);
 
