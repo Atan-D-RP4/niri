@@ -36,6 +36,11 @@ pub struct FramebufferEffectElement {
     blur_options: Option<BlurOptions>,
     noise: f32,
     saturation: f32,
+    liquid_glass: bool,
+    lg_tint: f32,
+    lg_quality: i32,
+    lg_window_size: Option<(f32, f32)>,
+    lg_local_origin: Option<(f32, f32)>,
     inner: Rc<RefCell<Option<Inner>>>,
 }
 
@@ -64,6 +69,11 @@ impl FramebufferEffect {
         blur_options: Option<BlurOptions>,
         noise: f32,
         saturation: f32,
+        liquid_glass: bool,
+        lg_tint: f32,
+        lg_quality: i32,
+        lg_window_size: Option<(f32, f32)>,
+        lg_local_origin: Option<(f32, f32)>,
     ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
@@ -79,6 +89,11 @@ impl FramebufferEffect {
             blur_options,
             noise,
             saturation,
+            liquid_glass,
+            lg_tint,
+            lg_quality,
+            lg_window_size,
+            lg_local_origin,
             inner: self.inner.clone(),
         };
 
@@ -379,11 +394,53 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
         );
 
-        let uniforms = inner
-            .program
-            .is_some()
-            .then(|| self.compute_uniforms(crop, frame.transformation()));
-        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..]);
+        // Select shader program: liquid_glass if enabled and available, otherwise postprocess_and_clip.
+        let lg_program = if self.liquid_glass {
+            Shaders::get_from_frame(frame).liquid_glass.clone()
+        } else {
+            None
+        };
+        let (program, uniforms) = if let Some(liquid_glass) = lg_program {
+            // Compute liquid glass uniforms.
+            let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
+            let offset = Vec2::new(offset.x as f32, offset.y as f32);
+            let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
+            let clip_size = Vec2::new(self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
+
+            let input_to_clip_geo = Mat3::from_scale(crop_size / clip_size)
+                * Mat3::from_translation(offset / crop_size);
+
+            let transform_mat = Mat3::from_translation(Vec2::new(0.5, 0.5))
+                * Mat3::from_cols_array(frame.transformation().matrix().as_ref())
+                * Mat3::from_translation(Vec2::new(-0.5, -0.5));
+            let input_to_clip_geo = input_to_clip_geo * transform_mat;
+
+            let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
+            let window_size = self.lg_window_size.unwrap_or(clip_geo_size);
+            let local_origin = self.lg_local_origin.unwrap_or((0.0, 0.0));
+
+            (
+                Some(liquid_glass),
+                vec![
+                    Uniform::new("lg_tint", self.lg_tint),
+                    Uniform::new("lg_quality", self.lg_quality),
+                    Uniform::new("lg_window_size", [window_size.0, window_size.1]),
+                    Uniform::new("lg_local_origin", [local_origin.0, local_origin.1]),
+                    Uniform::new("niri_scale", self.scale),
+                    Uniform::new("geo_size", clip_geo_size),
+                    Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+                    mat3_uniform("input_to_geo", input_to_clip_geo),
+                ],
+            )
+        } else {
+            // Not using liquid glass (or shader unavailable).
+            let uniforms: Vec<Uniform<'static>> = if inner.program.is_some() {
+                self.compute_uniforms(crop, frame.transformation()).to_vec()
+            } else {
+                Vec::new()
+            };
+            (inner.program.clone(), uniforms)
+        };
 
         frame.render_texture_from_to(
             texture,
@@ -394,8 +451,8 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             // The intermediate texture has the same transform as the frame.
             frame.transformation().invert(),
             1.,
-            inner.program.as_ref(),
-            uniforms,
+            program.as_ref(),
+            &uniforms,
         )
     }
 }

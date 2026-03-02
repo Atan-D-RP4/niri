@@ -28,18 +28,44 @@ pub struct BackgroundEffect {
     options: Options,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Options {
     pub blur: bool,
     pub xray: bool,
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub liquid_glass: bool,
+    pub lg_distortion: f64,
+    pub lg_aberration: f64,
+    pub lg_highlight: f64,
+    pub lg_tint: f64,
+    pub lg_animate: bool,
+    pub lg_quality: u8,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            blur: false,
+            xray: false,
+            noise: None,
+            saturation: None,
+            liquid_glass: false,
+            lg_distortion: 0.02,
+            lg_aberration: 0.01,
+            lg_highlight: 0.3,
+            lg_tint: 0.1,
+            lg_animate: false,
+            lg_quality: 1,
+        }
+    }
 }
 
 impl Options {
     fn is_visible(&self) -> bool {
         self.xray
             || self.blur
+            || self.liquid_glass
             || self.noise.is_some_and(|x| x > 0.)
             || self.saturation.is_some_and(|x| x != 1.)
     }
@@ -201,6 +227,19 @@ impl BackgroundEffect {
             xray: effect.xray == Some(true),
             noise: effect.noise,
             saturation: effect.saturation,
+            liquid_glass: effect.liquid_glass.is_some(),
+            lg_distortion: effect
+                .liquid_glass
+                .map(|lg| lg.distortion.0)
+                .unwrap_or(0.02),
+            lg_aberration: effect
+                .liquid_glass
+                .map(|lg| lg.aberration.0)
+                .unwrap_or(0.01),
+            lg_highlight: effect.liquid_glass.map(|lg| lg.highlight.0).unwrap_or(0.3),
+            lg_tint: effect.liquid_glass.map(|lg| lg.tint.0).unwrap_or(0.1),
+            lg_animate: effect.liquid_glass.map(|lg| lg.animate).unwrap_or(false),
+            lg_quality: 1,
         };
 
         // If we have some background effect but xray wasn't explicitly set, default it to true
@@ -260,13 +299,32 @@ impl BackgroundEffect {
             };
 
             push(damage.into());
-            xray.render(ctx, params, blur, noise, saturation, &mut |elem| {
-                push(elem.into())
-            });
+            xray.render(
+                ctx,
+                params,
+                blur,
+                noise,
+                saturation,
+                self.options.liquid_glass,
+                self.options.lg_tint as f32,
+                self.options.lg_quality as i32,
+                &mut |elem| push(elem.into()),
+            );
         } else {
             // Render non-xray effect.
             let elem = &self.nonxray[ctx.target as usize];
-            if let Some(elem) = elem.render(ctx.renderer, params, blur_options, noise, saturation) {
+            if let Some(elem) = elem.render(
+                ctx.renderer,
+                params,
+                blur_options,
+                noise,
+                saturation,
+                self.options.liquid_glass,
+                self.options.lg_tint as f32,
+                self.options.lg_quality as i32,
+                None,
+                None,
+            ) {
                 push(damage.into());
                 push(elem.into());
             }
