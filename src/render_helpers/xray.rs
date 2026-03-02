@@ -80,14 +80,14 @@ impl Xray {
         lg_pointer: Option<(f32, f32)>,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        let program = if liquid_glass {
-            Shaders::get(ctx.renderer)
-                .liquid_glass
-                .clone()
-                .or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone())
+        let liquid_glass_program = if liquid_glass {
+            Shaders::get(ctx.renderer).liquid_glass.clone()
         } else {
-            Shaders::get(ctx.renderer).postprocess_and_clip.clone()
+            None
         };
+        let use_liquid_glass = liquid_glass_program.is_some();
+        let program = liquid_glass_program
+            .or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone());
 
         let (clip_geo, corner_radius) = params
             .clip
@@ -170,7 +170,7 @@ impl Xray {
                     saturation,
                     bg_color: *bg_color,
                     program: program.clone(),
-                    liquid_glass,
+                    liquid_glass: use_liquid_glass,
                     lg_tint,
                     lg_distortion,
                     lg_aberration,
@@ -229,7 +229,7 @@ impl Xray {
                 saturation,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
-                liquid_glass,
+                liquid_glass: use_liquid_glass,
                 lg_tint,
                 lg_distortion,
                 lg_aberration,
