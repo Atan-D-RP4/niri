@@ -926,12 +926,8 @@ Override the background effect options for this window.
 - `blur`: set to `true` to enable blur behind this window, or `false` to force-disable it.
 - `noise`: amount of pixel noise added to the background (helps with color banding from blur).
 - `saturation`: color saturation of the background (`0` is desaturated, `1` is normal, `2` is 200% saturation).
-- `liquid-glass`: set to `true` to enable the liquid glass effect. See the [window effects page](./Window-Effects.md#liquid-glass) for details. <sup>Since: next release</sup>
-- `lg-distortion`: liquid glass lens distortion strength (default: `0.04`). <sup>Since: next release</sup>
-- `lg-aberration`: chromatic aberration spread in pixels (default: `2.0`). <sup>Since: next release</sup>
-- `lg-highlight`: specular rim highlight intensity (default: `0.25`). <sup>Since: next release</sup>
-- `lg-tint`: glass tint opacity (default: `0.92`). <sup>Since: next release</sup>
-- `lg-animate`: set to `true` to make the glass respond to the pointer (default: `false`). <sup>Since: next release</sup>
+- `animate`: set to `true` to make niri continuously track the pointer for this window and pass its position as `niri_pointer` to any `custom-shader`. Without it, `niri_pointer` is always `(-1, -1)`. Default: `false`. <sup>Since: next release</sup>
+- `custom-shader`: path to a `.frag` file (or an inline GLSL raw string) used as a post-processing shader for this window's background. See [Background Shaders](./Configuration:-Background-Shaders.md) for details. <sup>Since: next release</sup>
 
 See the [window effects page](./Window-Effects.md) for an overview of background effects.
 
