@@ -45,14 +45,7 @@ pub struct XrayElement {
     saturation: f32,
     bg_color: Color32F,
     program: Option<GlesTexProgram>,
-    liquid_glass: bool,
-    lg_tint: f32,
-    lg_distortion: f32,
-    lg_aberration: f32,
-    lg_highlight: f32,
-    lg_quality: i32,
-    lg_window_size: (f32, f32),
-    lg_pointer: (f32, f32),
+    is_custom_shader: bool,
 }
 
 impl Xray {
@@ -65,7 +58,6 @@ impl Xray {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         ctx: RenderCtx<GlesRenderer>,
@@ -73,36 +65,16 @@ impl Xray {
         blur: bool,
         noise: f32,
         saturation: f32,
-        liquid_glass: bool,
-        lg_tint: f32,
-        lg_distortion: f32,
-        lg_aberration: f32,
-        lg_highlight: f32,
-        lg_quality: i32,
-        lg_pointer: Option<(f32, f32)>,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        // Fallback chain: custom_liquid_glass → liquid_glass → postprocess_and_clip
-        let liquid_glass_program = if liquid_glass {
-            let custom = Shaders::get(ctx.renderer)
-                .custom_liquid_glass
-                .borrow()
-                .clone();
-            custom.or_else(|| Shaders::get(ctx.renderer).liquid_glass.clone())
-        } else {
-            None
-        };
-        let use_liquid_glass = liquid_glass_program.is_some();
-        if liquid_glass {
-            debug!(
-                shader_available = use_liquid_glass,
-                blur,
-                quality = lg_quality,
-                "xray liquid-glass activation"
-            );
-        }
-        let program = liquid_glass_program
-            .or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone());
+        // Fallback chain: custom_liquid_glass → postprocess_and_clip
+        let custom_program = Shaders::get(ctx.renderer)
+            .custom_liquid_glass
+            .borrow()
+            .clone();
+        let is_custom_shader = custom_program.is_some();
+        let program =
+            custom_program.or_else(|| Shaders::get(ctx.renderer).postprocess_and_clip.clone());
 
         let (clip_geo, corner_radius) = params
             .clip
@@ -185,14 +157,7 @@ impl Xray {
                     saturation,
                     bg_color: *bg_color,
                     program: program.clone(),
-                    liquid_glass: use_liquid_glass,
-                    lg_tint,
-                    lg_distortion,
-                    lg_aberration,
-                    lg_highlight,
-                    lg_quality,
-                    lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
-                    lg_pointer: lg_pointer.unwrap_or((-1.0, -1.0)),
+                    is_custom_shader,
                 };
                 push(elem);
             }
@@ -244,14 +209,7 @@ impl Xray {
                 saturation,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
-                liquid_glass: use_liquid_glass,
-                lg_tint,
-                lg_distortion,
-                lg_aberration,
-                lg_highlight,
-                lg_quality,
-                lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
-                lg_pointer: lg_pointer.unwrap_or((-1.0, -1.0)),
+                is_custom_shader,
             };
             push(elem);
         }
@@ -260,19 +218,10 @@ impl Xray {
 
 impl XrayElement {
     fn compute_uniforms(&self) -> Vec<Uniform<'static>> {
-        if self.liquid_glass {
+        if self.is_custom_shader {
             vec![
-                Uniform::new("lg_tint", self.lg_tint),
-                Uniform::new("lg_distortion", self.lg_distortion),
-                Uniform::new("lg_aberration", self.lg_aberration),
-                Uniform::new("lg_highlight", self.lg_highlight),
-                Uniform::new("lg_quality", self.lg_quality),
-                Uniform::new(
-                    "lg_window_size",
-                    [self.lg_window_size.0, self.lg_window_size.1],
-                ),
-                Uniform::new("lg_local_origin", [0f32, 0.]),
-                Uniform::new("lg_pointer", [self.lg_pointer.0, self.lg_pointer.1]),
+                Uniform::new("niri_pointer", [-1f32, -1.]),
+                Uniform::new("niri_window_size", <[f32; 2]>::from(self.clip_geo_size)),
                 Uniform::new("noise", self.noise),
                 Uniform::new("saturation", self.saturation),
                 Uniform::new("bg_color", self.bg_color.components()),
