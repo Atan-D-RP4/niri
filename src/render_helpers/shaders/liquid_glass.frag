@@ -22,6 +22,10 @@ uniform int lg_quality;
 uniform vec2 lg_window_size;
 // Pointer in window-local logical pixels; (-1,-1) = no pointer (animate disabled).
 uniform vec2 lg_pointer;
+// Pointer in window-local logical pixels for custom shader; (-1,-1) = no pointer.
+uniform vec2 niri_pointer;
+// Window size in logical pixels for custom shader.
+uniform vec2 niri_window_size;
 
 // Reused from postprocess
 uniform float noise;

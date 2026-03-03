@@ -452,7 +452,7 @@ impl<W: LayoutElement> Tile<W> {
     pub fn are_animations_ongoing(&self) -> bool {
         self.are_transitions_ongoing()
             || self.window.rules().baba_is_float == Some(true)
-            || self.background_effect.has_animated_glass()
+            || self.background_effect.needs_continuous_damage()
     }
 
     pub fn are_transitions_ongoing(&self) -> bool {

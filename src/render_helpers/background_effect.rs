@@ -47,6 +47,7 @@ pub struct Options {
     pub lg_tint: f64,
     pub lg_animate: bool,
     pub lg_quality: u8,
+    pub animate: bool,
 }
 
 impl Default for Options {
@@ -63,6 +64,7 @@ impl Default for Options {
             lg_tint: 0.1,
             lg_animate: false,
             lg_quality: 1,
+            animate: false,
         }
     }
 }
@@ -251,6 +253,9 @@ impl BackgroundEffect {
             lg_tint: effect.liquid_glass.map(|lg| lg.tint.0).unwrap_or(0.1),
             lg_animate: effect.liquid_glass.map(|lg| lg.animate).unwrap_or(false),
             lg_quality: self.adaptive_quality_level,
+            animate: effect
+                .animate
+                .unwrap_or_else(|| effect.liquid_glass.map(|lg| lg.animate).unwrap_or(false)),
         };
 
         // If we have some background effect but xray wasn't explicitly set, default it to true
@@ -278,7 +283,7 @@ impl BackgroundEffect {
         // subregion in update_render_elements().
         if self.options == options && self.corner_radius == corner_radius {
             // Animated glass needs continuous damage since pointer uniforms change every frame.
-            if self.options.liquid_glass && self.options.lg_animate {
+            if self.options.animate {
                 debug!("forcing full damage for animated liquid-glass");
                 self.damage.damage_all();
             }
@@ -294,8 +299,8 @@ impl BackgroundEffect {
         self.options.is_visible()
     }
 
-    pub fn has_animated_glass(&self) -> bool {
-        self.options.liquid_glass && self.options.lg_animate
+    pub fn needs_continuous_damage(&self) -> bool {
+        self.options.animate
     }
 
     pub fn render(
