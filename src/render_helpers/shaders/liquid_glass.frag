@@ -49,7 +49,7 @@ float gradient_noise(vec2 uv) {
     return fract(magic.z * fract(dot(uv, magic.xy)));
 }
 
-void main() {
+vec4 liquid_glass_effect() {
     vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
 
     // Normalized [0,1] coords over element geometry — use for all position logic.
@@ -151,8 +151,7 @@ void main() {
     color = color + bg_color * (1.0 - color.a);
 
     if (coords_geo.x < 0.0 || 1.0 < coords_geo.x || coords_geo.y < 0.0 || 1.0 < coords_geo.y) {
-        gl_FragColor = vec4(0.0);
-        return;
+        return vec4(0.0);
     }
 
     color *= niri_rounding_alpha(coords_geo.xy * geo_size, geo_size, corner_radius);
@@ -164,5 +163,15 @@ void main() {
         color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
 #endif
 
-    gl_FragColor = color;
+    return color;
+}
+
+// ============ USER CUSTOM SHADER SECTION ============
+vec4 custom_postprocess(vec4 input_color) {
+    return input_color;
+}
+// ============ USER CUSTOM SHADER SECTION ============
+
+void main() {
+    gl_FragColor = custom_postprocess(liquid_glass_effect());
 }
