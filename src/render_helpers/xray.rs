@@ -186,7 +186,7 @@ impl Xray {
                     lg_highlight,
                     lg_quality,
                     lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
-                    lg_pointer: lg_pointer.unwrap_or((0.0, 0.0)),
+                    lg_pointer: lg_pointer.unwrap_or((-1.0, -1.0)),
                 };
                 push(elem);
             }
@@ -245,7 +245,7 @@ impl Xray {
                 lg_highlight,
                 lg_quality,
                 lg_window_size: (clip_geo.size.w as f32, clip_geo.size.h as f32),
-                lg_pointer: lg_pointer.unwrap_or((0.0, 0.0)),
+                lg_pointer: lg_pointer.unwrap_or((-1.0, -1.0)),
             };
             push(elem);
         }

@@ -20,7 +20,7 @@ uniform float lg_aberration;
 uniform float lg_highlight;
 uniform int lg_quality;
 uniform vec2 lg_window_size;
-uniform vec2 lg_local_origin;
+// Pointer in window-local logical pixels; (-1,-1) = no pointer (animate disabled).
 uniform vec2 lg_pointer;
 
 // Reused from postprocess
@@ -49,112 +49,100 @@ float gradient_noise(vec2 uv) {
     return fract(magic.z * fract(dot(uv, magic.xy)));
 }
 
-// Signed distance from fragment to rounded-rect window edge.
-// Negative inside, positive outside.
-float window_sdf(vec2 local_uv) {
-    vec2 pos = local_uv * lg_window_size;
-    vec2 half_size = lg_window_size * 0.5;
-    vec2 d = abs(pos - half_size) - half_size;
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-
-// Normal direction at fragment (toward nearest edge).
-vec2 sdf_gradient(vec2 local_uv) {
-    float eps = 1.0 / max(lg_window_size.x, lg_window_size.y);
-    float dx = window_sdf(local_uv + vec2(eps, 0.0)) - window_sdf(local_uv - vec2(eps, 0.0));
-    float dy = window_sdf(local_uv + vec2(0.0, eps)) - window_sdf(local_uv - vec2(0.0, eps));
-    return normalize(vec2(dx, dy));
-}
-
-// Quadratic bulge from center — simulates convex glass.
-vec2 distort_uv(vec2 uv, float strength) {
-    vec2 center = vec2(0.5);
-    vec2 offset = uv - center;
-    float r2 = dot(offset, offset);
-    return uv + offset * r2 * strength;
-}
-
 void main() {
     vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
-    vec2 local_uv = v_coords - lg_local_origin / lg_window_size;
+
+    // Normalized [0,1] coords over element geometry — use for all position logic.
+    vec2 local_uv = coords_geo.xy;
+
+    // Radial values from element center.
+    vec2 from_center = local_uv - vec2(0.5);
+    float r = length(from_center);
+    // Safe radial direction — avoid divide-by-zero at exact center.
+    vec2 radial_dir = from_center / max(r, 0.001);
 
     vec4 color;
 
-    float sdf = window_sdf(local_uv);
-    // Edge factor: 1 at edges, 0 at center
-    float edge_factor = clamp(-sdf / max(lg_window_size.x, lg_window_size.y) * 4.0, 0.0, 1.0);
-    edge_factor = 1.0 - edge_factor;
-
     if (lg_quality == 0) {
-        // LOW: No distortion, no chromatic aberration
+        // LOW: no distortion, no chromatic aberration.
         color = texture2D(tex, v_coords);
     } else if (lg_quality == 1) {
-        // MEDIUM: Distortion + 2-sample chromatic aberration (swizzle trick)
-        vec2 distorted = distort_uv(v_coords, lg_distortion);
+        // MEDIUM: convex lens distortion + 2-sample radial chromatic aberration.
+        float r2 = r * r;
+        vec2 distorted = v_coords + from_center * r2 * lg_distortion;
 
-        // Pointer-influenced additional lens bulge
-        vec2 pointer_uv = lg_pointer / lg_window_size;
-        vec2 to_pointer = local_uv - pointer_uv;
-        float p_dist = length(to_pointer);
-        float p_influence = 1.0 - smoothstep(0.0, 0.2, p_dist);
-        distorted += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
+        // Pointer-influenced lens wobble.
+        if (lg_pointer.x >= 0.0) {
+            vec2 pointer_local = lg_pointer / lg_window_size;
+            vec2 to_pointer = local_uv - pointer_local;
+            float p_dist = length(to_pointer);
+            float p_influence = (1.0 - smoothstep(0.0, 0.25, p_dist)) * lg_distortion * 0.5;
+            distorted += normalize(to_pointer + vec2(0.001)) * p_influence;
+        }
 
-        float ca_offset = lg_aberration / max(lg_window_size.x, lg_window_size.y) * edge_factor;
-        vec2 ca_dir = sdf_gradient(local_uv) * ca_offset;
+        // Radial CA: split grows smoothly with distance from center.
+        vec2 ca = radial_dir * r * (lg_aberration * 0.004);
+        vec4 rg = texture2D(tex, distorted + ca);
+        vec4 gb = texture2D(tex, distorted - ca);
+        vec4 base = texture2D(tex, distorted);
 
-        vec4 sample_rg = texture2D(tex, distorted + ca_dir);
-        vec4 sample_gb = texture2D(tex, distorted - ca_dir);
-        vec4 sample_a = texture2D(tex, distorted);
-
-        color = vec4(sample_rg.r, (sample_rg.g + sample_gb.g) * 0.5, sample_gb.b, sample_a.a);
+        color = vec4(rg.r, (rg.g + gb.g) * 0.5, gb.b, base.a);
     } else {
-        // HIGH: Full distortion + 3-sample chromatic aberration
-        vec2 distorted = distort_uv(v_coords, lg_distortion);
+        // HIGH: convex lens distortion + 3-sample radial chromatic aberration.
+        float r2 = r * r;
+        vec2 distorted = v_coords + from_center * r2 * lg_distortion;
 
-        // Pointer-influenced additional lens bulge
-        vec2 pointer_uv = lg_pointer / lg_window_size;
-        vec2 to_pointer = local_uv - pointer_uv;
-        float p_dist = length(to_pointer);
-        float p_influence = 1.0 - smoothstep(0.0, 0.2, p_dist);
-        distorted += normalize(to_pointer + vec2(0.001)) * p_influence * lg_distortion * 0.5;
+        if (lg_pointer.x >= 0.0) {
+            vec2 pointer_local = lg_pointer / lg_window_size;
+            vec2 to_pointer = local_uv - pointer_local;
+            float p_dist = length(to_pointer);
+            float p_influence = (1.0 - smoothstep(0.0, 0.25, p_dist)) * lg_distortion * 0.5;
+            distorted += normalize(to_pointer + vec2(0.001)) * p_influence;
+        }
 
-        float ca_offset = lg_aberration / max(lg_window_size.x, lg_window_size.y) * edge_factor;
-        vec2 ca_dir = sdf_gradient(local_uv) * ca_offset;
-
-        float r = texture2D(tex, distorted + ca_dir).r;
-        vec4 sample_a = texture2D(tex, distorted);
-        float g = sample_a.g;
-        float b = texture2D(tex, distorted - ca_dir).b;
-        color = vec4(r, g, b, sample_a.a);
+        vec2 ca = radial_dir * r * (lg_aberration * 0.004);
+        float r_ch = texture2D(tex, distorted + ca).r;
+        vec4 base = texture2D(tex, distorted);
+        float b_ch = texture2D(tex, distorted - ca).b;
+        color = vec4(r_ch, base.g, b_ch, base.a);
     }
 
-    // Glass tint (all LOD levels)
+    // Glass tint: slight absorption (1.0 = no change, 0.0 = fully absorbed).
     color.rgb *= lg_tint;
 
-    // Specular rim (medium + high)
+    // Specular highlight (medium + high).
     if (lg_quality >= 1) {
-        vec2 grad = sdf_gradient(local_uv);
-        vec2 light_dir = normalize(vec2(-0.5, -0.7));
-        float spec = max(dot(grad, light_dir), 0.0);
-        spec = pow(spec, 4.0) * lg_highlight * edge_factor;
+        // Convex-lens surface normal: points outward from center.
+        // Dotted with light direction → smooth crescent highlight.
+        vec2 light = normalize(vec2(-0.5, -1.0));
+        float NdotL = max(dot(radial_dir, light), 0.0);
+        // Fade near center (undefined normal) and near far edge.
+        float rim = pow(NdotL, 3.0)
+            * smoothstep(0.05, 0.25, r)
+            * (1.0 - smoothstep(0.3, 0.65, r));
+        float spec = rim * lg_highlight;
 
-        // Pointer influence: increase specular near cursor
-        vec2 pointer_uv = lg_pointer / lg_window_size;
-        vec2 to_pointer = local_uv - pointer_uv;
-        float pointer_dist = length(to_pointer);
-        float influence = 1.0 - smoothstep(0.0, 0.2, pointer_dist);
-        spec += influence * lg_highlight * 0.3;
+        // Soft top-edge glow: diffuse light scattering through the glass top.
+        float top_glow = exp(-pow(local_uv.y * 5.0, 2.0)) * lg_highlight * 0.35;
 
-        color.rgb += spec;
+        // Pointer proximity: gentle brightening near cursor.
+        float p_glow = 0.0;
+        if (lg_pointer.x >= 0.0) {
+            vec2 pointer_local = lg_pointer / lg_window_size;
+            float pointer_dist = length(local_uv - pointer_local);
+            p_glow = (1.0 - smoothstep(0.0, 0.15, pointer_dist)) * lg_highlight * 0.25;
+        }
+
+        color.rgb += spec + top_glow + p_glow;
     }
 
-    // Saturation (BT.709, same as postprocess.frag)
+    // Saturation (BT.709, same as postprocess.frag).
     if (saturation != 1.0) {
         const vec3 w = vec3(0.2126, 0.7152, 0.0722);
         color.rgb = mix(vec3(dot(color.rgb, w)), color.rgb, saturation);
     }
 
-    // Noise dithering
+    // Noise dithering.
     if (noise > 0.0) {
         color.rgb += (gradient_noise(gl_FragCoord.xy) - 0.5) * noise;
     }
