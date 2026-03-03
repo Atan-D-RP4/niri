@@ -216,6 +216,8 @@ window-rule {
 
 The global blur settings (passes, radius) are configured separately in the `blur` section of your niri config, not per-window.
 
+Do not set `xray true` with custom background shaders. Custom shaders are rendered through the framebuffer path (`xray false`) so the shader coordinate space matches element geometry.
+
 After copying, open `liquid_glass.frag` and edit the `LG_*` constants near the top to tune the look:
 
 - `LG_DISTORTION` — convex lens warp strength (default `0.04`)

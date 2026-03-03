@@ -29,6 +29,13 @@ pub struct Xray {
     pub workspaces: Vec<(Rectangle<f64, Logical>, Color32F)>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EffectParams {
+    pub noise: f32,
+    pub saturation: f32,
+    pub pointer: Option<(f32, f32)>,
+}
+
 #[derive(Debug)]
 pub struct XrayElement {
     buffer: Rc<RefCell<EffectBuffer>>,
@@ -43,6 +50,7 @@ pub struct XrayElement {
     blur: bool,
     noise: f32,
     saturation: f32,
+    pointer: Option<(f32, f32)>,
     bg_color: Color32F,
     program: Option<GlesTexProgram>,
     is_custom_shader: bool,
@@ -63,8 +71,7 @@ impl Xray {
         ctx: RenderCtx<GlesRenderer>,
         params: RenderParams,
         blur: bool,
-        noise: f32,
-        saturation: f32,
+        effect: EffectParams,
         push: &mut dyn FnMut(XrayElement),
     ) {
         // Fallback chain: custom_liquid_glass → postprocess_and_clip
@@ -153,8 +160,9 @@ impl Xray {
                     corner_radius,
                     scale: params.scale as f32,
                     blur,
-                    noise,
-                    saturation,
+                    noise: effect.noise,
+                    saturation: effect.saturation,
+                    pointer: effect.pointer,
                     bg_color: *bg_color,
                     program: program.clone(),
                     is_custom_shader,
@@ -205,8 +213,9 @@ impl Xray {
                 corner_radius: corner_radius.scaled_by(params.zoom as f32),
                 scale: params.scale as f32,
                 blur,
-                noise,
-                saturation,
+                noise: effect.noise,
+                saturation: effect.saturation,
+                pointer: effect.pointer,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
                 is_custom_shader,
@@ -219,8 +228,9 @@ impl Xray {
 impl XrayElement {
     fn compute_uniforms(&self) -> Vec<Uniform<'static>> {
         if self.is_custom_shader {
+            let pointer = self.pointer.unwrap_or((-1f32, -1.));
             vec![
-                Uniform::new("niri_pointer", [-1f32, -1.]),
+                Uniform::new("niri_pointer", [pointer.0, pointer.1]),
                 Uniform::new("niri_window_size", <[f32; 2]>::from(self.clip_geo_size)),
                 Uniform::new("noise", self.noise),
                 Uniform::new("saturation", self.saturation),
@@ -276,6 +286,8 @@ impl RenderElement<GlesRenderer> for XrayElement {
         damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
+        debug_assert!(!self.is_custom_shader || self.pointer.is_none());
+
         let mut buffer = self.buffer.borrow_mut();
         let texture = match buffer.render(frame, self.blur) {
             Ok(x) => x,

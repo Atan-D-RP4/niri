@@ -90,7 +90,7 @@ vec4 custom_postprocess(vec4 input_color) {
 
     // Pointer-influenced lens wobble (only when pointer is in window).
     if (niri_pointer.x >= 0.0) {
-        vec2 pointer_local = niri_pointer / niri_window_size;
+        vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
         vec2 to_pointer = local_uv - pointer_local;
         float p_dist = length(to_pointer);
         float p_influence = (1.0 - smoothstep(0.0, 0.25, p_dist)) * LG_DISTORTION * 0.5;
@@ -124,7 +124,7 @@ vec4 custom_postprocess(vec4 input_color) {
     // Pointer proximity glow: gentle brightening near cursor.
     float p_glow = 0.0;
     if (niri_pointer.x >= 0.0) {
-        vec2 pointer_local = niri_pointer / niri_window_size;
+        vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
         float pointer_dist = length(local_uv - pointer_local);
         p_glow = (1.0 - smoothstep(0.0, 0.15, pointer_dist)) * LG_HIGHLIGHT * 0.25;
     }

@@ -38,6 +38,7 @@ pub struct FramebufferEffectElement {
     blur_options: Option<BlurOptions>,
     noise: f32,
     saturation: f32,
+    pointer: Option<(f32, f32)>,
     inner: Rc<RefCell<Option<Inner>>>,
 }
 
@@ -66,6 +67,7 @@ impl FramebufferEffect {
         blur_options: Option<BlurOptions>,
         noise: f32,
         saturation: f32,
+        pointer: Option<(f32, f32)>,
     ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
@@ -81,6 +83,7 @@ impl FramebufferEffect {
             blur_options,
             noise,
             saturation,
+            pointer,
             inner: self.inner.clone(),
         };
 
@@ -420,7 +423,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
 
             let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
             let window_size = clip_geo_size;
-            let pointer = (-1.0f32, -1.0f32);
+            let pointer = self.pointer.unwrap_or((-1.0f32, -1.0f32));
 
             let uniforms = vec![
                 Uniform::new("niri_pointer", [pointer.0, pointer.1]),
