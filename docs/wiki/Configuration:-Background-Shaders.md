@@ -2,10 +2,8 @@
 
 <sup>Since: next release</sup>
 
-You can write a custom GLSL shader to post-process the liquid glass background effect on a per-window basis.
-The shader runs after all liquid glass processing is complete and receives the final composited color as input.
-
-This feature requires `liquid-glass true` in the same `background-effect` block.
+You can write a custom GLSL shader to post-process the background effect on a per-window basis.
+The shader runs after all background processing is complete and receives the final composited color as input.
 
 If a custom shader fails to compile, niri will print a warning and fall back to no post-processing (equivalent to the passthrough shader).
 When running niri as a systemd service, you can see the warnings in the journal: `journalctl -ef /usr/bin/niri`
@@ -25,11 +23,10 @@ vec4 custom_postprocess(vec4 input_color) {
 }
 ```
 
-The function receives the fully-processed liquid glass color (sRGB, premultiplied alpha) and must return a color in the same format.
+The function receives the fully-processed background color (sRGB, premultiplied alpha) and must return a color in the same format.
 
 Do not declare any `uniform` variables or `varying` inputs yourself. Niri provides them all.
 All niri-defined symbols use a `niri_` or `lg_` prefix, so avoid those for your own names.
-
 The shader is compiled as GLSL ES 1.0 (`#version 100`). ES 3.0 features are not available.
 
 #### Available Uniforms
@@ -43,7 +40,7 @@ The shader is compiled as GLSL ES 1.0 (`#version 100`). ES 3.0 features are not 
 | `corner_radius` | `vec4` | Corner radii in logical pixels: (top-left, top-right, bottom-right, bottom-left) |
 | `input_to_geo` | `mat3` | Homogeneous transform from texture coords to geometry coords (0..1 range) |
 
-**Liquid glass parameters** (reflect the values set in the window rule)
+**Liquid glass parameters** (reflect the rendering state)
 
 | Uniform | Type | Description |
 |---------|------|-------------|
@@ -83,7 +80,6 @@ float gradient_noise(vec2 uv);
 ### Config Syntax
 
 Use the `custom-shader` property inside a `background-effect` block, with inline GLSL as a KDL raw string (`r"..."`).
-`liquid-glass true` must also be set in the same block.
 
 ```kdl
 window-rule {
@@ -91,7 +87,6 @@ window-rule {
 
     background-effect {
         blur true
-        liquid-glass true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
                 return input_color;
@@ -105,7 +100,7 @@ window-rule {
 
 #### Passthrough (no-op)
 
-Returns the liquid glass output unchanged. This is the default behavior when no `custom-shader` is set.
+Returns the background output unchanged. This is the default behavior when no `custom-shader` is set.
 
 ```kdl
 window-rule {
@@ -113,7 +108,6 @@ window-rule {
 
     background-effect {
         blur true
-        liquid-glass true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
                 return input_color;
@@ -133,7 +127,6 @@ window-rule {
 
     background-effect {
         blur true
-        liquid-glass true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
                 return vec4(1.0 - input_color.rgb, input_color.a);
@@ -153,7 +146,6 @@ window-rule {
 
     background-effect {
         blur true
-        liquid-glass true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
                 vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
@@ -175,7 +167,7 @@ window-rule {
 
 #### Pointer Highlight
 
-Brightens the area around the cursor when `lg-animate true` is set. Falls back gracefully when the pointer is absent.
+Brightens the area around the cursor when `animate true` is set. Falls back gracefully when the pointer is absent.
 
 ```kdl
 window-rule {
@@ -183,8 +175,7 @@ window-rule {
 
     background-effect {
         blur true
-        liquid-glass true
-        lg-animate true
+        animate true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
                 if (lg_pointer.x < 0.0) {
@@ -210,7 +201,7 @@ window-rule {
 
 **Shader fails to compile**
 
-niri logs a warning and silently falls back to passthrough (no post-processing). The liquid glass effect itself still renders normally.
+niri logs a warning and silently falls back to passthrough (no post-processing). The background effect itself still renders normally.
 
 Check the journal for the error message and the relevant GLSL line number:
 
@@ -225,12 +216,11 @@ Common causes:
 
 **Effect not visible**
 
-- Make sure `liquid-glass true` is set in the same `background-effect` block. The `custom-shader` property has no effect without it.
 - The window must be semitransparent; an opaque window covers the background entirely.
 
 **Pointer uniforms always `(-1, -1)`**
 
-Add `lg-animate true` to the `background-effect` block. Without it, niri does not track the pointer for this window and `lg_pointer` stays at `(-1, -1)`.
+Add `animate true` to the `background-effect` block. Without it, niri does not track the pointer for this window and `lg_pointer` stays at `(-1, -1)`.
 
 **Color looks wrong or washed out**
 

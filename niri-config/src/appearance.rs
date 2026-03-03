@@ -1056,32 +1056,6 @@ impl MergeWith<BlurPart> for Blur {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
-pub struct LiquidGlass {
-    #[knuffel(property, default)]
-    pub distortion: FloatOrInt<0, 100>,
-    #[knuffel(property, default)]
-    pub aberration: FloatOrInt<0, 100>,
-    #[knuffel(property, default)]
-    pub highlight: FloatOrInt<0, 100>,
-    #[knuffel(property, default)]
-    pub tint: FloatOrInt<0, 100>,
-    #[knuffel(property, default)]
-    pub animate: bool,
-}
-
-impl Default for LiquidGlass {
-    fn default() -> Self {
-        Self {
-            distortion: FloatOrInt(0.04),
-            aberration: FloatOrInt(2.0),
-            highlight: FloatOrInt(0.25),
-            tint: FloatOrInt(0.92),
-            animate: false,
-        }
-    }
-}
-
 #[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffectRule {
     #[knuffel(child, unwrap(argument))]
@@ -1092,18 +1066,6 @@ pub struct BackgroundEffectRule {
     pub noise: Option<FloatOrInt<0, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub saturation: Option<FloatOrInt<0, 1000>>,
-    #[knuffel(child, unwrap(argument))]
-    pub liquid_glass: Option<bool>,
-    #[knuffel(child, unwrap(argument))]
-    pub lg_distortion: Option<FloatOrInt<0, 100>>,
-    #[knuffel(child, unwrap(argument))]
-    pub lg_aberration: Option<FloatOrInt<0, 100>>,
-    #[knuffel(child, unwrap(argument))]
-    pub lg_highlight: Option<FloatOrInt<0, 100>>,
-    #[knuffel(child, unwrap(argument))]
-    pub lg_tint: Option<FloatOrInt<0, 100>>,
-    #[knuffel(child, unwrap(argument))]
-    pub lg_animate: Option<bool>,
     #[knuffel(child, unwrap(argument))]
     pub animate: Option<bool>,
     #[knuffel(child, unwrap(argument))]
@@ -1118,12 +1080,6 @@ impl MergeWith<Self> for BackgroundEffectRule {
             blur,
             noise,
             saturation,
-            liquid_glass,
-            lg_distortion,
-            lg_aberration,
-            lg_highlight,
-            lg_tint,
-            lg_animate,
             animate,
             custom_shader
         );
@@ -1150,7 +1106,6 @@ pub struct BackgroundEffect {
 
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
-    pub liquid_glass: Option<LiquidGlass>,
     pub animate: Option<bool>,
     pub custom_shader: Option<String>,
 }
@@ -1165,32 +1120,6 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
 
         if let Some(x) = part.saturation {
             self.saturation = Some(x.0);
-        }
-
-        match part.liquid_glass {
-            Some(true) => {
-                let mut lg = self.liquid_glass.unwrap_or_default();
-                if let Some(x) = part.lg_distortion {
-                    lg.distortion = x;
-                }
-                if let Some(x) = part.lg_aberration {
-                    lg.aberration = x;
-                }
-                if let Some(x) = part.lg_highlight {
-                    lg.highlight = x;
-                }
-                if let Some(x) = part.lg_tint {
-                    lg.tint = x;
-                }
-                if let Some(x) = part.lg_animate {
-                    lg.animate = x;
-                }
-                self.liquid_glass = Some(lg);
-            }
-            Some(false) => {
-                self.liquid_glass = None;
-            }
-            None => {}
         }
 
         merge_clone_opt!((self, part), animate, custom_shader);
@@ -1442,155 +1371,5 @@ mod tests {
         )
         "
         );
-    }
-
-    #[test]
-    fn liquid_glass_defaults() {
-        let config = Config::parse_mem(
-            r##"
-            window-rule {
-                background-effect {
-                    liquid-glass true
-                }
-            }
-            "##,
-        )
-        .unwrap();
-
-        let mut effect = BackgroundEffect::default();
-        for rule in &config.window_rules {
-            effect.merge_with(&rule.background_effect);
-        }
-
-        let lg = effect.liquid_glass.unwrap();
-        assert_eq!(lg.distortion.0, 0.04);
-        assert_eq!(lg.aberration.0, 2.0);
-        assert_eq!(lg.highlight.0, 0.25);
-        assert_eq!(lg.tint.0, 0.92);
-        assert!(!lg.animate);
-    }
-
-    #[test]
-    fn liquid_glass_custom_values() {
-        let config = Config::parse_mem(
-            r##"
-            window-rule {
-                background-effect {
-                    liquid-glass true
-                    lg-distortion 0.08
-                    lg-aberration 3.5
-                    lg-highlight 0.5
-                    lg-tint 0.85
-                    lg-animate true
-                }
-            }
-            "##,
-        )
-        .unwrap();
-
-        let mut effect = BackgroundEffect::default();
-        for rule in &config.window_rules {
-            effect.merge_with(&rule.background_effect);
-        }
-
-        let lg = effect.liquid_glass.unwrap();
-        assert_eq!(lg.distortion.0, 0.08);
-        assert_eq!(lg.aberration.0, 3.5);
-        assert_eq!(lg.highlight.0, 0.5);
-        assert_eq!(lg.tint.0, 0.85);
-        assert!(lg.animate);
-    }
-
-    #[test]
-    fn liquid_glass_disabled_by_default() {
-        let config = Config::parse_mem("").unwrap();
-        let effect = BackgroundEffect::default();
-        assert!(effect.liquid_glass.is_none());
-        assert!(config.window_rules.is_empty());
-    }
-
-    #[test]
-    fn liquid_glass_rule_merging() {
-        let config = Config::parse_mem(
-            r##"
-            window-rule {
-                background-effect {
-                    liquid-glass true
-                    lg-distortion 0.1
-                }
-            }
-            window-rule {
-                background-effect {
-                    liquid-glass true
-                    lg-aberration 5.0
-                    lg-animate true
-                }
-            }
-            "##,
-        )
-        .unwrap();
-
-        let mut effect = BackgroundEffect::default();
-        for rule in &config.window_rules {
-            effect.merge_with(&rule.background_effect);
-        }
-
-        let lg = effect.liquid_glass.unwrap();
-        assert_eq!(lg.distortion.0, 0.1);
-        assert_eq!(lg.aberration.0, 5.0);
-        assert_eq!(lg.highlight.0, 0.25);
-        assert_eq!(lg.tint.0, 0.92);
-        assert!(lg.animate);
-    }
-
-    #[test]
-    fn liquid_glass_rule_explicit_disable() {
-        let config = Config::parse_mem(
-            r##"
-            window-rule {
-                background-effect {
-                    liquid-glass true
-                    lg-distortion 0.1
-                }
-            }
-            window-rule {
-                background-effect {
-                    liquid-glass false
-                }
-            }
-            "##,
-        )
-        .unwrap();
-
-        let mut effect = BackgroundEffect::default();
-        for rule in &config.window_rules {
-            effect.merge_with(&rule.background_effect);
-        }
-
-        assert!(effect.liquid_glass.is_none());
-    }
-
-    #[test]
-    fn liquid_glass_in_layer_rule() {
-        let config = Config::parse_mem(
-            r##"
-            layer-rule {
-                background-effect {
-                    liquid-glass true
-                    lg-tint 0.8
-                }
-            }
-            "##,
-        )
-        .unwrap();
-
-        let mut effect = BackgroundEffect::default();
-        for rule in &config.layer_rules {
-            effect.merge_with(&rule.background_effect);
-        }
-
-        let lg = effect.liquid_glass.unwrap();
-        assert_eq!(lg.tint.0, 0.8);
-        assert_eq!(lg.distortion.0, 0.04);
     }
 }
