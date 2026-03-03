@@ -66,4 +66,68 @@ You can see this if you enable non-xray effects on a bottom or background layer 
 Bottom and background layer surfaces are cloned on all workspaces that you can see in the Overview, causing interference.
 Fixing this requires support for framebuffer effect clones in the Smithay rendering code.
 
-Niri automatically adjusts the liquid glass detail level based on GPU performance to maintain smooth frame rates.
+### Custom Shaders
+
+You can write a custom GLSL fragment shader to post-process the background effect on a per-window basis.
+The shader runs after all background processing and samples the composited backdrop texture directly.
+
+Use the `custom-shader` property inside a `background-effect` block with an inline GLSL string (`r"..."`) or a path to a `.frag` file.
+Set `animate true` to enable continuous pointer tracking; without it, `niri_pointer` is always `(-1, -1)`.
+
+See [this example shader](./examples/background_custom_shader.frag) for full documentation of the shader contract and several examples to experiment with.
+
+If a custom shader fails to compile, niri will print a warning to the journal and fall back to no post-processing.
+
+```kdl
+window-rule {
+    match app-id="^foot$"
+
+    background-effect {
+        blur true
+        animate true
+        custom-shader r"
+            vec4 custom_postprocess() {
+                return texture2D(tex, v_coords);
+            }
+        "
+    }
+}
+```
+
+#### Liquid Glass
+
+niri ships a ready-to-use liquid glass shader at `docs/wiki/examples/liquid_glass.frag` in the repository.
+It implements convex-lens distortion, chromatic aberration, a specular crescent highlight, and a pointer proximity glow.
+
+Copy the file to a location of your choice, then point your config at it:
+
+```kdl
+window-rule {
+    match app-id=".*"
+
+    background-effect {
+        blur true
+        custom-shader "/path/to/liquid_glass.frag"
+        animate true
+    }
+}
+```
+
+The global blur settings (passes, radius) are configured in the [`blur {}` config section](./Configuration:-Miscellaneous.md#blur), not per-window.
+
+Do not set `xray true` with custom background shaders — custom shaders render through the framebuffer path (`xray false`) so the shader coordinate space matches element geometry.
+
+After copying, open `liquid_glass.frag` and edit the `LG_*` constants near the top to tune the look:
+
+- `LG_DISTORTION` — convex lens warp strength (default `0.04`)
+- `LG_ABERRATION` — chromatic aberration spread in pixels (default `2.0`)
+- `LG_HIGHLIGHT` — specular highlight brightness (default `0.25`)
+- `LG_TINT` — glass tint / absorption (`1.0` = fully clear, default `0.92`)
+
+The shader ships with three quality variants (only one active at a time):
+
+- **HIGH** (default) — full 3-sample chromatic aberration, specular crescent, pointer glow. Best on dedicated GPUs.
+- **MEDIUM** — 2-sample CA and highlights. Good middle ground.
+- **LOW** — texture passthrough with tint only. Suitable for integrated GPUs.
+
+To switch, comment out the HIGH body and uncomment the desired variant. The file has clear `// ---------- LOW/MEDIUM/HIGH ----------` markers.
