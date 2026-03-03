@@ -40,7 +40,7 @@ The shader is compiled as GLSL ES 1.0 (`#version 100`). ES 3.0 features are not 
 |---------|------|-------------|
 | `niri_scale` | `float` | HiDPI scale factor (physical pixels per logical pixel) |
 | `geo_size` | `vec2` | Window geometry size in logical pixels |
-| `corner_radius` | `vec4` | Corner radii in logical pixels: (top-left, top-right, bottom-left, bottom-right) |
+| `corner_radius` | `vec4` | Corner radii in logical pixels: (top-left, top-right, bottom-right, bottom-left) |
 | `input_to_geo` | `mat3` | Homogeneous transform from texture coords to geometry coords (0..1 range) |
 
 **Liquid glass parameters** (reflect the values set in the window rule)
