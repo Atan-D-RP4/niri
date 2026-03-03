@@ -45,8 +45,8 @@ float gradient_noise(vec2 uv) {
 }
 
 // ============ USER CUSTOM SHADER SECTION ============
-vec4 custom_postprocess(vec4 input_color) {
-    return input_color;
+vec4 custom_postprocess() {
+    return texture2D(tex, v_coords);
 }
 // ============ USER CUSTOM SHADER SECTION ============
 
@@ -60,7 +60,7 @@ void main() {
     }
 
     // User custom shader.
-    vec4 color = custom_postprocess(texture2D(tex, v_coords));
+    vec4 color = custom_postprocess();
 
     // Saturation adjustment (BT.709 luminance weights — same as postprocess.frag).
     if (saturation != 1.0) {
