@@ -23,6 +23,7 @@ pub struct Shaders {
     pub custom_resize: RefCell<Option<ShaderProgram>>,
     pub custom_close: RefCell<Option<ShaderProgram>>,
     pub custom_open: RefCell<Option<ShaderProgram>>,
+    pub custom_liquid_glass: RefCell<Option<GlesTexProgram>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -196,6 +197,7 @@ impl Shaders {
             custom_resize: RefCell::new(None),
             custom_close: RefCell::new(None),
             custom_open: RefCell::new(None),
+            custom_liquid_glass: RefCell::new(None),
         }
     }
 
@@ -231,6 +233,13 @@ impl Shaders {
         program: Option<ShaderProgram>,
     ) -> Option<ShaderProgram> {
         self.custom_open.replace(program)
+    }
+
+    pub fn replace_custom_liquid_glass_program(
+        &self,
+        program: Option<GlesTexProgram>,
+    ) -> Option<GlesTexProgram> {
+        self.custom_liquid_glass.replace(program)
     }
 
     pub fn program(&self, program: ProgramType) -> Option<ShaderProgram> {
@@ -388,6 +397,69 @@ pub fn set_custom_open_program(renderer: &mut GlesRenderer, src: Option<&str>) {
             warn!("error destroying previous custom open shader: {err:?}");
         }
     }
+}
+
+fn compile_custom_liquid_glass_program(
+    renderer: &mut GlesRenderer,
+    src: &str,
+) -> Result<GlesTexProgram, GlesError> {
+    let template = concat!(
+        include_str!("liquid_glass.frag"),
+        include_str!("rounding_alpha.frag"),
+    );
+
+    // Inject user code between the section markers, replacing the no-op default implementation.
+    let marker = "// ============ USER CUSTOM SHADER SECTION ============";
+    let start = template.find(marker).ok_or(GlesError::ShaderCompileError)?;
+    let end_search = &template[start + marker.len()..];
+    let end_offset = end_search
+        .find(marker)
+        .ok_or(GlesError::ShaderCompileError)?;
+    let end = start + marker.len() + end_offset + marker.len();
+
+    let mut shader = String::new();
+    shader.push_str(&template[..start]);
+    shader.push_str(src);
+    shader.push('\n');
+    shader.push_str(&template[end..]);
+
+    renderer.compile_custom_texture_shader(
+        &shader,
+        &[
+            UniformName::new("niri_scale", UniformType::_1f),
+            UniformName::new("geo_size", UniformType::_2f),
+            UniformName::new("corner_radius", UniformType::_4f),
+            UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("noise", UniformType::_1f),
+            UniformName::new("saturation", UniformType::_1f),
+            UniformName::new("bg_color", UniformType::_4f),
+            UniformName::new("lg_tint", UniformType::_1f),
+            UniformName::new("lg_distortion", UniformType::_1f),
+            UniformName::new("lg_aberration", UniformType::_1f),
+            UniformName::new("lg_highlight", UniformType::_1f),
+            UniformName::new("lg_quality", UniformType::_1i),
+            UniformName::new("lg_window_size", UniformType::_2f),
+            UniformName::new("lg_pointer", UniformType::_2f),
+        ],
+    )
+}
+
+pub fn set_custom_liquid_glass_program(renderer: &mut GlesRenderer, src: Option<&str>) {
+    let program = if let Some(src) = src {
+        match compile_custom_liquid_glass_program(renderer, src) {
+            Ok(program) => Some(program),
+            Err(err) => {
+                warn!("error compiling custom background shader: {err:?}");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
+    let prev = Shaders::get(renderer).replace_custom_liquid_glass_program(program);
+    // GlesTexProgram does not have a .destroy() method unlike ShaderProgram — just drop it.
+    drop(prev);
 }
 
 pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform<'_> {
