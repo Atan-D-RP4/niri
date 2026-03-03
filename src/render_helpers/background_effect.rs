@@ -4,7 +4,7 @@ use std::sync::Arc;
 use niri_config::CornerRadius;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::niri_render_elements;
 use crate::render_helpers::blur::BlurOptions;
@@ -34,46 +34,19 @@ pub struct BackgroundEffect {
     adaptive_quality_level: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Options {
     pub blur: bool,
     pub xray: bool,
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
-    pub liquid_glass: bool,
-    pub lg_distortion: f64,
-    pub lg_aberration: f64,
-    pub lg_highlight: f64,
-    pub lg_tint: f64,
-    pub lg_animate: bool,
-    pub lg_quality: u8,
     pub animate: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            blur: false,
-            xray: false,
-            noise: None,
-            saturation: None,
-            liquid_glass: false,
-            lg_distortion: 0.02,
-            lg_aberration: 0.01,
-            lg_highlight: 0.3,
-            lg_tint: 0.1,
-            lg_animate: false,
-            lg_quality: 1,
-            animate: false,
-        }
-    }
 }
 
 impl Options {
     fn is_visible(&self) -> bool {
         self.xray
             || self.blur
-            || self.liquid_glass
             || self.noise.is_some_and(|x| x > 0.)
             || self.saturation.is_some_and(|x| x != 1.)
     }
@@ -240,43 +213,13 @@ impl BackgroundEffect {
             xray: effect.xray == Some(true),
             noise: effect.noise,
             saturation: effect.saturation,
-            liquid_glass: effect.liquid_glass.is_some(),
-            lg_distortion: effect
-                .liquid_glass
-                .map(|lg| lg.distortion.0)
-                .unwrap_or(0.02),
-            lg_aberration: effect
-                .liquid_glass
-                .map(|lg| lg.aberration.0)
-                .unwrap_or(0.01),
-            lg_highlight: effect.liquid_glass.map(|lg| lg.highlight.0).unwrap_or(0.3),
-            lg_tint: effect.liquid_glass.map(|lg| lg.tint.0).unwrap_or(0.1),
-            lg_animate: effect.liquid_glass.map(|lg| lg.animate).unwrap_or(false),
-            lg_quality: self.adaptive_quality_level,
-            animate: effect
-                .animate
-                .unwrap_or_else(|| effect.liquid_glass.map(|lg| lg.animate).unwrap_or(false)),
+            animate: effect.animate.unwrap_or(false),
         };
 
         // If we have some background effect but xray wasn't explicitly set, default it to true
         // since it's cheaper.
         if options.is_visible() && effect.xray.is_none() {
-            options.xray = !options.liquid_glass;
-        }
-
-        if effect.liquid_glass.is_some() {
-            debug!(
-                liquid_glass = options.liquid_glass,
-                xray = options.xray,
-                blur = options.blur,
-                quality = options.lg_quality,
-                tint = options.lg_tint,
-                distortion = options.lg_distortion,
-                aberration = options.lg_aberration,
-                highlight = options.lg_highlight,
-                animate = options.lg_animate,
-                "background effect liquid-glass options resolved"
-            );
+            options.xray = effect.custom_shader.is_none();
         }
 
         // FIXME: do we also need to damage when subregion changes? Then we'll need to pass
@@ -333,66 +276,21 @@ impl BackgroundEffect {
         };
         let saturation = self.options.saturation.unwrap_or(saturation) as f32;
 
-        // Transform pointer to window-local coordinates for animated liquid glass.
-        let lg_pointer = if self.options.lg_animate {
-            ctx.pointer_position.map(|pos| {
-                let local = pos - params.geometry.loc;
-                (local.x as f32, local.y as f32)
-            })
-        } else {
-            None
-        };
-
         if self.options.xray {
             let Some(xray) = ctx.xray else {
-                if self.options.liquid_glass {
-                    warn!("liquid-glass requested xray path, but xray context is unavailable");
-                }
                 return;
             };
 
             push(damage.into());
-            xray.render(
-                ctx,
-                params,
-                blur,
-                noise,
-                saturation,
-                self.options.liquid_glass,
-                self.options.lg_tint as f32,
-                self.options.lg_distortion as f32,
-                self.options.lg_aberration as f32,
-                self.options.lg_highlight as f32,
-                self.options.lg_quality as i32,
-                lg_pointer,
-                &mut |elem| push(elem.into()),
-            );
+            xray.render(ctx, params, blur, noise, saturation, &mut |elem| {
+                push(elem.into())
+            });
         } else {
             // Render non-xray effect.
             let elem = &self.nonxray[ctx.target as usize];
-            if let Some(elem) = elem.render(
-                ctx.renderer,
-                params,
-                blur_options,
-                noise,
-                saturation,
-                self.options.liquid_glass,
-                self.options.lg_tint as f32,
-                self.options.lg_distortion as f32,
-                self.options.lg_aberration as f32,
-                self.options.lg_highlight as f32,
-                self.options.lg_quality as i32,
-                None,
-                None,
-                lg_pointer,
-            ) {
+            if let Some(elem) = elem.render(ctx.renderer, params, blur_options, noise, saturation) {
                 push(damage.into());
                 push(elem.into());
-            } else if self.options.liquid_glass {
-                warn!(
-                    blur,
-                    "liquid-glass framebuffer path produced no element; check shader and blur availability"
-                );
             }
         }
     }

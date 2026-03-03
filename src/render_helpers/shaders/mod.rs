@@ -1,15 +1,13 @@
 use std::cell::RefCell;
 
+use super::renderer::NiriRenderer;
+use super::shader_element::ShaderProgram;
+use crate::render_helpers::blur::BlurProgram;
 use glam::Mat3;
 use smithay::backend::renderer::gles::{
     GlesError, GlesFrame, GlesRenderer, GlesTexProgram, Uniform, UniformName, UniformType,
     UniformValue,
 };
-use tracing::debug;
-
-use super::renderer::NiriRenderer;
-use super::shader_element::ShaderProgram;
-use crate::render_helpers::blur::BlurProgram;
 
 pub struct Shaders {
     pub border: Option<ShaderProgram>,
@@ -19,7 +17,6 @@ pub struct Shaders {
     pub resize: Option<ShaderProgram>,
     pub gradient_fade: Option<GlesTexProgram>,
     pub blur: Option<BlurProgram>,
-    pub liquid_glass: Option<GlesTexProgram>,
     pub custom_resize: RefCell<Option<ShaderProgram>>,
     pub custom_close: RefCell<Option<ShaderProgram>>,
     pub custom_open: RefCell<Option<ShaderProgram>>,
@@ -151,40 +148,6 @@ impl Shaders {
             })
             .ok();
 
-        let liquid_glass = renderer
-            .compile_custom_texture_shader(
-                concat!(
-                    include_str!("liquid_glass.frag"),
-                    include_str!("rounding_alpha.frag"),
-                ),
-                &[
-                    UniformName::new("lg_tint", UniformType::_1f),
-                    UniformName::new("lg_distortion", UniformType::_1f),
-                    UniformName::new("lg_aberration", UniformType::_1f),
-                    UniformName::new("lg_highlight", UniformType::_1f),
-                    UniformName::new("lg_quality", UniformType::_1i),
-                    UniformName::new("lg_window_size", UniformType::_2f),
-                    UniformName::new("lg_local_origin", UniformType::_2f),
-                    UniformName::new("lg_pointer", UniformType::_2f),
-                    UniformName::new("noise", UniformType::_1f),
-                    UniformName::new("saturation", UniformType::_1f),
-                    UniformName::new("bg_color", UniformType::_4f),
-                    UniformName::new("niri_scale", UniformType::_1f),
-                    UniformName::new("geo_size", UniformType::_2f),
-                    UniformName::new("corner_radius", UniformType::_4f),
-                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
-                ],
-            )
-            .map_err(|err| {
-                warn!("error compiling liquid glass shader: {err:?}");
-            })
-            .ok();
-
-        debug!(
-            liquid_glass_available = liquid_glass.is_some(),
-            "liquid glass shader compilation result"
-        );
-
         Self {
             border,
             shadow,
@@ -193,7 +156,6 @@ impl Shaders {
             resize,
             gradient_fade,
             blur,
-            liquid_glass,
             custom_resize: RefCell::new(None),
             custom_close: RefCell::new(None),
             custom_open: RefCell::new(None),

@@ -38,15 +38,6 @@ pub struct FramebufferEffectElement {
     blur_options: Option<BlurOptions>,
     noise: f32,
     saturation: f32,
-    liquid_glass: bool,
-    lg_tint: f32,
-    lg_distortion: f32,
-    lg_aberration: f32,
-    lg_highlight: f32,
-    lg_quality: i32,
-    lg_window_size: Option<(f32, f32)>,
-    lg_local_origin: Option<(f32, f32)>,
-    lg_pointer: Option<(f32, f32)>,
     inner: Rc<RefCell<Option<Inner>>>,
 }
 
@@ -68,7 +59,6 @@ impl FramebufferEffect {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         renderer: &mut GlesRenderer,
@@ -76,27 +66,7 @@ impl FramebufferEffect {
         blur_options: Option<BlurOptions>,
         noise: f32,
         saturation: f32,
-        liquid_glass: bool,
-        lg_tint: f32,
-        lg_distortion: f32,
-        lg_aberration: f32,
-        lg_highlight: f32,
-        lg_quality: i32,
-        lg_window_size: Option<(f32, f32)>,
-        lg_local_origin: Option<(f32, f32)>,
-        lg_pointer: Option<(f32, f32)>,
     ) -> Option<FramebufferEffectElement> {
-        let shader_available = Shaders::get(renderer).liquid_glass.is_some();
-        let use_liquid_glass = liquid_glass && shader_available;
-        if liquid_glass {
-            debug!(
-                shader_available,
-                blur = blur_options.is_some(),
-                quality = lg_quality,
-                "framebuffer liquid-glass activation"
-            );
-        }
-
         let (clip_geo, corner_radius) = params
             .clip
             .unwrap_or((params.geometry, CornerRadius::default()));
@@ -111,15 +81,6 @@ impl FramebufferEffect {
             blur_options,
             noise,
             saturation,
-            liquid_glass: use_liquid_glass,
-            lg_tint,
-            lg_distortion,
-            lg_aberration,
-            lg_highlight,
-            lg_quality,
-            lg_window_size,
-            lg_local_origin,
-            lg_pointer,
             inner: self.inner.clone(),
         };
 
@@ -437,24 +398,13 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
         );
 
-        // Fallback chain: custom_liquid_glass → liquid_glass → postprocess_and_clip
-        let lg_program = if self.liquid_glass {
-            let custom = Shaders::get_from_frame(frame)
-                .custom_liquid_glass
-                .borrow()
-                .clone();
-            custom.or_else(|| Shaders::get_from_frame(frame).liquid_glass.clone())
-        } else {
-            None
-        };
-        if self.liquid_glass {
-            debug!(
-                shader_available = lg_program.is_some(),
-                "framebuffer liquid-glass draw program selection"
-            );
-        }
-        let (program, uniforms) = if let Some(liquid_glass) = lg_program {
-            // Compute liquid glass uniforms.
+        // Fallback chain: custom_liquid_glass → postprocess_and_clip
+        let custom_program = Shaders::get_from_frame(frame)
+            .custom_liquid_glass
+            .borrow()
+            .clone();
+        if let Some(custom_lg) = custom_program {
+            debug!("framebuffer using custom_liquid_glass program");
             let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
             let offset = Vec2::new(offset.x as f32, offset.y as f32);
             let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
@@ -469,54 +419,52 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             let input_to_clip_geo = input_to_clip_geo * transform_mat;
 
             let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
-            let window_size = self.lg_window_size.unwrap_or(clip_geo_size);
-            let local_origin = self.lg_local_origin.unwrap_or((0.0, 0.0));
-            let pointer = self.lg_pointer.unwrap_or((-1.0, -1.0));
+            let window_size = clip_geo_size;
+            let pointer = (-1.0f32, -1.0f32);
 
-            (
-                Some(liquid_glass),
-                vec![
-                    Uniform::new("lg_tint", self.lg_tint),
-                    Uniform::new("lg_distortion", self.lg_distortion),
-                    Uniform::new("lg_aberration", self.lg_aberration),
-                    Uniform::new("lg_highlight", self.lg_highlight),
-                    Uniform::new("lg_quality", self.lg_quality),
-                    Uniform::new("lg_window_size", [window_size.0, window_size.1]),
-                    Uniform::new("lg_local_origin", [local_origin.0, local_origin.1]),
-                    Uniform::new("lg_pointer", [pointer.0, pointer.1]),
-                    Uniform::new("niri_pointer", [pointer.0, pointer.1]),
-                    Uniform::new("niri_window_size", [window_size.0, window_size.1]),
-                    Uniform::new("noise", self.noise),
-                    Uniform::new("saturation", self.saturation),
-                    Uniform::new("bg_color", [0f32, 0., 0., 0.]),
-                    Uniform::new("niri_scale", self.scale),
-                    Uniform::new("geo_size", clip_geo_size),
-                    Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
-                    mat3_uniform("input_to_geo", input_to_clip_geo),
-                ],
+            let uniforms = vec![
+                Uniform::new("niri_pointer", [pointer.0, pointer.1]),
+                Uniform::new("niri_window_size", [window_size.0, window_size.1]),
+                Uniform::new("noise", self.noise),
+                Uniform::new("saturation", self.saturation),
+                Uniform::new("bg_color", [0f32, 0., 0., 0.]),
+                Uniform::new("niri_scale", self.scale),
+                Uniform::new("geo_size", clip_geo_size),
+                Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+                mat3_uniform("input_to_geo", input_to_clip_geo),
+            ];
+
+            frame.render_texture_from_to(
+                texture,
+                Rectangle::from_size(texture.size().to_f64()),
+                clamped_dst,
+                damage,
+                &[],
+                frame.transformation().invert(),
+                1.,
+                Some(&custom_lg),
+                &uniforms,
             )
         } else {
-            // Not using liquid glass (or shader unavailable).
             let uniforms: Vec<Uniform<'static>> = if inner.program.is_some() {
                 self.compute_uniforms(crop, frame.transformation()).to_vec()
             } else {
                 Vec::new()
             };
-            (inner.program.clone(), uniforms)
-        };
 
-        frame.render_texture_from_to(
-            texture,
-            Rectangle::from_size(texture.size().to_f64()),
-            clamped_dst,
-            damage,
-            &[],
-            // The intermediate texture has the same transform as the frame.
-            frame.transformation().invert(),
-            1.,
-            program.as_ref(),
-            &uniforms,
-        )
+            frame.render_texture_from_to(
+                texture,
+                Rectangle::from_size(texture.size().to_f64()),
+                clamped_dst,
+                damage,
+                &[],
+                // The intermediate texture has the same transform as the frame.
+                frame.transformation().invert(),
+                1.,
+                inner.program.as_ref(),
+                &uniforms,
+            )
+        }
     }
 }
 
