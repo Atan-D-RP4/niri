@@ -1573,6 +1573,35 @@ impl State {
             shaders_changed = true;
         }
 
+        {
+            let new_custom = config
+                .window_rules
+                .iter()
+                .find_map(|r| r.background_effect.custom_shader.as_deref())
+                .or_else(|| {
+                    config
+                        .layer_rules
+                        .iter()
+                        .find_map(|r| r.background_effect.custom_shader.as_deref())
+                });
+            let old_custom = old_config
+                .window_rules
+                .iter()
+                .find_map(|r| r.background_effect.custom_shader.as_deref())
+                .or_else(|| {
+                    old_config
+                        .layer_rules
+                        .iter()
+                        .find_map(|r| r.background_effect.custom_shader.as_deref())
+                });
+            if new_custom != old_custom {
+                self.backend.with_primary_renderer(|renderer| {
+                    shaders::set_custom_liquid_glass_program(renderer, new_custom);
+                });
+                shaders_changed = true;
+            }
+        }
+
         if config.cursor.hide_after_inactive_ms != old_config.cursor.hide_after_inactive_ms {
             cursor_inactivity_timeout_changed = true;
         }
