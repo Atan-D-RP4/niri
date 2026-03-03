@@ -4,13 +4,13 @@ use std::sync::Arc;
 use niri_config::CornerRadius;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::niri_render_elements;
 use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::damage::ExtraDamage;
 use crate::render_helpers::framebuffer_effect::{FramebufferEffect, FramebufferEffectElement};
-use crate::render_helpers::xray::XrayElement;
+use crate::render_helpers::xray::{EffectParams as XrayEffectParams, XrayElement};
 use crate::render_helpers::{RenderCtx, RenderTarget};
 
 #[derive(Debug)]
@@ -38,12 +38,14 @@ pub struct Options {
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
     pub animate: bool,
+    pub has_custom_shader: bool,
 }
 
 impl Options {
     fn is_visible(&self) -> bool {
         self.xray
             || self.blur
+            || self.has_custom_shader
             || self.noise.is_some_and(|x| x > 0.)
             || self.saturation.is_some_and(|x| x != 1.)
     }
@@ -211,20 +213,24 @@ impl BackgroundEffect {
             noise: effect.noise,
             saturation: effect.saturation,
             animate: effect.animate.unwrap_or(false),
+            has_custom_shader: effect.custom_shader.is_some(),
         };
 
-        // If we have some background effect but xray wasn't explicitly set, default it to true
-        // since it's cheaper.
-        if options.is_visible() && effect.xray.is_none() {
-            options.xray = effect.custom_shader.is_none();
+        if options.has_custom_shader {
+            if effect.xray == Some(true) {
+                warn!("ignoring `xray true` for custom background shader");
+            }
+            options.xray = false;
+        } else if options.is_visible() && effect.xray.is_none() {
+            options.xray = true;
         }
 
         // FIXME: do we also need to damage when subregion changes? Then we'll need to pass
         // subregion in update_render_elements().
         if self.options == options && self.corner_radius == corner_radius {
             // Animated glass needs continuous damage since pointer uniforms change every frame.
-            if self.options.animate {
-                debug!("forcing full damage for animated liquid-glass");
+            if self.options.needs_continuous_damage() {
+                debug!("forcing full damage for animated custom shader");
                 self.damage.damage_all();
             }
             return;
@@ -240,7 +246,7 @@ impl BackgroundEffect {
     }
 
     pub fn needs_continuous_damage(&self) -> bool {
-        self.options.animate
+        self.options.needs_continuous_damage()
     }
 
     pub fn render(
@@ -272,6 +278,14 @@ impl BackgroundEffect {
             1.
         };
         let saturation = self.options.saturation.unwrap_or(saturation) as f32;
+        let pointer = if self.options.needs_continuous_damage() {
+            ctx.pointer_position.map(|pos| {
+                let local = pos - params.geometry.loc;
+                (local.x as f32, local.y as f32)
+            })
+        } else {
+            None
+        };
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
@@ -279,16 +293,37 @@ impl BackgroundEffect {
             };
 
             push(damage.into());
-            xray.render(ctx, params, blur, noise, saturation, &mut |elem| {
-                push(elem.into())
-            });
+            xray.render(
+                ctx,
+                params,
+                blur,
+                XrayEffectParams {
+                    noise,
+                    saturation,
+                    pointer,
+                },
+                &mut |elem| push(elem.into()),
+            );
         } else {
             // Render non-xray effect.
             let elem = &self.nonxray[ctx.target as usize];
-            if let Some(elem) = elem.render(ctx.renderer, params, blur_options, noise, saturation) {
+            if let Some(elem) = elem.render(
+                ctx.renderer,
+                params,
+                blur_options,
+                noise,
+                saturation,
+                pointer,
+            ) {
                 push(damage.into());
                 push(elem.into());
             }
         }
+    }
+}
+
+impl Options {
+    fn needs_continuous_damage(&self) -> bool {
+        self.animate && self.has_custom_shader
     }
 }
