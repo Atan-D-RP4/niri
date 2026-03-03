@@ -179,7 +179,8 @@ impl Blur {
         if size.w > TILING_THRESHOLD || size.h > TILING_THRESHOLD {
             trace!(
                 "tiled blur not implemented yet, falling back to non-tiled path for {}x{}",
-                size.w, size.h
+                size.w,
+                size.h
             );
         }
 
@@ -350,5 +351,4 @@ impl Blur {
 
         Ok(self.textures[0].clone())
     }
-
 }

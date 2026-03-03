@@ -1,13 +1,14 @@
 use std::cell::RefCell;
 
-use super::renderer::NiriRenderer;
-use super::shader_element::ShaderProgram;
-use crate::render_helpers::blur::BlurProgram;
 use glam::Mat3;
 use smithay::backend::renderer::gles::{
     GlesError, GlesFrame, GlesRenderer, GlesTexProgram, Uniform, UniformName, UniformType,
     UniformValue,
 };
+
+use super::renderer::NiriRenderer;
+use super::shader_element::ShaderProgram;
+use crate::render_helpers::blur::BlurProgram;
 
 pub struct Shaders {
     pub border: Option<ShaderProgram>,
