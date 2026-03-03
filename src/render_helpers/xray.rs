@@ -81,8 +81,13 @@ impl Xray {
         lg_pointer: Option<(f32, f32)>,
         push: &mut dyn FnMut(XrayElement),
     ) {
+        // Fallback chain: custom_liquid_glass → liquid_glass → postprocess_and_clip
         let liquid_glass_program = if liquid_glass {
-            Shaders::get(ctx.renderer).liquid_glass.clone()
+            let custom = Shaders::get(ctx.renderer)
+                .custom_liquid_glass
+                .borrow()
+                .clone();
+            custom.or_else(|| Shaders::get(ctx.renderer).liquid_glass.clone())
         } else {
             None
         };

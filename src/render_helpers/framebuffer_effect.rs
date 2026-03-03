@@ -436,10 +436,13 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
         );
 
-        // Select shader program: liquid_glass if enabled and available, otherwise
-        // postprocess_and_clip.
+        // Fallback chain: custom_liquid_glass → liquid_glass → postprocess_and_clip
         let lg_program = if self.liquid_glass {
-            Shaders::get_from_frame(frame).liquid_glass.clone()
+            let custom = Shaders::get_from_frame(frame)
+                .custom_liquid_glass
+                .borrow()
+                .clone();
+            custom.or_else(|| Shaders::get_from_frame(frame).liquid_glass.clone())
         } else {
             None
         };
