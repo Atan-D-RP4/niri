@@ -440,6 +440,8 @@ fn compile_custom_liquid_glass_program(
             UniformName::new("lg_quality", UniformType::_1i),
             UniformName::new("lg_window_size", UniformType::_2f),
             UniformName::new("lg_pointer", UniformType::_2f),
+            UniformName::new("niri_pointer", UniformType::_2f),
+            UniformName::new("niri_window_size", UniformType::_2f),
         ],
     )
 }

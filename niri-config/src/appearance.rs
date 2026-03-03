@@ -1105,6 +1105,8 @@ pub struct BackgroundEffectRule {
     #[knuffel(child, unwrap(argument))]
     pub lg_animate: Option<bool>,
     #[knuffel(child, unwrap(argument))]
+    pub animate: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
     pub custom_shader: Option<String>,
 }
 
@@ -1122,6 +1124,7 @@ impl MergeWith<Self> for BackgroundEffectRule {
             lg_highlight,
             lg_tint,
             lg_animate,
+            animate,
             custom_shader
         );
     }
@@ -1148,6 +1151,7 @@ pub struct BackgroundEffect {
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
     pub liquid_glass: Option<LiquidGlass>,
+    pub animate: Option<bool>,
     pub custom_shader: Option<String>,
 }
 
@@ -1189,7 +1193,7 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
             None => {}
         }
 
-        merge_clone_opt!((self, part), custom_shader);
+        merge_clone_opt!((self, part), animate, custom_shader);
     }
 }
 

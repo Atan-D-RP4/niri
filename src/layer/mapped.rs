@@ -130,7 +130,7 @@ impl MappedLayer {
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
-        self.rules.baba_is_float || self.background_effect.has_animated_glass()
+        self.rules.baba_is_float || self.background_effect.needs_continuous_damage()
     }
 
     pub fn surface(&self) -> &LayerSurface {

@@ -469,6 +469,8 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
                     Uniform::new("lg_window_size", [window_size.0, window_size.1]),
                     Uniform::new("lg_local_origin", [local_origin.0, local_origin.1]),
                     Uniform::new("lg_pointer", [pointer.0, pointer.1]),
+                    Uniform::new("niri_pointer", [pointer.0, pointer.1]),
+                    Uniform::new("niri_window_size", [window_size.0, window_size.1]),
                     Uniform::new("noise", self.noise),
                     Uniform::new("saturation", self.saturation),
                     Uniform::new("bg_color", [0f32, 0., 0., 0.]),
