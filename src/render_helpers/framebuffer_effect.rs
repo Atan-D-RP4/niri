@@ -67,6 +67,7 @@ impl FramebufferEffect {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         renderer: &mut GlesRenderer,
@@ -455,7 +456,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
             let window_size = self.lg_window_size.unwrap_or(clip_geo_size);
             let local_origin = self.lg_local_origin.unwrap_or((0.0, 0.0));
-            let pointer = self.lg_pointer.unwrap_or((0.0, 0.0));
+            let pointer = self.lg_pointer.unwrap_or((-1.0, -1.0));
 
             (
                 Some(liquid_glass),

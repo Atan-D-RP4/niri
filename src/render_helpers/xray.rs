@@ -65,6 +65,7 @@ impl Xray {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         ctx: RenderCtx<GlesRenderer>,
