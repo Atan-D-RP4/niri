@@ -478,7 +478,7 @@ impl<W: LayoutElement> Tile<W> {
         let has_blur_region = self.window.blur_region().is_some_and(|r| !r.is_empty());
         self.background_effect.update_render_elements(
             radius,
-            rules.background_effect,
+            &rules.background_effect,
             has_blur_region,
         );
 

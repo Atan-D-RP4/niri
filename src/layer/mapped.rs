@@ -124,7 +124,7 @@ impl MappedLayer {
         let has_blur_region = self.blur_region().is_some_and(|r| !r.is_empty());
         self.background_effect.update_render_elements(
             radius,
-            self.rules.background_effect,
+            &self.rules.background_effect,
             has_blur_region,
         );
     }

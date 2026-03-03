@@ -1082,7 +1082,7 @@ impl Default for LiquidGlass {
     }
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffectRule {
     #[knuffel(child, unwrap(argument))]
     pub xray: Option<bool>,
@@ -1104,6 +1104,8 @@ pub struct BackgroundEffectRule {
     pub lg_tint: Option<FloatOrInt<0, 100>>,
     #[knuffel(child, unwrap(argument))]
     pub lg_animate: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub custom_shader: Option<String>,
 }
 
 impl MergeWith<Self> for BackgroundEffectRule {
@@ -1119,13 +1121,14 @@ impl MergeWith<Self> for BackgroundEffectRule {
             lg_aberration,
             lg_highlight,
             lg_tint,
-            lg_animate
+            lg_animate,
+            custom_shader
         );
     }
 }
 
 /// Resolved background effect rule.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffect {
     /// Whether to render with xray effect (see through).
     ///
@@ -1145,6 +1148,7 @@ pub struct BackgroundEffect {
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
     pub liquid_glass: Option<LiquidGlass>,
+    pub custom_shader: Option<String>,
 }
 
 impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
@@ -1184,6 +1188,8 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
             }
             None => {}
         }
+
+        merge_clone_opt!((self, part), custom_shader);
     }
 }
 

@@ -220,7 +220,7 @@ impl BackgroundEffect {
     pub fn update_render_elements(
         &mut self,
         corner_radius: CornerRadius,
-        effect: niri_config::BackgroundEffect,
+        effect: &niri_config::BackgroundEffect,
         has_blur_region: bool,
     ) {
         // If the surface explicitly requests a blur region, default blur to true.
