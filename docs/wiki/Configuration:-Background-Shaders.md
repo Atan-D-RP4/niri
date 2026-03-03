@@ -26,7 +26,7 @@ vec4 custom_postprocess(vec4 input_color) {
 The function receives the fully-processed background color (sRGB, premultiplied alpha) and must return a color in the same format.
 
 Do not declare any `uniform` variables or `varying` inputs yourself. Niri provides them all.
-All niri-defined symbols use a `niri_` or `lg_` prefix, so avoid those for your own names.
+All niri-defined symbols use a `niri_` prefix, so avoid that prefix for your own names.
 The shader is compiled as GLSL ES 1.0 (`#version 100`). ES 3.0 features are not available.
 
 #### Available Uniforms
@@ -40,17 +40,12 @@ The shader is compiled as GLSL ES 1.0 (`#version 100`). ES 3.0 features are not 
 | `corner_radius` | `vec4` | Corner radii in logical pixels: (top-left, top-right, bottom-right, bottom-left) |
 | `input_to_geo` | `mat3` | Homogeneous transform from texture coords to geometry coords (0..1 range) |
 
-**Liquid glass parameters** (reflect the rendering state)
+**Pointer and animation**
 
 | Uniform | Type | Description |
 |---------|------|-------------|
-| `lg_tint` | `float` | Glass tint opacity (`0.92` default) |
-| `lg_distortion` | `float` | Lens distortion strength (`0.04` default) |
-| `lg_aberration` | `float` | Chromatic aberration spread in pixels (`2.0` default) |
-| `lg_highlight` | `float` | Specular rim highlight intensity (`0.25` default) |
-| `lg_quality` | `int` | Quality level: `0` = low, `1` = medium, `2` = high |
-| `lg_window_size` | `vec2` | Window size in physical pixels |
-| `lg_pointer` | `vec2` | Pointer position in window-local logical pixels; `(-1, -1)` when pointer is absent or animation is disabled |
+| `niri_pointer` | `vec2` | Pointer position in window-local logical pixels; `(-1, -1)` when pointer is absent or `animate` is not set |
+| `niri_window_size` | `vec2` | Window size in logical pixels |
 
 **Background effect parameters**
 
@@ -79,7 +74,9 @@ float gradient_noise(vec2 uv);
 
 ### Config Syntax
 
-Use the `custom-shader` property inside a `background-effect` block, with inline GLSL as a KDL raw string (`r"..."`).
+Use the `custom-shader` property inside a `background-effect` block, with inline GLSL as a KDL raw string (`r"..."`), or a path to a `.frag` file.
+
+Set `animate true` to make niri continuously track the pointer for this window and pass its position as `niri_pointer`. Without it, `niri_pointer` is always `(-1, -1)`. Default: `false`.
 
 ```kdl
 window-rule {
@@ -87,6 +84,7 @@ window-rule {
 
     background-effect {
         blur true
+        animate true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
                 return input_color;
@@ -178,13 +176,13 @@ window-rule {
         animate true
         custom-shader r"
             vec4 custom_postprocess(vec4 input_color) {
-                if (lg_pointer.x < 0.0) {
+                if (niri_pointer.x < 0.0) {
                     return input_color;
                 }
 
                 vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
                 vec2 uv = coords_geo.xy;
-                vec2 pointer_local = lg_pointer / lg_window_size;
+                vec2 pointer_local = niri_pointer / niri_window_size;
                 float dist = length(uv - pointer_local);
 
                 float glow = (1.0 - smoothstep(0.0, 0.2, dist)) * 0.15;
@@ -196,6 +194,73 @@ window-rule {
     }
 }
 ```
+
+### Liquid Glass Reference Shader
+
+niri ships a ready-to-use liquid glass shader at `docs/wiki/examples/liquid_glass.frag` in the repository.
+It implements convex-lens distortion, chromatic aberration, a specular crescent highlight, and a pointer proximity glow.
+
+Copy the file to a location of your choice, then point your config at it:
+
+```kdl
+window-rule {
+    match app-id=".*"
+
+    background-effect {
+        blur true
+        custom-shader "/path/to/liquid_glass.frag"
+        animate true
+    }
+}
+```
+
+The global blur settings (passes, radius) are configured separately in the `blur` section of your niri config, not per-window.
+
+After copying, open `liquid_glass.frag` and edit the `LG_*` constants near the top to tune the look:
+
+- `LG_DISTORTION` — convex lens warp strength (default `0.04`)
+- `LG_ABERRATION` — chromatic aberration spread in pixels (default `2.0`)
+- `LG_HIGHLIGHT` — specular highlight brightness (default `0.25`)
+- `LG_TINT` — glass tint / absorption (`1.0` = fully clear, default `0.92`)
+
+#### Performance Tuning
+
+The shader ships with three quality variants. Only one should be active at a time (the others are commented out).
+
+**HIGH** (default) — full 3-sample chromatic aberration, specular crescent, and pointer proximity glow. Best on dedicated GPUs.
+
+**MEDIUM** — 2-sample CA and highlights, no separate pointer glow pass. Good middle ground.
+
+**LOW** — returns `input_color * LG_TINT` only, no distortion or aberration. Suitable for integrated GPUs.
+
+To switch variants, comment out the HIGH function body and uncomment the desired variant. The file has clear `// ---------- LOW/MEDIUM/HIGH ----------` markers.
+
+### Migration Guide (from `liquid-glass` config)
+
+The `liquid-glass` config field and all associated parameters have been removed. Replace them with the custom shader approach:
+
+```kdl
+window-rule {
+    match app-id=".*"
+
+    background-effect {
+        blur true
+        custom-shader "/path/to/liquid_glass.frag"
+        animate true
+    }
+}
+```
+
+Field mapping:
+
+| Removed config field | Replacement |
+|---------------------|-------------|
+| `lg-tint 0.92` | `const float LG_TINT = 0.92;` in shader file |
+| `lg-distortion 0.04` | `const float LG_DISTORTION = 0.04;` in shader file |
+| `lg-aberration 2.0` | `const float LG_ABERRATION = 2.0;` in shader file |
+| `lg-highlight 0.25` | `const float LG_HIGHLIGHT = 0.25;` in shader file |
+| `lg-quality` | Edit LOW/MEDIUM/HIGH variant in shader file (see Performance Tuning) |
+| `lg-animate true` | `animate true` in `background-effect {}` block |
 
 ### Troubleshooting
 
@@ -220,7 +285,7 @@ Common causes:
 
 **Pointer uniforms always `(-1, -1)`**
 
-Add `animate true` to the `background-effect` block. Without it, niri does not track the pointer for this window and `lg_pointer` stays at `(-1, -1)`.
+Add `animate true` to the `background-effect` block. Without it, niri does not track the pointer for this window and `niri_pointer` stays at `(-1, -1)`.
 
 **Color looks wrong or washed out**
 
