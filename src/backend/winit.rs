@@ -160,6 +160,19 @@ impl Winit {
         if let Some(src) = config.animations.window_open.custom_shader.as_deref() {
             shaders::set_custom_open_program(renderer, Some(src));
         }
+        let custom_bg = config
+            .window_rules
+            .iter()
+            .find_map(|r| r.background_effect.custom_shader.as_deref())
+            .or_else(|| {
+                config
+                    .layer_rules
+                    .iter()
+                    .find_map(|r| r.background_effect.custom_shader.as_deref())
+            });
+        if let Some(src) = custom_bg {
+            shaders::set_custom_liquid_glass_program(renderer, Some(src));
+        }
         drop(config);
 
         niri.update_shaders();
