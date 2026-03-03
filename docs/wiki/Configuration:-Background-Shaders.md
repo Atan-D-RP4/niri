@@ -3,7 +3,7 @@
 <sup>Since: next release</sup>
 
 You can write a custom GLSL shader to post-process the background effect on a per-window basis.
-The shader runs after all background processing is complete and receives the final composited color as input.
+The shader runs after all background processing is complete and samples the composited backdrop texture directly.
 
 If a custom shader fails to compile, niri will print a warning and fall back to no post-processing (equivalent to the passthrough shader).
 When running niri as a systemd service, you can see the warnings in the journal: `journalctl -ef /usr/bin/niri`
@@ -18,12 +18,12 @@ When running niri as a systemd service, you can see the warnings in the journal:
 Your shader must define exactly one function:
 
 ```glsl
-vec4 custom_postprocess(vec4 input_color) {
-    return input_color;
+vec4 custom_postprocess() {
+    return texture2D(tex, v_coords);
 }
 ```
 
-The function receives the fully-processed background color (sRGB, premultiplied alpha) and must return a color in the same format.
+The function takes no arguments. Sample the backdrop texture yourself using `texture2D(tex, v_coords)` (or any modified coordinates). Return a color in sRGB with premultiplied alpha.
 
 Do not declare any `uniform` variables or `varying` inputs yourself. Niri provides them all.
 All niri-defined symbols use a `niri_` prefix, so avoid that prefix for your own names.
@@ -86,8 +86,8 @@ window-rule {
         blur true
         animate true
         custom-shader r"
-            vec4 custom_postprocess(vec4 input_color) {
-                return input_color;
+            vec4 custom_postprocess() {
+                return texture2D(tex, v_coords);
             }
         "
     }
@@ -107,8 +107,8 @@ window-rule {
     background-effect {
         blur true
         custom-shader r"
-            vec4 custom_postprocess(vec4 input_color) {
-                return input_color;
+            vec4 custom_postprocess() {
+                return texture2D(tex, v_coords);
             }
         "
     }
@@ -126,8 +126,9 @@ window-rule {
     background-effect {
         blur true
         custom-shader r"
-            vec4 custom_postprocess(vec4 input_color) {
-                return vec4(1.0 - input_color.rgb, input_color.a);
+            vec4 custom_postprocess() {
+                vec4 color = texture2D(tex, v_coords);
+                return vec4(1.0 - color.rgb, color.a);
             }
         "
     }
@@ -145,7 +146,8 @@ window-rule {
     background-effect {
         blur true
         custom-shader r"
-            vec4 custom_postprocess(vec4 input_color) {
+            vec4 custom_postprocess() {
+                vec4 color = texture2D(tex, v_coords);
                 vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
                 vec2 uv = coords_geo.xy;
 
@@ -156,7 +158,7 @@ window-rule {
                 // Smooth falloff: bright center, dark edges.
                 float vignette = 1.0 - smoothstep(0.5, 1.4, dist);
 
-                return vec4(input_color.rgb * vignette, input_color.a);
+                return vec4(color.rgb * vignette, color.a);
             }
         "
     }
@@ -175,9 +177,10 @@ window-rule {
         blur true
         animate true
         custom-shader r"
-            vec4 custom_postprocess(vec4 input_color) {
+            vec4 custom_postprocess() {
+                vec4 color = texture2D(tex, v_coords);
                 if (niri_pointer.x < 0.0) {
-                    return input_color;
+                    return color;
                 }
 
                 vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
@@ -188,7 +191,7 @@ window-rule {
                 float glow = (1.0 - smoothstep(0.0, 0.2, dist)) * 0.15;
 
                 // Premultiplied alpha: add to RGB only, not alpha.
-                return vec4(input_color.rgb + glow * input_color.a, input_color.a);
+                return vec4(color.rgb + glow * color.a, color.a);
             }
         "
     }
@@ -233,7 +236,7 @@ The shader ships with three quality variants. Only one should be active at a tim
 
 **MEDIUM** — 2-sample CA and highlights, no separate pointer glow pass. Good middle ground.
 
-**LOW** — returns `input_color * LG_TINT` only, no distortion or aberration. Suitable for integrated GPUs.
+**LOW** — samples `texture2D(tex, v_coords) * LG_TINT` only, no distortion or aberration. Suitable for integrated GPUs.
 
 To switch variants, comment out the HIGH function body and uncomment the desired variant. The file has clear `// ---------- LOW/MEDIUM/HIGH ----------` markers.
 
@@ -277,7 +280,7 @@ journalctl -ef /usr/bin/niri
 ```
 
 Common causes:
-- Missing `vec4 custom_postprocess(vec4 input_color)` function signature (must match exactly).
+- Missing `vec4 custom_postprocess()` function definition (must use this exact signature with no arguments).
 - Using GLSL ES 3.0 features (`texture()`, `in`/`out` qualifiers, etc.) — use `texture2D()` and GLSL ES 1.0 syntax instead.
 - Declaring a `uniform` that niri already provides — remove it from your shader.
 

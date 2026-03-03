@@ -15,7 +15,7 @@
 //
 // Uniforms available from the template (do not re-declare):
 //   uniform sampler2D tex;          // backdrop texture
-//   uniform vec2 v_coords;          // texture coordinates
+//   uniform vec2 v_coords;          // texture coordinates (use texture2D(tex, ...) yourself)
 //   uniform mat3 input_to_geo;      // maps tex coords to [0,1] element space
 //   uniform vec2 geo_size;          // element size in logical pixels
 //   uniform vec2 niri_pointer;      // pointer in window-local px; (-1,-1) = no pointer
@@ -32,12 +32,12 @@ const float LG_TINT       = 0.92;   // glass tint (absorption; 1.0 = clear)
 
 // ---------- LOW quality variant (no distortion, no CA) ----------
 // Replace the HIGH variant below with this for integrated GPUs.
-// vec4 custom_postprocess(vec4 input_color) {
-//     return input_color * LG_TINT;
+// vec4 custom_postprocess() {
+//     return texture2D(tex, v_coords) * LG_TINT;
 // }
 
 // ---------- MEDIUM quality variant (distortion + 2-sample CA + highlights) ----------
-// vec4 custom_postprocess(vec4 input_color) {
+// vec4 custom_postprocess() {
 //     vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
 //     vec2 local_uv = coords_geo.xy;
 //     vec2 from_center = local_uv - vec2(0.5);
@@ -73,7 +73,7 @@ const float LG_TINT       = 0.92;   // glass tint (absorption; 1.0 = clear)
 // }
 
 // ---------- HIGH quality variant (full: distortion + 3-sample CA + specular + pointer) ----------
-vec4 custom_postprocess(vec4 input_color) {
+vec4 custom_postprocess() {
     // Convert to normalized [0,1] element geometry coordinates.
     vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
     vec2 local_uv = coords_geo.xy;
