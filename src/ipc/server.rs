@@ -36,7 +36,6 @@ use crate::layout::workspace::WorkspaceId;
 use crate::niri::State;
 use crate::utils::{version, with_toplevel_role};
 use crate::window::Mapped;
-use crate::zoom::OutputZoomExt;
 
 // If an event stream client fails to read events fast enough that we accumulate more than this
 // number in our buffer, we drop that event stream client.
@@ -464,11 +463,11 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                     .layout
                     .outputs()
                     .fold(HashMap::new(), |mut acc, output| {
-                        let level = output.zoom_level();
+                        let level = state.niri.layout.zoom_level_for_output(output);
                         acc.insert(
                             output.name().clone(),
                             niri_ipc::Zoom {
-                                is_locked: output.zoom_locked(),
+                                is_locked: state.niri.layout.zoom_locked_for_output(output),
                                 level,
                             },
                         );
