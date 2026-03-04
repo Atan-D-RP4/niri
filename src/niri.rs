@@ -2964,11 +2964,12 @@ impl Niri {
         let scale = output.current_scale();
         let transform = output.current_transform();
 
+        let zoom_state = self.layout.zoom_state_for_output(output).cloned();
         {
             let mut layer_map = layer_map_for_output(output);
             for layer in layer_map.layers() {
                 layer.with_surfaces(|surface, data| {
-                    send_scale_transform(surface, data, scale, transform);
+                    send_scale_transform(surface, data, scale, transform, zoom_state.as_ref());
                 });
 
                 if let Some(mapped) = self.mapped_layer_surfaces.get_mut(layer) {
@@ -4008,6 +4009,7 @@ impl Niri {
                         data,
                         output::Scale::Fractional(cursor_scale),
                         cursor_transform,
+                        None,
                     )
                 });
                 if let Some((surface, _)) = dnd {
@@ -4017,6 +4019,7 @@ impl Niri {
                             data,
                             output::Scale::Fractional(dnd_scale),
                             dnd_transform,
+                            None,
                         );
                     });
                 }
@@ -4071,6 +4074,7 @@ impl Niri {
                         data,
                         output::Scale::Fractional(dnd_scale),
                         dnd_transform,
+                        None,
                     );
                 });
             }

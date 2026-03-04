@@ -47,9 +47,12 @@ use scrolling::{Column, ColumnWidth};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
+use smithay::desktop::layer_map_for_output;
 use smithay::output::{self, Output};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Serial, Size, Transform};
+use smithay::wayland::compositor::with_states;
+use smithay::wayland::shell::wlr_layer::Layer;
 use tile::{Tile, TileRenderElement};
 use workspace::{WorkspaceAddWindowTarget, WorkspaceId};
 
@@ -70,13 +73,14 @@ use crate::rubber_band::RubberBand;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::{
     ensure_min_max_size_maybe_zero, output_matches_name, output_size,
-    round_logical_in_physical_max1, ResizeEdge,
+    round_logical_in_physical_max1, send_scale_transform, ResizeEdge,
 };
 use crate::window::ResolvedWindowRules;
-use crate::zoom::{
-    compute_focal_for_cursor, compute_focal_for_on_edge_anchor, compute_on_edge_cursor_anchor,
-};
 pub use crate::zoom::OutputZoomState;
+use crate::zoom::{
+    apply_zoom_viewport, calculate_visibility, compute_focal_for_cursor,
+    compute_focal_for_on_edge_anchor, compute_on_edge_cursor_anchor,
+};
 
 pub mod closing_window;
 pub mod floating;
@@ -222,7 +226,13 @@ pub trait LayoutElement {
     fn max_size(&self) -> Size<i32, Logical>;
     fn is_wl_surface(&self, wl_surface: &WlSurface) -> bool;
     fn has_ssd(&self) -> bool;
-    fn set_preferred_scale_transform(&self, scale: output::Scale, transform: Transform);
+    fn wl_surface(&self) -> Option<WlSurface>;
+    fn set_preferred_scale_transform(
+        &self,
+        scale: output::Scale,
+        transform: Transform,
+        zoom_state: Option<&OutputZoomState>,
+    );
     fn output_enter(&self, output: &Output);
     fn output_leave(&self, output: &Output);
     fn set_offscreen_data(&self, data: Option<OffscreenData>);
@@ -362,6 +372,9 @@ pub struct Options {
     pub gestures: niri_config::Gestures,
     pub overview: niri_config::Overview,
     pub max_zoom: f64,
+    pub use_fractional_scale: bool,
+    pub max_fractional_scale: f64,
+    pub zoom_scale_sensitivity: f64,
     // Debug flags.
     pub disable_resize_throttling: bool,
     pub disable_transactions: bool,
@@ -623,6 +636,9 @@ impl Options {
             gestures: config.gestures,
             overview: config.overview,
             max_zoom: config.zoom.max_zoom.clamp(1.0, 100.0),
+            use_fractional_scale: config.zoom.use_fractional_scale,
+            max_fractional_scale: config.zoom.max_fractional_scale.clamp(1.0, 20.0),
+            zoom_scale_sensitivity: config.zoom.scale_sensitivity.clamp(0.0, 1.0),
             disable_resize_throttling: config.debug.disable_resize_throttling,
             disable_transactions: config.debug.disable_transactions,
             deactivate_unfocused_windows: config.debug.deactivate_unfocused_windows,
@@ -2993,6 +3009,75 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
+    /// Associated function (not `&self`) to avoid borrow conflicts when the caller
+    /// must hold an immutable borrow of `monitors[mon_idx]` before writing results back.
+    fn compute_zoomed_surfaces_for_monitor(
+        monitors: &[Monitor<W>],
+        interactive_move: &Option<InteractiveMoveState<W>>,
+        mon_idx: usize,
+        max_fractional_scale: f64,
+        zoom_scale_sensitivity: f64,
+    ) -> HashMap<WlSurface, f64> {
+        let mon = &monitors[mon_idx];
+        if mon.zoom_state.level <= 1.0 {
+            return HashMap::new();
+        }
+
+        let output = &mon.output;
+        let output_geo = Rectangle::from_size(output_size(output).to_f64());
+        let focal = mon.zoom_state.focal;
+        let level = mon.zoom_state.level;
+        let zoom_rect = apply_zoom_viewport(output_geo, focal, level);
+        let zoom_boost = (level - 1.0) * zoom_scale_sensitivity;
+        let capped_zoom = (1.0 + zoom_boost).min(max_fractional_scale).max(1.0);
+
+        let mut result: HashMap<WlSurface, f64> = HashMap::new();
+
+        let ws_idx = mon.active_workspace_idx();
+        let ws = &mon.workspaces[ws_idx];
+        for (tile, pos, _visible) in ws.tiles_with_render_positions() {
+            let win = tile.window();
+            let window_geo = Rectangle::new(pos, win.size().to_f64());
+            if calculate_visibility(window_geo, zoom_rect) > 0.0 {
+                if let Some(surface) = win.wl_surface() {
+                    result.insert(surface, capped_zoom);
+                }
+            }
+        }
+
+        if let Some(InteractiveMoveState::Moving(move_data)) = interactive_move {
+            if move_data.output == *output {
+                let win = move_data.tile.window();
+                let win_size = win.size().to_f64();
+                let (rx, ry) = move_data.pointer_ratio_within_window;
+                let pos = Point::from((
+                    move_data.pointer_pos_within_output.x - win_size.w * rx,
+                    move_data.pointer_pos_within_output.y - win_size.h * ry,
+                ));
+                if calculate_visibility(Rectangle::new(pos, win_size), zoom_rect) > 0.0 {
+                    if let Some(surface) = win.wl_surface() {
+                        result.insert(surface, capped_zoom);
+                    }
+                }
+            }
+        }
+
+        let layer_map = layer_map_for_output(output);
+        for layer in layer_map.layers() {
+            if layer.layer() == Layer::Background {
+                continue;
+            }
+            if let Some(geo) = layer_map.layer_geometry(layer) {
+                let layer_rect = Rectangle::new(geo.loc.to_f64(), geo.size.to_f64());
+                if calculate_visibility(layer_rect, zoom_rect) > 0.0 {
+                    result.insert(layer.wl_surface().clone(), capped_zoom);
+                }
+            }
+        }
+
+        result
+    }
+
     pub fn advance_animations(&mut self) {
         let _span = tracy_client::span!("Layout::advance_animations");
 
@@ -3124,7 +3209,7 @@ impl<W: LayoutElement> Layout<W> {
 
         match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => {
-                for mon in monitors {
+                for mon in monitors.iter_mut() {
                     mon.set_overview_progress(self.overview_progress.as_ref());
                     mon.advance_animations();
 
@@ -3132,6 +3217,59 @@ impl<W: LayoutElement> Layout<W> {
                     mon.zoom_transition.apply_to_state(&mut mon.zoom_state);
 
                     mon.zoom_transition.clear_if_done();
+                }
+
+                if self.options.use_fractional_scale {
+                    for mon_idx in 0..monitors.len() {
+                        let zoom_level = monitors[mon_idx].zoom_state.level;
+                        if zoom_level <= 1.0 {
+                            if !monitors[mon_idx].zoom_state.zoomed_surfaces.is_empty() {
+                                let scale = monitors[mon_idx].output.current_scale();
+                                let transform = monitors[mon_idx].output.current_transform();
+                                let surfaces: Vec<WlSurface> = monitors[mon_idx]
+                                    .zoom_state
+                                    .zoomed_surfaces
+                                    .keys()
+                                    .cloned()
+                                    .collect();
+                                for surface in &surfaces {
+                                    with_states(surface, |data| {
+                                        send_scale_transform(surface, data, scale, transform, None);
+                                    });
+                                }
+                                monitors[mon_idx].zoom_state.zoomed_surfaces.clear();
+                                monitors[mon_idx].zoom_state.last_scale_update_level = None;
+                            }
+                            continue;
+                        }
+
+                        let new_surfaces = Self::compute_zoomed_surfaces_for_monitor(
+                            monitors,
+                            &self.interactive_move,
+                            mon_idx,
+                            self.options.max_fractional_scale,
+                            self.options.zoom_scale_sensitivity,
+                        );
+                        monitors[mon_idx].zoom_state.zoomed_surfaces = new_surfaces;
+                        monitors[mon_idx].zoom_state.last_scale_update_level = Some(zoom_level);
+
+                        let scale = monitors[mon_idx].output.current_scale();
+                        let transform = monitors[mon_idx].output.current_transform();
+                        let zoom_state_snap = monitors[mon_idx].zoom_state.clone();
+                        let surfaces: Vec<WlSurface> =
+                            zoom_state_snap.zoomed_surfaces.keys().cloned().collect();
+                        for surface in &surfaces {
+                            with_states(surface, |data| {
+                                send_scale_transform(
+                                    surface,
+                                    data,
+                                    scale,
+                                    transform,
+                                    Some(&zoom_state_snap),
+                                );
+                            });
+                        }
+                    }
                 }
             }
             MonitorSet::NoOutputs { workspaces, .. } => {
@@ -3195,8 +3333,7 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn zoom_state_for_output(&self, output: &Output) -> Option<&OutputZoomState> {
-        self.monitor_for_output(output)
-            .map(|mon| &mon.zoom_state)
+        self.monitor_for_output(output).map(|mon| &mon.zoom_state)
     }
 
     pub fn zoom_state_for_output_mut(&mut self, output: &Output) -> Option<&mut OutputZoomState> {
@@ -3205,8 +3342,7 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn zoom_level_for_output(&self, output: &Output) -> f64 {
-        self.zoom_state_for_output(output)
-            .map_or(1.0, |z| z.level)
+        self.zoom_state_for_output(output).map_or(1.0, |z| z.level)
     }
 
     pub fn zoom_focal_for_output(&self, output: &Output) -> Point<f64, Logical> {
@@ -4459,8 +4595,7 @@ impl<W: LayoutElement> Layout<W> {
         };
         mon.zoom_transition.begin_gesture(gesture);
 
-        mon.zoom_transition
-            .mark_transitioning(&mut mon.zoom_state);
+        mon.zoom_transition.mark_transitioning(&mut mon.zoom_state);
     }
 
     pub fn zoom_gesture_update(
@@ -4786,6 +4921,7 @@ impl<W: LayoutElement> Layout<W> {
                 tile.window().set_preferred_scale_transform(
                     output.current_scale(),
                     output.current_transform(),
+                    None,
                 );
 
                 let view_size = output_size(&output);
@@ -4861,6 +4997,7 @@ impl<W: LayoutElement> Layout<W> {
                     move_.tile.window().set_preferred_scale_transform(
                         output.current_scale(),
                         output.current_transform(),
+                        None,
                     );
                     move_.output = output.clone();
                     self.focus_output(&output);

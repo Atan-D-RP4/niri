@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use niri::layout::{
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
-    LayoutElementRenderSnapshot, SizingMode,
+    LayoutElementRenderSnapshot, OutputZoomState, SizingMode,
 };
 use niri::render_helpers::offscreen::OffscreenData;
 use niri::render_helpers::renderer::NiriRenderer;
@@ -198,7 +198,17 @@ impl LayoutElement for TestWindow {
         false
     }
 
-    fn set_preferred_scale_transform(&self, _scale: output::Scale, _transform: Transform) {}
+    fn wl_surface(&self) -> Option<WlSurface> {
+        None
+    }
+
+    fn set_preferred_scale_transform(
+        &self,
+        _scale: output::Scale,
+        _transform: Transform,
+        _zoom_state: Option<&OutputZoomState>,
+    ) {
+    }
 
     fn has_ssd(&self) -> bool {
         false
