@@ -3355,6 +3355,25 @@ impl<W: LayoutElement> Layout<W> {
             .is_some_and(|z| z.is_active())
     }
 
+    /// Effective fractional-scale multiplier used when capturing screenshots for `output`.
+    /// Matches the scale sent to clients via `wp_fractional_scale_v1`; 1.0 when not applicable.
+    pub fn effective_zoom_for_output(&self, output: &Output) -> f64 {
+        if !self.options.use_fractional_scale {
+            return 1.0;
+        }
+        let Some(zoom_state) = self.zoom_state_for_output(output) else {
+            return 1.0;
+        };
+        if !zoom_state.is_active() {
+            return 1.0;
+        }
+        let level = zoom_state.level;
+        let zoom_boost = (level - 1.0) * self.options.zoom_scale_sensitivity;
+        (1.0 + zoom_boost)
+            .min(self.options.max_fractional_scale)
+            .max(1.0)
+    }
+
     pub fn zoom_locked_for_output(&self, output: &Output) -> bool {
         self.zoom_state_for_output(output)
             .map_or(false, |z| z.locked)
