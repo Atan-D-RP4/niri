@@ -71,7 +71,6 @@ use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::{resources, shaders, RenderTarget};
 use crate::utils::{get_monotonic_time, is_laptop_panel, logical_output, PanelOrientation};
-use crate::zoom::{OutputZoomExt, OutputZoomState};
 
 const SUPPORTED_COLOR_FORMATS: [Fourcc; 4] = [
     Fourcc::Xrgb8888,
@@ -1374,10 +1373,6 @@ impl Tty {
             .insert_if_missing(|| TtyOutputState { node, crtc });
         output.user_data().insert_if_missing(|| output_name.clone());
 
-        output
-            .user_data()
-            .insert_if_missing(|| Mutex::new(OutputZoomState::new_for_output(&output)));
-
         if let Some(x) = orientation {
             output.user_data().insert_if_missing(|| PanelOrientation(x));
         }
@@ -1872,7 +1867,7 @@ impl Tty {
             }
         };
 
-        let zoom_factor = output.zoom_level();
+        let zoom_factor = niri.layout.zoom_level_for_output(output);
 
         // Apply filter temporarily before rendering
         // Set filter based on this output's zoom level
