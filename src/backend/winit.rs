@@ -23,7 +23,6 @@ use crate::niri::{Niri, RedrawState, State};
 use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::{resources, shaders, RenderTarget};
 use crate::utils::{get_monotonic_time, logical_output};
-use crate::zoom::{OutputZoomExt, OutputZoomState};
 
 pub struct Winit {
     config: Rc<RefCell<Config>>,
@@ -71,10 +70,6 @@ impl Winit {
             model: Some("Winit".to_string()),
             serial: None,
         });
-
-        output
-            .user_data()
-            .insert_if_missing(|| Mutex::new(OutputZoomState::new_for_output(&output)));
 
         let physical_properties = output.physical_properties();
         let ipc_outputs = Arc::new(Mutex::new(HashMap::from([(
@@ -186,7 +181,7 @@ impl Winit {
     pub fn render(&mut self, niri: &mut Niri, output: &Output) -> RenderResult {
         let _span = tracy_client::span!("Winit::render");
 
-        let zoom_level = output.zoom_level();
+        let zoom_level = niri.layout.zoom_level_for_output(output);
 
         // Apply filter temporarily before rendering
         // based on this output's zoom level
