@@ -1,10 +1,9 @@
-use std::sync::{Mutex, MutexGuard};
-
 use niri_config::ZoomMovementMode;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{
-    CropRenderElement, RelocateRenderElement, RescaleRenderElement,
+    CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
 };
+use smithay::backend::renderer::element::Element;
 use smithay::output::Output;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size};
 
@@ -18,6 +17,24 @@ use crate::render_helpers::solid_color::SolidColorRenderElement;
 
 // Define a type alias for the common zoom wrapper: Relocate(Rescale(T))
 pub type ZoomWrapper<T> = RelocateRenderElement<RescaleRenderElement<T>>;
+
+/// Wrap an element with the standard zoom transform: Rescale around the focal
+/// point, then Relocate by the subpixel correction. This is the non-pointer
+/// path — all elements except the live cursor use this.
+pub fn zoom_wrap<E: Element>(
+    elem: E,
+    zoom_factor: f64,
+    output_scale: Scale<f64>,
+    zoom_focal: Point<f64, Logical>,
+) -> ZoomWrapper<E> {
+    let focal_physical: Point<i32, Physical> = zoom_focal.to_physical_precise_round(output_scale);
+    let correction = zoom_subpixel_correction(zoom_focal, zoom_factor, output_scale);
+    RelocateRenderElement::from_element(
+        RescaleRenderElement::from_element(elem, focal_physical, zoom_factor),
+        correction,
+        Relocate::Relative,
+    )
+}
 
 // Separate enum for all zoomed elements - this avoids type conflicts with
 // OutputRenderElements since zoomed types are wrapped in a different enum
@@ -110,71 +127,7 @@ impl Default for OutputZoomState {
     }
 }
 
-pub trait OutputZoomExt {
-    fn zoom_state(&self) -> Option<MutexGuard<'_, OutputZoomState>>;
-
-    /// Returns true if zoom state has been initialized on this output.
-    fn has_zoom_state(&self) -> bool {
-        self.zoom_state().is_some()
-    }
-
-    /// Returns true if zoom is active (level > 1.0), false if no zoom or not available.
-    fn zoom_is_active(&self) -> bool {
-        self.zoom_state().is_some_and(|z| z.is_active())
-    }
-
-    /// Get current zoom level, returns 1.0 if not available.
-    fn zoom_level(&self) -> f64 {
-        self.zoom_state().map(|z| z.level).unwrap_or(1.0)
-    }
-
-    /// Get current focal point, returns origin if not available.
-    fn zoom_focal(&self) -> Point<f64, Logical> {
-        self.zoom_state()
-            .map(|z| z.focal)
-            .unwrap_or_else(|| Point::from((0.0, 0.0)))
-    }
-
-    /// Get locked state, returns false if not available.
-    fn zoom_locked(&self) -> bool {
-        self.zoom_state().map(|z| z.locked).unwrap_or(false)
-    }
-
-    /// Compute zoomed viewport for arbitrary focal/zoom.
-    fn zoomed_geometry(
-        &self,
-        output_rect: Rectangle<f64, Logical>,
-        focal_point: Point<f64, Logical>,
-        zoom_factor: f64,
-    ) -> Rectangle<f64, Logical> {
-        apply_zoom_viewport(output_rect, focal_point, zoom_factor)
-    }
-
-    /// Clamp a position to the zoom viewport if zoom is active.
-    fn zoom_clamp_to_viewport(
-        &self,
-        pos: Point<f64, Logical>,
-        output_geometry: Rectangle<f64, Logical>,
-    ) -> Option<Point<f64, Logical>> {
-        let zoom_state = self.zoom_state()?;
-        if zoom_state.is_active() {
-            Some(zoom_state.clamp_to_viewport(pos, output_geometry))
-        } else {
-            None
-        }
-    }
-}
-
-impl OutputZoomExt for Output {
-    fn zoom_state(&self) -> Option<MutexGuard<'_, OutputZoomState>> {
-        self.user_data()
-            .get::<Mutex<OutputZoomState>>()?
-            .lock()
-            .ok()
-    }
-}
-
-fn apply_zoom_viewport(
+pub fn apply_zoom_viewport(
     mut output_rect: Rectangle<f64, Logical>,
     focal_point: Point<f64, Logical>,
     zoom_factor: f64,
@@ -260,7 +213,7 @@ fn compute_on_edge_zoom_update(
     };
 
     let focal_global = focal_point + output_geometry.loc;
-    let zoomed_geometry_global = output.zoomed_geometry(output_geometry, focal_global, zoom_factor);
+    let zoomed_geometry_global = apply_zoom_viewport(output_geometry, focal_global, zoom_factor);
 
     let jump_threshold = (16.0 * output.current_scale().fractional_scale()) / zoom_factor;
     let jump_detect_size: Size<f64, Logical> = (jump_threshold, jump_threshold).into();
@@ -280,7 +233,7 @@ fn compute_on_edge_zoom_update(
     let scale = zoom_factor / (zoom_factor - 1.0);
     let viewport_size = output_geometry.size.downscale(zoom_factor);
     let output_rect = Rectangle::from_size(output_geometry.size);
-    let zoomed_geometry_local = output.zoomed_geometry(output_rect, focal_point, zoom_factor);
+    let zoomed_geometry_local = apply_zoom_viewport(output_rect, focal_point, zoom_factor);
 
     let mut new_focal = focal_point;
     let vp_left = zoomed_geometry_local.loc.x;
@@ -335,14 +288,13 @@ pub fn zoom_display_cursor_logical(
 }
 
 pub(crate) fn compute_on_edge_cursor_anchor(
-    output: &Output,
     cursor_local: Point<f64, Logical>,
     zoom_level: f64,
     focal: Point<f64, Logical>,
     output_size: Size<f64, Logical>,
 ) -> (f64, f64) {
     let output_rect: Rectangle<f64, Logical> = Rectangle::from_size(output_size);
-    let viewport = output.zoomed_geometry(output_rect, focal, zoom_level);
+    let viewport = apply_zoom_viewport(output_rect, focal, zoom_level);
 
     let anchor_x = if viewport.size.w.abs() < f64::EPSILON {
         0.5
@@ -413,7 +365,6 @@ pub fn zoom_transform_physical_point(
 #[cfg(test)]
 mod tests {
     use niri_config::ZoomMovementMode;
-    use smithay::output::{PhysicalProperties, Subpixel};
 
     use super::*;
 
@@ -428,22 +379,12 @@ mod tests {
 
     #[test]
     fn compute_focal_for_cursor_on_edge_anchor_roundtrip() {
-        let output = Output::new(
-            "test".to_string(),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: String::new(),
-                model: String::new(),
-                serial_number: String::new(),
-            },
-        );
         let cursor = Point::from((800.0, 450.0));
         let focal = Point::from((900.0, 500.0));
         let size = Size::from((1920.0, 1080.0));
         let zoom = 2.5;
 
-        let anchor = compute_on_edge_cursor_anchor(&output, cursor, zoom, focal, size);
+        let anchor = compute_on_edge_cursor_anchor(cursor, zoom, focal, size);
         let focal2 = compute_focal_for_on_edge_anchor(cursor, zoom, size, anchor);
 
         assert!((focal.x - focal2.x).abs() < 1.0);

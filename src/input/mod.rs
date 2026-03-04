@@ -53,7 +53,6 @@ use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
-use crate::zoom::OutputZoomExt;
 
 pub mod backend_ext;
 pub mod move_grab;
@@ -118,7 +117,10 @@ impl State {
             Some(name) => self.niri.output_by_name_match(name).cloned(),
             None => self.niri.layout.active_output().cloned(),
         }?;
-        output.has_zoom_state().then_some(output)
+        self.niri
+            .layout
+            .has_zoom_for_output(&output)
+            .then_some(output)
     }
 
     pub fn process_input_event<I: InputBackend + 'static>(&mut self, event: InputEvent<I>)
@@ -2418,7 +2420,7 @@ impl State {
             }
             Action::SetZoomLevel(level, output) => {
                 if let Some(output) = self.active_zoom_output(output.as_deref()) {
-                    let current_level = output.zoom_level();
+                    let current_level = self.niri.layout.zoom_level_for_output(&output);
                     let target_level = {
                         let factor_str = level.trim();
                         let is_relative =
@@ -2452,7 +2454,7 @@ impl State {
                         .to_f64();
                     let cursor_local = cursor_pos - output_geo.loc;
                     let movement_mode = self.niri.config.borrow().zoom.movement_mode.clone();
-                    let locked = output.zoom_locked();
+                    let locked = self.niri.layout.zoom_locked_for_output(&output);
 
                     self.niri.layout.set_zoom_level(
                         &output,
@@ -2471,15 +2473,7 @@ impl State {
             }
             Action::ToggleZoomLock(output) => {
                 if let Some(output) = self.active_zoom_output(output.as_deref()) {
-                    let was_locked = if let Some(mut zoom_state) = output.zoom_state() {
-                        let was = zoom_state.locked;
-                        zoom_state.locked = !was;
-                        was
-                    } else {
-                        false
-                    };
-                    // MutexGuard is dropped here — safe to call animate_zoom_unlock
-                    // which acquires the same lock internally.
+                    let was_locked = self.niri.layout.toggle_zoom_lock(&output);
                     if was_locked {
                         let cursor_pos = self.niri.seat.get_pointer().unwrap().current_location();
                         let output_geo = self
@@ -2517,7 +2511,7 @@ impl State {
 
         // Get the output under the current pointer position for zoom-aware acceleration.
         let zoom_multiplier = if let Some((output, _)) = self.niri.output_under(pos) {
-            1.0 / output.zoom_level()
+            1.0 / self.niri.layout.zoom_level_for_output(output)
         } else {
             1.0
         };
@@ -2638,14 +2632,20 @@ impl State {
                 }
             }
             Some(output) => {
-                if output.zoom_locked() && output.zoom_is_active() {
+                if self.niri.layout.zoom_locked_for_output(output)
+                    && self.niri.layout.zoom_is_active_for_output(output)
+                {
                     let output_geometry = self
                         .niri
                         .global_space
                         .output_geometry(output)
                         .unwrap()
                         .to_f64();
-                    if let Some(clamped) = output.zoom_clamp_to_viewport(new_pos, output_geometry) {
+                    if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport_for_output(
+                        output,
+                        new_pos,
+                        output_geometry,
+                    ) {
                         new_pos = clamped;
                     }
                 }
@@ -4073,7 +4073,7 @@ impl State {
             if let Some(output) = self.niri.output_under_cursor() {
                 // Always intercept 2-finger pinch for zoom control when zoom state exists.
                 // This allows pinch-to-zoom from unzoomed state (level == 1.0).
-                if output.has_zoom_state() {
+                if self.niri.layout.has_zoom_for_output(&output) {
                     let cursor_global = self.niri.seat.get_pointer().unwrap().current_location();
                     let output_geo = self
                         .niri
@@ -4237,14 +4237,20 @@ impl State {
     /// This ensures that touch events do not go outside the zoomed area.
     fn clamp_position_to_zoom(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
         if let Some((output, _)) = self.niri.output_under(pos) {
-            if output.zoom_locked() && output.zoom_is_active() {
+            if self.niri.layout.zoom_locked_for_output(output)
+                && self.niri.layout.zoom_is_active_for_output(output)
+            {
                 let output_geometry = self
                     .niri
                     .global_space
                     .output_geometry(output)
                     .unwrap()
                     .to_f64();
-                if let Some(clamped) = output.zoom_clamp_to_viewport(pos, output_geometry) {
+                if let Some(clamped) =
+                    self.niri
+                        .layout
+                        .zoom_clamp_to_viewport_for_output(output, pos, output_geometry)
+                {
                     return clamped;
                 }
             }
