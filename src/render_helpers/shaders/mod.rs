@@ -26,6 +26,7 @@ pub struct Shaders {
     pub custom_layer_wallpaper_open: RefCell<Option<ShaderProgram>>,
     pub custom_layer_launcher_close: RefCell<Option<ShaderProgram>>,
     pub custom_layer_launcher_open: RefCell<Option<ShaderProgram>>,
+    pub custom_screen_transition: RefCell<Option<ShaderProgram>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,6 +44,7 @@ pub enum ProgramType {
     LayerWallpaperOpen,
     LayerLauncherClose,
     LayerLauncherOpen,
+    ScreenTransition,
 }
 
 impl Shaders {
@@ -140,6 +142,7 @@ impl Shaders {
             custom_layer_wallpaper_open: RefCell::new(None),
             custom_layer_launcher_close: RefCell::new(None),
             custom_layer_launcher_open: RefCell::new(None),
+            custom_screen_transition: RefCell::new(None),
         }
     }
 
@@ -233,6 +236,13 @@ impl Shaders {
         self.custom_layer_launcher_open.replace(program)
     }
 
+    pub fn replace_custom_screen_transition_program(
+        &self,
+        program: Option<ShaderProgram>,
+    ) -> Option<ShaderProgram> {
+        self.custom_screen_transition.replace(program)
+    }
+
     pub fn program(&self, program: ProgramType) -> Option<ShaderProgram> {
         match program {
             ProgramType::Border => self.border.clone(),
@@ -276,6 +286,7 @@ impl Shaders {
                 .borrow()
                 .clone()
                 .or_else(|| self.custom_layer_open.borrow().clone()),
+            ProgramType::ScreenTransition => self.custom_screen_transition.borrow().clone(),
         }
     }
 }
@@ -580,6 +591,50 @@ pub fn set_custom_layer_launcher_close_program(renderer: &mut GlesRenderer, src:
     {
         if let Err(err) = prev.destroy(renderer) {
             warn!("error destroying previous custom layer launcher close shader: {err:?}");
+        }
+    }
+}
+
+fn compile_screen_transition_program(
+    renderer: &mut GlesRenderer,
+    src: &str,
+) -> Result<ShaderProgram, GlesError> {
+    let mut program = include_str!("screen_transition_prelude.frag").to_string();
+    program.push_str(src);
+    program.push_str(include_str!("screen_transition_epilogue.frag"));
+
+    ShaderProgram::compile(
+        renderer,
+        &program,
+        &[
+            UniformName::new("niri_input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("niri_geo_size", UniformType::_2f),
+            UniformName::new("niri_geo_to_tex", UniformType::Matrix3x3),
+            UniformName::new("niri_progress", UniformType::_1f),
+            UniformName::new("niri_clamped_progress", UniformType::_1f),
+            UniformName::new("niri_mouse_pos", UniformType::_2f),
+            UniformName::new("niri_random_seed", UniformType::_1f),
+        ],
+        &["niri_tex_from"],
+    )
+}
+
+pub fn set_custom_screen_transition_program(renderer: &mut GlesRenderer, src: Option<&str>) {
+    let program = if let Some(src) = src {
+        match compile_screen_transition_program(renderer, src) {
+            Ok(program) => Some(program),
+            Err(err) => {
+                warn!("error compiling custom transition shader: {err:?}");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
+    if let Some(prev) = Shaders::get(renderer).replace_custom_screen_transition_program(program) {
+        if let Err(err) = prev.destroy(renderer) {
+            warn!("error destroying previous custom transition shader: {err:?}");
         }
     }
 }

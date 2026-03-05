@@ -214,6 +214,9 @@ impl Winit {
         {
             shaders::set_custom_layer_launcher_open_program(renderer, Some(src));
         }
+        if let Some(src) = config.animations.screen_transition.custom_shader.as_deref() {
+            shaders::set_custom_screen_transition_program(renderer, Some(src));
+        }
         drop(config);
 
         niri.update_shaders();
