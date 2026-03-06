@@ -69,7 +69,7 @@ use crate::frame_clock::FrameClock;
 use crate::niri::{Niri, RedrawState, State};
 use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::renderer::AsGlesRenderer;
-use crate::render_helpers::{resources, shaders, RenderTarget};
+use crate::render_helpers::{resources, shaders, RenderCtx, RenderTarget};
 use crate::utils::{get_monotonic_time, is_laptop_panel, logical_output, PanelOrientation};
 
 const SUPPORTED_COLOR_FORMATS: [Fourcc; 4] = [
@@ -884,6 +884,19 @@ impl Tty {
             }
             if let Some(src) = config.animations.screen_transition.custom_shader.as_deref() {
                 shaders::set_custom_screen_transition_program(gles_renderer, Some(src));
+            }
+            let custom_bg = config
+                .window_rules
+                .iter()
+                .find_map(|r| r.background_effect.custom_shader.as_deref())
+                .or_else(|| {
+                    config
+                        .layer_rules
+                        .iter()
+                        .find_map(|r| r.background_effect.custom_shader.as_deref())
+                });
+            if let Some(src) = custom_bg {
+                shaders::set_custom_liquid_glass_program(gles_renderer, Some(src));
             }
             drop(config);
 
@@ -1911,8 +1924,14 @@ impl Tty {
         let _ = renderer.downscale_filter(filter);
 
         // Render the elements.
-        let mut elements =
-            niri.render::<TtyRenderer>(&mut renderer, output, true, RenderTarget::Output);
+        let pointer_pos = niri.seat.get_pointer().map(|p| p.current_location());
+        let ctx = RenderCtx {
+            renderer: &mut renderer,
+            target: RenderTarget::Output,
+            xray: None,
+            pointer_position: pointer_pos,
+        };
+        let mut elements = niri.render_to_vec(ctx, output, true);
 
         // Visualize the damage, if enabled.
         if niri.debug_draw_damage {

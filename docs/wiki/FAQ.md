@@ -147,3 +147,30 @@ profile {
 
 They draw their own 1 px dark border around the window, which obscures one pixel of niri's border.
 If you don't like this, set the [`clip-to-geometry true` window rule](./Configuration:-Window-Rules.md#clip-to-geometry).
+
+### Why does my custom background shader fail to compile?
+
+niri logs a warning and silently falls back to passthrough (no post-processing). The background effect itself still renders normally.
+
+Check the journal for the error message and the relevant GLSL line number:
+
+```
+journalctl -ef /usr/bin/niri
+```
+
+Common causes:
+- Missing `vec4 custom_postprocess()` function (must use this exact signature with no arguments).
+- Using GLSL ES 3.0 features (`texture()`, `in`/`out` qualifiers) — use `texture2D()` and GLSL ES 1.0 syntax instead.
+- Declaring a `uniform` that niri already provides — remove it from your shader.
+
+### Why is my custom background shader effect not visible?
+
+The window must be semitransparent. An opaque window covers the background entirely.
+
+### Why are the pointer uniforms always `(-1, -1)` in my custom background shader?
+
+Add `animate true` to the `background-effect` block. Without it, niri does not track the pointer for this window.
+
+### Why do colors look wrong or washed out in my custom background shader?
+
+All colors use sRGB with premultiplied alpha. When modifying color channels, keep RGB and alpha consistent: if you reduce alpha, also reduce RGB by the same factor. Adding a value to RGB without multiplying by alpha will brighten transparent areas incorrectly.

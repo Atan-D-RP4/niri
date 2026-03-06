@@ -8,13 +8,16 @@ use smithay::backend::renderer::gles::{
 
 use super::renderer::NiriRenderer;
 use super::shader_element::ShaderProgram;
+use crate::render_helpers::blur::BlurProgram;
 
 pub struct Shaders {
     pub border: Option<ShaderProgram>,
     pub shadow: Option<ShaderProgram>,
     pub clipped_surface: Option<GlesTexProgram>,
+    pub postprocess_and_clip: Option<GlesTexProgram>,
     pub resize: Option<ShaderProgram>,
     pub gradient_fade: Option<GlesTexProgram>,
+    pub blur: Option<BlurProgram>,
     pub custom_window_resize: RefCell<Option<ShaderProgram>>,
     pub custom_window_close: RefCell<Option<ShaderProgram>>,
     pub custom_window_open: RefCell<Option<ShaderProgram>>,
@@ -27,6 +30,7 @@ pub struct Shaders {
     pub custom_layer_launcher_close: RefCell<Option<ShaderProgram>>,
     pub custom_layer_launcher_open: RefCell<Option<ShaderProgram>>,
     pub custom_screen_transition: RefCell<Option<ShaderProgram>>,
+    pub custom_liquid_glass: RefCell<Option<GlesTexProgram>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +57,10 @@ impl Shaders {
 
         let border = ShaderProgram::compile(
             renderer,
-            include_str!("border.frag"),
+            concat!(
+                include_str!("border.frag"),
+                include_str!("rounding_alpha.frag")
+            ),
             &[
                 UniformName::new("colorspace", UniformType::_1f),
                 UniformName::new("hue_interpolation", UniformType::_1f),
@@ -76,7 +83,10 @@ impl Shaders {
 
         let shadow = ShaderProgram::compile(
             renderer,
-            include_str!("shadow.frag"),
+            concat!(
+                include_str!("shadow.frag"),
+                include_str!("rounding_alpha.frag")
+            ),
             &[
                 UniformName::new("shadow_color", UniformType::_4f),
                 UniformName::new("sigma", UniformType::_1f),
@@ -96,7 +106,11 @@ impl Shaders {
 
         let clipped_surface = renderer
             .compile_custom_texture_shader(
-                include_str!("clipped_surface.frag"),
+                concat!(
+                    include_str!("clipped_surface.frag"),
+                    include_str!("rounding_alpha.frag"),
+                    "\nvec4 postprocess(vec4 color) { return color; }",
+                ),
                 &[
                     UniformName::new("niri_scale", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
@@ -106,6 +120,28 @@ impl Shaders {
             )
             .map_err(|err| {
                 warn!("error compiling clipped surface shader: {err:?}");
+            })
+            .ok();
+
+        let postprocess_and_clip = renderer
+            .compile_custom_texture_shader(
+                concat!(
+                    include_str!("clipped_surface.frag"),
+                    include_str!("rounding_alpha.frag"),
+                    include_str!("postprocess.frag"),
+                ),
+                &[
+                    UniformName::new("niri_scale", UniformType::_1f),
+                    UniformName::new("geo_size", UniformType::_2f),
+                    UniformName::new("corner_radius", UniformType::_4f),
+                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
+                    UniformName::new("noise", UniformType::_1f),
+                    UniformName::new("saturation", UniformType::_1f),
+                    UniformName::new("bg_color", UniformType::_4f),
+                ],
+            )
+            .map_err(|err| {
+                warn!("error compiling postprocess_and_clip shader: {err:?}");
             })
             .ok();
 
@@ -125,12 +161,20 @@ impl Shaders {
             })
             .ok();
 
+        let blur = BlurProgram::compile(renderer)
+            .map_err(|err| {
+                warn!("error compiling blur shaders: {err:?}");
+            })
+            .ok();
+
         Self {
             border,
             shadow,
             clipped_surface,
+            postprocess_and_clip,
             resize,
             gradient_fade,
+            blur,
             custom_window_resize: RefCell::new(None),
             custom_window_close: RefCell::new(None),
             custom_window_open: RefCell::new(None),
@@ -143,6 +187,7 @@ impl Shaders {
             custom_layer_launcher_close: RefCell::new(None),
             custom_layer_launcher_open: RefCell::new(None),
             custom_screen_transition: RefCell::new(None),
+            custom_liquid_glass: RefCell::new(None),
         }
     }
 
@@ -243,6 +288,13 @@ impl Shaders {
         self.custom_screen_transition.replace(program)
     }
 
+    pub fn replace_custom_liquid_glass_program(
+        &self,
+        program: Option<GlesTexProgram>,
+    ) -> Option<GlesTexProgram> {
+        self.custom_liquid_glass.replace(program)
+    }
+
     pub fn program(&self, program: ProgramType) -> Option<ShaderProgram> {
         match program {
             ProgramType::Border => self.border.clone(),
@@ -306,6 +358,7 @@ fn compile_resize_program(
     let mut program = include_str!("resize_prelude.frag").to_string();
     program.push_str(src);
     program.push_str(include_str!("resize_epilogue.frag"));
+    program.push_str(include_str!("rounding_alpha.frag"));
 
     ShaderProgram::compile(
         renderer,
@@ -637,6 +690,64 @@ pub fn set_custom_screen_transition_program(renderer: &mut GlesRenderer, src: Op
             warn!("error destroying previous custom transition shader: {err:?}");
         }
     }
+}
+
+fn compile_custom_liquid_glass_program(
+    renderer: &mut GlesRenderer,
+    src: &str,
+) -> Result<GlesTexProgram, GlesError> {
+    let template = concat!(
+        include_str!("liquid_glass.frag"),
+        include_str!("rounding_alpha.frag"),
+    );
+
+    // Inject user code between the section markers, replacing the no-op default implementation.
+    let marker = "// ============ USER CUSTOM SHADER SECTION ============";
+    let start = template.find(marker).ok_or(GlesError::ShaderCompileError)?;
+    let end_search = &template[start + marker.len()..];
+    let end_offset = end_search
+        .find(marker)
+        .ok_or(GlesError::ShaderCompileError)?;
+    let end = start + marker.len() + end_offset + marker.len();
+
+    let mut shader = String::new();
+    shader.push_str(&template[..start]);
+    shader.push_str(src);
+    shader.push('\n');
+    shader.push_str(&template[end..]);
+
+    renderer.compile_custom_texture_shader(
+        &shader,
+        &[
+            UniformName::new("niri_scale", UniformType::_1f),
+            UniformName::new("geo_size", UniformType::_2f),
+            UniformName::new("corner_radius", UniformType::_4f),
+            UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("noise", UniformType::_1f),
+            UniformName::new("saturation", UniformType::_1f),
+            UniformName::new("bg_color", UniformType::_4f),
+            UniformName::new("niri_pointer", UniformType::_2f),
+            UniformName::new("niri_window_size", UniformType::_2f),
+        ],
+    )
+}
+
+pub fn set_custom_liquid_glass_program(renderer: &mut GlesRenderer, src: Option<&str>) {
+    let program = if let Some(src) = src {
+        match compile_custom_liquid_glass_program(renderer, src) {
+            Ok(program) => Some(program),
+            Err(err) => {
+                warn!("error compiling custom background shader: {err:?}");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
+    let prev = Shaders::get(renderer).replace_custom_liquid_glass_program(program);
+    // GlesTexProgram does not have a .destroy() method unlike ShaderProgram — just drop it.
+    drop(prev);
 }
 
 pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform<'_> {
