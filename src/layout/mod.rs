@@ -818,6 +818,7 @@ fn compute_on_edge_tracking_anchor(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_zoom_level_animation(
     clock: &Clock,
     start_level: f64,
@@ -3219,7 +3220,7 @@ impl<W: LayoutElement> Layout<W> {
 
     pub fn zoom_locked_for_output(&self, output: &Output) -> bool {
         self.zoom_state_for_output(output)
-            .map_or(false, |z| z.locked)
+            .is_some_and(|z| z.locked)
     }
 
     pub fn has_zoom_for_output(&self, output: &Output) -> bool {
