@@ -575,12 +575,10 @@ impl Niri {
             }
 
             if cursor_data.is_none() {
-                self.render_inner(
-                    renderer,
-                    output,
-                    false,
-                    RenderTarget::Screencast,
-                    &mut |elem| elements.push(elem.into()),
+                elements.extend(
+                    self.render(renderer, output, false, RenderTarget::Screencast)
+                        .into_iter()
+                        .map(CastRenderElement::from),
                 );
 
                 let mut pointer_pos = Point::default();
