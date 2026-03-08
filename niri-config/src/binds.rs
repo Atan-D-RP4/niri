@@ -376,6 +376,21 @@ pub enum Action {
         output: Option<String>,
     },
     #[knuffel(skip)]
+    SetZoomFactor {
+        factor: String,
+        output: Option<String>,
+    },
+    #[knuffel(skip)]
+    SetZoomMovement {
+        movement: niri_ipc::ZoomMovement,
+        output: Option<String>,
+    },
+    #[knuffel(skip)]
+    SetZoomThreshold {
+        threshold: f64,
+        output: Option<String>,
+    },
+    #[knuffel(skip)]
     LoadConfigFile(#[knuffel(argument)] Option<String>),
     #[knuffel(skip)]
     MruAdvance {
@@ -709,6 +724,15 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::UnsetWindowUrgent { id } => Self::UnsetWindowUrgent(id),
             niri_ipc::Action::ToggleZoom { output } => Self::ToggleZoom { output },
             niri_ipc::Action::ToggleZoomFreeze { output } => Self::ToggleZoomFreeze { output },
+            niri_ipc::Action::SetZoomFactor { factor, output } => {
+                Self::SetZoomFactor { factor, output }
+            }
+            niri_ipc::Action::SetZoomMovement { movement, output } => {
+                Self::SetZoomMovement { movement, output }
+            }
+            niri_ipc::Action::SetZoomThreshold { threshold, output } => {
+                Self::SetZoomThreshold { threshold, output }
+            }
             niri_ipc::Action::LoadConfigFile { path } => Self::LoadConfigFile(path),
         }
     }
