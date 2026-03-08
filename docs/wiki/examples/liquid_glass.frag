@@ -25,15 +25,28 @@
 // Quality variants: edit LOW/MEDIUM/HIGH sections below to change quality.
 
 // Baked visual constants (replaces removed lg-* config fields).
-const float LG_DISTORTION = 0.04;   // convex lens distortion strength
-const float LG_ABERRATION = 2.0;    // chromatic aberration amount (in pixels)
-const float LG_HIGHLIGHT  = 0.25;   // specular highlight brightness
-const float LG_TINT       = 0.92;   // glass tint (absorption; 1.0 = clear)
+const float LG_DISTORTION = 0.020;                 // convex lens distortion strength
+const float LG_ABERRATION = 1.2;                   // chromatic aberration amount
+const float LG_HIGHLIGHT  = 0.26;                  // specular highlight brightness
+const vec3  LG_TINT       = vec3(0.93, 0.96, 0.98); // cool glass absorption tint
+const vec2  LG_UV_EPS     = vec2(0.0015);          // keeps samples safely in-bounds
+
+vec2 lg_safe_uv(vec2 uv) {
+    return clamp(uv, LG_UV_EPS, vec2(1.0) - LG_UV_EPS);
+}
+
+vec4 lg_sample(vec2 uv) {
+    return texture2D(tex, lg_safe_uv(uv));
+}
 
 // ---------- LOW quality variant (no distortion, no CA) ----------
 // Replace the HIGH variant below with this for integrated GPUs.
 // vec4 custom_postprocess() {
-//     return texture2D(tex, v_coords) * LG_TINT;
+//     vec4 color = lg_sample(v_coords);
+//     float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+//     color.rgb = mix(vec3(luma), color.rgb, 0.95);
+//     color.rgb *= LG_TINT;
+//     return color;
 // }
 
 // ---------- MEDIUM quality variant (distortion + 2-sample CA + highlights) ----------
@@ -44,18 +57,26 @@ const float LG_TINT       = 0.92;   // glass tint (absorption; 1.0 = clear)
 //     float r = length(from_center);
 //     vec2 radial_dir = from_center / max(r, 0.001);
 //     float r2 = r * r;
-//     vec2 distorted = v_coords + from_center * r2 * LG_DISTORTION;
+//     vec2 dist_vec = from_center * r2 * LG_DISTORTION;
+//     vec2 pointer_vec = vec2(0.0);
 //     if (niri_pointer.x >= 0.0) {
-//         vec2 pointer_local = niri_pointer / niri_window_size;
+//         vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
 //         vec2 to_pointer = local_uv - pointer_local;
 //         float p_dist = length(to_pointer);
-//         float p_influence = (1.0 - smoothstep(0.0, 0.25, p_dist)) * LG_DISTORTION * 0.5;
-//         distorted += normalize(to_pointer + vec2(0.001)) * p_influence;
+//         float p_influence = (1.0 - smoothstep(0.0, 0.25, p_dist)) * 0.007;
+//         pointer_vec = normalize(to_pointer + vec2(0.001)) * p_influence;
 //     }
-//     vec2 ca = radial_dir * r * (LG_ABERRATION * 0.004);
-//     vec4 rg = texture2D(tex, distorted + ca);
-//     vec4 gb = texture2D(tex, distorted - ca);
-//     vec4 base = texture2D(tex, distorted);
+//     vec2 ca = radial_dir * r * (LG_ABERRATION * 0.0025);
+//     vec2 shift = dist_vec + pointer_vec;
+//     vec2 excursion = abs(shift) + abs(ca);
+//     vec2 budget = max(min(v_coords, vec2(1.0) - v_coords) - LG_UV_EPS, vec2(0.0));
+//     float uv_scale = min(1.0, min(budget.x / max(excursion.x, 1e-5), budget.y / max(excursion.y, 1e-5)));
+//     shift *= uv_scale;
+//     ca *= uv_scale;
+//     vec2 distorted = v_coords + shift;
+//     vec4 rg = lg_sample(distorted + ca);
+//     vec4 gb = lg_sample(distorted - ca);
+//     vec4 base = lg_sample(distorted);
 //     vec4 color = vec4(rg.r, (rg.g + gb.g) * 0.5, gb.b, base.a);
 //     color.rgb *= LG_TINT;
 //     vec2 light = normalize(vec2(-0.5, -1.0));
@@ -64,11 +85,11 @@ const float LG_TINT       = 0.92;   // glass tint (absorption; 1.0 = clear)
 //     float top_glow = exp(-pow(local_uv.y * 5.0, 2.0)) * LG_HIGHLIGHT * 0.35;
 //     float p_glow = 0.0;
 //     if (niri_pointer.x >= 0.0) {
-//         vec2 pointer_local = niri_pointer / niri_window_size;
+//         vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
 //         float pointer_dist = length(local_uv - pointer_local);
 //         p_glow = (1.0 - smoothstep(0.0, 0.15, pointer_dist)) * LG_HIGHLIGHT * 0.25;
 //     }
-//     color.rgb += rim * LG_HIGHLIGHT + top_glow + p_glow;
+//     color.rgb += (rim * LG_HIGHLIGHT + top_glow + p_glow) * color.a;
 //     return color;
 // }
 
@@ -84,52 +105,65 @@ vec4 custom_postprocess() {
     // Safe radial direction — avoid divide-by-zero at exact center.
     vec2 radial_dir = from_center / max(r, 0.001);
 
-    // ── Convex lens distortion ──────────────────────────────────────
+    // Soft convex refraction. Keep strength low for polished, glassy depth.
     float r2 = r * r;
-    vec2 distorted = v_coords + from_center * r2 * LG_DISTORTION;
+    float warp = LG_DISTORTION * (0.25 + 0.75 * smoothstep(0.0, 0.65, r));
+    vec2 dist_vec = from_center * r2 * warp;
+    vec2 pointer_vec = vec2(0.0);
 
-    // Pointer-influenced lens wobble (only when pointer is in window).
+    // Cursor interaction: subtle local lens wobble.
     if (niri_pointer.x >= 0.0) {
         vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
         vec2 to_pointer = local_uv - pointer_local;
         float p_dist = length(to_pointer);
-        float p_influence = (1.0 - smoothstep(0.0, 0.25, p_dist)) * LG_DISTORTION * 0.5;
-        distorted += normalize(to_pointer + vec2(0.001)) * p_influence;
+        float p_influence = (1.0 - smoothstep(0.0, 0.28, p_dist)) * DISTORTION * 0.008;
+        pointer_vec = normalize(to_pointer + vec2(0.001)) * p_influence;
     }
 
-    // ── 3-sample radial chromatic aberration ────────────────────────
-    // Split grows smoothly with distance from center.
-    vec2 ca = radial_dir * r * (LG_ABERRATION * 0.004);
-    float r_ch = texture2D(tex, distorted + ca).r;
-    vec4 base  = texture2D(tex, distorted);
-    float b_ch = texture2D(tex, distorted - ca).b;
+    // Radial chromatic split with bounded sampling.
+    vec2 ca = radial_dir * r * (LG_ABERRATION * 0.0025);
+    vec2 shift = dist_vec + pointer_vec;
+    vec2 excursion = abs(shift) + abs(ca);
+    vec2 budget = max(min(v_coords, vec2(1.0) - v_coords) - LG_UV_EPS, vec2(0.0));
+    float uv_scale = min(1.0, min(budget.x / max(excursion.x, 1e-5), budget.y / max(excursion.y, 1e-5)));
+    shift *= uv_scale;
+    ca *= uv_scale;
+    vec2 distorted = v_coords + shift;
+    float r_ch = lg_sample(distorted + ca).r;
+    vec4 base = lg_sample(distorted);
+    float b_ch = lg_sample(distorted - ca).b;
     vec4 color = vec4(r_ch, base.g, b_ch, base.a);
 
-    // ── Glass tint ──────────────────────────────────────────────────
-    // Slight absorption: 1.0 = fully clear, 0.0 = fully absorbed.
+    // Frosted appearance: slight desaturation + cool tint.
+    // Note: the desaturation is technically optional, since the chromatic
+    // aberration already reduces saturation — but it helps unify the look and
+    // smooth out some remaining color noise from the CA sampling.
+    float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    color.rgb = mix(vec3(luma), color.rgb, 0.94);
     color.rgb *= LG_TINT;
+    color.rgb += 0.02 * color.a;
 
-    // ── Specular crescent highlight ─────────────────────────────────
-    // Convex-lens surface normal dotted with light → smooth crescent.
-    vec2 light = normalize(vec2(-0.5, -1.0));
-    float NdotL = max(dot(radial_dir, light), 0.0);
-    // Fade near center (undefined normal) and near far edge.
-    float rim = pow(NdotL, 3.0)
-        * smoothstep(0.05, 0.25, r)
-        * (1.0 - smoothstep(0.3, 0.65, r));
+    // Apple-like glazing: fresnel edge lift + narrow specular + top sheen.
+    vec3 n = normalize(vec3(from_center * 2.0, 1.25));
+    vec3 v = vec3(0.0, 0.0, 1.0);
+    vec3 l = normalize(vec3(-0.45, -0.85, 0.35));
+    float fresnel = pow(1.0 - max(dot(n, v), 0.0), 3.5);
+    float specular = pow(max(dot(reflect(-l, n), v), 0.0), 22.0);
+    float top_sheen = exp(-pow((local_uv.y - 0.05) * 7.0, 2.0)) * 0.20;
+    float edge_lift = fresnel * 0.14;
 
-    // Soft top-edge glow: diffuse light scattering through the glass top.
-    float top_glow = exp(-pow(local_uv.y * 5.0, 2.0)) * LG_HIGHLIGHT * 0.35;
+    float highlight = (specular * 0.45 + edge_lift + top_sheen) * LG_HIGHLIGHT;
 
-    // Pointer proximity glow: gentle brightening near cursor.
+    // Pointer proximity glow: subtle halo around the cursor, using the same
+    // fresnel highlight for consistency.
     float p_glow = 0.0;
     if (niri_pointer.x >= 0.0) {
         vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
         float pointer_dist = length(local_uv - pointer_local);
-        p_glow = (1.0 - smoothstep(0.0, 0.15, pointer_dist)) * LG_HIGHLIGHT * 0.25;
+        p_glow = (1.0 - smoothstep(0.0, 0.16, pointer_dist)) * LG_HIGHLIGHT * 0.23;
     }
 
-    color.rgb += rim * LG_HIGHLIGHT + top_glow + p_glow;
+    color.rgb += (highlight + p_glow) * color.a;
 
     return color;
     // Note: saturation, noise, bg_color blending, and rounding are applied
