@@ -34,6 +34,7 @@ pub struct EffectParams {
     pub noise: f32,
     pub saturation: f32,
     pub pointer: Option<(f32, f32)>,
+    pub time: f32,
 }
 
 #[derive(Debug)]
@@ -51,6 +52,7 @@ pub struct XrayElement {
     noise: f32,
     saturation: f32,
     pointer: Option<(f32, f32)>,
+    time: f32,
     bg_color: Color32F,
     program: Option<GlesTexProgram>,
     is_custom_shader: bool,
@@ -74,9 +76,9 @@ impl Xray {
         effect: EffectParams,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        // Fallback chain: custom_liquid_glass → postprocess_and_clip
+        // Fallback chain: custom_background_effect → postprocess_and_clip
         let custom_program = Shaders::get(ctx.renderer)
-            .custom_liquid_glass
+            .custom_background_effect
             .borrow()
             .clone();
         let is_custom_shader = custom_program.is_some();
@@ -163,6 +165,7 @@ impl Xray {
                     noise: effect.noise,
                     saturation: effect.saturation,
                     pointer: effect.pointer,
+                    time: effect.time,
                     bg_color: *bg_color,
                     program: program.clone(),
                     is_custom_shader,
@@ -216,6 +219,7 @@ impl Xray {
                 noise: effect.noise,
                 saturation: effect.saturation,
                 pointer: effect.pointer,
+                time: effect.time,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
                 is_custom_shader,
@@ -232,6 +236,7 @@ impl XrayElement {
             vec![
                 Uniform::new("niri_pointer", [pointer.0, pointer.1]),
                 Uniform::new("niri_window_size", <[f32; 2]>::from(self.clip_geo_size)),
+                Uniform::new("niri_time", self.time),
                 Uniform::new("noise", self.noise),
                 Uniform::new("saturation", self.saturation),
                 Uniform::new("bg_color", self.bg_color.components()),

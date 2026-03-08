@@ -1591,7 +1591,7 @@ impl State {
                 });
             if new_custom != old_custom {
                 self.backend.with_primary_renderer(|renderer| {
-                    shaders::set_custom_liquid_glass_program(renderer, new_custom);
+                    shaders::set_custom_background_effect_program(renderer, new_custom);
                 });
                 shaders_changed = true;
             }
@@ -2074,6 +2074,7 @@ impl State {
                     renderer,
                     xray: None,
                     pointer_position: None,
+                    time: 0.,
                 };
 
                 self.niri.fill_xray_elements(ctx.r(), output);
@@ -5184,6 +5185,7 @@ impl Niri {
                             target: RenderTarget::ScreenCapture,
                             xray: None,
                             pointer_position: None,
+                            time: 0.,
                         };
                         self.render_to_vec(ctx, output, true)
                     });
@@ -5253,6 +5255,7 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
             pointer_position: None,
+            time: 0.,
         };
         let elements = self.render_to_vec(ctx, output, screencopy.overlay_cursor());
 
@@ -5383,6 +5386,7 @@ impl Niri {
                     target,
                     xray: None,
                     pointer_position: None,
+                    time: 0.,
                 };
                 let elements = self.render_to_vec(ctx, &output, false);
                 let elements = elements.iter().rev();
@@ -5466,6 +5470,7 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
             pointer_position: None,
+            time: 0.,
         };
         let elements = self.render_to_vec(ctx, output, include_pointer);
         let elements = elements.iter().rev();
@@ -5522,6 +5527,7 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
             pointer_position: None,
+            time: 0.,
         };
         mapped.render(
             ctx,
@@ -5688,6 +5694,7 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
             pointer_position: None,
+            time: 0.,
         };
         let elements = self.render_to_vec(ctx, &output, include_pointer);
         let elements = elements.iter().rev();
@@ -6167,6 +6174,7 @@ impl Niri {
                         target,
                         xray: None,
                         pointer_position: None,
+                        time: 0.,
                     };
                     let elements = self.render_to_vec(ctx, &output, false);
                     let elements = elements.iter().rev();

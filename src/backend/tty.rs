@@ -837,7 +837,7 @@ impl Tty {
                         .find_map(|r| r.background_effect.custom_shader.as_deref())
                 });
             if let Some(src) = custom_bg {
-                shaders::set_custom_liquid_glass_program(gles_renderer, Some(src));
+                shaders::set_custom_background_effect_program(gles_renderer, Some(src));
             }
             drop(config);
 
@@ -1884,6 +1884,7 @@ impl Tty {
             target: RenderTarget::Output,
             xray: None,
             pointer_position: pointer_pos,
+            time: niri.start_time.elapsed().as_secs_f32(),
         };
         let mut elements = niri.render_to_vec(ctx, output, true);
 

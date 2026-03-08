@@ -21,7 +21,7 @@ pub struct Shaders {
     pub custom_resize: RefCell<Option<ShaderProgram>>,
     pub custom_close: RefCell<Option<ShaderProgram>>,
     pub custom_open: RefCell<Option<ShaderProgram>>,
-    pub custom_liquid_glass: RefCell<Option<GlesTexProgram>>,
+    pub custom_background_effect: RefCell<Option<GlesTexProgram>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -160,7 +160,7 @@ impl Shaders {
             custom_resize: RefCell::new(None),
             custom_close: RefCell::new(None),
             custom_open: RefCell::new(None),
-            custom_liquid_glass: RefCell::new(None),
+            custom_background_effect: RefCell::new(None),
         }
     }
 
@@ -198,11 +198,11 @@ impl Shaders {
         self.custom_open.replace(program)
     }
 
-    pub fn replace_custom_liquid_glass_program(
+    pub fn replace_custom_background_effect_program(
         &self,
         program: Option<GlesTexProgram>,
     ) -> Option<GlesTexProgram> {
-        self.custom_liquid_glass.replace(program)
+        self.custom_background_effect.replace(program)
     }
 
     pub fn program(&self, program: ProgramType) -> Option<ShaderProgram> {
@@ -362,12 +362,12 @@ pub fn set_custom_open_program(renderer: &mut GlesRenderer, src: Option<&str>) {
     }
 }
 
-fn compile_custom_liquid_glass_program(
+fn compile_custom_background_effect_program(
     renderer: &mut GlesRenderer,
     src: &str,
 ) -> Result<GlesTexProgram, GlesError> {
     let template = concat!(
-        include_str!("liquid_glass.frag"),
+        include_str!("custom_background_effect.frag"),
         include_str!("rounding_alpha.frag"),
     );
 
@@ -398,13 +398,14 @@ fn compile_custom_liquid_glass_program(
             UniformName::new("bg_color", UniformType::_4f),
             UniformName::new("niri_pointer", UniformType::_2f),
             UniformName::new("niri_window_size", UniformType::_2f),
+            UniformName::new("niri_time", UniformType::_1f),
         ],
     )
 }
 
-pub fn set_custom_liquid_glass_program(renderer: &mut GlesRenderer, src: Option<&str>) {
+pub fn set_custom_background_effect_program(renderer: &mut GlesRenderer, src: Option<&str>) {
     let program = if let Some(src) = src {
-        match compile_custom_liquid_glass_program(renderer, src) {
+        match compile_custom_background_effect_program(renderer, src) {
             Ok(program) => Some(program),
             Err(err) => {
                 warn!("error compiling custom background shader: {err:?}");
@@ -415,7 +416,7 @@ pub fn set_custom_liquid_glass_program(renderer: &mut GlesRenderer, src: Option<
         None
     };
 
-    let prev = Shaders::get(renderer).replace_custom_liquid_glass_program(program);
+    let prev = Shaders::get(renderer).replace_custom_background_effect_program(program);
     // GlesTexProgram does not have a .destroy() method unlike ShaderProgram — just drop it.
     drop(prev);
 }

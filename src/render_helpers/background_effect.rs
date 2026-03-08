@@ -289,6 +289,7 @@ impl BackgroundEffect {
         } else {
             None
         };
+        let time = ctx.time;
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
@@ -304,6 +305,7 @@ impl BackgroundEffect {
                     noise,
                     saturation,
                     pointer,
+                    time,
                 },
                 &mut |elem| push(elem.into()),
             );
@@ -317,6 +319,7 @@ impl BackgroundEffect {
                 noise,
                 saturation,
                 pointer,
+                time,
             ) {
                 push(damage.into());
                 push(elem.into());

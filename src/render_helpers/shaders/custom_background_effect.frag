@@ -17,6 +17,8 @@ uniform float alpha;
 uniform vec2 niri_pointer;
 // Window size in logical pixels for custom shader.
 uniform vec2 niri_window_size;
+// Seconds since compositor start for animations.
+uniform float niri_time;
 
 // Reused from postprocess
 uniform float noise;

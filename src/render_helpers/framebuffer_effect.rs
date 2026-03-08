@@ -39,6 +39,7 @@ pub struct FramebufferEffectElement {
     noise: f32,
     saturation: f32,
     pointer: Option<(f32, f32)>,
+    time: f32,
     inner: Rc<RefCell<Option<Inner>>>,
 }
 
@@ -68,6 +69,7 @@ impl FramebufferEffect {
         noise: f32,
         saturation: f32,
         pointer: Option<(f32, f32)>,
+        time: f32,
     ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
@@ -84,6 +86,7 @@ impl FramebufferEffect {
             noise,
             saturation,
             pointer,
+            time,
             inner: self.inner.clone(),
         };
 
@@ -401,13 +404,13 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
         );
 
-        // Fallback chain: custom_liquid_glass → postprocess_and_clip
+        // Fallback chain: custom_background_effect → postprocess_and_clip
         let custom_program = Shaders::get_from_frame(frame)
-            .custom_liquid_glass
+            .custom_background_effect
             .borrow()
             .clone();
-        if let Some(custom_lg) = custom_program {
-            debug!("framebuffer using custom_liquid_glass program");
+        if let Some(custom_bg) = custom_program {
+            debug!("framebuffer using custom_background_effect program");
             let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
             let offset = Vec2::new(offset.x as f32, offset.y as f32);
             let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
@@ -428,6 +431,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             let uniforms = vec![
                 Uniform::new("niri_pointer", [pointer.0, pointer.1]),
                 Uniform::new("niri_window_size", [window_size.0, window_size.1]),
+                Uniform::new("niri_time", self.time),
                 Uniform::new("noise", self.noise),
                 Uniform::new("saturation", self.saturation),
                 Uniform::new("bg_color", [0f32, 0., 0., 0.]),
@@ -445,7 +449,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
                 &[],
                 frame.transformation().invert(),
                 1.,
-                Some(&custom_lg),
+                Some(&custom_bg),
                 &uniforms,
             )
         } else {

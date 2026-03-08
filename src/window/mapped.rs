@@ -530,6 +530,7 @@ impl Mapped {
                 target: RenderTarget::Screencast,
                 xray: None,
                 pointer_position: None,
+                time: 0.,
             },
             location,
             scale,
