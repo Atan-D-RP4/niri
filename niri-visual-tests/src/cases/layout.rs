@@ -275,6 +275,7 @@ impl TestCase for Layout {
             target: RenderTarget::Output,
             xray: None,
             pointer_position: None,
+            time: 0.,
         };
         self.layout
             .monitor_for_output(&self.output)

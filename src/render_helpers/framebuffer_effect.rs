@@ -61,6 +61,7 @@ impl FramebufferEffect {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         renderer: &mut GlesRenderer,
