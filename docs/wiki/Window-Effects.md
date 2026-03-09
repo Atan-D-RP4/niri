@@ -20,7 +20,7 @@ You can also enable blur on the niri side with the `blur true` background effect
 // Enable blur behind the foot terminal.
 window-rule {
     match app-id="^foot$"
- 
+
     background-effect {
         blur true
     }

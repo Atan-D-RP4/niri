@@ -1427,4 +1427,127 @@ mod tests {
         "
         );
     }
+
+    #[test]
+    fn liquid_glass_defaults() {
+        let config = Config::parse_mem(
+            r##"
+            window-rule {
+                background-effect {
+                    liquid-glass true
+                }
+            }
+            "##,
+        )
+        .unwrap();
+
+        let mut effect = BackgroundEffect::default();
+        for rule in &config.window_rules {
+            effect.merge_with(&rule.background_effect);
+        }
+
+        let lg = effect.liquid_glass.unwrap();
+        assert_eq!(lg.distortion.0, 0.04);
+        assert_eq!(lg.aberration.0, 2.0);
+        assert_eq!(lg.highlight.0, 0.25);
+        assert_eq!(lg.tint.0, 0.92);
+        assert!(!lg.animate);
+    }
+
+    #[test]
+    fn liquid_glass_custom_values() {
+        let config = Config::parse_mem(
+            r##"
+            window-rule {
+                background-effect {
+                    liquid-glass true
+                    lg-distortion 0.08
+                    lg-aberration 3.5
+                    lg-highlight 0.5
+                    lg-tint 0.85
+                    lg-animate true
+                }
+            }
+            "##,
+        )
+        .unwrap();
+
+        let mut effect = BackgroundEffect::default();
+        for rule in &config.window_rules {
+            effect.merge_with(&rule.background_effect);
+        }
+
+        let lg = effect.liquid_glass.unwrap();
+        assert_eq!(lg.distortion.0, 0.08);
+        assert_eq!(lg.aberration.0, 3.5);
+        assert_eq!(lg.highlight.0, 0.5);
+        assert_eq!(lg.tint.0, 0.85);
+        assert!(lg.animate);
+    }
+
+    #[test]
+    fn liquid_glass_disabled_by_default() {
+        let config = Config::parse_mem("").unwrap();
+        let effect = BackgroundEffect::default();
+        assert!(effect.liquid_glass.is_none());
+        assert!(config.window_rules.is_empty());
+    }
+
+    #[test]
+    fn liquid_glass_rule_merging() {
+        let config = Config::parse_mem(
+            r##"
+            window-rule {
+                background-effect {
+                    liquid-glass true
+                    lg-distortion 0.1
+                }
+            }
+            window-rule {
+                background-effect {
+                    liquid-glass true
+                    lg-aberration 5.0
+                    lg-animate true
+                }
+            }
+            "##,
+        )
+        .unwrap();
+
+        let mut effect = BackgroundEffect::default();
+        for rule in &config.window_rules {
+            effect.merge_with(&rule.background_effect);
+        }
+
+        let lg = effect.liquid_glass.unwrap();
+        assert_eq!(lg.distortion.0, 0.1);
+        assert_eq!(lg.aberration.0, 5.0);
+        assert_eq!(lg.highlight.0, 0.25);
+        assert_eq!(lg.tint.0, 0.92);
+        assert!(lg.animate);
+    }
+
+    #[test]
+    fn liquid_glass_in_layer_rule() {
+        let config = Config::parse_mem(
+            r##"
+            layer-rule {
+                background-effect {
+                    liquid-glass true
+                    lg-tint 0.8
+                }
+            }
+            "##,
+        )
+        .unwrap();
+
+        let mut effect = BackgroundEffect::default();
+        for rule in &config.layer_rules {
+            effect.merge_with(&rule.background_effect);
+        }
+
+        let lg = effect.liquid_glass.unwrap();
+        assert_eq!(lg.tint.0, 0.8);
+        assert_eq!(lg.distortion.0, 0.04);
+    }
 }
