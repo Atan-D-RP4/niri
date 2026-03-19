@@ -845,6 +845,7 @@ impl State {
     }
 
     pub fn move_cursor(&mut self, location: Point<f64, Logical>) {
+        let effective_location = self.niri.effective_cursor_pos(location);
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
             _ => self.niri.contents_under(location),
@@ -867,7 +868,7 @@ impl State {
             self,
             under.surface,
             &MotionEvent {
-                location,
+                location: effective_location,
                 serial: SERIAL_COUNTER.next_serial(),
                 time: get_monotonic_time().as_millis() as u32,
             },
@@ -1056,6 +1057,7 @@ impl State {
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
+        let effective_location = self.niri.effective_cursor_pos(location);
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
             _ => self.niri.contents_under(location),
@@ -1086,7 +1088,7 @@ impl State {
             self,
             under.surface,
             &MotionEvent {
-                location,
+                location: effective_location,
                 serial: SERIAL_COUNTER.next_serial(),
                 time: get_monotonic_time().as_millis() as u32,
             },
@@ -4208,6 +4210,11 @@ impl Niri {
         element: OutputRenderElements<R>,
         output: &Output,
     ) -> OutputRenderElements<R> {
+        let is_wayland_pointer = matches!(
+            &element,
+            OutputRenderElements::Pointer(PointerRenderElements::Wayland(_))
+        );
+
         // Apply zoom to the render elements when needed.
         if !self.layout.has_zoom_for_output(output) {
             return element;
@@ -4243,19 +4250,23 @@ impl Niri {
 
                 // Use cursor theme hotspot — stable per icon, avoids oscillating
                 // hotspot_in_elem = cursor_f64 - elem_pos_i32 computation.
-                let cursor_scale = output.current_scale().integer_scale();
-                let hotspot = match self.cursor_manager.get_render_cursor(cursor_scale) {
-                    RenderCursor::Hidden => None,
-                    RenderCursor::Surface { hotspot, .. } => {
-                        Some(hotspot.to_physical_precise_round(output_scale))
-                    }
-                    RenderCursor::Named { scale, cursor, .. } => {
-                        let (_, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
-                        Some(
-                            XCursor::hotspot(frame)
-                                .to_logical(scale)
-                                .to_physical_precise_round(output_scale),
-                        )
+                let hotspot = if is_wayland_pointer {
+                    None
+                } else {
+                    let cursor_scale = output.current_scale().integer_scale();
+                    match self.cursor_manager.get_render_cursor(cursor_scale) {
+                        RenderCursor::Hidden => None,
+                        RenderCursor::Surface { hotspot, .. } => {
+                            Some(hotspot.to_physical_precise_round(output_scale))
+                        }
+                        RenderCursor::Named { scale, cursor, .. } => {
+                            let (_, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
+                            Some(
+                                XCursor::hotspot(frame)
+                                    .to_logical(scale)
+                                    .to_physical_precise_round(output_scale),
+                            )
+                        }
                     }
                 };
 
@@ -4290,6 +4301,7 @@ impl Niri {
 
         self.render_inner(renderer, output, include_pointer, target, &mut |elem| {
             let zoomed = self.zoomed_element(elem, output);
+
             elements.push(zoomed);
         });
 
