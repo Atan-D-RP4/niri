@@ -2640,7 +2640,6 @@ impl State {
             }
         }
 
-        let effective_new_pos = self.niri.effective_cursor_pos(new_pos);
         let under = self.niri.contents_under(new_pos);
 
         // Handle confined pointer.
@@ -2685,7 +2684,7 @@ impl State {
             self,
             under.surface.clone(),
             &MotionEvent {
-                location: effective_new_pos,
+                location: new_pos,
                 serial,
                 time: event.time_msec(),
             },
@@ -2782,7 +2781,6 @@ impl State {
             }
         }
 
-        let effective_pos = self.niri.effective_cursor_pos(pos);
         let under = self.niri.contents_under(pos);
 
         self.niri.handle_focus_follows_mouse(&under);
@@ -2793,7 +2791,7 @@ impl State {
             self,
             under.surface,
             &MotionEvent {
-                location: effective_pos,
+                location: pos,
                 serial,
                 time: event.time_msec(),
             },

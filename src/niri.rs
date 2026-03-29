@@ -845,7 +845,6 @@ impl State {
     }
 
     pub fn move_cursor(&mut self, location: Point<f64, Logical>) {
-        let effective_location = self.niri.effective_cursor_pos(location);
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
             _ => self.niri.contents_under(location),
@@ -868,7 +867,7 @@ impl State {
             self,
             under.surface,
             &MotionEvent {
-                location: effective_location,
+                location: location,
                 serial: SERIAL_COUNTER.next_serial(),
                 time: get_monotonic_time().as_millis() as u32,
             },
@@ -1057,7 +1056,6 @@ impl State {
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
-        let effective_location = self.niri.effective_cursor_pos(location);
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
             _ => self.niri.contents_under(location),
@@ -1088,7 +1086,7 @@ impl State {
             self,
             under.surface,
             &MotionEvent {
-                location: effective_location,
+                location: location,
                 serial: SERIAL_COUNTER.next_serial(),
                 time: get_monotonic_time().as_millis() as u32,
             },
