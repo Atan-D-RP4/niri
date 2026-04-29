@@ -251,6 +251,35 @@ pub fn render_and_download(
     copy_framebuffer(renderer, &target, fourcc).context("error copying framebuffer")
 }
 
+pub fn render_and_download_with_damage(
+    renderer: &mut GlesRenderer,
+    damage_tracker: &mut OutputDamageTracker,
+    fourcc: Fourcc,
+    elements: &[impl RenderElement<GlesRenderer>],
+    states: RenderElementStates,
+) -> anyhow::Result<GlesMapping> {
+    let _span = tracy_client::span!();
+
+    let (size, _scale, _transform) = damage_tracker.mode().try_into().unwrap();
+    let mut texture = create_texture(renderer, size, fourcc).context("error creating texture")?;
+    let mut target = renderer
+        .bind(&mut texture)
+        .context("error binding texture")?;
+
+    let _res = damage_tracker
+        .render_output_with_states(
+            renderer,
+            &mut target,
+            0,
+            elements,
+            Color32F::TRANSPARENT,
+            states,
+        )
+        .context("error rendering")?;
+
+    copy_framebuffer(renderer, &target, fourcc).context("error copying framebuffer")
+}
+
 pub fn render_to_vec(
     renderer: &mut GlesRenderer,
     size: Size<i32, Physical>,

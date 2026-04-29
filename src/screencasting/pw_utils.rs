@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::{mem, slice};
 
-use anyhow::Context as _;
+use anyhow::{ensure, Context as _};
 use calloop::timer::{TimeoutAction, Timer};
 use calloop::RegistrationToken;
 use pipewire::context::ContextRc;
@@ -39,7 +39,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
-use smithay::backend::renderer::element::{Element, RenderElement};
+use smithay::backend::renderer::element::{Element, RenderElement, RenderElementStates};
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::ExportMem;
@@ -51,13 +51,15 @@ use smithay::reexports::rustix::fd::OwnedFd;
 use smithay::reexports::rustix::fs::{
     fcntl_add_seals, ftruncate, memfd_create, MemfdFlags, SealFlags,
 };
+use smithay::reexports::rustix::mm::{mmap, munmap, MapFlags, ProtFlags};
 use smithay::utils::{Logical, Physical, Point, Scale, Size, Transform};
 use zbus::object_server::SignalEmitter;
 
 use crate::dbus::mutter_screen_cast::{self, CursorMode};
 use crate::niri::{CastTarget, State};
 use crate::render_helpers::{
-    clear_dmabuf, encompassing_geo, render_and_download, render_to_dmabuf,
+    clear_dmabuf, encompassing_geo, render_and_download, render_and_download_with_damage,
+    render_to_dmabuf,
 };
 use crate::screencasting::CastRenderElement;
 use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
@@ -1344,10 +1346,16 @@ impl Cast {
 
         let mut inner = self.inner.borrow_mut();
         let inner_ = &mut *inner;
-        let CastState::Ready { damage_tracker, .. } = &mut inner_.state else {
+        let CastState::Ready {
+            damage_tracker,
+            alpha,
+            ..
+        } = &mut inner_.state
+        else {
             unreachable!()
         };
         let damage_tracker = damage_tracker.as_mut().unwrap();
+        let alpha = *alpha;
 
         unsafe {
             let spa_buffer = (*buffer).buffer;
@@ -1360,20 +1368,40 @@ impl Cast {
             // Unfortunately, I think the OBS PipeWire code needs to be updated first to cleanly
             // allow for that codepath.
             let fd = (*(*spa_buffer).datas).fd;
-            let dmabuf = inner_.dmabufs[&fd].clone();
 
-            let res = render_to_dmabuf(renderer, damage_tracker, dmabuf, elements, states);
+            let res = match (*(*spa_buffer).datas).type_ {
+                x if x == DataType::DmaBuf.as_raw() => {
+                    let dmabuf = inner_.dmabufs[&fd].clone();
+                    render_to_dmabuf(renderer, damage_tracker, dmabuf, elements, states)
+                        .map(|x| (x, SharingBuf::Dma))
+                }
+                x if x == DataType::MemFd.as_raw() => {
+                    let shmbuf = inner_.shmbufs[&fd].clone();
+
+                    let fourcc = if alpha {
+                        Fourcc::Argb8888
+                    } else {
+                        Fourcc::Xrgb8888
+                    };
+
+                    render_to_shmbuf(renderer, damage_tracker, &shmbuf, fourcc, elements, states)
+                        .map(|()| (SyncPoint::signaled(), SharingBuf::Shm(shmbuf)))
+                }
+                _ => Err(anyhow::anyhow!(
+                    "unknown data type in dequeue_buffer_and_render"
+                )),
+            };
+
             drop(inner);
-
             match res {
-                Ok(sync_point) => {
-                    mark_buffer_as_good(pw_buffer, &mut self.sequence_counter, SharingBuf::Dma);
+                Ok((sync_point, buf)) => {
+                    mark_buffer_as_good(pw_buffer, &mut self.sequence_counter, buf);
                     trace!("queueing buffer with seq={}", self.sequence_counter);
                     self.queue_after_sync(pw_buffer, sync_point);
                     true
                 }
                 Err(err) => {
-                    warn!("error rendering to dmabuf: {err:?}");
+                    warn!("error rendering to buffer: {err:?}");
                     return_unused_buffer(&self.stream, pw_buffer);
                     false
                 }
@@ -1410,17 +1438,30 @@ impl Cast {
             }
 
             let fd = (*(*spa_buffer).datas).fd;
-            let dmabuf = self.inner.borrow().dmabufs[&fd].clone();
 
-            match clear_dmabuf(renderer, dmabuf) {
-                Ok(sync_point) => {
-                    mark_buffer_as_good(pw_buffer, &mut self.sequence_counter, SharingBuf::Dma);
+            let res = match (*(*(*buffer).buffer).datas).type_ {
+                x if x == DataType::DmaBuf.as_raw() => {
+                    let dmabuf = self.inner.borrow().dmabufs[&fd].clone();
+                    clear_dmabuf(renderer, dmabuf).map(|x| (x, SharingBuf::Dma))
+                }
+                x if x == DataType::MemFd.as_raw() => {
+                    let shmbuf = self.inner.borrow().shmbufs[&fd].clone();
+                    clear_shmbuf(&shmbuf).map(|()| (SyncPoint::signaled(), SharingBuf::Shm(shmbuf)))
+                }
+                _ => Err(anyhow::anyhow!(
+                    "unknown data type in dequeue_buffer_and_clear"
+                )),
+            };
+
+            match res {
+                Ok((sync_point, buf)) => {
+                    mark_buffer_as_good(pw_buffer, &mut self.sequence_counter, buf);
                     trace!("queueing clear buffer with seq={}", self.sequence_counter);
                     self.queue_after_sync(pw_buffer, sync_point);
                     true
                 }
                 Err(err) => {
-                    warn!("error clearing dmabuf: {err:?}");
+                    warn!("error clearing buffer: {err:?}");
                     return_unused_buffer(&self.stream, pw_buffer);
                     false
                 }
@@ -1550,10 +1591,15 @@ impl ShmLayout {
             size: buffer_size,
         })
     }
+
+    fn size_usize(self) -> usize {
+        self.size as usize
+    }
 }
 
 enum SharingBuf {
     Dma,
+    Shm(Shmbuf),
 }
 
 fn allocate_shmbuf(size: Size<u32, Physical>) -> anyhow::Result<Shmbuf> {
@@ -1606,6 +1652,10 @@ unsafe fn mark_buffer_as_good(pw_buffer: NonNull<pw_buffer>, sequence: &mut u64,
             // so we set it to 1.
             (*chunk).size = 1;
             // Clear the corrupted flag we may have set before.
+            (*chunk).flags = SPA_CHUNK_FLAG_NONE as i32;
+        }
+        SharingBuf::Shm(shmbuf) => {
+            (*chunk).size = shmbuf.layout.size;
             (*chunk).flags = SPA_CHUNK_FLAG_NONE as i32;
         }
     }
@@ -1772,6 +1822,70 @@ unsafe fn add_cursor_metadata(
         bitmap_meta.size.height = size.h as _;
         bitmap_meta.stride = size.w * CURSOR_BPP as i32;
     }
+}
+
+fn render_to_shmbuf(
+    renderer: &mut GlesRenderer,
+    damage_tracker: &mut OutputDamageTracker,
+    buffer: &Shmbuf,
+    fourcc: Fourcc,
+    elements: &[impl RenderElement<GlesRenderer>],
+    states: RenderElementStates,
+) -> anyhow::Result<()> {
+    let _span = tracy_client::span!();
+    let (size, _scale, _transform) = damage_tracker.mode().try_into().unwrap();
+    let expected_size = size.w as usize * size.h as usize * SHM_BYTES_PER_PIXEL;
+    ensure!(
+        buffer.layout.size_usize() == expected_size,
+        "invalid buffer size"
+    );
+
+    let mapping =
+        render_and_download_with_damage(renderer, damage_tracker, fourcc, elements, states)?;
+
+    let bytes = renderer
+        .map_texture(&mapping)
+        .context("error mapping texture")?;
+
+    unsafe {
+        let buf = mmap(
+            std::ptr::null_mut(),
+            buffer.layout.size_usize(),
+            ProtFlags::READ | ProtFlags::WRITE,
+            MapFlags::SHARED,
+            buffer.fd.clone(),
+            0,
+        )?;
+        {
+            let buf = slice::from_raw_parts_mut(buf.cast::<u8>(), buffer.layout.size_usize());
+            buf.copy_from_slice(bytes);
+        }
+        if let Err(err) = munmap(buf, buffer.layout.size_usize()) {
+            warn!("error unmapping shm buffer: {err:?}");
+        }
+    }
+    Ok(())
+}
+
+fn clear_shmbuf(buffer: &Shmbuf) -> anyhow::Result<()> {
+    unsafe {
+        let buf = mmap(
+            std::ptr::null_mut(),
+            buffer.layout.size_usize(),
+            ProtFlags::READ | ProtFlags::WRITE,
+            MapFlags::SHARED,
+            buffer.fd.clone(),
+            0,
+        )?;
+        {
+            let buf = slice::from_raw_parts_mut(buf.cast::<u8>(), buffer.layout.size_usize());
+            buf.fill(0);
+        }
+        if let Err(err) = munmap(buf, buffer.layout.size_usize()) {
+            warn!("error unmapping shm buffer: {err:?}");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
