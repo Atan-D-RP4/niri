@@ -15,7 +15,7 @@ use smithay::backend::input::{
     InputEvent, KeyState, KeyboardKeyEvent, Keycode, MouseButton, PointerAxisEvent,
     PointerButtonEvent, PointerMotionEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
     TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-    TabletToolTipState, TouchEvent,
+    TabletToolTipState, TouchEvent, TouchSlot,
 };
 use smithay::backend::libinput::LibinputInputBackend;
 use smithay::input::dnd::DnDGrab;
@@ -35,7 +35,7 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use touch_overview_grab::TouchOverviewGrab;
@@ -2527,11 +2527,12 @@ impl State {
         if let Some((output, horizontal)) = spatial_grab.flatten() {
             if let Some(geo) = self.niri.global_space.output_geometry(&output) {
                 let geo = geo.to_f64();
+                let geo_extent = geo.loc + geo.size.to_f64();
                 if horizontal {
                     new_pos.x = (new_pos.x - geo.loc.x).rem_euclid(geo.size.w) + geo.loc.x;
-                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo.loc.y + geo.size.h - 1.);
+                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo_extent.y - 1.);
                 } else {
-                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo.loc.x + geo.size.w - 1.);
+                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo_extent.x - 1.);
                     new_pos.y = (new_pos.y - geo.loc.y).rem_euclid(geo.size.h) + geo.loc.y;
                 }
             }
@@ -2564,14 +2565,7 @@ impl State {
             }
         }
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let point = (new_pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
+        self.update_screenshot_ui(new_pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
@@ -2699,14 +2693,7 @@ impl State {
 
         let pointer = self.niri.seat.get_pointer().unwrap();
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
+        self.update_screenshot_ui(pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
@@ -3066,10 +3053,7 @@ impl State {
                 };
 
                 if let Some(output) = output.cloned() {
-                    let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                    let point = (pos - geom.loc.to_f64())
-                        .to_physical(output.current_scale().fractional_scale())
-                        .to_i32_round();
+                    let point = self.screenshot_ui_point(&output, pos);
 
                     if self
                         .niri
@@ -3482,6 +3466,7 @@ impl State {
                         !self.niri.screenshot_ui.is_open()
                             || allowed_during_screenshot(&bind.action)
                     });
+
                     let bind_down =
                         find_configured_bind(bindings, mod_key, Trigger::TouchpadScrollDown, mods)
                             .filter(|bind| {
@@ -3599,14 +3584,7 @@ impl State {
             return;
         };
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
+        self.update_screenshot_ui(pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
@@ -3698,10 +3676,7 @@ impl State {
                         };
 
                         if let Some(output) = output.cloned() {
-                            let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                            let point = (pos - geom.loc.to_f64())
-                                .to_physical(output.current_scale().fractional_scale())
-                                .to_i32_round();
+                            let point = self.screenshot_ui_point(&output, pos);
 
                             if self
                                 .niri
@@ -4298,10 +4273,7 @@ impl State {
             };
 
             if let Some(output) = output.cloned() {
-                let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                let point = (pos - geom.loc.to_f64())
-                    .to_physical(output.current_scale().fractional_scale())
-                    .to_i32_round();
+                let point = self.screenshot_ui_point(&output, pos);
 
                 if self
                     .niri
@@ -4403,6 +4375,7 @@ impl State {
         // We're using touch, hide the pointer.
         self.niri.pointer_visibility = PointerVisibility::Disabled;
     }
+
     fn on_touch_up<I: InputBackend>(&mut self, evt: I::TouchUpEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
@@ -4437,12 +4410,7 @@ impl State {
         let slot = evt.slot();
 
         if let Some(output) = self.niri.screenshot_ui.selection_output().cloned() {
-            let geom = self.niri.global_space.output_geometry(&output).unwrap();
-            let point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            self.niri.screenshot_ui.pointer_motion(point, Some(slot));
+            self.update_screenshot_ui(pos, Some(slot));
             self.niri.queue_redraw(&output);
         }
 
@@ -4468,12 +4436,14 @@ impl State {
             }
         }
     }
+
     fn on_touch_frame<I: InputBackend>(&mut self, _evt: I::TouchFrameEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
         };
         handle.frame(self);
     }
+
     fn on_touch_cancel<I: InputBackend>(&mut self, _evt: I::TouchCancelEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
@@ -4513,6 +4483,33 @@ impl State {
         let grab = grab.as_any();
 
         grab.is::<PickWindowGrab>() || grab.is::<PickColorGrab>() || Self::is_dnd_grab(grab)
+    }
+
+    /// Converts a global logical position to screenshot UI physical coords
+    /// for the given output.
+    fn screenshot_ui_point(
+        &self,
+        output: &Output,
+        pos: Point<f64, Logical>,
+    ) -> Point<i32, Physical> {
+        let geom = self.niri.global_space.output_geometry(output).unwrap();
+        let point = pos - geom.loc.to_f64();
+        let scale = output.current_scale().fractional_scale();
+        let point = point.to_physical_precise_round(scale);
+
+        let size = output.current_mode().unwrap().size;
+        let transform = output.current_transform();
+        let size = transform.transform_size(size);
+
+        point.constrain(Rectangle::from_size(size))
+    }
+
+    /// Routes pointer or touch motion to the screenshot UI.
+    fn update_screenshot_ui(&mut self, pos: Point<f64, Logical>, slot: Option<TouchSlot>) {
+        if let Some(output) = self.niri.screenshot_ui.selection_output() {
+            let point = self.screenshot_ui_point(output, pos);
+            self.niri.screenshot_ui.pointer_motion(point, slot);
+        }
     }
 }
 
