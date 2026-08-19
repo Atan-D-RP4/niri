@@ -17,7 +17,7 @@ use smithay::backend::input::{
     InputEvent, KeyState, KeyboardKeyEvent, Keycode, MouseButton, PointerAxisEvent,
     PointerButtonEvent, PointerMotionEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
     TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-    TabletToolTipState, TouchEvent,
+    TabletToolTipState, TouchEvent, TouchSlot,
 };
 use smithay::backend::libinput::LibinputInputBackend;
 use smithay::input::dnd::DnDGrab;
@@ -37,7 +37,7 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardDevice;
@@ -56,7 +56,8 @@ use crate::niri::{CastTarget, Niri, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::{spawn, spawn_sh};
-use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
+use crate::utils::{center, get_monotonic_time, output_size, CastSessionId, ResizeEdge};
+use crate::window::mapped::MappedId;
 
 pub mod backend_ext;
 pub mod click_grab;
@@ -2753,11 +2754,12 @@ impl State {
         if let Some((output, horizontal)) = spatial_grab.flatten() {
             if let Some(geo) = self.niri.global_space.output_geometry(&output) {
                 let geo = geo.to_f64();
+                let geo_extent = geo.loc + geo.size;
                 if horizontal {
                     new_pos.x = (new_pos.x - geo.loc.x).rem_euclid(geo.size.w) + geo.loc.x;
-                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo.loc.y + geo.size.h - 1.);
+                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo_extent.y - 1.);
                 } else {
-                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo.loc.x + geo.size.w - 1.);
+                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo_extent.x - 1.);
                     new_pos.y = (new_pos.y - geo.loc.y).rem_euclid(geo.size.h) + geo.loc.y;
                 }
             }
@@ -2790,22 +2792,9 @@ impl State {
             }
         }
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let point = (new_pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
+        self.update_screenshot_ui(new_pos, None);
 
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
-
-        if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
-                if mru_output == output {
-                    self.niri.window_mru_ui.pointer_motion(pos_within_output);
-                }
-            }
-        }
+        self.mru_pointer_motion(new_pos);
 
         let under = self.niri.contents_under(new_pos);
 
@@ -2925,22 +2914,9 @@ impl State {
 
         let pointer = self.niri.seat.get_pointer().unwrap();
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
+        self.update_screenshot_ui(pos, None);
 
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
-
-        if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
-                if mru_output == output {
-                    self.niri.window_mru_ui.pointer_motion(pos_within_output);
-                }
-            }
-        }
+        self.mru_pointer_motion(pos);
 
         let under = self.niri.contents_under(pos);
 
@@ -3053,18 +3029,12 @@ impl State {
             self.niri.cancel_interrupted_release_binds();
 
             let mut is_mru_open = false;
-            if let Some(mru_output) = self.niri.window_mru_ui.output() {
+            if self.niri.window_mru_ui.output().is_some() {
                 is_mru_open = true;
                 if let Some(MouseButton::Left) = button {
                     let location = pointer.current_location();
-                    let (output, pos_within_output) = self.niri.output_under(location).unwrap();
-                    if mru_output == output {
-                        let id = self.niri.window_mru_ui.pointer_motion(pos_within_output);
-                        if id.is_some() {
-                            self.confirm_mru();
-                        } else {
-                            self.niri.cancel_mru();
-                        }
+                    if self.mru_pointer_motion(location).is_some() {
+                        self.confirm_mru();
                     } else {
                         self.niri.cancel_mru();
                     }
@@ -3332,10 +3302,7 @@ impl State {
                 };
 
                 if let Some(output) = output.cloned() {
-                    let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                    let point = (pos - geom.loc.to_f64())
-                        .to_physical(output.current_scale().fractional_scale())
-                        .to_i32_round();
+                    let point = self.screenshot_ui_point(&output, pos);
 
                     if self
                         .niri
@@ -3803,22 +3770,9 @@ impl State {
             return;
         };
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
+        self.update_screenshot_ui(pos, None);
 
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
-
-        if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
-                if mru_output == output {
-                    self.niri.window_mru_ui.pointer_motion(pos_within_output);
-                }
-            }
-        }
+        self.mru_pointer_motion(pos);
 
         let under = self.niri.contents_under(pos);
 
@@ -3904,10 +3858,7 @@ impl State {
                         };
 
                         if let Some(output) = output.cloned() {
-                            let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                            let point = (pos - geom.loc.to_f64())
-                                .to_physical(output.current_scale().fractional_scale())
-                                .to_i32_round();
+                            let point = self.screenshot_ui_point(&output, pos);
 
                             if self
                                 .niri
@@ -3917,18 +3868,11 @@ impl State {
                                 self.niri.queue_redraw_all();
                             }
                         }
-                    } else if let Some(mru_output) = self.niri.window_mru_ui.output() {
-                        if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
-                            if mru_output == output {
-                                let id = self.niri.window_mru_ui.pointer_motion(pos_within_output);
-                                if id.is_some() {
-                                    self.confirm_mru();
-                                } else {
-                                    self.niri.cancel_mru();
-                                }
-                            } else {
-                                self.niri.cancel_mru();
-                            }
+                    } else if self.niri.window_mru_ui.output().is_some() {
+                        if self.mru_pointer_motion(pos).is_some() {
+                            self.confirm_mru();
+                        } else {
+                            self.niri.cancel_mru();
                         }
                     } else if !tool.is_grabbed() {
                         if under.overview && !mod_down && under.output.is_some() {
@@ -4546,10 +4490,7 @@ impl State {
             };
 
             if let Some(output) = output.cloned() {
-                let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                let point = (pos - geom.loc.to_f64())
-                    .to_physical(output.current_scale().fractional_scale())
-                    .to_i32_round();
+                let point = self.screenshot_ui_point(&output, pos);
 
                 if self
                     .niri
@@ -4559,18 +4500,11 @@ impl State {
                     self.niri.queue_redraw_all();
                 }
             }
-        } else if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
-                if mru_output == output {
-                    let id = self.niri.window_mru_ui.pointer_motion(pos_within_output);
-                    if id.is_some() {
-                        self.confirm_mru();
-                    } else {
-                        self.niri.cancel_mru();
-                    }
-                } else {
-                    self.niri.cancel_mru();
-                }
+        } else if self.niri.window_mru_ui.output().is_some() {
+            if self.mru_pointer_motion(pos).is_some() {
+                self.confirm_mru();
+            } else {
+                self.niri.cancel_mru();
             }
         } else if !handle.is_grabbed() {
             if under.overview && !mod_down && under.output.is_some() {
@@ -4647,6 +4581,7 @@ impl State {
         // We're using touch, hide the pointer.
         self.niri.pointer_visibility = PointerVisibility::Disabled;
     }
+
     fn on_touch_up<I: InputBackend>(&mut self, evt: I::TouchUpEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
@@ -4681,12 +4616,7 @@ impl State {
         let slot = evt.slot();
 
         if let Some(output) = self.niri.screenshot_ui.selection_output().cloned() {
-            let geom = self.niri.global_space.output_geometry(&output).unwrap();
-            let point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            self.niri.screenshot_ui.pointer_motion(point, Some(slot));
+            self.update_screenshot_ui(pos, Some(slot));
             self.niri.queue_redraw(&output);
         }
 
@@ -4712,12 +4642,14 @@ impl State {
             }
         }
     }
+
     fn on_touch_frame<I: InputBackend>(&mut self, _evt: I::TouchFrameEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
         };
         handle.frame(self);
     }
+
     fn on_touch_cancel<I: InputBackend>(&mut self, _evt: I::TouchCancelEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
@@ -4757,6 +4689,43 @@ impl State {
         let grab = grab.as_any();
 
         grab.is::<PickWindowGrab>() || grab.is::<PickColorGrab>() || Self::is_dnd_grab(grab)
+    }
+
+    /// Computes the position of a point in the screenshot UI output, given a point in global
+    /// logical coordinates.
+    fn screenshot_ui_point(
+        &self,
+        output: &Output,
+        pos: Point<f64, Logical>,
+    ) -> Point<i32, Physical> {
+        let geom = self.niri.global_space.output_geometry(output).unwrap();
+        let scale = output.current_scale().fractional_scale();
+        let logical_size = output_size(output);
+
+        let point = pos - geom.loc.to_f64();
+        point
+            .constrain(Rectangle::from_size(logical_size))
+            .to_physical_precise_round(scale)
+    }
+
+    /// Routes pointer or touch motion to the screen-fixed screenshot UI, if the motion is within
+    /// the screenshot UI output.
+    fn update_screenshot_ui(&mut self, pos: Point<f64, Logical>, slot: Option<TouchSlot>) {
+        if let Some(output) = self.niri.screenshot_ui.selection_output() {
+            let point = self.screenshot_ui_point(output, pos);
+            self.niri.screenshot_ui.pointer_motion(point, slot);
+        }
+    }
+
+    /// Routes pointer or touch motion to the screen-fixed MRU UI, if the motion is within the MRU
+    /// output.
+    fn mru_pointer_motion(&mut self, pos: Point<f64, Logical>) -> Option<MappedId> {
+        let mru_output = self.niri.window_mru_ui.output()?;
+        let (output, pos_within_output) = self.niri.output_under(pos)?;
+        if mru_output != output {
+            return None;
+        }
+        self.niri.window_mru_ui.pointer_motion(pos_within_output)
     }
 }
 
