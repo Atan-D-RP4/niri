@@ -4453,7 +4453,7 @@ impl Niri {
 
         // Get monitor elements.
         let mon = self.layout.monitor_for_output(output).unwrap();
-        let zoom = mon.overview_zoom();
+        let overview_zoom = mon.overview_zoom();
 
         // Get layer-shell elements.
         let layer_map = layer_map_for_output(output);
@@ -4552,7 +4552,9 @@ impl Niri {
             macro_rules! process {
                 ($geo:expr) => {{
                     &mut |elem| {
-                        if let Some(elem) = scale_relocate_crop(elem, output_scale, zoom, $geo) {
+                        if let Some(elem) =
+                            scale_relocate_crop(elem, output_scale, overview_zoom, $geo)
+                        {
                             push(elem.into());
                         }
                     }
@@ -4561,7 +4563,7 @@ impl Niri {
 
             for (ws, geo) in mon.workspaces_with_render_geo() {
                 let ns = Some(ws.id().get() as usize);
-                let xray_pos = XrayPos::new(geo.loc, zoom);
+                let xray_pos = XrayPos::new(geo.loc, overview_zoom);
                 push_popups_from_layer!(Layer::Bottom, ns, xray_pos, process!(geo));
                 push_popups_from_layer!(Layer::Background, ns, xray_pos, process!(geo));
             }
@@ -4578,7 +4580,7 @@ impl Niri {
                 // namespace on the frame at once. Id + namespace is used as the cache key in the
                 // damage tracker.
                 let ns = Some(ws.id().get() as usize);
-                let xray_pos = XrayPos::new(geo.loc, zoom);
+                let xray_pos = XrayPos::new(geo.loc, overview_zoom);
                 push_normal_from_layer!(Layer::Bottom, ns, xray_pos, process!(geo));
                 push_normal_from_layer!(Layer::Background, ns, xray_pos, process!(geo));
 
