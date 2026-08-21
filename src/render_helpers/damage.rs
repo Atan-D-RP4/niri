@@ -2,13 +2,15 @@ use smithay::backend::renderer::element::{Element, Id, RenderElement};
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::Renderer;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Size};
+use smithay::utils::{Buffer, Physical, Rectangle, Scale, Size};
+
+use crate::utils::geometry::{Local, RectLocalExt};
 
 #[derive(Debug, Clone)]
 pub struct ExtraDamage {
     id: Id,
     commit: CommitCounter,
-    geometry: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
 }
 
 impl ExtraDamage {
@@ -24,7 +26,7 @@ impl ExtraDamage {
         self.commit.increment();
     }
 
-    pub fn render(&self, geometry: Rectangle<f64, Logical>) -> Self {
+    pub fn render(&self, geometry: Rectangle<f64, Local>) -> Self {
         let mut this = self.clone();
         this.geometry = geometry;
         this
@@ -51,7 +53,7 @@ impl Element for ExtraDamage {
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.geometry.to_physical_precise_up(scale)
+        self.geometry.as_logical().to_physical_precise_up(scale)
     }
 }
 

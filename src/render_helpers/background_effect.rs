@@ -13,6 +13,7 @@ use crate::render_helpers::damage::ExtraDamage;
 use crate::render_helpers::framebuffer_effect::{FramebufferEffect, FramebufferEffectElement};
 use crate::render_helpers::xray::{XrayElement, XrayPos};
 use crate::render_helpers::RenderCtx;
+use crate::utils::geometry::{Local, PointLocalExt, RectExt, RectLocalExt};
 use crate::utils::region::TransformedRegion;
 use crate::utils::surface_geo;
 
@@ -51,13 +52,15 @@ impl Options {
 #[derive(Debug)]
 pub struct RenderParams {
     /// Geometry of the background effect.
-    pub geometry: Rectangle<f64, Logical>,
+    pub geometry: Rectangle<f64, Local>,
     /// Effect subregion, will be clipped to `geometry`.
     ///
-    /// `subregion.iter()` should return `geometry`-relative rectangles.
+    /// `TransformedRegion` intentionally remains in Smithay's bare Logical geometry because it
+    /// originates at the surface-region API. Its values are adapted to the Local effect geometry
+    /// only at the render-element boundary.
     pub subregion: Option<TransformedRegion>,
     /// Geometry and radius for clipping in the same coordinate space as `geometry`.
-    pub clip: Option<(Rectangle<f64, Logical>, CornerRadius)>,
+    pub clip: Option<(Rectangle<f64, Local>, CornerRadius)>,
     /// Scale to use for rounding to physical pixels.
     pub scale: f64,
 }
@@ -206,12 +209,12 @@ impl BackgroundEffect {
 }
 
 fn render_params_for_tile(
-    geometry: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
     scale: f64,
     clip_to_geometry: bool,
     block_out: bool,
     blur_region: Option<Arc<Vec<Rectangle<i32, Logical>>>>,
-    surface_geo: Rectangle<f64, Logical>,
+    surface_geo: Rectangle<f64, Local>,
     surface_anim_scale: Scale<f64>,
 ) -> Option<RenderParams> {
     // Effects not requested by the surface itself are drawn to match the geometry.
@@ -239,12 +242,13 @@ fn render_params_for_tile(
                 subregion = Some(TransformedRegion {
                     rects,
                     scale: surface_anim_scale,
-                    offset: surface_geo.loc,
+                    offset: surface_geo.loc.as_logical(),
                 });
 
                 surface_geo = surface_geo
                     .to_physical_precise_round(scale)
-                    .to_logical(scale);
+                    .to_logical(scale)
+                    .assume_local();
                 effect_geometry = surface_geo;
             }
         }
@@ -284,11 +288,11 @@ pub fn damage_surface(states: &SurfaceData) {
 pub fn render_for_tile(
     ctx: RenderCtx<GlesRenderer>,
     ns: Option<usize>,
-    geometry: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
     scale: f64,
     clip_to_geometry: bool,
     surface: &WlSurface,
-    surface_off: Point<f64, Logical>,
+    surface_off: Point<f64, Local>,
     surface_anim_scale: Scale<f64>,
     blur_config: niri_config::Blur,
     radius: CornerRadius,
@@ -326,6 +330,7 @@ pub fn render_for_tile(
             return;
         };
 
+        // Same-frame (Local) displacement, no relabeling needed.
         let xray_pos = xray_pos.offset(params.geometry.loc - geometry.loc);
         background_effect.render(ctx, ns, params, xray_pos, push);
     });

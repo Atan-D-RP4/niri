@@ -68,6 +68,7 @@ use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{BakedBuffer, RenderCtx};
 use crate::rubber_band::RubberBand;
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectLocalExt, SizeExt};
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::{
     ensure_min_max_size_maybe_zero, output_matches_name, output_size,
@@ -156,14 +157,14 @@ pub trait LayoutElement {
     /// The point is relative to the element's visual geometry.
     fn is_in_input_region(&self, point: Point<f64, Logical>) -> bool;
 
-    /// Renders the element at the given visual location.
+    /// Renders the element at the given visual location, in output-Local space.
     ///
     /// The element should be rendered in such a way that its visual geometry ends up at the given
     /// location.
     fn render<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         scale: Scale<f64>,
         alpha: f32,
         xray_pos: XrayPos,
@@ -177,7 +178,7 @@ pub trait LayoutElement {
     fn render_normal<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         scale: Scale<f64>,
         alpha: f32,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
@@ -189,7 +190,7 @@ pub trait LayoutElement {
     fn render_popups<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         scale: Scale<f64>,
         alpha: f32,
         xray_pos: XrayPos,
@@ -431,7 +432,7 @@ struct InteractiveMoveData<W: LayoutElement> {
     /// Output where the window is currently located/rendered.
     pub(self) output: Output,
     /// Current pointer position within output.
-    pub(self) pointer_pos_within_output: Point<f64, Logical>,
+    pub(self) pointer_pos_within_output: Point<f64, Local>,
     /// Window column width.
     pub(self) width: ColumnWidth,
     /// Whether the window column was full-width.
@@ -459,7 +460,7 @@ pub struct DndData<W: LayoutElement> {
     /// Output where the pointer is currently located.
     output: Output,
     /// Current pointer position within output.
-    pointer_pos_within_output: Point<f64, Logical>,
+    pointer_pos_within_output: Point<f64, Local>,
     /// Ongoing DnD hold to activate something.
     hold: Option<DndHold<W>>,
 }
@@ -616,6 +617,7 @@ impl<W: LayoutElement> InteractiveMoveData<W> {
         ));
         let pos = self.pointer_pos_within_output
             - (pointer_offset_within_window + self.tile.window_loc() - self.tile.render_offset())
+                .assume_local()
                 .upscale(overview_zoom);
         // Round to physical pixels.
         pos.to_physical_precise_round(scale).to_logical(scale)
@@ -1445,7 +1447,7 @@ impl<W: LayoutElement> Layout<W> {
     /// Computes the window-geometry-relative target rect for popup unconstraining.
     ///
     /// We will try to fit popups inside this rect.
-    pub fn popup_target_rect(&self, window: &W::Id) -> Rectangle<f64, Logical> {
+    pub fn popup_target_rect(&self, window: &W::Id) -> Rectangle<f64, Local> {
         if let Some(InteractiveMoveState::Moving(move_)) = &self.interactive_move {
             if move_.tile.window().id() == window {
                 // Follow the scrolling layout logic and fit the popup horizontally within the
@@ -2326,14 +2328,15 @@ impl<W: LayoutElement> Layout<W> {
     pub fn interactive_moved_window_under(
         &self,
         output: &Output,
-        pos_within_output: Point<f64, Logical>,
+        pos_within_output: Point<f64, Local>,
     ) -> Option<(&W, HitType)> {
         if let Some(InteractiveMoveState::Moving(move_)) = &self.interactive_move {
             if move_.output == *output {
                 if self.overview_progress.is_some() {
                     let overview_zoom = self.overview_zoom();
                     let tile_pos = move_.tile_render_location(overview_zoom);
-                    let pos_within_tile = (pos_within_output - tile_pos).downscale(overview_zoom);
+                    let pos_within_tile =
+                        (pos_within_output.as_logical() - tile_pos).downscale(overview_zoom);
                     // During the overview animation, we cannot do input hits because we cannot
                     // really represent scaled windows properly.
                     let (win, hit) =
@@ -2341,7 +2344,7 @@ impl<W: LayoutElement> Layout<W> {
                     Some((win, hit.to_activate()))
                 } else {
                     let tile_pos = move_.tile_render_location(1.);
-                    HitType::hit_tile(&move_.tile, tile_pos, pos_within_output)
+                    HitType::hit_tile(&move_.tile, tile_pos, pos_within_output.as_logical())
                 }
             } else {
                 None
@@ -2355,7 +2358,7 @@ impl<W: LayoutElement> Layout<W> {
     pub fn window_under(
         &self,
         output: &Output,
-        pos_within_output: Point<f64, Logical>,
+        pos_within_output: Point<f64, Local>,
     ) -> Option<(&W, HitType)> {
         let mon = self.monitor_for_output(output)?;
         mon.window_under(pos_within_output)
@@ -2364,7 +2367,7 @@ impl<W: LayoutElement> Layout<W> {
     pub fn resize_edges_under(
         &self,
         output: &Output,
-        pos_within_output: Point<f64, Logical>,
+        pos_within_output: Point<f64, Local>,
     ) -> Option<ResizeEdge> {
         let mon = self.monitor_for_output(output)?;
         mon.resize_edges_under(pos_within_output)
@@ -2374,7 +2377,7 @@ impl<W: LayoutElement> Layout<W> {
         &self,
         extended_bounds: bool,
         output: &Output,
-        pos_within_output: Point<f64, Logical>,
+        pos_within_output: Point<f64, Local>,
     ) -> Option<&Workspace<W>> {
         if self
             .interactive_moved_window_under(output, pos_within_output)
@@ -3816,7 +3819,7 @@ impl<W: LayoutElement> Layout<W> {
         &mut self,
         window_id: W::Id,
         output: &Output,
-        start_pos_within_output: Point<f64, Logical>,
+        start_pos_within_output: Point<f64, Local>,
     ) -> bool {
         if self.interactive_move.is_some() {
             return false;
@@ -3843,10 +3846,11 @@ impl<W: LayoutElement> Layout<W> {
             .unwrap();
         let window_offset = tile.window_loc();
 
-        let tile_pos = ws_geo.loc + tile_offset.upscale(overview_zoom);
+        // Overview-drag math stays Logical.
+        let tile_pos = ws_geo.loc.as_logical() + tile_offset.as_logical().upscale(overview_zoom);
 
         let pointer_offset_within_window =
-            start_pos_within_output - tile_pos - window_offset.upscale(overview_zoom);
+            start_pos_within_output.as_logical() - tile_pos - window_offset.upscale(overview_zoom);
         let window_size = tile.window_size().upscale(overview_zoom);
         let pointer_ratio_within_window = (
             f64::clamp(pointer_offset_within_window.x / window_size.w, 0., 1.),
@@ -3878,7 +3882,7 @@ impl<W: LayoutElement> Layout<W> {
         window: &W::Id,
         delta: Point<f64, Logical>,
         output: Output,
-        pointer_pos_within_output: Point<f64, Logical>,
+        pointer_pos_within_output: Point<f64, Local>,
     ) -> bool {
         let Some(state) = self.interactive_move.take() else {
             return false;
@@ -3966,7 +3970,9 @@ impl<W: LayoutElement> Layout<W> {
 
                         let overview_zoom = mon.overview_zoom();
                         tile_pos = Some((
-                            ws_geo.loc + tile_offset.upscale(overview_zoom),
+                            // Overview-drag math stays Logical.
+                            ws_geo.loc.as_logical()
+                                + tile_offset.as_logical().upscale(overview_zoom),
                             overview_zoom,
                         ));
                     }
@@ -4287,9 +4293,10 @@ impl<W: LayoutElement> Layout<W> {
                         match insert_ws {
                             InsertWorkspace::Existing(_) => {
                                 if let Some(offset) = offset {
-                                    let pos = (tile_render_loc - offset).downscale(overview_zoom);
-                                    let pos =
-                                        mon.workspaces[ws_idx].floating_logical_to_size_frac(pos);
+                                    let pos = (tile_render_loc - offset.as_logical())
+                                        .downscale(overview_zoom);
+                                    let pos = mon.workspaces[ws_idx]
+                                        .floating_logical_to_size_frac(pos.assume_local());
                                     tile.floating_pos = Some(pos);
                                 } else {
                                     error!(
@@ -4336,7 +4343,9 @@ impl<W: LayoutElement> Layout<W> {
                             .map(|(tile, tile_offset)| (tile, tile_offset, geo))
                     })
                     .unwrap();
-                let new_tile_render_loc = ws_geo.loc + tile_offset.upscale(overview_zoom);
+                // Overview-drag math stays Logical.
+                let new_tile_render_loc =
+                    ws_geo.loc.as_logical() + tile_offset.as_logical().upscale(overview_zoom);
 
                 tile.animate_move_from(
                     (tile_render_loc - new_tile_render_loc).downscale(overview_zoom),
@@ -4380,7 +4389,7 @@ impl<W: LayoutElement> Layout<W> {
         move_.output == *output
     }
 
-    pub fn dnd_update(&mut self, output: Output, pointer_pos_within_output: Point<f64, Logical>) {
+    pub fn dnd_update(&mut self, output: Output, pointer_pos_within_output: Point<f64, Local>) {
         let begin_gesture = self.dnd.is_none();
 
         self.dnd = Some(DndData {
@@ -4691,13 +4700,17 @@ impl<W: LayoutElement> Layout<W> {
 
         if let Some(InteractiveMoveState::Moving(move_)) = &mut self.interactive_move {
             if move_.tile.window().id() == window {
-                let pos_within_output = move_.tile_render_location(overview_zoom);
+                let pos_within_output = move_.tile_render_location(overview_zoom).assume_local();
 
                 // Computation matches update_render_elements().
-                let view_rect =
-                    Rectangle::new(pos_within_output.upscale(-1.), output_size(&move_.output))
-                        .downscale(overview_zoom);
-                move_.tile.update_render_elements(false, view_rect);
+                let view_rect = Rectangle::new(
+                    pos_within_output.upscale(-1.),
+                    output_size(&move_.output).assume_local(),
+                )
+                .downscale(overview_zoom);
+                move_
+                    .tile
+                    .update_render_elements(false, view_rect.as_logical());
 
                 move_.tile.store_unmap_snapshot_if_empty(
                     renderer,
@@ -4802,7 +4815,7 @@ impl<W: LayoutElement> Layout<W> {
                 let idx = mon.idx_of_ws(ws.id()).unwrap();
                 let ws = &mut mon.workspaces[idx];
 
-                let tile_pos = tile_pos - ws_geo.loc;
+                let tile_pos = tile_pos - ws_geo.loc.as_logical();
                 ws.start_close_animation_for_tile(renderer, snapshot, tile_size, tile_pos, blocker);
                 return;
             }
@@ -4851,17 +4864,24 @@ impl<W: LayoutElement> Layout<W> {
         let scale = Scale::from(move_.output.current_scale().fractional_scale());
         let overview_zoom = self.overview_zoom();
         let pos_in_backdrop = move_.tile_render_location(overview_zoom);
-        let xray_pos = XrayPos::new(pos_in_backdrop, overview_zoom);
+        let xray_pos = XrayPos::new(pos_in_backdrop.assume_local(), overview_zoom);
 
         move_
             .tile
-            .render(ctx, pos_in_backdrop, xray_pos, true, &mut |elem| {
-                push(RescaleRenderElement::from_element(
-                    elem,
-                    pos_in_backdrop.to_physical_precise_round(scale),
-                    overview_zoom,
-                ));
-            });
+            // Overview-drag position plays the output-Local role pre-rescale.
+            .render(
+                ctx,
+                pos_in_backdrop.assume_local(),
+                xray_pos,
+                true,
+                &mut |elem| {
+                    push(RescaleRenderElement::from_element(
+                        elem,
+                        pos_in_backdrop.to_physical_precise_round(scale),
+                        overview_zoom,
+                    ));
+                },
+            );
     }
 
     pub fn refresh(&mut self, is_active: bool) {

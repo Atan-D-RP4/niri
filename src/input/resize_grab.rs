@@ -16,18 +16,19 @@ use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
 
 use crate::input::AnyStartData;
 use crate::niri::State;
+use crate::utils::geometry::{Global, PointExt, PointGlobalExt};
 
 pub struct ResizeGrab {
     start_data: AnyStartData<State>,
     window: Window,
 
     // Accumulated and applied in frame().
-    new_location: Point<f64, Logical>,
+    new_location: Point<f64, Global>,
 }
 
 impl ResizeGrab {
     pub fn new(start_data: AnyStartData<State>, window: Window) -> Self {
-        let location = start_data.location();
+        let location = start_data.global_location();
 
         Self {
             start_data,
@@ -52,7 +53,7 @@ impl ResizeGrab {
             return false;
         }
 
-        let delta = self.new_location - self.start_data.location();
+        let delta = (self.new_location - self.start_data.global_location()).as_logical();
         data.niri
             .layout
             .interactive_resize_update(&self.window, delta)
@@ -70,7 +71,7 @@ impl PointerGrab<State> for ResizeGrab {
         // While the grab is active, no client has pointer focus.
         handle.motion(data, None, event);
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
     }
 
     fn relative_motion(
@@ -242,7 +243,7 @@ impl TouchGrab<State> for ResizeGrab {
             return;
         }
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
     }
 
     fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
@@ -310,7 +311,7 @@ impl TabletToolGrab<State> for ResizeGrab {
     ) {
         handle.motion(data, None, event);
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
     }
 
     fn down(

@@ -35,6 +35,7 @@ use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::RenderCtx;
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, RectLocalExt, SizeExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::{
@@ -79,7 +80,7 @@ pub struct Workspace<W: LayoutElement> {
     ///
     /// This should be computed from the current workspace output size, or, if all outputs have
     /// been disconnected, preserved until a new output is connected.
-    view_size: Size<f64, Logical>,
+    view_size: Size<f64, Local>,
 
     /// Latest known working area for this workspace.
     ///
@@ -87,7 +88,7 @@ pub struct Workspace<W: LayoutElement> {
     ///
     /// This is similar to view size, but takes into account things like layer shell exclusive
     /// zones.
-    working_area: Rectangle<f64, Logical>,
+    working_area: Rectangle<f64, Local>,
 
     /// This workspace's shadow in the overview.
     shadow: Shadow,
@@ -232,7 +233,7 @@ impl<W: LayoutElement> Workspace<W> {
                 .adjusted_for_scale(scale.fractional_scale()),
         );
 
-        let view_size = output_size(&output);
+        let view_size = output_size(&output).assume_local();
         let working_area = compute_working_area(&output);
 
         let scrolling = ScrollingSpace::new(
@@ -264,7 +265,10 @@ impl<W: LayoutElement> Workspace<W> {
             view_size,
             working_area,
             shadow: Shadow::new(shadow_config),
-            background_buffer: SolidColorBuffer::new(view_size, options.layout.background_color),
+            background_buffer: SolidColorBuffer::new(
+                view_size.as_logical(),
+                options.layout.background_color,
+            ),
             output: Some(output),
             clock,
             base_options,
@@ -296,8 +300,8 @@ impl<W: LayoutElement> Workspace<W> {
                 .adjusted_for_scale(scale.fractional_scale()),
         );
 
-        let view_size = Size::from((1280., 720.));
-        let working_area = Rectangle::from_size(Size::from((1280., 720.)));
+        let view_size: Size<f64, Local> = (1280., 720.).into();
+        let working_area = Rectangle::from_size(view_size);
 
         let scrolling = ScrollingSpace::new(
             view_size,
@@ -329,7 +333,10 @@ impl<W: LayoutElement> Workspace<W> {
             view_size,
             working_area,
             shadow: Shadow::new(shadow_config),
-            background_buffer: SolidColorBuffer::new(view_size, options.layout.background_color),
+            background_buffer: SolidColorBuffer::new(
+                view_size.as_logical(),
+                options.layout.background_color,
+            ),
             clock,
             base_options,
             options,
@@ -380,7 +387,7 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling
             .update_render_elements(is_active && !self.floating_is_active.get(), layer);
 
-        let view_rect = Rectangle::from_size(self.view_size);
+        let view_rect = Rectangle::from_size(self.view_size.as_logical());
         self.floating.update_render_elements(
             is_active && self.floating_is_active.get(),
             view_rect,
@@ -389,7 +396,7 @@ impl<W: LayoutElement> Workspace<W> {
 
         if layer.is_normal() {
             self.shadow.update_render_elements(
-                self.view_size,
+                self.view_size.as_logical(),
                 true,
                 CornerRadius::default(),
                 self.scale.fractional_scale(),
@@ -532,9 +539,14 @@ impl<W: LayoutElement> Workspace<W> {
         let output = self.output.as_ref().unwrap();
         let scale = output.current_scale();
         let transform = output.current_transform();
-        let view_size = output_size(output);
+        let view_size = output_size(output).assume_local();
         let working_area = compute_working_area(output);
-        self.set_view_size(scale, transform, view_size, working_area);
+        self.set_view_size(
+            scale,
+            transform,
+            view_size.as_logical(),
+            working_area.as_logical(),
+        );
     }
 
     fn set_view_size(
@@ -547,7 +559,10 @@ impl<W: LayoutElement> Workspace<W> {
         let scale_transform_changed = self.transform != transform
             || self.scale.integer_scale() != scale.integer_scale()
             || self.scale.fractional_scale() != scale.fractional_scale();
-        if !scale_transform_changed && self.view_size == size && self.working_area == working_area {
+        if !scale_transform_changed
+            && self.view_size == size.assume_local()
+            && self.working_area == working_area.assume_local()
+        {
             return;
         }
 
@@ -555,8 +570,8 @@ impl<W: LayoutElement> Workspace<W> {
 
         self.scale = scale;
         self.transform = transform;
-        self.view_size = size;
-        self.working_area = working_area;
+        self.view_size = size.assume_local();
+        self.working_area = working_area.assume_local();
 
         if fractional_scale_changed {
             // Options need to be recomputed for the new scale.
@@ -564,20 +579,22 @@ impl<W: LayoutElement> Workspace<W> {
         } else {
             // Pass our existing options as is.
             self.scrolling.update_config(
-                size,
-                working_area,
+                size.assume_local(),
+                working_area.assume_local(),
                 scale.fractional_scale(),
                 self.options.clone(),
             );
             self.floating.update_config(
-                size,
-                working_area,
+                size.assume_local(),
+                working_area.assume_local(),
                 scale.fractional_scale(),
                 self.options.clone(),
             );
 
-            let shadow_config =
-                compute_workspace_shadow_config(self.options.overview.workspace_shadow, size);
+            let shadow_config = compute_workspace_shadow_config(
+                self.options.overview.workspace_shadow,
+                size.assume_local(),
+            );
             self.shadow.update_config(shadow_config);
         }
 
@@ -590,14 +607,14 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub fn view_size(&self) -> Size<f64, Logical> {
+    pub fn view_size(&self) -> Size<f64, Local> {
         self.view_size
     }
 
     pub fn make_tile(&self, window: W) -> Tile<W> {
         Tile::new(
             window,
-            self.view_size,
+            self.view_size.as_logical(),
             self.scale.fractional_scale(),
             self.clock.clone(),
             self.options.clone(),
@@ -668,11 +685,11 @@ impl<W: LayoutElement> Workspace<W> {
                         // Position the new tile in the center above the next_to tile. Think a
                         // dialog opening on top of a window.
                         let tile_size = tile.tile_size();
-                        let pos = render_pos
+                        let pos = render_pos.as_logical()
                             + (next_to_tile.tile_size().to_point() - tile_size.to_point())
                                 .downscale(2.);
                         let pos = self.floating.clamp_within_working_area(pos, tile_size);
-                        let pos = self.floating.logical_to_size_frac(pos);
+                        let pos = self.floating.logical_to_size_frac(pos.assume_local());
                         tile.floating_pos = Some(pos);
 
                         self.floating.add_tile(tile, activate);
@@ -867,9 +884,9 @@ impl<W: LayoutElement> Workspace<W> {
         });
         toplevel.with_pending_state(|state| {
             if state.states.contains(xdg_toplevel::State::Fullscreen) {
-                state.size = Some(self.view_size.to_i32_round());
+                state.size = Some(self.view_size.as_logical().to_i32_round());
             } else if state.states.contains(xdg_toplevel::State::Maximized) {
-                state.size = Some(self.working_area.size.to_i32_round());
+                state.size = Some(self.working_area.size.as_logical().to_i32_round());
             } else {
                 let size =
                     self.new_window_size(width, height, is_floating, rules, (min_size, max_size));
@@ -1428,8 +1445,11 @@ impl<W: LayoutElement> Workspace<W> {
                     };
                 let pos = render_pos + offset;
                 let size = removed.tile.tile_size();
-                let pos = self.floating.clamp_within_working_area(pos, size);
-                let pos = self.floating.logical_to_size_frac(pos);
+                // Working-area helpers stay Logical.
+                let pos = self
+                    .floating
+                    .clamp_within_working_area(pos.as_logical(), size);
+                let pos = self.floating.logical_to_size_frac(pos.assume_local());
                 removed.tile.floating_pos = Some(pos);
             }
 
@@ -1444,7 +1464,8 @@ impl<W: LayoutElement> Workspace<W> {
             .find(|(tile, _)| *tile.window().id() == id)
             .unwrap();
 
-        tile.animate_move_from(render_pos - new_render_pos);
+        // Move-animation data stays Logical.
+        tile.animate_move_from((render_pos - new_render_pos).as_logical());
     }
 
     pub fn set_window_floating(&mut self, id: Option<&W::Id>, floating: bool) {
@@ -1586,7 +1607,7 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn tiles_with_render_positions(
         &self,
-    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>, bool)> {
+    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>, bool)> {
         let scrolling = self.scrolling.tiles_with_render_positions();
 
         let floating = self.floating.tiles_with_render_positions();
@@ -1599,7 +1620,7 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn tiles_with_render_positions_mut(
         &mut self,
         round: bool,
-    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> {
         let scrolling = self.scrolling.tiles_with_render_positions_mut(round);
         let floating = self.floating.tiles_with_render_positions_mut(round);
         floating.chain(scrolling)
@@ -1611,7 +1632,7 @@ impl<W: LayoutElement> Workspace<W> {
         floating.chain(scrolling)
     }
 
-    pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Logical>> {
+    pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Local>> {
         if self.floating_is_active.get() {
             self.floating.active_window_visual_rectangle()
         } else {
@@ -1619,7 +1640,7 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub fn popup_target_rect(&self, window: &W::Id) -> Option<Rectangle<f64, Logical>> {
+    pub fn popup_target_rect(&self, window: &W::Id) -> Option<Rectangle<f64, Local>> {
         if self.floating.has_window(window) {
             self.floating.popup_target_rect(window)
         } else {
@@ -1654,7 +1675,7 @@ impl<W: LayoutElement> Workspace<W> {
             return;
         }
 
-        let view_rect = Rectangle::from_size(self.view_size);
+        let view_rect = Rectangle::from_size(self.view_size.as_logical());
         let floating_focus_ring = focus_ring && self.floating_is_active();
         self.floating.render(
             ctx,
@@ -1707,7 +1728,7 @@ impl<W: LayoutElement> Workspace<W> {
         for (tile, tile_pos) in self.tiles_with_render_positions_mut(false) {
             if tile.window().id() == window {
                 let view_pos = Point::from((-tile_pos.x, -tile_pos.y));
-                let view_rect = Rectangle::new(view_pos, view_size);
+                let view_rect = Rectangle::new(view_pos, view_size.as_logical());
                 tile.update_render_elements(false, view_rect);
                 let xray_pos = xray_pos.offset(tile_pos);
                 tile.store_unmap_snapshot_if_empty(
@@ -1761,13 +1782,15 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling.start_open_animation(id) || self.floating.start_open_animation(id)
     }
 
-    pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<(&W, HitType)> {
+    pub fn window_under(&self, pos: Point<f64, Local>) -> Option<(&W, HitType)> {
         // This logic is consistent with tiles_with_render_positions().
         if self.is_floating_visible() {
-            if let Some(rv) = self
-                .floating
-                .tiles_with_render_positions()
-                .find_map(|(tile, tile_pos)| HitType::hit_tile(tile, tile_pos, pos))
+            if let Some(rv) =
+                self.floating
+                    .tiles_with_render_positions()
+                    .find_map(|(tile, tile_pos)| {
+                        HitType::hit_tile(tile, tile_pos.as_logical(), pos.as_logical())
+                    })
             {
                 return Some(rv);
             }
@@ -1776,7 +1799,7 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling.window_under(pos)
     }
 
-    pub fn resize_edges_under(&self, pos: Point<f64, Logical>) -> Option<ResizeEdge> {
+    pub fn resize_edges_under(&self, pos: Point<f64, Local>) -> Option<ResizeEdge> {
         self.tiles_with_render_positions()
             .find_map(|(tile, tile_pos, visible)| {
                 // This logic should be consistent with window_under() in when it returns Some vs.
@@ -1787,7 +1810,7 @@ impl<W: LayoutElement> Workspace<W> {
 
                 let pos_within_tile = pos - tile_pos;
 
-                if tile.hit(pos_within_tile).is_some() {
+                if tile.hit(pos_within_tile.as_logical()).is_some() {
                     let size = tile.tile_size().to_f64();
 
                     let mut edges = ResizeEdge::empty();
@@ -1865,14 +1888,14 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub(super) fn scrolling_insert_position(&self, pos: Point<f64, Logical>) -> InsertPosition {
+    pub(super) fn scrolling_insert_position(&self, pos: Point<f64, Local>) -> InsertPosition {
         self.scrolling.insert_position(pos)
     }
 
     pub(super) fn insert_hint_area(
         &self,
         position: InsertPosition,
-    ) -> Option<Rectangle<f64, Logical>> {
+    ) -> Option<Rectangle<f64, Local>> {
         self.scrolling.insert_hint_area(position)
     }
 
@@ -1898,7 +1921,7 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling.dnd_scroll_gesture_begin();
     }
 
-    pub fn dnd_scroll_gesture_scroll(&mut self, pos: Point<f64, Logical>, speed: f64) -> bool {
+    pub fn dnd_scroll_gesture_scroll(&mut self, pos: Point<f64, Local>, speed: f64) -> bool {
         let config = &self.options.gestures.dnd_edge_view_scroll;
         let trigger_width = config.trigger_width;
 
@@ -1972,12 +1995,12 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn floating_logical_to_size_frac(
         &self,
-        logical_pos: Point<f64, Logical>,
+        logical_pos: Point<f64, Local>,
     ) -> Point<f64, SizeFrac> {
         self.floating.logical_to_size_frac(logical_pos)
     }
 
-    pub fn working_area(&self) -> Rectangle<f64, Logical> {
+    pub fn working_area(&self) -> Rectangle<f64, Local> {
         self.working_area
     }
 
@@ -2016,7 +2039,7 @@ impl<W: LayoutElement> Workspace<W> {
         assert!(self.view_size.w > 0.);
         assert!(self.view_size.h > 0.);
 
-        assert_eq!(self.background_buffer.size(), self.view_size);
+        assert_eq!(self.background_buffer.size(), self.view_size.as_logical());
         assert_eq!(
             self.background_buffer.color().components(),
             options.layout.background_color.to_array_unpremul(),
@@ -2072,13 +2095,16 @@ impl<W: LayoutElement> Workspace<W> {
     }
 }
 
-pub(super) fn compute_working_area(output: &Output) -> Rectangle<f64, Logical> {
-    layer_map_for_output(output).non_exclusive_zone().to_f64()
+pub(super) fn compute_working_area(output: &Output) -> Rectangle<f64, Local> {
+    layer_map_for_output(output)
+        .non_exclusive_zone()
+        .to_f64()
+        .assume_local()
 }
 
 fn compute_workspace_shadow_config(
     config: niri_config::WorkspaceShadow,
-    view_size: Size<f64, Logical>,
+    view_size: Size<f64, Local>,
 ) -> niri_config::Shadow {
     // Gaps between workspaces are a multiple of the view height, so shadow settings should also be
     // normalized to the view height to prevent them from overlapping on lower resolutions.

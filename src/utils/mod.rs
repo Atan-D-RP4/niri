@@ -36,6 +36,7 @@ use wayland_backend::server::Credentials;
 use crate::handlers::KdeDecorationsModeState;
 use crate::niri::ClientState;
 
+pub mod geometry;
 pub mod id;
 pub mod region;
 pub mod scale;
@@ -49,6 +50,8 @@ pub mod xwayland;
 pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
 
 use id::IdCounter;
+
+use self::geometry::{Local, RectExt};
 
 /// Unique ID for a screencast session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -164,11 +167,11 @@ pub fn get_monotonic_time() -> Duration {
     Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
 
-pub fn center(rect: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+pub fn center<C>(rect: Rectangle<i32, C>) -> Point<i32, C> {
     rect.loc + rect.size.downscale(2).to_point()
 }
 
-pub fn center_f64(rect: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+pub fn center_f64<C>(rect: Rectangle<f64, C>) -> Point<f64, C> {
     rect.loc + rect.size.downscale(2.0).to_point()
 }
 
@@ -331,13 +334,15 @@ pub fn is_laptop_panel(connector: &str) -> bool {
 /// Returns the geometry of the surface.
 ///
 /// Returns `None` if the surface isn't mapped.
-pub fn surface_geo(states: &SurfaceData) -> Option<Rectangle<i32, Logical>> {
+pub fn surface_geo(states: &SurfaceData) -> Option<Rectangle<i32, Local>> {
     let data = states.data_map.get::<RendererSurfaceStateUserData>();
-    data.and_then(|d| d.lock().unwrap().view())
-        .map(|view| Rectangle {
+    data.and_then(|d| d.lock().unwrap().view()).map(|view| {
+        Rectangle {
             loc: view.offset,
             size: view.dst,
-        })
+        }
+        .assume_local()
+    })
 }
 
 pub fn with_toplevel_role<T>(

@@ -19,6 +19,7 @@ use zbus::zvariant::{NoneValue, OwnedObjectPath, SerializeDict, Type, Value};
 use zbus::{interface, DBusError};
 
 use crate::niri::{PointContents, State};
+use crate::utils::geometry::PointExt;
 use crate::utils::get_credentials_for_surface;
 
 pub struct Manager {
@@ -679,7 +680,7 @@ impl State {
         let _span = tracy_client::span!("QueryPointer");
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
-        let pointer_pos = pointer.current_location();
+        let pointer_pos = pointer.current_location().assume_global();
 
         // Grabs can modify pointer focus, but here let's ignore them. I'm not entirely sure what's
         // expected by a11y users though.
