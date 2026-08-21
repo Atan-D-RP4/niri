@@ -41,6 +41,7 @@ use crate::input::resize_grab::ResizeGrab;
 use crate::input::{AnyStartData, DOUBLE_CLICK_TIME};
 use crate::layout::ActivateWindow;
 use crate::niri::{CastTarget, PopupGrabState, State};
+use crate::utils::geometry::{Local, PointExt, RectExt, RectLocalExt};
 use crate::utils::transaction::Transaction;
 use crate::utils::{
     get_monotonic_time, output_matches_name, send_scale_transform, update_tiled_state, ResizeEdge,
@@ -1307,7 +1308,7 @@ impl State {
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
         let mut target = self.niri.layout.popup_target_rect(window);
-        target.loc -= get_popup_toplevel_coords(popup).to_f64();
+        target.loc -= get_popup_toplevel_coords(popup).to_f64().assume_local();
 
         self.position_popup_within_rect(popup, target, true);
     }
@@ -1326,7 +1327,7 @@ impl State {
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
-        let mut target = Rectangle::from_size(output_geo.size);
+        let mut target = Rectangle::from_size(output_geo.size).assume_local();
 
         // Background and bottom layer popups render below the top and the overlay layer, so let's
         // put them into the non-exclusive zone.
@@ -1337,11 +1338,11 @@ impl State {
         // FIXME: related to the above, top layer popups should use the "overlay layer"
         // non-exclusive zone.
         if matches!(layer_surface.layer(), Layer::Background | Layer::Bottom) {
-            target = map.non_exclusive_zone();
+            target = map.non_exclusive_zone().assume_local();
         }
 
-        target.loc -= layer_geo.loc;
-        target.loc -= get_popup_toplevel_coords(popup);
+        target.loc -= layer_geo.loc.assume_local();
+        target.loc -= get_popup_toplevel_coords(popup).assume_local();
 
         // Don't add padding to layer-shell popups. It's not really needed, and it's unexpected.
         self.position_popup_within_rect(popup, target.to_f64(), false);
@@ -1350,18 +1351,18 @@ impl State {
     fn position_popup_within_rect(
         &self,
         popup: &PopupKind,
-        target: Rectangle<f64, Logical>,
+        target: Rectangle<f64, Local>,
         padding: bool,
     ) {
         match popup {
             PopupKind::Xdg(popup) => {
                 popup.with_pending_state(|state| {
                     state.geometry = if padding {
-                        unconstrain_with_padding(state.positioner, target)
+                        unconstrain_with_padding(state.positioner, target.as_logical().to_f64())
                     } else {
                         state
                             .positioner
-                            .get_unconstrained_geometry(target.to_i32_round())
+                            .get_unconstrained_geometry(target.as_logical().to_f64().to_i32_round())
                     };
                 });
             }
@@ -1372,6 +1373,7 @@ impl State {
                         .to_f64();
 
                 // Position bbox horizontally first.
+                let target = target.as_logical().to_f64();
                 let overflow_x = (bbox.loc.x + bbox.size.w) - (target.loc.x + target.size.w);
                 if overflow_x > 0. {
                     bbox.loc.x -= overflow_x;

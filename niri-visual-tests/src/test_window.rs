@@ -10,6 +10,7 @@ use niri::render_helpers::offscreen::OffscreenData;
 use niri::render_helpers::renderer::NiriRenderer;
 use niri::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use niri::render_helpers::RenderCtx;
+use niri::utils::geometry::{Local, PointLocalExt};
 use niri::utils::transaction::Transaction;
 use niri::window::ResolvedWindowRules;
 use smithay::backend::renderer::element::Kind;
@@ -152,7 +153,7 @@ impl LayoutElement for TestWindow {
     fn render_normal<R: NiriRenderer>(
         &self,
         _ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         _scale: Scale<f64>,
         alpha: f32,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
@@ -160,13 +161,19 @@ impl LayoutElement for TestWindow {
         let inner = self.inner.borrow();
 
         push(
-            SolidColorRenderElement::from_buffer(&inner.buffer, location, alpha, Kind::Unspecified)
-                .into(),
+            SolidColorRenderElement::from_buffer(
+                &inner.buffer,
+                location.as_logical(),
+                alpha,
+                Kind::Unspecified,
+            )
+            .into(),
         );
         push(
             SolidColorRenderElement::from_buffer(
                 &inner.csd_shadow_buffer,
-                location - Point::from((inner.csd_shadow_width, inner.csd_shadow_width)).to_f64(),
+                location.as_logical()
+                    - Point::from((inner.csd_shadow_width, inner.csd_shadow_width)).to_f64(),
                 alpha,
                 Kind::Unspecified,
             )

@@ -52,6 +52,10 @@ use crate::layout::{ActivateWindow, LayoutElement as _};
 use crate::niri::{CastTarget, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
+use crate::utils::geometry::{
+    Global, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt, RectLocalExt,
+    SizeExt,
+};
 use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
 
@@ -89,6 +93,10 @@ impl<D: SeatHandler + TabletSeatHandler> AnyStartData<D> {
             AnyStartData::Touch(x) => x.location,
             AnyStartData::TabletTool(x) => x.location,
         }
+    }
+
+    pub fn global_location(&self) -> Point<f64, Global> {
+        self.location().assume_global()
     }
 
     pub fn unwrap_pointer(&self) -> &PointerGrabStartData<D> {
@@ -290,14 +298,14 @@ impl State {
     }
 
     /// Computes the rectangle that covers all outputs in global space.
-    fn global_bounding_rectangle(&self) -> Option<Rectangle<i32, Logical>> {
+    fn global_bounding_rectangle(&self) -> Option<Rectangle<i32, Global>> {
         self.niri.global_space.outputs().fold(
             None,
-            |acc: Option<Rectangle<i32, Logical>>, output| {
-                self.niri
-                    .global_space
-                    .output_geometry(output)
-                    .map(|geo| acc.map(|acc| acc.merge(geo)).unwrap_or(geo))
+            |acc: Option<Rectangle<i32, Global>>, output| {
+                self.niri.global_space.output_geometry(output).map(|geo| {
+                    let geo = geo.assume_global();
+                    acc.map(|acc| acc.merge(geo)).unwrap_or(geo)
+                })
             },
         )
     }
@@ -309,7 +317,7 @@ impl State {
     fn compute_tablet_position<I: InputBackend>(
         &self,
         event: &(impl Event<I> + TabletToolEvent<I>),
-    ) -> Option<Point<f64, Logical>>
+    ) -> Option<Point<f64, Global>>
     where
         I::Device: 'static,
     {
@@ -327,10 +335,11 @@ impl State {
             let output = mapped_output.or_else(|| self.niri.layout.active_output());
             output.and_then(|output| {
                 let monitor = self.niri.layout.monitor_for_output(output)?;
-                let mut rect = monitor.active_window_visual_rectangle()?;
+                let rect = monitor.active_window_visual_rectangle()?;
                 let output_geo = self.niri.global_space.output_geometry(output)?;
+                let mut rect = rect.as_logical();
                 rect.loc += output_geo.loc.to_f64();
-                Some((rect, output))
+                Some((rect.assume_global(), output))
             })
         } else {
             None
@@ -344,7 +353,12 @@ impl State {
                 output.current_transform(),
             )
         } else if let Some(output) = mapped_output {
-            let geo = self.niri.global_space.output_geometry(output).unwrap();
+            let geo = self
+                .niri
+                .global_space
+                .output_geometry(output)
+                .unwrap()
+                .assume_global();
             (
                 geo.to_f64(),
                 true,
@@ -364,7 +378,9 @@ impl State {
         };
 
         let mut pos = {
-            let size = transform.invert().transform_size(target_geo.size);
+            let size = transform
+                .invert()
+                .transform_size(target_geo.size.as_logical());
             transform.transform_point_in(event.position_transformed(size.to_i32_round()), &size)
         };
 
@@ -394,7 +410,7 @@ impl State {
 
         pos.x = pos.x.clamp(0.0, target_geo.size.w - px);
         pos.y = pos.y.clamp(0.0, target_geo.size.h - px);
-        Some(pos + target_geo.loc)
+        Some(target_geo.loc.surface_position(pos))
     }
 
     fn is_inhibiting_shortcuts(&self) -> bool {
@@ -2468,7 +2484,7 @@ impl State {
             // No need to check if the pointer focus surface matches, because here we're checking
             // for an already-active constraint, and the constraint is deactivated when the focused
             // surface changes.
-            let pos_within_surface = pos - under.1;
+            let pos_within_surface = pos.assume_global().surface_offset(under.1);
 
             let mut pointer_locked = false;
             with_pointer_constraint(&under.0, &pointer, |constraint| {
@@ -2479,7 +2495,7 @@ impl State {
 
                 // Constraint does not apply if not within region.
                 if let Some(region) = constraint.region() {
-                    if !region.contains(pos_within_surface.to_i32_round()) {
+                    if !region.contains(pos_within_surface.as_logical().to_i32_round()) {
                         return;
                     }
                 }
@@ -2498,7 +2514,7 @@ impl State {
             if pointer_locked {
                 pointer.relative_motion(
                     self,
-                    Some(under.clone()),
+                    Some((under.0.clone(), under.1.as_logical())),
                     &RelativeMotionEvent {
                         delta: event.delta(),
                         delta_unaccel: event.delta_unaccel(),
@@ -2571,17 +2587,19 @@ impl State {
             }
         }
 
-        self.update_screenshot_ui(new_pos, None);
+        self.update_screenshot_ui(new_pos.assume_global(), None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
+            if let Some((output, pos_within_output)) =
+                self.niri.output_under(new_pos.assume_global())
+            {
                 if mru_output == output {
                     self.niri.window_mru_ui.pointer_motion(pos_within_output);
                 }
             }
         }
 
-        let under = self.niri.contents_under(new_pos);
+        let under = self.niri.contents_under(new_pos.assume_global());
 
         // Handle confined pointer.
         if let Some((focus_surface, region)) = pointer_confined {
@@ -2594,8 +2612,9 @@ impl State {
 
             // Prevent the pointer from leaving the confine region, if any.
             if let Some(region) = region {
-                let new_pos_within_surface = new_pos - focus_surface.1;
-                if !region.contains(new_pos_within_surface.to_i32_round()) {
+                let new_pos_within_surface =
+                    new_pos.assume_global().surface_offset(focus_surface.1);
+                if !region.contains(new_pos_within_surface.as_logical().to_i32_round()) {
                     prevent = true;
                 }
             }
@@ -2603,7 +2622,7 @@ impl State {
             if prevent {
                 pointer.relative_motion(
                     self,
-                    Some(focus_surface),
+                    Some((focus_surface.0, focus_surface.1.as_logical())),
                     &RelativeMotionEvent {
                         delta: event.delta(),
                         delta_unaccel: event.delta_unaccel(),
@@ -2623,7 +2642,10 @@ impl State {
 
         pointer.motion(
             self,
-            under.surface.clone(),
+            under
+                .surface
+                .clone()
+                .map(|(surface, location)| (surface, location.as_logical())),
             &MotionEvent {
                 location: new_pos,
                 serial,
@@ -2633,7 +2655,9 @@ impl State {
 
         pointer.relative_motion(
             self,
-            under.surface,
+            under
+                .surface
+                .map(|(surface, location)| (surface, location.as_logical())),
             &RelativeMotionEvent {
                 delta: event.delta(),
                 delta_unaccel: event.delta_unaccel(),
@@ -2664,7 +2688,9 @@ impl State {
             .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
             .unwrap_or(false);
         if is_dnd_grab {
-            if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
+            if let Some((output, pos_within_output)) =
+                self.niri.output_under(new_pos.assume_global())
+            {
                 let output = output.clone();
                 self.niri.layout.dnd_update(output, pos_within_output);
             }
@@ -2689,7 +2715,12 @@ impl State {
 
         let Some(pos) = self.compute_absolute_location(&event, None).or_else(|| {
             self.global_bounding_rectangle().map(|output_geo| {
-                event.position_transformed(output_geo.size) + output_geo.loc.to_f64()
+                output_geo.loc.to_f64().surface_position(
+                    event
+                        .position_transformed(output_geo.size.as_logical())
+                        .assume_local()
+                        .as_logical(),
+                )
             })
         }) else {
             return;
@@ -2717,9 +2748,11 @@ impl State {
 
         pointer.motion(
             self,
-            under.surface,
+            under
+                .surface
+                .map(|(surface, location)| (surface, location.as_logical())),
             &MotionEvent {
-                location: pos,
+                location: pos.as_logical(),
                 serial,
                 time: event.time(),
             },
@@ -2796,7 +2829,8 @@ impl State {
                 is_mru_open = true;
                 if let Some(MouseButton::Left) = button {
                     let location = pointer.current_location();
-                    let (output, pos_within_output) = self.niri.output_under(location).unwrap();
+                    let (output, pos_within_output) =
+                        self.niri.output_under(location.assume_global()).unwrap();
                     if mru_output == output {
                         let id = self.niri.window_mru_ui.pointer_motion(pos_within_output);
                         if id.is_some() {
@@ -2949,7 +2983,8 @@ impl State {
                 // Check if we need to start an interactive resize.
                 else if button == Some(MouseButton::Right) && !pointer.is_grabbed() && mod_down {
                     let location = pointer.current_location();
-                    let (output, pos_within_output) = self.niri.output_under(location).unwrap();
+                    let (output, pos_within_output) =
+                        self.niri.output_under(location.assume_global()).unwrap();
                     let edges = self
                         .niri
                         .layout
@@ -3055,11 +3090,13 @@ impl State {
                 let output = if mod_down {
                     self.niri.screenshot_ui.selection_output()
                 } else {
-                    self.niri.output_under(pos).map(|(out, _)| out)
+                    self.niri
+                        .output_under(pos.assume_global())
+                        .map(|(out, _)| out)
                 };
 
                 if let Some(output) = output.cloned() {
-                    let point = self.screenshot_ui_point(&output, pos);
+                    let point = self.screenshot_ui_point(&output, pos.assume_global());
 
                     if self
                         .niri
@@ -3620,9 +3657,11 @@ impl State {
 
             tool.motion(
                 self,
-                under.surface,
+                under
+                    .surface
+                    .map(|(surface, location)| (surface, location.as_logical())),
                 &tablet::tool::MotionEvent {
-                    location: pos,
+                    location: pos.as_logical(),
                     serial: SERIAL_COUNTER.next_serial(),
                     time,
                 },
@@ -3728,7 +3767,7 @@ impl State {
                             let start_data = TabletToolGrabStartData {
                                 focus: None,
                                 trigger: tablet::tool::GrabTrigger::Tip,
-                                location: pos,
+                                location: pos.as_logical(),
                             };
                             let start_data = AnyStartData::TabletTool(start_data);
                             let start_timestamp = Duration::from_micros(event.time().micros());
@@ -3750,7 +3789,7 @@ impl State {
                                 let start_data = TabletToolGrabStartData {
                                     focus: None,
                                     trigger: tablet::tool::GrabTrigger::Tip,
-                                    location: pos,
+                                    location: pos.as_logical(),
                                 };
                                 let start_data = AnyStartData::TabletTool(start_data);
                                 let icon = CursorIcon::Grabbing;
@@ -3832,10 +3871,12 @@ impl State {
 
                     tool.proximity_in(
                         self,
-                        under.surface,
+                        under
+                            .surface
+                            .map(|(surface, location)| (surface, location.as_logical())),
                         tablet,
                         &tablet::tool::ProximityInEvent {
-                            location: pos,
+                            location: pos.as_logical(),
                             axis: Some(frame),
                             serial,
                             time,
@@ -4229,17 +4270,15 @@ impl State {
         &self,
         evt: &impl AbsolutePositionEvent<I>,
         fallback_output: Option<&Output>,
-    ) -> Option<Point<f64, Logical>> {
+    ) -> Option<Point<f64, Global>> {
         let output = evt.device().output(self);
         let output = output.filter(|output| self.niri.output_exists(output));
         let output = output.as_ref().or(fallback_output)?;
         let output_geo = self.niri.global_space.output_geometry(output).unwrap();
         let transform = output.current_transform();
         let size = transform.invert().transform_size(output_geo.size);
-        Some(
-            transform.transform_point_in(evt.position_transformed(size), &size.to_f64())
-                + output_geo.loc.to_f64(),
-        )
+        let pos = transform.transform_point_in(evt.position_transformed(size), &size.to_f64());
+        Some(pos.assume_local().to_global(output_geo.loc.to_f64()))
     }
 
     /// Computes the cursor position for the touch event.
@@ -4248,7 +4287,7 @@ impl State {
     fn compute_touch_location<I: InputBackend>(
         &self,
         evt: &impl AbsolutePositionEvent<I>,
-    ) -> Option<Point<f64, Logical>> {
+    ) -> Option<Point<f64, Global>> {
         self.compute_absolute_location(evt, self.niri.output_for_touch())
     }
 
@@ -4325,7 +4364,7 @@ impl State {
                 let start_data = TouchGrabStartData {
                     focus: None,
                     slot,
-                    location: pos,
+                    location: pos.as_logical(),
                 };
                 let start_data = AnyStartData::Touch(start_data);
                 let start_timestamp = Duration::from_micros(evt.time().micros());
@@ -4347,7 +4386,7 @@ impl State {
                     let start_data = TouchGrabStartData {
                         focus: None,
                         slot,
-                        location: pos,
+                        location: pos.as_logical(),
                     };
                     let start_data = AnyStartData::Touch(start_data);
                     if let Some(grab) = MoveGrab::new(self, start_data, window.clone(), true, None)
@@ -4369,10 +4408,12 @@ impl State {
 
         handle.down(
             self,
-            under.surface,
+            under
+                .surface
+                .map(|(surface, location)| (surface, location.as_logical())),
             &DownEvent {
                 slot,
-                location: pos,
+                location: pos.as_logical(),
                 serial,
                 time: evt.time(),
             },
@@ -4423,10 +4464,12 @@ impl State {
         let under = self.niri.contents_under(pos);
         handle.motion(
             self,
-            under.surface,
+            under
+                .surface
+                .map(|(surface, location)| (surface, location.as_logical())),
             &TouchMotionEvent {
                 slot,
-                location: pos,
+                location: pos.as_logical(),
                 time: evt.time(),
             },
         );
@@ -4493,13 +4536,15 @@ impl State {
 
     /// Converts a global logical position to screenshot UI physical coords
     /// for the given output.
+    /// TODO(cursor-zoom): constrain against captured texture size, not output, when zoom is
+    /// integrated
     fn screenshot_ui_point(
         &self,
         output: &Output,
-        pos: Point<f64, Logical>,
+        pos: Point<f64, Global>,
     ) -> Point<i32, Physical> {
         let geom = self.niri.global_space.output_geometry(output).unwrap();
-        let point = pos - geom.loc.to_f64();
+        let point = pos.to_local(geom.loc.to_f64()).as_logical();
         let scale = output.current_scale().fractional_scale();
         let point = point.to_physical_precise_round(scale);
 
@@ -4511,7 +4556,7 @@ impl State {
     }
 
     /// Routes pointer or touch motion to the screenshot UI.
-    fn update_screenshot_ui(&mut self, pos: Point<f64, Logical>, slot: Option<TouchSlot>) {
+    fn update_screenshot_ui(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
         if let Some(output) = self.niri.screenshot_ui.selection_output() {
             let point = self.screenshot_ui_point(output, pos);
             self.niri.screenshot_ui.pointer_motion(point, slot);

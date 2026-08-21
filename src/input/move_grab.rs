@@ -20,19 +20,20 @@ use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
 
 use crate::input::AnyStartData;
 use crate::niri::State;
+use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt};
 
 pub struct MoveGrab {
     start_data: AnyStartData<State>,
     start_output: Output,
-    start_pos_within_output: Point<f64, Logical>,
-    last_location: Point<f64, Logical>,
+    start_pos_within_output: Point<f64, Local>,
+    last_location: Point<f64, Global>,
     window: Window,
     gesture: GestureState,
     enable_view_offset: bool,
     move_icon: CursorIcon,
 
     // Accumulated and applied in frame().
-    new_location: Point<f64, Logical>,
+    new_location: Point<f64, Global>,
     event_timestamp: Option<Duration>,
     relative_delta: Option<Point<f64, Logical>>,
 }
@@ -52,7 +53,7 @@ impl MoveGrab {
         enable_view_offset: bool,
         move_icon: Option<CursorIcon>,
     ) -> Option<Self> {
-        let location = start_data.location();
+        let location = start_data.global_location();
         let (output, pos_within_output) = state.niri.output_under(location)?;
 
         Some(Self {
@@ -175,7 +176,7 @@ impl MoveGrab {
             return true;
         };
 
-        let mut delta = self.new_location - self.last_location;
+        let mut delta = (self.new_location - self.last_location).as_logical();
         let mut relative_delta = self.relative_delta.take().unwrap_or(delta);
         self.last_location = self.new_location;
 
@@ -187,7 +188,7 @@ impl MoveGrab {
             }
 
             // Check if the gesture moved far enough to decide.
-            let c = self.new_location - self.start_data.location();
+            let c = (self.new_location - self.start_data.global_location()).as_logical();
             if c.x * c.x + c.y * c.y >= 8. * 8. {
                 let is_floating = data
                     .niri
@@ -279,7 +280,7 @@ impl MoveGrab {
             // Apply the delta accumulated during recognizing.
             let ongoing = data.niri.layout.interactive_move_update(
                 &self.window,
-                self.last_location - self.start_data.location(),
+                (self.last_location - self.start_data.global_location()).as_logical(),
                 output,
                 pos_within_output,
             );
@@ -306,7 +307,7 @@ impl PointerGrab<State> for MoveGrab {
         // While the grab is active, no client has pointer focus.
         handle.motion(data, None, event);
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
 
         // Relative motion takes precedence over normal motion.
         if self.relative_delta.is_none() {
@@ -509,7 +510,7 @@ impl TouchGrab<State> for MoveGrab {
             return;
         }
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
         self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 
@@ -578,7 +579,7 @@ impl TabletToolGrab<State> for MoveGrab {
     ) {
         handle.motion(data, None, event);
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
         self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 

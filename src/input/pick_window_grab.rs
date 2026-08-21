@@ -9,6 +9,7 @@ use smithay::input::SeatHandler;
 use smithay::utils::{Logical, Point};
 
 use crate::niri::State;
+use crate::utils::geometry::PointExt;
 use crate::window::Mapped;
 
 pub struct PickWindowGrab {
@@ -70,7 +71,7 @@ impl PointerGrab<State> for PickWindowGrab {
         if let Some(tx) = data.niri.pick_window.take() {
             let _ = tx.send_blocking(
                 data.niri
-                    .window_under(handle.current_location())
+                    .window_under(handle.current_location().assume_global())
                     .map(Mapped::id),
             );
         }

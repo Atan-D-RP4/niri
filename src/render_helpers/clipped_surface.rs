@@ -14,13 +14,14 @@ use super::damage::ExtraDamage;
 use super::renderer::{AsGlesFrame as _, NiriRenderer};
 use super::shaders::{mat3_uniform, Shaders};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
+use crate::utils::geometry::{Local, RectLocalExt, SizeExt};
 
 #[derive(Debug)]
 pub struct ClippedSurfaceRenderElement<R: NiriRenderer> {
     inner: WaylandSurfaceRenderElement<R>,
     program: GlesTexProgram,
     corner_radius: CornerRadius,
-    geometry: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
     scale: f32,
 }
 
@@ -34,7 +35,7 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
     pub fn new(
         elem: WaylandSurfaceRenderElement<R>,
         scale: Scale<f64>,
-        geometry: Rectangle<f64, Logical>,
+        geometry: Rectangle<f64, Local>,
         program: GlesTexProgram,
         corner_radius: CornerRadius,
     ) -> Self {
@@ -106,7 +107,7 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
     pub fn will_clip(
         elem: &WaylandSurfaceRenderElement<R>,
         scale: Scale<f64>,
-        geometry: Rectangle<f64, Logical>,
+        geometry: Rectangle<f64, Local>,
         corner_radius: CornerRadius,
     ) -> bool {
         let elem_geo = elem.geometry(scale);
@@ -118,37 +119,40 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
             let corners = Self::rounded_corners(geometry, corner_radius);
             let corners = corners
                 .into_iter()
-                .map(|rect| rect.to_physical_precise_up(scale));
+                // Rounding math is frame-free; convert at the Smithay sink.
+                .map(|rect| rect.as_logical().to_physical_precise_up(scale));
             let geo = Rectangle::subtract_rects_many([geo], corners);
             !Rectangle::subtract_rects_many([elem_geo], geo).is_empty()
         }
     }
 
     fn rounded_corners(
-        geo: Rectangle<f64, Logical>,
+        geo: Rectangle<f64, Local>,
         corner_radius: CornerRadius,
-    ) -> [Rectangle<f64, Logical>; 4] {
+    ) -> [Rectangle<f64, Local>; 4] {
         let top_left = corner_radius.top_left as f64;
         let top_right = corner_radius.top_right as f64;
         let bottom_right = corner_radius.bottom_right as f64;
         let bottom_left = corner_radius.bottom_left as f64;
 
+        // Extents share output units; the frame lives on the parent rect.
+        let corner = |r: f64| Size::<f64, Logical>::from((r, r)).assume_local();
         [
-            Rectangle::new(geo.loc, Size::from((top_left, top_left))),
+            Rectangle::new(geo.loc, corner(top_left)),
             Rectangle::new(
                 Point::from((geo.loc.x + geo.size.w - top_right, geo.loc.y)),
-                Size::from((top_right, top_right)),
+                corner(top_right),
             ),
             Rectangle::new(
                 Point::from((
                     geo.loc.x + geo.size.w - bottom_right,
                     geo.loc.y + geo.size.h - bottom_right,
                 )),
-                Size::from((bottom_right, bottom_right)),
+                corner(bottom_right),
             ),
             Rectangle::new(
                 Point::from((geo.loc.x, geo.loc.y + geo.size.h - bottom_left)),
-                Size::from((bottom_left, bottom_left)),
+                corner(bottom_left),
             ),
         ]
     }
@@ -210,7 +214,7 @@ impl<R: NiriRenderer> Element for ClippedSurfaceRenderElement<R> {
 
             let elem_loc = self.geometry(scale).loc;
             let corners = corners.into_iter().map(|rect| {
-                let mut rect = rect.to_physical_precise_up(scale);
+                let mut rect = rect.as_logical().to_physical_precise_up(scale);
                 rect.loc -= elem_loc;
                 rect
             });
@@ -300,7 +304,7 @@ impl RoundedCornerDamage {
         self.damage.damage_all();
     }
 
-    pub fn render(&self, geometry: Rectangle<f64, Logical>) -> ExtraDamage {
+    pub fn render(&self, geometry: Rectangle<f64, Local>) -> ExtraDamage {
         self.damage.render(geometry)
     }
 }
