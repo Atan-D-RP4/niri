@@ -45,6 +45,7 @@ pub mod signals;
 pub mod spawning;
 pub mod transaction;
 pub mod vblank_throttle;
+pub mod view;
 pub mod watcher;
 pub mod xwayland;
 
