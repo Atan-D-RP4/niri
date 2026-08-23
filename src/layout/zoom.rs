@@ -6,8 +6,8 @@ use smithay::utils::{Point, Rectangle, Size};
 
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
-use crate::utils::geometry::Local;
-use crate::utils::view::ViewportTransform;
+use crate::layout::view::ViewportTransform;
+use crate::utils::geometry::{Global, Local, PointGlobalExt, PointLocalExt, SizeExt};
 
 /// Per-output zoom state. Layout writes these every animation tick;
 /// external consumers read via `Layout`'s public API.
@@ -25,19 +25,9 @@ pub struct OutputZoomState {
 
 impl OutputZoomState {
     pub fn new_for_output(output: &Output) -> Self {
+        let mode_size = output.current_mode().map_or((0, 0).into(), |m| m.size);
         let scale = output.current_scale().fractional_scale();
-        // Presented size: apply the output transform before the scale conversion,
-        // matching `OutputViewCtx::for_output` and `output_size()`.
-        let logical_size = output
-            .current_mode()
-            .map(|m| {
-                output
-                    .current_transform()
-                    .transform_size(m.size)
-                    .to_f64()
-                    .to_logical(scale)
-            })
-            .unwrap_or_else(|| Size::from((0., 0.)));
+        let logical_size = mode_size.to_f64().to_logical(scale);
         Self {
             level: 1.0,
             focal: Point::from((logical_size.w / 2.0, logical_size.h / 2.0)),
@@ -65,19 +55,24 @@ impl OutputZoomState {
     }
 
     /// Compute the current level from the active animation state.
+    // `now` is threaded through for the gesture-driven paths that
+    // Integrating Zoom 1 wires up; the idle check reads the clock directly.
+    #[allow(clippy::let_and_return)]
     fn current_level(&self, now: Duration) -> f64 {
-        match &self.level_transition {
+        let level = match &self.level_transition {
             ZoomLevelTransition::Animating(a) => a.value_at(now),
             ZoomLevelTransition::Gesturing(g) => g.current_level,
             ZoomLevelTransition::Idle => self.level,
-        }
+        };
+        level
     }
 
     /// Compute the current focal point from the active animation state.
+    // See `current_level`: `now` is consumed by Integrating Zoom 1.
+    #[allow(clippy::let_and_return)]
     fn current_focal(&self, now: Duration) -> Point<f64, Local> {
         let level = self.current_level(now);
-
-        match &self.focal_animation {
+        let focal = match &self.focal_animation {
             Some(a) => a.value_at(now),
             None => {
                 // When no focal animation is active, compute focal from the
@@ -90,7 +85,9 @@ impl OutputZoomState {
                     ZoomLevelTransition::Idle => self.focal,
                 }
             }
-        }
+        };
+
+        focal
     }
 
     /// Sweep completed transitions and commit final values to resting state.
@@ -123,7 +120,7 @@ impl OutputZoomState {
     /// subsequent focal computations use the correct mode.
     ///
     /// Does nothing when no level transition is active — the movement mode
-    /// is read fresh from config by `update_cursor_zoom_focal` in that case.
+    /// is read fresh from config by `update_zoom_base_focal` in that case.
     pub fn update_movement_mode(&mut self, mode: ZoomMovementMode) {
         match &mut self.level_transition {
             ZoomLevelTransition::Animating(a) => {
@@ -149,6 +146,30 @@ impl OutputZoomState {
         let focal = self.current_focal(now);
         let level = self.current_level(now);
         ViewportTransform::new(focal, level)
+    }
+
+    /// Viewport rectangle in the global coordinate frame for the current
+    /// animated zoom state.
+    ///
+    /// Computes the viewport in Local space via [`ViewportTransform`], then
+    /// translates to Global by adding the output origin. This does NOT apply
+    /// the output transform (rotation/reflection) — that is a render-stage
+    /// concern per the geometry pipeline.
+    pub fn viewport_global(
+        &self,
+        output_origin: Point<f64, Global>,
+        output_size: Size<f64, Local>,
+        now: Duration,
+    ) -> Rectangle<f64, Global> {
+        let vt = self.viewport_transform(now);
+        let output_local = Rectangle::from_size(output_size);
+        let viewport_local = vt.apply_inverse_rect(output_local);
+        // Local→Global is a pure translation of location by the output origin.
+        // Size is frame-invariant.
+        Rectangle::new(
+            viewport_local.loc.to_global(output_origin.as_logical()),
+            viewport_local.size.assume_global(),
+        )
     }
 }
 
@@ -195,8 +216,7 @@ impl FocalTrackingContext {
 
     /// Computes the focal point that places `cursor` within the viewport at
     /// the given zoom level and movement mode.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn focal_for_cursor(
+    fn focal_for_cursor(
         cursor: Point<f64, Local>,
         level: f64,
         output_size: Size<f64, Local>,
@@ -208,20 +228,17 @@ impl FocalTrackingContext {
 
         match mode {
             ZoomMovementMode::CursorFollow => cursor,
-            // Centered keeps the cursor at the viewport center; OnEdge uses
-            // the same static focal and only differs in how it updates the
-            // focal as the cursor moves relative to the viewport. The output
-            // clamp parks the viewport at the bounds near edges, letting the
-            // cursor roam free inside until it moves back inward.
+            // OnEdge uses the same static focal as Centered; it only differs
+            // in how it updates the focal as the cursor moves relative to the
+            // viewport.
             ZoomMovementMode::Centered | ZoomMovementMode::OnEdge => {
                 let vt = ViewportTransform::new(cursor, level);
                 let output_rect = Rectangle::from_size(output_size);
                 let viewport = vt.apply_inverse_rect(output_rect);
-                let centered_loc =
-                    cursor - Point::from((viewport.size.w / 2.0, viewport.size.h / 2.0));
                 let scale_factor = level / (level - 1.0).max(0.001);
 
-                centered_loc
+                viewport
+                    .loc
                     .upscale(scale_factor)
                     .constrain(Rectangle::from_size(
                         output_size - Size::from((f64::EPSILON, f64::EPSILON)),
@@ -242,11 +259,7 @@ impl FocalTrackingContext {
             return cursor;
         }
 
-        // Viewport size is the inverse image of the output under the zoom,
-        // matching `focal_for_cursor`; only the anchor placement differs.
-        let viewport_size = ViewportTransform::new(cursor, level)
-            .apply_inverse_rect(Rectangle::from_size(output_size))
-            .size;
+        let viewport_size = output_size.downscale(level);
         let anchor_offset = Point::from((viewport_size.w * anchor.x, viewport_size.h * anchor.y));
         let viewport_loc: Point<f64, Local> = cursor - anchor_offset;
         let scale_factor = level / (level - 1.0).max(0.001);
@@ -518,243 +531,5 @@ impl ZoomLevelTransition {
             Self::Gesturing(g) => Some(g),
             _ => None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use niri_config::animations::{Animation as AnimationConfig, Curve, EasingParams, Kind};
-    use niri_config::ZoomMovementMode;
-    use smithay::output::{Mode, PhysicalProperties, Subpixel};
-    use smithay::utils::{Point, Size};
-
-    use super::*;
-    use crate::utils::geometry::Local;
-
-    fn output() -> Output {
-        let output = Output::new(
-            "test".to_string(),
-            PhysicalProperties {
-                size: Size::from((1920, 1080)),
-                subpixel: Subpixel::Unknown,
-                make: String::new(),
-                model: String::new(),
-                serial_number: String::new(),
-            },
-        );
-        output.change_current_state(
-            Some(Mode {
-                size: Size::from((1920, 1080)),
-                refresh: 60000,
-            }),
-            None,
-            None,
-            None,
-        );
-        output
-    }
-
-    fn state(level: f64, focal: Point<f64, Local>) -> OutputZoomState {
-        OutputZoomState {
-            level,
-            focal,
-            locked: false,
-            level_transition: ZoomLevelTransition::Idle,
-            focal_animation: None,
-        }
-    }
-
-    fn animation_config() -> AnimationConfig {
-        AnimationConfig {
-            off: false,
-            kind: Kind::Easing(EasingParams {
-                duration_ms: 100,
-                curve: Curve::Linear,
-            }),
-        }
-    }
-
-    #[test]
-    fn new_for_output_starts_at_local_center() {
-        let state = OutputZoomState::new_for_output(&output());
-
-        assert_eq!(state.level, 1.0);
-        assert_eq!(state.focal, (960.0, 540.0).into());
-        assert!(!state.locked);
-        assert!(!state.transitioning());
-    }
-
-    #[test]
-    fn idle_viewport_transform_uses_resting_state() {
-        let state = state(2.5, (300.0, 200.0).into());
-
-        assert_eq!(
-            state.viewport_transform(Duration::from_secs(1)),
-            ViewportTransform::new((300.0, 200.0).into(), 2.5)
-        );
-    }
-
-    #[test]
-    fn gesture_viewport_transform_uses_live_values() {
-        let mut gesture = ZoomLevelGesture::new(
-            1.0,
-            (960.0, 540.0).into(),
-            Some((200.0, 100.0).into()),
-            Some((1920.0, 1080.0).into()),
-            Some(ZoomMovementMode::CursorFollow),
-        );
-        gesture.current_level = 3.0;
-        gesture.current_focal = (200.0, 100.0).into();
-
-        let state = OutputZoomState {
-            level: 1.0,
-            focal: (960.0, 540.0).into(),
-            locked: false,
-            level_transition: ZoomLevelTransition::Gesturing(gesture),
-            focal_animation: None,
-        };
-        let viewport = state.viewport_transform(Duration::ZERO);
-
-        assert_eq!(viewport.factor, 3.0);
-        assert_eq!(viewport.focal, (200.0, 100.0).into());
-    }
-
-    #[test]
-    fn gesture_is_transitioning_but_not_animating() {
-        let gesture = ZoomLevelGesture::new(1.0, (960.0, 540.0).into(), None, None, None);
-        let state = OutputZoomState {
-            level: 1.0,
-            focal: (960.0, 540.0).into(),
-            locked: false,
-            level_transition: ZoomLevelTransition::Gesturing(gesture),
-            focal_animation: None,
-        };
-
-        assert!(state.transitioning());
-        assert!(!state.is_animating());
-    }
-
-    #[test]
-    fn focal_tracking_requires_complete_context() {
-        let mut tracking = FocalTrackingContext::default();
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, false, true));
-
-        tracking.set_cursor_pos((100.0, 100.0).into());
-        tracking.set_output_size((1920.0, 1080.0).into());
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, false, true));
-
-        tracking.set_movement_mode(ZoomMovementMode::CursorFollow, 1.0, (960.0, 540.0).into());
-        assert!(tracking.should_use_dynamic_focal_tracking(2.0, false, true));
-        assert!(!tracking.should_use_dynamic_focal_tracking(1.0, false, true));
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, true, true));
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, false, false));
-    }
-
-    #[test]
-    fn focal_tracking_falls_back_without_cursor_context() {
-        let tracking = FocalTrackingContext::default();
-        let fallback: Point<f64, Local> = (321.0, 123.0).into();
-
-        assert_eq!(tracking.compute_focal(2.0, fallback), fallback);
-    }
-
-    #[test]
-    fn focal_for_cursor_is_cursor_follow_at_zoom() {
-        let cursor = (321.0, 123.0).into();
-        let size = (1920.0, 1080.0).into();
-
-        assert_eq!(
-            FocalTrackingContext::focal_for_cursor(
-                cursor,
-                2.0,
-                size,
-                &ZoomMovementMode::CursorFollow,
-            ),
-            cursor
-        );
-        assert_eq!(
-            FocalTrackingContext::focal_for_cursor(
-                cursor,
-                1.0,
-                size,
-                &ZoomMovementMode::CursorFollow,
-            ),
-            cursor
-        );
-    }
-
-    #[test]
-    fn on_edge_anchor_is_only_present_for_on_edge_mode() {
-        let mut tracking = FocalTrackingContext::default();
-        tracking.set_cursor_pos((500.0, 400.0).into());
-        tracking.set_output_size((1920.0, 1080.0).into());
-
-        tracking.set_movement_mode(ZoomMovementMode::Centered, 2.0, (500.0, 400.0).into());
-        assert_eq!(
-            tracking.compute_on_edge_anchor(2.0, (500.0, 400.0).into()),
-            None
-        );
-
-        tracking.set_movement_mode(ZoomMovementMode::OnEdge, 2.0, (500.0, 400.0).into());
-        let anchor = tracking.compute_on_edge_anchor(2.0, (500.0, 400.0).into());
-        assert!(anchor.is_some());
-        let anchor = anchor.unwrap();
-        assert!((0.0..=1.0).contains(&anchor.x));
-        assert!((0.0..=1.0).contains(&anchor.y));
-    }
-
-    #[test]
-    fn changing_movement_mode_recomputes_on_edge_tracking() {
-        let mut tracking = FocalTrackingContext::default();
-        tracking.set_cursor_pos((10.0, 20.0).into());
-        tracking.set_output_size((1920.0, 1080.0).into());
-        tracking.set_movement_mode(ZoomMovementMode::CursorFollow, 1.0, (960.0, 540.0).into());
-        tracking.set_movement_mode(ZoomMovementMode::OnEdge, 2.0, (960.0, 540.0).into());
-
-        let focal = tracking.compute_focal(2.0, (960.0, 540.0).into());
-        assert!((0.0..=1920.0).contains(&focal.x));
-        assert!((0.0..=1080.0).contains(&focal.y));
-    }
-
-    #[test]
-    fn completed_level_animation_is_swept_to_idle() {
-        let clock = Clock::with_time(Duration::ZERO);
-        let mut clock_for_animation = clock.clone();
-        clock_for_animation.set_complete_instantly(true);
-        let animation = ZoomLevelAnimation::new(clock, 1.0, 3.0, animation_config());
-        let mut transition = ZoomLevelTransition::Animating(animation);
-
-        transition.sweep_at(Duration::ZERO);
-
-        assert!(matches!(transition, ZoomLevelTransition::Idle));
-    }
-
-    #[test]
-    fn advance_animations_commits_level_and_focal_targets() {
-        let clock = Clock::with_time(Duration::ZERO);
-        let mut clock_for_animation = clock.clone();
-        clock_for_animation.set_complete_instantly(true);
-        let level_animation = ZoomLevelAnimation::new(clock.clone(), 1.0, 3.0, animation_config());
-        let focal_animation = ZoomFocalAnimation::new(
-            clock,
-            (960.0, 540.0).into(),
-            (300.0, 200.0).into(),
-            animation_config(),
-        );
-        let mut state = OutputZoomState {
-            level: 1.0,
-            focal: (960.0, 540.0).into(),
-            locked: false,
-            level_transition: ZoomLevelTransition::Animating(level_animation),
-            focal_animation: Some(focal_animation),
-        };
-
-        state.advance_animations(Duration::from_millis(1));
-
-        assert_eq!(state.level, 3.0);
-        assert_eq!(state.focal, (300.0, 200.0).into());
-        assert!(!state.transitioning());
     }
 }

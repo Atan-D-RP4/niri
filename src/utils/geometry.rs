@@ -100,6 +100,9 @@ pub(crate) trait PointSurfaceLocalExt<C: Coordinate> {
 
 pub(crate) trait RectExt<C: Coordinate> {
     /// Relabels a bare Logical rectangle as Global without translating it.
+    ///
+    /// Used again from Integrating Zoom 1 (tablet target rects); kept for API symmetry.
+    #[allow(dead_code)]
     fn assume_global(self) -> Rectangle<C, Global>;
     /// Relabels a bare Logical rectangle as Local without translating it.
     fn assume_local(self) -> Rectangle<C, Local>;
