@@ -2434,6 +2434,12 @@ impl State {
                     self.niri.test_action_count += 1;
                 }
             }
+            Action::SetZoomLevel(_level, _output) => {
+                todo!()
+            }
+            Action::ToggleZoomLock(_output) => {
+                todo!()
+            }
         }
     }
 
@@ -4825,6 +4831,9 @@ fn allowed_when_locked(action: &Action) -> bool {
             | Action::PowerOnMonitors
             | Action::SwitchLayout(_)
             | Action::ToggleKeyboardShortcutsInhibit
+            // Zoom is an accessibility feature that should work on the lockscreen.
+            | Action::SetZoomLevel(_, _)
+            | Action::ToggleZoomLock(_)
     )
 }
 
@@ -4865,6 +4874,9 @@ fn allowed_during_screenshot(action: &Action) -> bool {
             | Action::SetWindowWidth(_)
             | Action::SetWindowHeight(_)
             | Action::SetColumnWidth(_)
+            // Zoom is visible behind the overlay and doesn't affect the capture.
+            | Action::SetZoomLevel(_, _)
+            | Action::ToggleZoomLock(_)
     )
 }
 

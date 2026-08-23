@@ -456,6 +456,9 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             let casts = state.casts.casts.values().cloned().collect();
             Response::Casts(casts)
         }
+        Request::ZoomState => {
+            todo!()
+        }
     };
 
     Ok(response)
