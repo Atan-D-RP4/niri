@@ -57,6 +57,9 @@ pub fn handle_msg(mut msg: Msg, json: bool, print_request: bool) -> anyhow::Resu
                 .context("error reading from stdin")?;
             serde_json::from_slice(&buf).context("error parsing request JSON from stdin")?
         }
+        Msg::ZoomState { output } => Request::ZoomState {
+            output: output.clone(),
+        },
     };
 
     if print_request {
@@ -522,6 +525,12 @@ pub fn handle_msg(mut msg: Msg, json: bool, print_request: bool) -> anyhow::Resu
                     Event::CastStopped { stream_id } => {
                         println!("Cast stopped: stream id {stream_id}");
                     }
+                    Event::ZoomChanged { output, state } => {
+                        println!(
+                            "Zoom on {output}: level={} locked={}",
+                            state.level, state.is_locked
+                        );
+                    }
                 }
             }
         }
@@ -542,6 +551,29 @@ pub fn handle_msg(mut msg: Msg, json: bool, print_request: bool) -> anyhow::Resu
                 println!("Overview is open.");
             } else {
                 println!("Overview is closed.");
+            }
+        }
+        Msg::ZoomState { output } => {
+            let Response::ZoomState(response) = response else {
+                bail!("unexpected response: expected ZoomState, got {response:?}");
+            };
+
+            if json {
+                let response =
+                    serde_json::to_string(&response).context("error formatting response")?;
+                println!("{response}");
+                return Ok(());
+            }
+
+            if let Some(output) = output {
+                if let Some(state) = response.get(&output) {
+                    println!("Zoom state for output \"{output}\": {state:?}");
+                }
+            } else {
+                println!("Zoom state for all outputs:");
+                for (output, state) in response {
+                    println!("  Output \"{output}\": {state:?}");
+                }
             }
         }
         Msg::Casts => {
