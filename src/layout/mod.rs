@@ -86,6 +86,7 @@ pub mod scrolling;
 pub mod shadow;
 pub mod tab_indicator;
 pub mod tile;
+pub mod view;
 pub mod workspace;
 
 #[cfg(test)]
