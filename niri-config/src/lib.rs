@@ -92,6 +92,7 @@ pub struct Config {
     pub debug: Debug,
     pub workspaces: Vec<Workspace>,
     pub recent_windows: RecentWindows,
+    pub zoom: Zoom,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +205,7 @@ where
                 "blur" => m_merge!(blur),
                 "gestures" => m_merge!(gestures),
                 "overview" => m_merge!(overview),
+                "zoom" => m_merge!(zoom),
                 "xwayland-satellite" => m_merge!(xwayland_satellite),
                 "switch-events" => m_merge!(switch_events),
                 "debug" => m_merge!(debug),
@@ -672,6 +674,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_animations_off_and_overrides() {
+        let parsed = do_parse(
+            r#"
+            animations {
+                off
+                slowdown 2.0
+                zoom-level-change {
+                    off
+                }
+            }
+            "#,
+        );
+
+        assert!(parsed.animations.off);
+        assert_eq!(parsed.animations.slowdown, 2.);
+        assert!(parsed.animations.zoom_level_change.0.off);
+        assert!(!parsed.animations.zoom_focal_pan.0.off);
+    }
+
+    #[test]
     fn parse() {
         let parsed = do_parse(
             r##"
@@ -772,6 +794,10 @@ mod tests {
                     bottom-left
                     bottom-right
                 }
+                zoom {
+                    movement-mode "centered"
+                    max-zoom 5.0
+                }
             }
 
             output "eDP-2" {
@@ -844,6 +870,7 @@ mod tests {
             prefer-no-csd
 
             cursor {
+                scale-with-view
                 xcursor-theme "breeze_cursors"
                 xcursor-size 16
                 hide-when-typing
@@ -934,6 +961,7 @@ mod tests {
             }
 
             binds {
+                Mod+Plus { set-zoom-level "+0.5" "eDP-1"; }
                 Mod+Escape hotkey-overlay-title="Inhibit" { toggle-keyboard-shortcuts-inhibit; }
                 Mod+Shift+Escape allow-inhibiting=true { toggle-keyboard-shortcuts-inhibit; }
                 Mod+T allow-when-locked=true { spawn "alacritty"; }
@@ -986,6 +1014,15 @@ mod tests {
                     Alt+grave { next-window filter="app-id"; }
                     Super+Tab { next-window scope="output"; }
                 }
+            }
+
+            zoom {
+                movement-mode "on-edge"
+                increment-type "exponential"
+                cursor-velocity "hand-speed"
+                gesture-sensitivity 0.8
+                max-zoom 10.0
+                filter-threshold 3.0
             }
             "##,
         );
@@ -1231,6 +1268,22 @@ mod tests {
                             },
                         ),
                         layout: None,
+                        zoom: Some(
+                            ZoomPart {
+                                movement_mode: Some(
+                                    Centered,
+                                ),
+                                increment_type: None,
+                                cursor_velocity: None,
+                                gesture_sensitivity: None,
+                                max_zoom: Some(
+                                    FloatOrInt(
+                                        5.0,
+                                    ),
+                                ),
+                                filter_threshold: None,
+                            },
+                        ),
                     },
                     Output {
                         off: false,
@@ -1258,6 +1311,7 @@ mod tests {
                         backdrop_color: None,
                         hot_corners: None,
                         layout: None,
+                        zoom: None,
                     },
                     Output {
                         off: false,
@@ -1288,6 +1342,7 @@ mod tests {
                         backdrop_color: None,
                         hot_corners: None,
                         layout: None,
+                        zoom: None,
                     },
                 ],
             ),
@@ -1523,6 +1578,7 @@ mod tests {
                 hide_after_inactive_ms: Some(
                     3000,
                 ),
+                scale_with_view: true,
             },
             screenshot_path: ScreenshotPath(
                 Some(
@@ -1674,6 +1730,33 @@ mod tests {
                                 damping_ratio: 1.0,
                                 stiffness: 800,
                                 epsilon: 0.001,
+                            },
+                        ),
+                    },
+                ),
+                zoom_level_change: ZoomLevelChangeAnim(
+                    Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 250,
+                                curve: EaseOutExpo,
+                            },
+                        ),
+                    },
+                ),
+                zoom_focal_pan: ZoomFocalPanAnim(
+                    Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 250,
+                                curve: CubicBezier(
+                                    0.05,
+                                    0.7,
+                                    0.1,
+                                    1.0,
+                                ),
                             },
                         ),
                     },
@@ -1996,6 +2079,29 @@ mod tests {
             ],
             binds: Binds(
                 [
+                    Bind {
+                        key: Key {
+                            trigger: Keysym(
+                                XK_plus,
+                            ),
+                            modifiers: Modifiers(
+                                COMPOSITOR,
+                            ),
+                        },
+                        action: SetZoomLevel(
+                            Adjust(
+                                0.5,
+                            ),
+                            Some(
+                                "eDP-1",
+                            ),
+                        ),
+                        repeat: true,
+                        cooldown: None,
+                        allow_when_locked: false,
+                        allow_inhibiting: true,
+                        hotkey_overlay_title: None,
+                    },
                     Bind {
                         key: Key {
                             trigger: Keysym(
@@ -2437,6 +2543,14 @@ mod tests {
                         hotkey_overlay_title: None,
                     },
                 ],
+            },
+            zoom: Zoom {
+                movement_mode: OnEdge,
+                increment_type: Exponential,
+                cursor_velocity: HandSpeed,
+                gesture_sensitivity: 0.8,
+                max_zoom: 10.0,
+                filter_threshold: 3.0,
             },
         }
         "#);

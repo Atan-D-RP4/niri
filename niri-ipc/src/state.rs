@@ -9,7 +9,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use crate::{Cast, Event, KeyboardLayouts, Window, Workspace};
+use crate::{Cast, Event, KeyboardLayouts, Window, Workspace, Zoom};
 
 /// Part of the state communicated via the event stream.
 pub trait EventStreamStatePart {
@@ -52,6 +52,9 @@ pub struct EventStreamState {
 
     /// State of touchpads.
     pub touchpad: TouchpadState,
+
+    /// State of zoom.
+    pub zoom: ZoomChangedState,
 }
 
 /// The workspaces state communicated over the event stream.
@@ -108,6 +111,37 @@ pub struct TouchpadState {
     pub on: bool,
 }
 
+/// The zoom state communicated over the event stream.
+#[derive(Debug, Default)]
+pub struct ZoomChangedState {
+    /// Map from an output name to the zoom state for that output.
+    pub outputs: HashMap<String, Zoom>,
+}
+
+impl ZoomChangedState {
+    const EVENT_EPSILON: f64 = 1e-6;
+
+    /// Emits on gesture/transition boundaries and settled changes, not per animation frame.
+    pub fn should_emit_zoom_event(
+        &self,
+        output: &str,
+        current: &Zoom,
+        transitioning: bool,
+        gesturing: bool,
+    ) -> bool {
+        let Some(previous) = self.outputs.get(output) else {
+            return true;
+        };
+
+        let state_changed = (previous.level - current.level).abs() > Self::EVENT_EPSILON
+            || previous.is_locked != current.is_locked;
+
+        previous.is_locked != current.is_locked
+            || previous.gesturing != gesturing
+            || (!transitioning && state_changed)
+    }
+}
+
 impl EventStreamStatePart for EventStreamState {
     fn replicate(&self) -> Vec<Event> {
         let mut events = Vec::new();
@@ -118,6 +152,7 @@ impl EventStreamStatePart for EventStreamState {
         events.extend(self.config.replicate());
         events.extend(self.casts.replicate());
         events.extend(self.touchpad.replicate());
+        events.extend(self.zoom.replicate());
         events
     }
 
@@ -129,6 +164,7 @@ impl EventStreamStatePart for EventStreamState {
         let event = self.config.apply(event)?;
         let event = self.casts.apply(event)?;
         let event = self.touchpad.apply(event)?;
+        let event = self.zoom.apply(event)?;
         Some(event)
     }
 }
@@ -348,6 +384,28 @@ impl EventStreamStatePart for TouchpadState {
         match event {
             Event::TouchpadToggled { on } => {
                 self.on = on;
+            }
+            event => return Some(event),
+        }
+        None
+    }
+}
+
+impl EventStreamStatePart for ZoomChangedState {
+    fn replicate(&self) -> Vec<Event> {
+        self.outputs
+            .iter()
+            .map(|(output, state)| Event::ZoomChanged {
+                output: output.clone(),
+                state: state.clone(),
+            })
+            .collect()
+    }
+
+    fn apply(&mut self, event: Event) -> Option<Event> {
+        match event {
+            Event::ZoomChanged { output, state } => {
+                self.outputs.insert(output, state);
             }
             event => return Some(event),
         }
