@@ -88,6 +88,7 @@ pub mod tab_indicator;
 pub mod tile;
 pub mod view;
 pub mod workspace;
+pub mod zoom;
 
 #[cfg(test)]
 mod tests;
