@@ -39,7 +39,8 @@ impl OutputZoomState {
 
     /// True when any transition (level or focal) is active and not yet done.
     pub fn transitioning(&self) -> bool {
-        self.level_transition.is_active() || self.focal_animation.is_some()
+        !matches!(self.level_transition, ZoomLevelTransition::Idle)
+            || self.focal_animation.is_some()
     }
 
     /// Returns true when any `Animating` transition is active (not `Gesturing`).
@@ -53,13 +54,24 @@ impl OutputZoomState {
             || self.focal_animation.is_some()
     }
 
-    pub fn snapshot_at(&self, now: Duration) -> ZoomSnapshot {
+    /// Compute the current level from the active animation state.
+    // `now` is threaded through for the gesture-driven paths that
+    // Integrating Zoom 1 wires up; the idle check reads the clock directly.
+    #[allow(clippy::let_and_return)]
+    fn current_level(&self, now: Duration) -> f64 {
         let level = match &self.level_transition {
             ZoomLevelTransition::Animating(a) => a.value_at(now),
             ZoomLevelTransition::Gesturing(g) => g.current_level,
             ZoomLevelTransition::Idle => self.level,
         };
+        level
+    }
 
+    /// Compute the current focal point from the active animation state.
+    // See `current_level`: `now` is consumed by Integrating Zoom 1.
+    #[allow(clippy::let_and_return)]
+    fn current_focal(&self, now: Duration) -> Point<f64, Local> {
+        let level = self.current_level(now);
         let focal = match &self.focal_animation {
             Some(a) => a.value_at(now),
             None => {
@@ -75,33 +87,23 @@ impl OutputZoomState {
             }
         };
 
-        ZoomSnapshot {
-            level,
-            focal,
-            locked: self.locked,
-            transitioning: self.transitioning() | self.is_animating(),
-            is_gesture: matches!(self.level_transition, ZoomLevelTransition::Gesturing(_)),
-        }
+        focal
     }
 
-    pub fn apply_pending_transition_at(&mut self, now: Duration) {
-        // Delegate to snapshot_at for the canonical level/focal computation,
-        // then commit and sweep. This avoids duplicating the match logic.
-        let snap = self.snapshot_at(now);
-        self.level = snap.level;
-        self.focal = snap.focal;
+    /// Sweep completed transitions and commit final values to resting state.
+    ///
+    /// Called from `Layout::advance_animations` on the same tick as all other
+    /// animation sweeps. When an animation completes, its final level/focal
+    /// are stored as the resting state for the `Idle` variant.
+    pub fn advance_animations(&mut self, now: Duration) {
+        self.level = self.current_level(now);
+        self.focal = self.current_focal(now);
         self.level_transition.sweep_at(now);
         if let Some(a) = &self.focal_animation {
             if a.x_anim.is_done() && a.y_anim.is_done() {
                 self.focal_animation = None;
             }
         }
-    }
-
-    /// True when zoom is currently active. Reads the current animated level
-    /// via `snapshot_at` so mid-transition calls return the correct state.
-    pub fn is_active(&self, now: Duration) -> bool {
-        self.snapshot_at(now).level > 1.0
     }
 
     /// Update cursor position on active transitions for focal tracking.
@@ -125,7 +127,7 @@ impl OutputZoomState {
                 let level = a.anim.value();
                 // Compute focal from the tracking context rather than
                 // using self.focal directly — self.focal may be stale
-                // (it's not updated until apply_pending_transition_at).
+                // (it's not updated until advance_animations).
                 let focal = a.tracking.compute_focal(level, self.focal);
                 a.set_movement_mode(mode, level, focal);
             }
@@ -138,11 +140,12 @@ impl OutputZoomState {
 
     /// Canonical viewport transform for the current animated zoom state.
     ///
-    /// Returns the immutable [`ViewportTransform`] that represents the
-    /// current level and focal. Consumers should sample this once per frame
-    /// and use the same snapshot for all render, damage, and cursor work.
+    /// This is the single construction path for [`ViewportTransform`]. No
+    /// consumer should reconstruct the transform from raw animation fields.
     pub fn viewport_transform(&self, now: Duration) -> ViewportTransform {
-        self.snapshot_at(now).viewport_transform()
+        let focal = self.current_focal(now);
+        let level = self.current_level(now);
+        ViewportTransform::new(focal, level)
     }
 
     /// Viewport rectangle in the global coordinate frame for the current
@@ -167,22 +170,6 @@ impl OutputZoomState {
             viewport_local.loc.to_global(output_origin.as_logical()),
             viewport_local.size.assume_global(),
         )
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ZoomSnapshot {
-    pub level: f64,
-    pub focal: Point<f64, Local>,
-    pub locked: bool,
-    pub transitioning: bool,
-    pub is_gesture: bool,
-}
-
-impl ZoomSnapshot {
-    /// Derives the [`ViewportTransform`] from this snapshot.
-    pub fn viewport_transform(&self) -> ViewportTransform {
-        ViewportTransform::new(self.focal, self.level)
     }
 }
 
@@ -321,6 +308,10 @@ impl FocalTrackingContext {
 
     pub fn set_cursor_pos(&mut self, pos: Point<f64, Local>) {
         self.cursor_pos = Some(pos);
+    }
+
+    pub fn set_output_size(&mut self, size: Size<f64, Local>) {
+        self.output_size = Some(size);
     }
 
     /// Update the movement mode. If the new mode is OnEdge, the cursor anchor
@@ -516,18 +507,6 @@ pub enum ZoomLevelTransition {
 }
 
 impl ZoomLevelTransition {
-    pub fn is_active(&self) -> bool {
-        !matches!(self, Self::Idle)
-    }
-
-    pub fn is_done_at(&self, _now: Duration) -> bool {
-        match self {
-            Self::Animating(a) => a.anim.is_done(),
-            Self::Gesturing(_) => false,
-            Self::Idle => true,
-        }
-    }
-
     /// Clear completed `Animating` transitions.
     pub fn sweep_at(&mut self, _now: Duration) {
         if let Self::Animating(a) = self {

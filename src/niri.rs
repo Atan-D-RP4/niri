@@ -204,6 +204,15 @@ const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 // should be ~1.995 seconds.
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
 
+/// State tracking for an active touchscreen pinch-to-zoom gesture.
+#[derive(Debug, Clone)]
+pub struct TouchPinchState {
+    /// Output where the pinch started.
+    pub output: Output,
+    /// Distance between the two touch points at gesture start.
+    pub initial_distance: f64,
+}
+
 pub struct Niri {
     pub config: Rc<RefCell<Config>>,
 
@@ -394,6 +403,12 @@ pub struct Niri {
     pub pointer_constraint_position_hint: Option<Point<f64, Global>>,
     pub tablet_cursor_location: Option<Point<f64, Global>>,
     pub gesture_swipe_3f_cumulative: Option<(f64, f64)>,
+    /// Output currently receiving a touchpad pinch-to-zoom gesture.
+    pub zoom_pinch_gesture_output: Option<Output>,
+    /// Active touch points for touchscreen pinch-to-zoom (slot → global position).
+    pub touch_points: HashMap<i32, Point<f64, Logical>>,
+    /// Active touchscreen pinch state, if any.
+    pub touch_pinch_state: Option<TouchPinchState>,
     pub overview_scroll_swipe_gesture: ScrollSwipeGesture,
     pub vertical_wheel_tracker: ScrollTracker,
     pub horizontal_wheel_tracker: ScrollTracker,
@@ -2740,6 +2755,9 @@ impl Niri {
             pointer_constraint_position_hint: None,
             tablet_cursor_location: None,
             gesture_swipe_3f_cumulative: None,
+            zoom_pinch_gesture_output: None,
+            touch_points: HashMap::new(),
+            touch_pinch_state: None,
             overview_scroll_swipe_gesture: ScrollSwipeGesture::new(),
             vertical_wheel_tracker: ScrollTracker::new(120),
             horizontal_wheel_tracker: ScrollTracker::new(120),

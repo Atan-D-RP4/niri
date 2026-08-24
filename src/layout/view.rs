@@ -10,8 +10,8 @@ use crate::utils::geometry::{Global, Local, PointExt};
 /// belongs to the owner that constructs this value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewportTransform {
-    focal: Point<f64, Local>,
-    factor: f64,
+    pub focal: Point<f64, Local>,
+    pub factor: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

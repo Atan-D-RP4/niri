@@ -35,7 +35,7 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use touch_overview_grab::TouchOverviewGrab;
@@ -49,11 +49,11 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::dbus::freedesktop_a11y::KbMonBlock;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
-use crate::niri::{CastTarget, PointerVisibility, State};
+use crate::niri::{CastTarget, PointerVisibility, State, TouchPinchState};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::geometry::{
-    Global, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt, RectLocalExt,
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectLocalExt,
     SizeExt,
 };
 use crate::utils::spawning::{spawn, spawn_sh};
@@ -72,6 +72,12 @@ pub mod swipe_tracker;
 pub mod touch_overview_grab;
 
 use backend_ext::{NiriInputBackend as InputBackend, NiriInputDevice as _};
+
+/// Output-local pinch geometry: optional cursor position and output size.
+///
+/// Gives a name to the complex return type until Integrating Zoom 1 rewrites
+/// this helper against `OutputViewCtx`.
+type PinchGeometry = (Option<Point<f64, Local>>, Option<Size<f64, Local>>);
 
 pub const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(400);
 
@@ -298,14 +304,14 @@ impl State {
     }
 
     /// Computes the rectangle that covers all outputs in global space.
-    fn global_bounding_rectangle(&self) -> Option<Rectangle<i32, Global>> {
+    fn global_bounding_rectangle(&self) -> Option<Rectangle<i32, Logical>> {
         self.niri.global_space.outputs().fold(
             None,
-            |acc: Option<Rectangle<i32, Global>>, output| {
-                self.niri.global_space.output_geometry(output).map(|geo| {
-                    let geo = geo.assume_global();
-                    acc.map(|acc| acc.merge(geo)).unwrap_or(geo)
-                })
+            |acc: Option<Rectangle<i32, Logical>>, output| {
+                self.niri
+                    .global_space
+                    .output_geometry(output)
+                    .map(|geo| acc.map(|acc| acc.merge(geo)).unwrap_or(geo))
             },
         )
     }
@@ -314,6 +320,9 @@ impl State {
     ///
     /// This function handles the tablet output mapping, as well as coordinate clamping and aspect
     /// ratio correction.
+    // `rect` is shadowed before mutation below; the `mut` matches the
+    // part-2 tree that Integrating Zoom 1 rewrites.
+    #[allow(unused_mut)]
     fn compute_tablet_position<I: InputBackend>(
         &self,
         event: &(impl Event<I> + TabletToolEvent<I>),
@@ -335,11 +344,11 @@ impl State {
             let output = mapped_output.or_else(|| self.niri.layout.active_output());
             output.and_then(|output| {
                 let monitor = self.niri.layout.monitor_for_output(output)?;
-                let rect = monitor.active_window_visual_rectangle()?;
+                let mut rect = monitor.active_window_visual_rectangle()?;
                 let output_geo = self.niri.global_space.output_geometry(output)?;
                 let mut rect = rect.as_logical();
                 rect.loc += output_geo.loc.to_f64();
-                Some((rect.assume_global(), output))
+                Some((rect, output))
             })
         } else {
             None
@@ -353,12 +362,7 @@ impl State {
                 output.current_transform(),
             )
         } else if let Some(output) = mapped_output {
-            let geo = self
-                .niri
-                .global_space
-                .output_geometry(output)
-                .unwrap()
-                .assume_global();
+            let geo = self.niri.global_space.output_geometry(output).unwrap();
             (
                 geo.to_f64(),
                 true,
@@ -378,9 +382,7 @@ impl State {
         };
 
         let mut pos = {
-            let size = transform
-                .invert()
-                .transform_size(target_geo.size.as_logical());
+            let size = transform.invert().transform_size(target_geo.size);
             transform.transform_point_in(event.position_transformed(size.to_i32_round()), &size)
         };
 
@@ -410,7 +412,9 @@ impl State {
 
         pos.x = pos.x.clamp(0.0, target_geo.size.w - px);
         pos.y = pos.y.clamp(0.0, target_geo.size.h - px);
-        Some(target_geo.loc.surface_position(pos))
+        // `target_geo.loc` is a global-space logical origin: offset the local
+        // position explicitly, then relabel to Global.
+        Some((pos + target_geo.loc).assume_global())
     }
 
     fn is_inhibiting_shortcuts(&self) -> bool {
@@ -2715,12 +2719,9 @@ impl State {
 
         let Some(pos) = self.compute_absolute_location(&event, None).or_else(|| {
             self.global_bounding_rectangle().map(|output_geo| {
-                output_geo.loc.to_f64().surface_position(
-                    event
-                        .position_transformed(output_geo.size.as_logical())
-                        .assume_local()
-                        .as_logical(),
-                )
+                let origin = output_geo.loc.to_f64();
+                let local = event.position_transformed(output_geo.size).to_f64();
+                (local + origin).assume_global()
             })
         }) else {
             return;
@@ -4176,6 +4177,153 @@ impl State {
         );
     }
 
+    // --- Continuous pinch gesture handlers (touchpad + touchscreen) ---
+    //
+    // These provide the generic pinch recognition layer. Both touchpad and
+    // touchscreen paths feed into `zoom_gesture_begin/update/end` on Layout,
+    // which is the stable consumer API.
+    //
+    // When PR #3771 lands, the touchscreen path can be replaced with
+    // `TouchPinch` → `ContinuousGestureKind` → `zoom_gesture_update()`,
+    // while the touchpad path stays (PR #3771's touchpad pinch is discrete).
+
+    // Callers (touch event handlers) arrive with Integrating Zoom 1.
+    #[allow(dead_code)]
+    fn cancel_touch_pinch(&mut self, cancelled: bool) {
+        if let Some(pinch) = self.niri.touch_pinch_state.take() {
+            self.niri.layout.zoom_gesture_end(&pinch.output, cancelled);
+            self.niri.queue_redraw(&pinch.output);
+        }
+    }
+
+    fn pinch_config(&self) -> (f64, niri_config::ZoomMovementMode) {
+        let zoom = &self.niri.config.borrow().zoom;
+        (zoom.pinch_sensitivity, zoom.movement_mode)
+    }
+
+    fn pinch_output_geometry(
+        &self,
+        output: &Output,
+        focal_point: Point<f64, Logical>,
+    ) -> PinchGeometry {
+        let output_geo = self
+            .niri
+            .global_space
+            .output_geometry(output)
+            .map(|g| g.to_f64());
+        (
+            // focal_point - g.loc is already relative to the output origin; just relabel.
+            output_geo.map(|g| (focal_point - g.loc).assume_local()),
+            output_geo.map(|g| g.size.assume_local()),
+        )
+    }
+
+    /// Returns `true` if a zoom gesture was active and was updated.
+    fn pinch_update(
+        &mut self,
+        output: &Output,
+        scale: f64,
+        focal_pos: Point<f64, Logical>,
+        timestamp: Duration,
+    ) -> bool {
+        let (sensitivity, _) = self.pinch_config();
+        let (cursor_local, output_size) = self.pinch_output_geometry(output, focal_pos);
+        if self
+            .niri
+            .layout
+            .zoom_gesture_update(
+                output,
+                scale,
+                sensitivity,
+                timestamp,
+                cursor_local,
+                output_size,
+            )
+            .is_some()
+        {
+            self.niri.queue_redraw(output);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle touchscreen pinch-to-zoom via raw `wl_touch` two-finger distance.
+    ///
+    /// On each touch point change, computes the distance between two touch
+    /// points and feeds the cumulative ratio (`current / initial`) into
+    /// `zoom_gesture_update`.
+    // Called from the touch event handlers with Integrating Zoom 1.
+    #[allow(dead_code)]
+    fn handle_touch_pinch(&mut self, timestamp: Duration) {
+        let touch_count = self.niri.touch_points.len();
+
+        // Cancel pinch if 3+ fingers — computing distance from an arbitrary
+        // pair of points against the initial 2-finger distance would produce
+        // a nonsensical scale ratio and an abrupt zoom jump.
+        if touch_count > 2 {
+            self.cancel_touch_pinch(true);
+            return;
+        }
+
+        if touch_count == 2 {
+            let mut positions = self.niri.touch_points.values().copied();
+            let p1 = positions.next().unwrap();
+            let p2 = positions.next().unwrap();
+            let dx = p1.x - p2.x;
+            let dy = p1.y - p2.y;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let midpoint = Point::from(((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0));
+
+            // Touch positions are global logical; convert to Global for output_under.
+            let Some((output, _)) = self.niri.output_under(midpoint.assume_global()) else {
+                self.cancel_touch_pinch(true);
+                return;
+            };
+            let output = output.clone();
+
+            if self.niri.layout.zoom_locked_for_output(&output) {
+                return;
+            }
+
+            if self.niri.touch_pinch_state.is_none() {
+                // First 2-finger touch: begin gesture.
+                let movement_mode = Some(self.pinch_config().1);
+                self.niri.layout.zoom_gesture_begin(
+                    &output,
+                    // We don't have output-local coords yet; the gesture
+                    // will compute them on the next update from
+                    // pointer.global_location() if needed.
+                    None,
+                    None,
+                    movement_mode,
+                );
+                self.niri.touch_pinch_state = Some(TouchPinchState {
+                    output: output.clone(),
+                    initial_distance: distance.max(1.0), // clamp to avoid div-by-zero
+                });
+                self.niri.queue_redraw(&output);
+            } else if let Some(ref pinch) = self.niri.touch_pinch_state {
+                if pinch.output == output {
+                    // Subsequent updates: scale = current_distance / initial_distance.
+                    let scale = distance / pinch.initial_distance;
+                    self.pinch_update(&output, scale, midpoint, timestamp);
+                }
+            }
+        } else if touch_count < 2 {
+            // 0 or 1 fingers: end gesture (not cancelled).
+            self.cancel_touch_pinch(false);
+        }
+    }
+
+    // --- Touchpad pinch (libinput GesturePinch*) ---
+    //
+    // Libinput provides cumulative `scale` (1.0 = unchanged) directly. We route
+    // 3-finger pinch to zoom; non-zoom pinches forward to Wayland clients.
+    //
+    // FIXME: make pinch-finger count configurable.
+    // See: https://github.com/niri-wm/niri/pull/3771
+
     fn on_gesture_pinch_begin<I: InputBackend>(&mut self, event: I::GesturePinchBeginEvent) {
         let serial = SERIAL_COUNTER.next_serial();
         let pointer = self.niri.seat.get_pointer().unwrap();
@@ -4184,6 +4332,29 @@ impl State {
             pointer.frame(self);
         }
 
+        // FIXME: make pinch-finger count configurable.
+        if event.fingers() == 3 {
+            if let Some(output) = self.niri.output_under_cursor() {
+                if self.niri.layout.zoom_locked_for_output(&output) {
+                    return;
+                }
+
+                let cursor_global = self.niri.seat.get_pointer().unwrap().current_location();
+                let (cursor_local, output_size) =
+                    self.pinch_output_geometry(&output, cursor_global);
+                let movement_mode = Some(self.pinch_config().1);
+                self.niri.layout.zoom_gesture_begin(
+                    &output,
+                    cursor_local,
+                    output_size,
+                    movement_mode,
+                );
+                self.niri.zoom_pinch_gesture_output = Some(output);
+                return;
+            }
+        }
+
+        // Not a zoom pinch — forward to Wayland client.
         pointer.gesture_pinch_begin(
             self,
             &GesturePinchBeginEvent {
@@ -4201,6 +4372,22 @@ impl State {
             pointer.frame(self);
         }
 
+        if let Some(output) = self
+            .niri
+            .zoom_pinch_gesture_output
+            .clone()
+            .or_else(|| self.niri.output_under_cursor())
+        {
+            let timestamp = Duration::from_millis(event.time_msec() as u64);
+            let scale = event.scale();
+            let cursor_global = self.niri.seat.get_pointer().unwrap().current_location();
+
+            if self.pinch_update(&output, scale, cursor_global, timestamp) {
+                return;
+            }
+        }
+
+        // Not a zoom pinch — forward to Wayland client.
         pointer.gesture_pinch_update(
             self,
             &GesturePinchUpdateEvent {
@@ -4219,6 +4406,27 @@ impl State {
         if self.update_pointer_contents() {
             pointer.frame(self);
         }
+
+        if let Some(output) = self
+            .niri
+            .zoom_pinch_gesture_output
+            .clone()
+            .or_else(|| self.niri.output_under_cursor())
+        {
+            let cancelled = event.cancelled();
+            if self
+                .niri
+                .layout
+                .zoom_gesture_end(&output, cancelled)
+                .unwrap_or(false)
+            {
+                self.niri.zoom_pinch_gesture_output = None;
+                self.niri.queue_redraw(&output);
+                return;
+            }
+        }
+
+        self.niri.zoom_pinch_gesture_output = None;
 
         pointer.gesture_pinch_end(
             self,
