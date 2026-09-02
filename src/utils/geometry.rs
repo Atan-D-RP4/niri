@@ -2,11 +2,13 @@
 
 use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Size};
 
+use crate::utils::view::OutputViewCtx;
+
 /// Compositor-wide frame: positions absolute across all outputs, in logical units.
 ///
 /// Global is the frame of cross-output concerns: hit-testing entry points such as
 /// `output_under`, cursor and pointer-grab state, and surface-origin bookkeeping.
-/// Translation to and from [`Local`] is a pure origin shift by the output origin;
+/// Translation to and from [`Local`] is a pure origin shift through [`OutputViewCtx`];
 /// output rotation and scale never participate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Global;
@@ -45,7 +47,7 @@ pub trait PointLocalExt<C: Coordinate> {
     /// Relabels a Local point for a Logical-only API; this does not translate it.
     fn as_logical(self) -> Point<C, Logical>;
     /// Translates an output-local point into the global frame using the output origin.
-    fn to_global(self, origin: Point<impl Coordinate, Logical>) -> Point<C, Global>;
+    fn to_global(self, ctx: &OutputViewCtx) -> Point<C, Global>;
     /// Converts a Local point into Physical coordinates using the given scale.
     fn to_physical(self, scale: impl Into<Scale<C>>) -> Point<C, Physical>;
     /// Converts a Local point into Physical coordinates using the given scale, rounding precisely
@@ -61,7 +63,7 @@ pub(crate) trait PointGlobalExt<C: Coordinate> {
     /// Relabels a Global point for a Logical-only API; this does not translate it.
     fn as_logical(self) -> Point<C, Logical>;
     /// Translates a global point into output-local coordinates using the output origin.
-    fn to_local(self, origin: Point<impl Coordinate, Logical>) -> Point<C, Local>;
+    fn to_local(self, ctx: &OutputViewCtx) -> Point<C, Local>;
     /// Computes a surface-relative offset from this global point and a surface origin.
     fn surface_offset(self, surface_origin: Point<C, Global>) -> Point<C, SurfaceLocal>;
     /// Places a surface-relative logical position into the global frame through this origin.
@@ -100,9 +102,6 @@ pub(crate) trait PointSurfaceLocalExt<C: Coordinate> {
 
 pub(crate) trait RectExt<C: Coordinate> {
     /// Relabels a bare Logical rectangle as Global without translating it.
-    ///
-    /// Used again from Integrating Zoom 1 (tablet target rects); kept for API symmetry.
-    #[allow(dead_code)]
     fn assume_global(self) -> Rectangle<C, Global>;
     /// Relabels a bare Logical rectangle as Local without translating it.
     fn assume_local(self) -> Rectangle<C, Local>;
@@ -115,7 +114,7 @@ pub(crate) trait RectLocalExt<C: Coordinate> {
     /// Relabels a Local rectangle for a Logical-only API; this does not translate it.
     fn as_logical(self) -> Rectangle<C, Logical>;
     /// Translates an output-local rectangle into the global frame using the output origin.
-    fn to_global(self, origin: Point<impl Coordinate, Logical>) -> Rectangle<C, Global>;
+    fn to_global(self, ctx: &OutputViewCtx) -> Rectangle<C, Global>;
     /// Converts a Local rectangle into Physical coordinates using the given scale.
     fn to_physical(self, scale: impl Into<Scale<C>>) -> Rectangle<C, Physical>;
     /// Converts a Local rectangle into Physical coordinates using the given scale, rounding
@@ -131,7 +130,7 @@ pub(crate) trait RectGlobalExt<C: Coordinate> {
     /// Relabels a Global rectangle for a Logical-only API; this does not translate it.
     fn as_logical(self) -> Rectangle<C, Logical>;
     /// Translates a global rectangle into output-local coordinates using the output origin.
-    fn to_local(self, origin: Point<impl Coordinate, Logical>) -> Rectangle<C, Local>;
+    fn to_local(self, ctx: &OutputViewCtx) -> Rectangle<C, Local>;
     /// Converts a Global rectangle into Physical coordinates using the given scale.
     fn to_physical(self, scale: impl Into<Scale<C>>) -> Rectangle<C, Physical>;
     /// Converts a Global rectangle into Physical coordinates using the given scale, rounding
@@ -174,8 +173,9 @@ impl<C: Coordinate> PointLocalExt<C> for Point<C, Local> {
         (self.x, self.y).into()
     }
 
-    fn to_global(self, origin: Point<impl Coordinate, Logical>) -> Point<C, Global> {
-        let point = self.to_f64().as_logical() + origin.to_f64();
+    fn to_global(self, ctx: &OutputViewCtx) -> Point<C, Global> {
+        let origin = ctx.output_origin();
+        let point = self.to_f64().as_logical() + origin;
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }
 
@@ -196,8 +196,9 @@ impl<C: Coordinate> PointGlobalExt<C> for Point<C, Global> {
         (self.x, self.y).into()
     }
 
-    fn to_local(self, origin: Point<impl Coordinate, Logical>) -> Point<C, Local> {
-        let point = self.to_f64().as_logical() - origin.to_f64();
+    fn to_local(self, ctx: &OutputViewCtx) -> Point<C, Local> {
+        let origin = ctx.output_origin();
+        let point = self.to_f64().as_logical() - origin;
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }
 
@@ -257,8 +258,8 @@ impl<C: Coordinate> RectLocalExt<C> for Rectangle<C, Local> {
         Rectangle::new(self.loc.as_logical(), self.size.as_logical())
     }
 
-    fn to_global(self, origin: Point<impl Coordinate, Logical>) -> Rectangle<C, Global> {
-        Rectangle::new(self.loc.to_global(origin), self.size.assume_global())
+    fn to_global(self, ctx: &OutputViewCtx) -> Rectangle<C, Global> {
+        Rectangle::new(self.loc.to_global(ctx), self.size.assume_global())
     }
 
     fn to_physical(self, scale: impl Into<Scale<C>>) -> Rectangle<C, Physical> {
@@ -278,8 +279,8 @@ impl<C: Coordinate> RectGlobalExt<C> for Rectangle<C, Global> {
         Rectangle::new(self.loc.as_logical(), self.size.as_logical())
     }
 
-    fn to_local(self, origin: Point<impl Coordinate, Logical>) -> Rectangle<C, Local> {
-        Rectangle::new(self.loc.to_local(origin), self.size.assume_local())
+    fn to_local(self, ctx: &OutputViewCtx) -> Rectangle<C, Local> {
+        Rectangle::new(self.loc.to_local(ctx), self.size.assume_local())
     }
 
     fn to_physical(self, scale: impl Into<Scale<C>>) -> Rectangle<C, Physical> {
@@ -374,6 +375,7 @@ mod tests {
         Global, Local, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt, RectGlobalExt,
         RectLocalExt, SizeExt,
     };
+    use crate::utils::view::OutputViewCtx;
 
     #[test]
     fn local_to_physical_matches_logical_conversion() {
@@ -419,29 +421,39 @@ mod tests {
 
     #[test]
     fn global_local_point_conversion_round_trips() {
-        let origin = Point::<f64, Logical>::from((40., 25.));
+        let ctx = OutputViewCtx::new(
+            Rectangle::new((40., 25.).into(), (1920., 1080.).into()),
+            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
+            Default::default(),
+            (1., 1.).into(),
+        );
         let point: Point<f64, Global> = (120., 90.).into();
 
-        let local: Point<f64, Local> = point.to_local(origin);
-        assert_eq!(local.to_global(origin), point);
+        let local: Point<f64, Local> = point.to_local(&ctx);
+        assert_eq!(local.to_global(&ctx), point);
     }
 
     #[test]
     fn global_local_rectangle_conversion_round_trips() {
-        let origin = Point::<f64, Logical>::from((40., 25.));
+        let ctx = OutputViewCtx::new(
+            Rectangle::new((40., 25.).into(), (1920., 1080.).into()),
+            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
+            Default::default(),
+            (1., 1.).into(),
+        );
         let logical = Rectangle::new((120., 90.).into(), (800., 600.).into());
         let global = logical.assume_global();
 
-        let local = global.to_local(origin);
+        let local = global.to_local(&ctx);
         assert_eq!(local.loc, (80., 65.).into());
         assert_eq!(local.size, logical.size.assume_local());
-        assert_eq!(local.to_global(origin), global);
+        assert_eq!(local.to_global(&ctx), global);
 
         // And back the other way from a Local literal.
         let local = Rectangle::new((80., 65.).into(), (800., 600.).into());
-        let global = local.to_global(origin);
+        let global = local.to_global(&ctx);
         assert_eq!(global.loc, (120., 90.).into());
         assert_eq!(global.size, local.size.assume_global());
-        assert_eq!(global.to_local(origin), local);
+        assert_eq!(global.to_local(&ctx), local);
     }
 }

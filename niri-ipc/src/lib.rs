@@ -1599,14 +1599,16 @@ pub struct Cast {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Zoom {
-    /// Current zoom level
+    /// Current zoom level.
     pub level: f64,
-    /// Whether zoom focal point is locked
+    /// Whether zoom focal point is locked.
     pub is_locked: bool,
-    /// Focal point X coordinate in logical pixels
-    pub focal_x: f64,
-    /// Focal point Y coordinate in logical pixels
-    pub focal_y: f64,
+    /// Focal point coordinates in output-local logical pixels.
+    ///
+    /// The coordinate frame is the same as the output's logical coordinate space
+    /// (origin at the output's top-left corner). To convert to global logical
+    /// coordinates, add the output's position in global space.
+    pub focal: (f64, f64),
 }
 
 /// Kind of screencast.
@@ -1798,10 +1800,8 @@ pub enum Event {
         output: String,
         /// Current zoom level.
         level: f64,
-        /// Focal point X coordinate in logical pixels.
-        focal_x: f64,
-        /// Focal point Y coordinate in logical pixels.
-        focal_y: f64,
+        /// Focal point coordinates in logical pixels.
+        focal: (f64, f64),
         /// Whether zoom focal point is locked.
         is_locked: bool,
     },

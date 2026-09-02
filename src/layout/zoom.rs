@@ -6,8 +6,8 @@ use smithay::utils::{Point, Rectangle, Size};
 
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
-use crate::layout::view::ViewportTransform;
-use crate::utils::geometry::{Global, Local, PointGlobalExt, PointLocalExt, SizeExt};
+use crate::utils::geometry::{Global, Local, PointLocalExt, SizeExt};
+use crate::utils::view::{OutputViewCtx, ViewportTransform};
 
 /// Per-output zoom state. Layout writes these every animation tick;
 /// external consumers read via `Layout`'s public API.
@@ -59,12 +59,11 @@ impl OutputZoomState {
     // Integrating Zoom 1 wires up; the idle check reads the clock directly.
     #[allow(clippy::let_and_return)]
     fn current_level(&self, now: Duration) -> f64 {
-        let level = match &self.level_transition {
+        match &self.level_transition {
             ZoomLevelTransition::Animating(a) => a.value_at(now),
             ZoomLevelTransition::Gesturing(g) => g.current_level,
             ZoomLevelTransition::Idle => self.level,
-        };
-        level
+        }
     }
 
     /// Compute the current focal point from the active animation state.
@@ -72,7 +71,8 @@ impl OutputZoomState {
     #[allow(clippy::let_and_return)]
     fn current_focal(&self, now: Duration) -> Point<f64, Local> {
         let level = self.current_level(now);
-        let focal = match &self.focal_animation {
+
+        match &self.focal_animation {
             Some(a) => a.value_at(now),
             None => {
                 // When no focal animation is active, compute focal from the
@@ -85,9 +85,7 @@ impl OutputZoomState {
                     ZoomLevelTransition::Idle => self.focal,
                 }
             }
-        };
-
-        focal
+        }
     }
 
     /// Sweep completed transitions and commit final values to resting state.
@@ -157,17 +155,16 @@ impl OutputZoomState {
     /// concern per the geometry pipeline.
     pub fn viewport_global(
         &self,
-        output_origin: Point<f64, Global>,
-        output_size: Size<f64, Local>,
+        output_view_ctx: &OutputViewCtx,
         now: Duration,
     ) -> Rectangle<f64, Global> {
         let vt = self.viewport_transform(now);
-        let output_local = Rectangle::from_size(output_size);
+        let output_local = Rectangle::from_size(output_view_ctx.local_geo.size);
         let viewport_local = vt.apply_inverse_rect(output_local);
         // Local→Global is a pure translation of location by the output origin.
         // Size is frame-invariant.
         Rectangle::new(
-            viewport_local.loc.to_global(output_origin.as_logical()),
+            viewport_local.loc.to_global(output_view_ctx),
             viewport_local.size.assume_global(),
         )
     }

@@ -90,7 +90,6 @@ pub mod scrolling;
 pub mod shadow;
 pub mod tab_indicator;
 pub mod tile;
-pub mod view;
 pub mod workspace;
 pub mod zoom;
 
@@ -2799,12 +2798,6 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    pub fn zoom_locked_for_output(&self, output: &Output) -> bool {
-        self.zoom_states
-            .get(output)
-            .is_some_and(|state| state.locked)
-    }
-
     /// Begin a continuous pinch-to-zoom gesture on the given output.
     ///
     /// Creates a `ZoomLevelGesture` that tracks cumulative scale changes in
@@ -3105,14 +3098,31 @@ impl<W: LayoutElement> Layout<W> {
 
     // --- Cursor/focal tracking ---
 
-    /// Update cursor position and optionally animate focal to follow.
+    /// Track cursor position for zoom state.
     ///
-    /// Unifies `set_zoom_cursor_pos` + `update_zoom_base_focal` +
-    /// `animate_zoom_unlock` from the old branch. Always updates cursor
-    /// position on active transitions. When idle and unlocked, computes
-    /// the target focal from the cursor and either sets it immediately or
-    /// animates.
-    pub fn update_zoom_cursor(
+    /// Always updates the cursor position on state, which is needed for:
+    /// - Focal policy recomputation (OnEdge reads cursor from state)
+    /// - Per-frame tracking during active transitions (animation/gesture)
+    /// - Edge detection in `FocalTrackingContext`
+    ///
+    /// This is a pure state mutation — it does not recompute focal.
+    /// Call [`update_focal_for_cursor`](Self::update_focal_for_cursor)
+    /// separately when the focal point should track the cursor.
+    pub fn set_zoom_cursor_pos(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
+        let Some(state) = self.zoom_states.get_mut(output) else {
+            return;
+        };
+        state.set_cursor_pos(cursor_local);
+    }
+
+    /// Recompute focal point from the given cursor position and movement mode.
+    ///
+    /// When idle and unlocked, computes the target focal and either sets it
+    /// immediately or animates. This handles all three movement modes:
+    /// - **CursorFollow**: focal ← cursor
+    /// - **Centered**: focal ← output center
+    /// - **OnEdge**: focal stays fixed unless cursor reaches the edge
+    pub fn update_focal_for_cursor(
         &mut self,
         output: &Output,
         cursor_local: Point<f64, Local>,
@@ -3123,15 +3133,12 @@ impl<W: LayoutElement> Layout<W> {
             return;
         };
 
-        // Always update cursor position on active transitions.
-        state.set_cursor_pos(cursor_local);
-
-        // If a transition is active, it handles focal tracking.
+        // If a transition is active, it handles focal tracking internally.
         if state.transitioning() {
             return;
         }
 
-        // If locked, don't update focal.
+        // If locked, focal is fixed.
         if state.locked {
             return;
         }
@@ -3194,10 +3201,22 @@ impl<W: LayoutElement> Layout<W> {
         let state = self.zoom_states.get(output)?;
         let now = self.clock.now();
         let vt = state.viewport_transform(now);
-        let viewport = vt.apply_inverse_rect(Rectangle::from_size(output_size));
+
+        // Compute the "zoom viewport" in output-local coordinates: the output rect
+        // scaled down by the zoom factor around the focal point. At factor 2.0 the
+        // viewport is the central quarter of the output; at factor 1.0 (IDENTITY)
+        // it is the full output.
+        let factor = vt.factor;
+        let focal = vt.focal;
+        let viewport_size = Size::from((output_size.w / factor, output_size.h / factor));
+        let viewport_loc = Point::from((
+            focal.x + (0. - focal.x) / factor,
+            focal.y + (0. - focal.y) / factor,
+        ));
+
         Some(pos.constrain(Rectangle::new(
-            viewport.loc,
-            viewport.size - Size::from((f64::EPSILON, f64::EPSILON)),
+            viewport_loc,
+            viewport_size - Size::from((f64::EPSILON, f64::EPSILON)),
         )))
     }
 
@@ -3207,7 +3226,7 @@ impl<W: LayoutElement> Layout<W> {
     fn output_size_for_focal(output: &Output) -> Size<f64, Local> {
         let mode_size = output.current_mode().map_or((0, 0).into(), |m| m.size);
         let scale = output.current_scale().fractional_scale();
-        Size::from((mode_size.w as f64 * scale, mode_size.h as f64 * scale))
+        Size::from((mode_size.w as f64 / scale, mode_size.h as f64 / scale))
     }
 
     pub fn are_animations_ongoing(&self, output: Option<&Output>) -> bool {

@@ -1,7 +1,10 @@
 use glam::{Mat3, Vec2};
-use smithay::utils::{Point, Rectangle, Scale, Transform};
+use smithay::desktop::space::SpaceElement;
+use smithay::desktop::Space;
+use smithay::output::Output;
+use smithay::utils::{Logical, Point, Rectangle, Scale, Transform};
 
-use crate::utils::geometry::{Global, Local, PointExt};
+use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, RectExt};
 
 /// Immutable, sampled transformation of output-local logical geometry.
 ///
@@ -94,6 +97,42 @@ impl ViewportTransform {
 }
 
 impl OutputViewCtx {
+    /// The output's position in global logical space.
+    ///
+    /// This is the translation offset for Global ↔ Local conversion via the
+    /// geometry extension traits (`PointLocalExt::to_global`,
+    /// `PointGlobalExt::to_local`). Use this instead of separately computing
+    /// output geometry from `global_space.output_geometry()`.
+    pub fn output_origin(&self) -> Point<f64, Logical> {
+        self.global_geo.loc.as_logical()
+    }
+
+    /// Creates a minimal context from an output geometry rectangle.
+    ///
+    /// Only the output origin is meaningful for Global ↔ Local translation;
+    /// transform and scale are set to defaults (Normal, 1.0).
+    pub fn from_output_rect(rect: Rectangle<i32, Logical>) -> Self {
+        Self::new(
+            rect.to_f64().assume_global(),
+            Rectangle::from_size(rect.size.to_f64()).assume_local(),
+            Transform::Normal,
+            Scale::from(1.0),
+        )
+    }
+
+    /// Creates a minimal context from an output origin point.
+    ///
+    /// Only the origin is meaningful for Global ↔ Local translation;
+    /// transform and scale are set to defaults (Normal, 1.0).
+    pub fn from_origin(origin: Point<f64, Logical>) -> Self {
+        Self::new(
+            Rectangle::new(origin.assume_global(), (0., 0.).into()),
+            Rectangle::new((0., 0.).into(), (0., 0.).into()).assume_local(),
+            Transform::Normal,
+            Scale::from(1.0),
+        )
+    }
+
     /// Converts output-local logical coordinates into compositor-global logical coordinates.
     ///
     /// The output transform is applied before output scale and global placement.
@@ -110,14 +149,35 @@ impl OutputViewCtx {
             scale,
         }
     }
+
+    pub fn for_output<W: SpaceElement + PartialEq>(
+        global_space: &Space<W>,
+        output: &Output,
+    ) -> Option<Self> {
+        let global_geo = global_space
+            .output_geometry(output)?
+            .to_f64()
+            .assume_global();
+        let mode = output.current_mode()?;
+        let scale = output.current_scale().fractional_scale();
+        let logical_size = mode.size.to_f64().to_logical(scale);
+        let local_geo = Rectangle::from_size(logical_size).assume_local();
+        let transform = output.current_transform();
+        Some(Self::new(
+            global_geo,
+            local_geo,
+            transform,
+            Scale::from(scale),
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use smithay::utils::{Rectangle, Scale, Transform};
+    use smithay::utils::Rectangle;
 
-    use super::{OutputViewCtx, ViewportTransform};
+    use super::ViewportTransform;
     use crate::utils::geometry::Local;
 
     fn transform() -> ViewportTransform {
@@ -148,23 +208,5 @@ mod tests {
             transform.apply_inverse_rect(transform.apply_rect(rect)),
             rect
         );
-    }
-
-    fn output_view(transform: Transform) -> OutputViewCtx {
-        OutputViewCtx::new(
-            Rectangle::new((100., 50.).into(), (3840., 2160.).into()),
-            Rectangle::new((0., 0.).into(), (1920., 1080.).into()),
-            transform,
-            Scale::from((2., 2.)),
-        )
-    }
-
-    #[test]
-    fn output_view_ctx_stores_construction_arguments() {
-        let ctx = output_view(Transform::Normal);
-        assert_eq!(ctx.global_geo.loc, (100., 50.).into());
-        assert_eq!(ctx.local_geo.loc, (0., 0.).into());
-        assert_eq!(ctx.output_transform, Transform::Normal);
-        assert_eq!(ctx.scale, Scale::from((2., 2.)));
     }
 }

@@ -457,7 +457,32 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             Response::Casts(casts)
         }
         Request::ZoomState => {
-            todo!()
+            let (tx, rx) = async_channel::bounded(1);
+            ctx.event_loop.insert_idle(move |state| {
+                let now = state.niri.clock.now();
+                let zooms = state
+                    .niri
+                    .layout
+                    .outputs()
+                    .filter_map(|output| {
+                        let zoom_state = state.niri.layout.zoom_state_for_output(output)?;
+                        let vt = zoom_state.viewport_transform(now);
+                        Some((
+                            output.name().clone(),
+                            niri_ipc::Zoom {
+                                is_locked: zoom_state.locked,
+                                level: vt.factor,
+                                focal: vt.focal.into(),
+                            },
+                        ))
+                    })
+                    .collect();
+
+                let _ = tx.send_blocking(zooms);
+            });
+            let result = rx.recv().await;
+            let zooms = result.map_err(|_| String::from("error getting zoom states"))?;
+            Response::ZoomState(zooms)
         }
     };
 
@@ -588,6 +613,52 @@ impl State {
         self.ipc_refresh_workspaces();
         self.ipc_refresh_windows();
         self.ipc_refresh_overview();
+        self.ipc_refresh_zoom_state();
+    }
+
+    pub fn ipc_refresh_zoom_state(&mut self) {
+        let Some(server) = &self.niri.ipc_server else {
+            return;
+        };
+
+        let mut state = server.event_stream_state.borrow_mut();
+        let state = &mut state.zoom;
+
+        let mut events = Vec::new();
+        let now = self.niri.clock.now();
+
+        for output in self.niri.layout.outputs() {
+            let zoom_state = match self.niri.layout.zoom_state_for_output(output) {
+                Some(zoom_state) => zoom_state,
+                None => continue,
+            };
+
+            let vt = zoom_state.viewport_transform(now);
+            let ipc_zoom = niri_ipc::Zoom {
+                is_locked: zoom_state.locked,
+                level: vt.factor,
+                focal: vt.focal.into(),
+            };
+
+            if state
+                .outputs
+                .get(&output.name())
+                .map(|s| (&s.level, &s.focal, &s.is_locked))
+                != Some((&ipc_zoom.level, &ipc_zoom.focal, &ipc_zoom.is_locked))
+            {
+                events.push(Event::ZoomChanged {
+                    output: output.name().clone(),
+                    level: ipc_zoom.level,
+                    focal: ipc_zoom.focal,
+                    is_locked: ipc_zoom.is_locked,
+                });
+            }
+        }
+
+        for event in events {
+            state.apply(event.clone());
+            server.send_event(event);
+        }
     }
 
     fn ipc_refresh_workspaces(&mut self) {
