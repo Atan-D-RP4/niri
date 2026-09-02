@@ -20,7 +20,7 @@ use niri_config::{
     WorkspaceReference, Xkb,
 };
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::input::{InputTime, Keycode};
+use smithay::backend::input::{InputTime, Keycode, TouchSlot};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
@@ -187,6 +187,7 @@ use crate::utils::geometry::{
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::{CHILD_DISPLAY, CHILD_ENV};
 use crate::utils::vblank_throttle::VBlankThrottle;
+use crate::utils::view::OutputViewCtx;
 use crate::utils::watcher::Watcher;
 use crate::utils::xwayland::satellite::Satellite;
 use crate::utils::{
@@ -406,7 +407,7 @@ pub struct Niri {
     /// Output currently receiving a touchpad pinch-to-zoom gesture.
     pub zoom_pinch_gesture_output: Option<Output>,
     /// Active touch points for touchscreen pinch-to-zoom (slot → global position).
-    pub touch_points: HashMap<i32, Point<f64, Logical>>,
+    pub touch_points: HashMap<TouchSlot, Point<f64, Global>>,
     /// Active touchscreen pinch state, if any.
     pub touch_pinch_state: Option<TouchPinchState>,
     pub overview_scroll_swipe_gesture: ScrollSwipeGesture,
@@ -526,6 +527,8 @@ pub struct OutputState {
     screen_transition: Option<ScreenTransition>,
     /// Damage tracker used for the debug damage visualization.
     pub debug_damage_tracker: OutputDamageTracker,
+    /// Cached output view context (global↔local conversion), rebuilt on resize.
+    pub view_ctx: OutputViewCtx,
 }
 
 #[derive(Debug, Default)]
@@ -1066,7 +1069,6 @@ impl State {
             return false;
         };
         let monitor = self.niri.layout.monitor_for_output(output).unwrap();
-        let output_geo = self.niri.global_space.output_geometry(output).unwrap();
 
         let mut rv = false;
         let rect = monitor.active_window_visual_rectangle();
@@ -1075,7 +1077,7 @@ impl State {
             let rect = rect
                 .as_logical()
                 .assume_local()
-                .to_global(output_geo.loc.to_f64());
+                .to_global(&self.niri.output_state[output].view_ctx);
             rv = self.move_cursor_to_rect(rect, mode);
         }
 
@@ -1586,6 +1588,52 @@ impl State {
 
         self.niri.config_error_notification.hide();
 
+        // Validate zoom config values.
+        if config.zoom.pinch_sensitivity <= 0.0 {
+            warn!(
+                "zoom.pinch_sensitivity must be > 0, got {}",
+                config.zoom.pinch_sensitivity
+            );
+            self.niri.config_error_notification.show();
+            self.niri.queue_redraw_all();
+
+            #[cfg(feature = "dbus")]
+            self.niri.a11y_announce_config_error();
+
+            return;
+        }
+        if config.zoom.max_zoom < 1.0 {
+            warn!("zoom.max_zoom must be >= 1.0, got {}", config.zoom.max_zoom);
+            self.niri.config_error_notification.show();
+            self.niri.queue_redraw_all();
+
+            #[cfg(feature = "dbus")]
+            self.niri.a11y_announce_config_error();
+
+            return;
+        }
+        if config.zoom.zoom_filter_threshold <= 0.0 {
+            warn!(
+                "zoom.zoom_filter_threshold must be > 0, got {}",
+                config.zoom.zoom_filter_threshold
+            );
+            self.niri.config_error_notification.show();
+            self.niri.queue_redraw_all();
+
+            #[cfg(feature = "dbus")]
+            self.niri.a11y_announce_config_error();
+
+            return;
+        }
+        if config.zoom.zoom_filter_threshold <= 1.01 {
+            warn!(
+                "zoom.zoom_filter_threshold is very low ({0}); \
+         Nearest-neighbour filtering will kick in at almost any zoom level above 1x. \
+         Set zoom_filter_threshold to a higher value (default is 2.0).",
+                config.zoom.zoom_filter_threshold,
+            );
+        }
+
         // Find & orphan removed named workspaces.
         let mut removed_workspaces: Vec<String> = vec![];
         for ws in &self.niri.config.borrow().workspaces {
@@ -1634,6 +1682,9 @@ impl State {
                 .reload(&config.cursor.xcursor_theme, config.cursor.xcursor_size);
             self.niri.cursor_texture_cache.clear();
         }
+
+        // We need to check zoom movement mode change, but defer the action until after drop.
+        let zoom_movement_mode_changed = config.zoom.movement_mode != old_config.zoom.movement_mode;
 
         // We need &mut self to reload the xkb config, so just store it here.
         if config.input.keyboard.xkb != old_config.input.keyboard.xkb {
@@ -1765,6 +1816,39 @@ impl State {
 
         // Release the borrow.
         drop(old_config);
+
+        if zoom_movement_mode_changed {
+            let output_and_cursor = self.niri.seat.get_pointer().and_then(|ptr| {
+                let pos = ptr.current_location().assume_global();
+                let (output, _) = self.niri.output_under(pos)?;
+                Some((output.clone(), pos))
+            });
+            if let Some((output, global_pointer_pos)) = output_and_cursor {
+                if !self
+                    .niri
+                    .layout
+                    .zoom_state_for_output(&output)
+                    .is_some_and(|s| s.locked)
+                {
+                    let movement_mode = self.niri.config.borrow().zoom.movement_mode;
+
+                    // Update the mode in any active transition's tracking context.
+                    self.niri
+                        .layout
+                        .update_zoom_movement_mode(&output, movement_mode);
+
+                    // Animate focal only when idle; active transitions update it each tick.
+                    let cursor_local =
+                        global_pointer_pos.to_local(&self.niri.output_state[&output].view_ctx);
+                    self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
+                    self.niri
+                        .layout
+                        .update_focal_for_cursor(&output, cursor_local, true);
+
+                    self.niri.queue_redraw(&output);
+                }
+            }
+        }
 
         // Now with a &mut self we can reload the xkb config.
         if let Some(mut xkb) = reload_xkb {
@@ -3053,12 +3137,19 @@ impl Niri {
             lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
+            view_ctx: OutputViewCtx::from_origin((0., 0.).into()),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
 
         // Must be last since it will call queue_redraw(output) which needs things to be filled-in.
         self.reposition_outputs(Some(&output));
+
+        // Now that the output position is established in the space, compute the cached view
+        // context.
+        if let Some(view_ctx) = OutputViewCtx::for_output(&self.global_space, &output) {
+            self.output_state.get_mut(&output).unwrap().view_ctx = view_ctx;
+        }
     }
 
     pub fn output_exists(&self, output: &Output) -> bool {
@@ -3171,6 +3262,8 @@ impl Niri {
         self.layout.update_output_size(output);
 
         if let Some(state) = self.output_state.get_mut(output) {
+            state.view_ctx =
+                OutputViewCtx::for_output(&self.global_space, output).unwrap_or(state.view_ctx);
             state.backdrop_buffer.resize(output_size);
 
             state.lock_color_buffer.resize(output_size);
@@ -3460,6 +3553,25 @@ impl Niri {
         self.window_under(pos)
     }
 
+    /// Transforms a global cursor position into content space for zoom-aware hit-testing.
+    ///
+    /// When zoom is active, the cursor's screen position maps to a different content position
+    /// (the inverse of the zoom transform). This is applied inside `contents_under` so all callers
+    /// get zoom-aware hit-testing without needing to transform at each call site.
+    pub fn effective_cursor_pos(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
+        let Some((output, _)) = self.output_under(pos) else {
+            return pos;
+        };
+        let Some(state) = self.layout.zoom_state_for_output(output) else {
+            return pos;
+        };
+
+        let vt = state.viewport_transform(self.clock.now());
+        let pos_local = pos.to_local(&self.output_state[output].view_ctx);
+        let content_local = vt.apply_inverse(pos_local);
+        content_local.to_global(&self.output_state[output].view_ctx)
+    }
+
     /// Returns contents under the given point.
     ///
     /// We don't have a proper global space for all windows, so this function converts window
@@ -3469,11 +3581,12 @@ impl Niri {
     pub fn contents_under(&self, pos: Point<f64, Global>) -> PointContents {
         let mut rv = PointContents::default();
 
+        let pos = self.effective_cursor_pos(pos);
+
         let Some((output, pos_within_output)) = self.output_under(pos) else {
             return rv;
         };
         rv.output = Some(output.clone());
-        let output_pos_in_global_space = self.global_space.output_geometry(output).unwrap().loc;
 
         // The ordering here must be consistent with the ordering in render() so that input is
         // consistent with the visuals.
@@ -3501,7 +3614,7 @@ impl Niri {
                     pos_within_output
                         .to_f64()
                         .assume_local()
-                        .to_global(output_pos_in_global_space.to_f64()),
+                        .to_global(&self.output_state[output].view_ctx),
                 )
             });
 
@@ -3643,7 +3756,7 @@ impl Niri {
             (
                 surface,
                 pos.assume_local()
-                    .to_global(output_pos_in_global_space.to_f64()),
+                    .to_global(&self.output_state[output].view_ctx),
             )
         });
         rv.window = window;
@@ -3890,7 +4003,6 @@ impl Niri {
     ) {
         let _span = tracy_client::span!("Niri::render_pointer");
         let output_scale = output.current_scale();
-        let output_pos = self.global_space.output_geometry(output).unwrap().loc;
 
         // Check whether we need to draw the tablet cursor or the regular cursor.
         let pointer_pos = self.tablet_cursor_location.unwrap_or_else(|| {
@@ -3900,7 +4012,9 @@ impl Niri {
                 .current_location()
                 .assume_global()
         });
-        let pointer_pos = pointer_pos.to_local(output_pos.to_f64()).as_logical();
+        let pointer_pos = pointer_pos
+            .to_local(&self.output_state[output].view_ctx)
+            .as_logical();
 
         // Get the render cursor to draw.
         let cursor_scale = output_scale.integer_scale();
@@ -7127,17 +7241,29 @@ niri_render_elements! {
     }
 }
 
+type ZoomElement<E> = RelocateRenderElement<RescaleRenderElement<E>>;
+
+niri_render_elements! {
+    ZoomRenderElement<R> => {
+        Monitor = ZoomElement<MonitorRenderElement<R>>,
+        RescaledTile = ZoomElement<RescaleRenderElement<TileRenderElement<R>>>,
+        LayerSurface = ZoomElement<LayerSurfaceRenderElement<R>>,
+        RelocatedLayerSurface = ZoomElement<CropRenderElement<ZoomElement<LayerSurfaceRenderElement<R>>>>,
+        RelocatedColor = ZoomElement<CropRenderElement<ZoomElement<SolidColorRenderElement>>>,
+        Pointer = ZoomElement<PointerRenderElements<R>>,
+        Wayland = ZoomElement<WaylandSurfaceRenderElement<R>>,
+        SolidColor = ZoomElement<SolidColorRenderElement>,
+        Texture = ZoomElement<PrimaryGpuTextureRenderElement>,
+    }
+}
+
 niri_render_elements! {
     OutputRenderElements<R> => {
         Monitor = MonitorRenderElement<R>,
         RescaledTile = RescaleRenderElement<TileRenderElement<R>>,
         LayerSurface = LayerSurfaceRenderElement<R>,
-        RelocatedLayerSurface = CropRenderElement<RelocateRenderElement<RescaleRenderElement<
-            LayerSurfaceRenderElement<R>
-        >>>,
-        RelocatedColor = CropRenderElement<RelocateRenderElement<RescaleRenderElement<
-            SolidColorRenderElement
-        >>>,
+        RelocatedLayerSurface = CropRenderElement<ZoomElement<LayerSurfaceRenderElement<R>>>,
+        RelocatedColor = CropRenderElement<ZoomElement<SolidColorRenderElement>>,
         Pointer = PointerRenderElements<R>,
         Wayland = WaylandSurfaceRenderElement<R>,
         SolidColor = SolidColorRenderElement,
@@ -7145,6 +7271,7 @@ niri_render_elements! {
         WindowMruUi = WindowMruUiRenderElement<R>,
         ExitConfirmDialog = ExitConfirmDialogRenderElement,
         Texture = PrimaryGpuTextureRenderElement,
+        Zoomed = ZoomRenderElement<R>,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
     }

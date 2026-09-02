@@ -101,10 +101,8 @@ pub struct CastsState {
 pub struct ZoomOutputState {
     /// Current zoom level.
     pub level: f64,
-    /// Focal point X coordinate within the output.
-    pub focal_x: f64,
-    /// Focal point Y coordinate within the output.
-    pub focal_y: f64,
+    /// Focal point coordinates within the output.
+    pub focal: (f64, f64),
     /// Whether zoom focal point is locked.
     pub is_locked: bool,
 }
@@ -358,8 +356,7 @@ impl EventStreamStatePart for ZoomChangedState {
             .map(|(output, state)| Event::ZoomChanged {
                 output: output.clone(),
                 level: state.level,
-                focal_x: state.focal_x,
-                focal_y: state.focal_y,
+                focal: state.focal,
                 is_locked: state.is_locked,
             })
             .collect()
@@ -370,16 +367,14 @@ impl EventStreamStatePart for ZoomChangedState {
             Event::ZoomChanged {
                 output,
                 level,
-                focal_x,
-                focal_y,
+                focal,
                 is_locked,
             } => {
                 self.outputs.insert(
                     output,
                     ZoomOutputState {
                         level,
-                        focal_x,
-                        focal_y,
+                        focal,
                         is_locked,
                     },
                 );

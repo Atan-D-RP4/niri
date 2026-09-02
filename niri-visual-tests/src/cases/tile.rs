@@ -115,6 +115,8 @@ impl TestCase for Tile {
         let size = size.to_f64();
         let tile_size = self.tile.tile_size().to_physical(1.);
         let location = Point::from((size.w - tile_size.w, size.h - tile_size.h)).downscale(2.);
+        let location_local =
+            Point::from((size.w - tile_size.w, size.h - tile_size.h)).downscale(2.);
 
         self.tile.update_render_elements(
             true,
@@ -127,7 +129,7 @@ impl TestCase for Tile {
             target: RenderTarget::Output,
             xray: None,
         };
-        let xray_pos = XrayPos::new(location, 1.);
+        let xray_pos = XrayPos::new(location_local, 1.);
         self.tile
             .render(ctx, location, xray_pos, true, &mut |elem| {
                 rv.push(Box::new(elem) as _)

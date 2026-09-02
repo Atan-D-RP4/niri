@@ -509,12 +509,11 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
                     Event::ZoomChanged {
                         output,
                         level,
-                        focal_x,
-                        focal_y,
+                        focal,
                         is_locked,
                     } => {
                         println!(
-                            "Zoom on {output}: level={level} focal=({focal_x}, {focal_y}) locked={is_locked}"
+                            "Zoom on {output}: level={level} focal={focal:?} locked={is_locked}"
                         );
                     }
                 }
