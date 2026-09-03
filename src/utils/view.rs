@@ -175,7 +175,8 @@ impl OutputViewCtx {
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use smithay::utils::Rectangle;
+    use glam::Vec3;
+    use smithay::utils::{Point, Rectangle};
 
     use super::ViewportTransform;
     use crate::utils::geometry::Local;
@@ -208,5 +209,42 @@ mod tests {
             transform.apply_inverse_rect(transform.apply_rect(rect)),
             rect
         );
+    }
+
+    #[test]
+    fn matrix_composition_matches_sequential_application() {
+        let inner = ViewportTransform::new((100., 80.).into(), 1.5);
+        let outer = ViewportTransform::new((700., 500.).into(), 2.25);
+        let point: Point<f64, Local> = (350., 275.).into();
+        let sequential = outer.apply(inner.apply(point));
+        let matrix = outer.to_matrix() * inner.to_matrix();
+        let composed = matrix * Vec3::new(point.x as f32, point.y as f32, 1.0);
+
+        assert_relative_eq!(composed.x as f64, sequential.x, epsilon = 1e-4);
+        assert_relative_eq!(composed.y as f64, sequential.y, epsilon = 1e-4);
+    }
+
+    #[test]
+    fn rectangle_image_and_preimage_have_expected_bounds() {
+        let transform = ViewportTransform::new((100., 80.).into(), 2.);
+        let rect: Rectangle<f64, Local> = Rectangle::new((90., 70.).into(), (20., 30.).into());
+
+        assert_eq!(
+            transform.apply_rect(rect),
+            Rectangle::new((80., 60.).into(), (40., 60.).into())
+        );
+        assert_eq!(
+            transform.apply_inverse_rect(rect),
+            Rectangle::new((95., 75.).into(), (10., 15.).into())
+        );
+    }
+
+    #[test]
+    fn identity_preserves_rectangles_exactly() {
+        let rect: Rectangle<f64, Local> = Rectangle::new((-10., 20.).into(), (33.5, 44.25).into());
+        let identity = ViewportTransform::identity();
+
+        assert_eq!(identity.apply_rect(rect), rect);
+        assert_eq!(identity.apply_inverse_rect(rect), rect);
     }
 }

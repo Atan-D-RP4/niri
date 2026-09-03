@@ -78,21 +78,6 @@ pub(crate) trait PointGlobalExt<C: Coordinate> {
     ) -> Point<R, Physical>;
 }
 
-/// Converts a global point to output-local coordinates when it lies within the output.
-///
-/// Rect-based containment + conversion helper for call sites holding output
-/// geometry; [`PointGlobalExt::to_local`] covers the pure-translation case.
-pub(crate) fn try_from_global(
-    pos: Point<f64, Global>,
-    output_geo: Rectangle<i32, Logical>,
-) -> Option<Point<f64, Local>> {
-    let output_geo_f64 = output_geo.to_f64();
-    output_geo_f64.contains(pos.as_logical()).then(|| {
-        let loc = pos.as_logical() - output_geo_f64.loc;
-        loc.assume_local()
-    })
-}
-
 pub(crate) trait PointSurfaceLocalExt<C: Coordinate> {
     /// Relabels a SurfaceLocal point for a Logical-only API; this does not translate it.
     fn as_logical(self) -> Point<C, Logical>;
