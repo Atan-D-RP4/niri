@@ -181,8 +181,8 @@ use crate::ui::mru::{MruCloseRequest, WindowMruUi, WindowMruUiRenderElement};
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::geometry::{
-    try_from_global, Global, Local, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt,
-    RectExt, RectLocalExt,
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt,
+    RectLocalExt,
 };
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::{CHILD_DISPLAY, CHILD_ENV};
@@ -3314,8 +3314,7 @@ impl Niri {
 
     pub fn output_under(&self, pos: Point<f64, Global>) -> Option<(&Output, Point<f64, Local>)> {
         let output = self.global_space.output_under(pos.as_logical()).next()?;
-        let output_geo = self.global_space.output_geometry(output).unwrap();
-        let pos_within_output = try_from_global(pos, output_geo)?;
+        let pos_within_output = pos.to_local(&self.output_state[output].view_ctx);
 
         Some((output, pos_within_output))
     }
