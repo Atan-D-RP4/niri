@@ -4431,21 +4431,6 @@ impl State {
         (zoom.pinch_sensitivity, zoom.movement_mode)
     }
 
-    /// Transform a screen-space touch position to content space under zoom.
-    ///
-    /// When zoom is active, the screen shows a magnified view of the content.
-    /// This function inverts the zoom transform so that a screen-space touch
-    /// position maps to the correct content-space position for hit-testing.
-    fn adjust_touch_for_zoom(
-        &self,
-        _output: &Output,
-        pos: Point<f64, Global>,
-    ) -> Point<f64, Global> {
-        // Delegate to effective_cursor_pos which applies the zoom inverse transform.
-        // The output is rediscovered inside effective_cursor_pos via output_under.
-        self.niri.effective_cursor_pos(pos)
-    }
-
     /// Clamp a touch position to the visible viewport when zoom is locked.
     ///
     /// When zoom is locked, touch events should not pan beyond the visible
@@ -4825,11 +4810,11 @@ impl State {
 
         // Transform to content space for the Wayland event (contents_under applies the
         // transform internally for hit-testing).
-        let zoomed_pos = self
-            .niri
-            .output_for_touch()
-            .map(|output| self.adjust_touch_for_zoom(output, pos_g))
-            .unwrap_or(pos_g);
+        let zoomed_pos = self.niri.output_for_touch().map_or(pos_g, |output| {
+            let ctx = self.niri.output_state[output].view_ctx;
+            let content_local = self.niri.screen_to_content(output, pos_g.to_local(&ctx));
+            content_local.to_global(&ctx)
+        });
 
         let under = self.niri.contents_under(pos);
 
@@ -5009,11 +4994,11 @@ impl State {
 
         // Transform to content space for the Wayland event (contents_under applies the
         // transform internally for hit-testing).
-        let zoomed_pos = self
-            .niri
-            .output_for_touch()
-            .map(|output| self.adjust_touch_for_zoom(output, pos_g))
-            .unwrap_or(pos_g);
+        let zoomed_pos = self.niri.output_for_touch().map_or(pos_g, |output| {
+            let ctx = self.niri.output_state[output].view_ctx;
+            let content_local = self.niri.screen_to_content(output, pos_g.to_local(&ctx));
+            content_local.to_global(&ctx)
+        });
 
         let under = self.niri.contents_under(pos);
         handle.motion(

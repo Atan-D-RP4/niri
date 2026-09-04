@@ -3224,9 +3224,14 @@ impl<W: LayoutElement> Layout<W> {
 
     /// Compute the output's logical size in Local frame for focal tracking.
     fn output_size_for_focal(output: &Output) -> Size<f64, Local> {
-        let mode_size = output.current_mode().map_or((0, 0).into(), |m| m.size);
+        let mode_size = output.current_mode().map_or((0, 0).into(), |m| {
+            output.current_transform().transform_size(m.size)
+        });
         let scale = output.current_scale().fractional_scale();
-        Size::from((mode_size.w as f64 / scale, mode_size.h as f64 / scale))
+        Size::from((
+            f64::from(mode_size.w) / scale,
+            f64::from(mode_size.h) / scale,
+        ))
     }
 
     pub fn are_animations_ongoing(&self, output: Option<&Output>) -> bool {

@@ -155,18 +155,16 @@ impl OutputZoomState {
     /// concern per the geometry pipeline.
     pub fn viewport_global(
         &self,
-        output_view_ctx: &OutputViewCtx,
+        view_ctx: &OutputViewCtx,
         now: Duration,
     ) -> Rectangle<f64, Global> {
         let vt = self.viewport_transform(now);
-        let output_local = Rectangle::from_size(output_view_ctx.local_geo.size);
+        let output_local = Rectangle::from_size(view_ctx.local_geo.size);
         let viewport_local = vt.apply_inverse_rect(output_local);
         // Local→Global is a pure translation of location by the output origin.
-        // Size is frame-invariant.
-        Rectangle::new(
-            viewport_local.loc.to_global(output_view_ctx),
-            viewport_local.size.assume_global(),
-        )
+        // intentionally not part of the viewport rectangle calculation.
+        let global_loc = viewport_local.loc.to_global(view_ctx);
+        Rectangle::new(global_loc, viewport_local.size.assume_global())
     }
 }
 

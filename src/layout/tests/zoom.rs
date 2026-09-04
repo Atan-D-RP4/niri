@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use niri_config::animations::{Animation, Curve, EasingParams, Kind};
 use niri_config::{Config, ZoomIncrementType, ZoomMovementMode};
-use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+use smithay::output::{Mode, Output, PhysicalProperties, Scale as OutputScale, Subpixel};
 use smithay::utils::{Point, Rectangle, Scale, Size, Transform};
 
 use super::*;
@@ -72,6 +72,20 @@ fn make_output(name: &str, w: i32, h: i32) -> Output {
         model: None,
         serial: None,
     });
+    output
+}
+
+fn make_transformed_output(name: &str, w: i32, h: i32, transform: Transform, scale: f64) -> Output {
+    let output = make_output(name, w, h);
+    output.change_current_state(
+        Some(Mode {
+            size: Size::from((w, h)),
+            refresh: 60000,
+        }),
+        Some(transform),
+        Some(OutputScale::Fractional(scale)),
+        None,
+    );
     output
 }
 
@@ -766,6 +780,73 @@ proptest! {
             "viewport height {} exceeds output height 1080",
             viewport.size.h,
         );
+    }
+}
+
+#[test]
+fn focal_output_size_applies_output_transform() {
+    let normal = make_transformed_output("normal", 1920, 1080, Transform::Normal, 1.0);
+    let rotate_90 = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
+    let rotate_180 = make_transformed_output("rotate-180", 1920, 1080, Transform::_180, 1.0);
+    let flipped = make_transformed_output("flipped", 1920, 1080, Transform::Flipped, 1.0);
+    let rotate_scaled = make_transformed_output("rotate-scaled", 1920, 1080, Transform::_90, 1.5);
+
+    assert_eq!(
+        Layout::<TestWindow>::output_size_for_focal(&normal),
+        (1920., 1080.).into()
+    );
+    assert_eq!(
+        Layout::<TestWindow>::output_size_for_focal(&rotate_90),
+        (1080., 1920.).into()
+    );
+    assert_eq!(
+        Layout::<TestWindow>::output_size_for_focal(&rotate_180),
+        (1920., 1080.).into()
+    );
+    assert_eq!(
+        Layout::<TestWindow>::output_size_for_focal(&flipped),
+        (1920., 1080.).into()
+    );
+    assert_eq!(
+        Layout::<TestWindow>::output_size_for_focal(&rotate_scaled),
+        (720., 1280.).into(),
+    );
+}
+
+#[test]
+fn rotated_focal_tracking_stays_within_transformed_output() {
+    let output = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
+    let size = Layout::<TestWindow>::output_size_for_focal(&output);
+    let mut tracking = FocalTrackingContext::default();
+    tracking.set_cursor_pos((0., 0.).into());
+    tracking.set_output_size(size);
+    tracking.set_movement_mode(ZoomMovementMode::Centered, 1.0, (0., 0.).into());
+
+    let focal = tracking.compute_focal(2.0, (0., 0.).into());
+    assert!(focal.x >= 0.0 && focal.x <= size.w);
+    assert!(focal.y >= 0.0 && focal.y <= size.h);
+}
+
+#[test]
+fn on_edge_focal_tracking_handles_all_rotated_output_corners() {
+    let output = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
+    let size = Layout::<TestWindow>::output_size_for_focal(&output);
+    let corners = [(0.0, 0.0), (size.w, 0.0), (0.0, size.h), (size.w, size.h)];
+
+    for cursor in corners {
+        let cursor = Point::from(cursor);
+        let mut tracking = FocalTrackingContext::default();
+        tracking.set_cursor_pos(cursor);
+        tracking.set_output_size(size);
+        tracking.set_movement_mode(
+            ZoomMovementMode::OnEdge,
+            2.0,
+            (size.w / 2.0, size.h / 2.0).into(),
+        );
+
+        let focal = tracking.compute_focal(2.0, cursor);
+        assert!(focal.x >= 0.0 && focal.x <= size.w, "focal x: {focal:?}");
+        assert!(focal.y >= 0.0 && focal.y <= size.h, "focal y: {focal:?}");
     }
 }
 
