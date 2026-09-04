@@ -34,6 +34,7 @@ use crate::backend::IpcOutputMap;
 use crate::handlers::image_copy_capture;
 use crate::input::pick_window_grab::PickWindowGrab;
 use crate::layout::workspace::WorkspaceId;
+use crate::layout::zoom::ZoomLevelTransition;
 use crate::niri::State;
 use crate::utils::{version, with_toplevel_role};
 use crate::window::Mapped;
@@ -625,13 +626,16 @@ impl State {
         let state = &mut state.zoom;
 
         let mut events = Vec::new();
+        let mut seen = HashSet::new();
         let now = self.niri.clock.now();
 
         for output in self.niri.layout.outputs() {
+            let output_name = output.name().clone();
             let zoom_state = match self.niri.layout.zoom_state_for_output(output) {
                 Some(zoom_state) => zoom_state,
                 None => continue,
             };
+            seen.insert(output_name.clone());
 
             let vt = zoom_state.viewport_transform(now);
             let ipc_zoom = niri_ipc::Zoom {
@@ -640,22 +644,53 @@ impl State {
                 focal: vt.focal.into(),
             };
 
-            if state
-                .outputs
-                .get(&output.name())
-                .map(|s| (&s.level, &s.focal, &s.is_locked))
-                != Some((&ipc_zoom.level, &ipc_zoom.focal, &ipc_zoom.is_locked))
-            {
+            let transitioning = zoom_state.transitioning();
+            let gesturing = matches!(
+                zoom_state.level_transition,
+                ZoomLevelTransition::Gesturing(_)
+            );
+
+            if state.should_emit_zoom_event(&output_name, &ipc_zoom, transitioning, gesturing) {
                 events.push(Event::ZoomChanged {
-                    output: output.name().clone(),
+                    output: output_name.clone(),
                     level: ipc_zoom.level,
                     focal: ipc_zoom.focal,
                     is_locked: ipc_zoom.is_locked,
                 });
             }
+
+            state
+                .was_transitioning
+                .insert(output_name.clone(), transitioning);
+            state.was_gesturing.insert(output_name, gesturing);
         }
 
+        state
+            .was_transitioning
+            .retain(|name, _| seen.contains(name));
+        state.was_gesturing.retain(|name, _| seen.contains(name));
+        state
+            .last_emitted_state
+            .retain(|name, _| seen.contains(name));
+        state.outputs.retain(|name, _| seen.contains(name));
+
         for event in events {
+            if let Event::ZoomChanged {
+                output,
+                level,
+                focal,
+                is_locked,
+            } = &event
+            {
+                state.last_emitted_state.insert(
+                    output.clone(),
+                    niri_ipc::state::ZoomOutputState {
+                        level: *level,
+                        focal: *focal,
+                        is_locked: *is_locked,
+                    },
+                );
+            }
             state.apply(event.clone());
             server.send_event(event);
         }
@@ -1057,5 +1092,153 @@ impl State {
         let event = Event::ScreenshotCaptured { path };
         state.apply(event.clone());
         server.send_event(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use niri_ipc::state::{ZoomChangedState, ZoomOutputState};
+
+    fn zoom(level: f64, focal: (f64, f64), is_locked: bool) -> niri_ipc::Zoom {
+        niri_ipc::Zoom {
+            level,
+            focal,
+            is_locked,
+        }
+    }
+
+    fn emitted(level: f64, focal: (f64, f64), is_locked: bool) -> niri_ipc::state::ZoomOutputState {
+        niri_ipc::state::ZoomOutputState {
+            level,
+            focal,
+            is_locked,
+        }
+    }
+
+    fn should_emit_zoom_event(
+        previous: Option<&ZoomOutputState>,
+        current: &niri_ipc::Zoom,
+        was_transitioning: bool,
+        transitioning: bool,
+        was_gesturing: bool,
+        gesturing: bool,
+    ) -> bool {
+        let mut state = ZoomChangedState::default();
+        if let Some(previous) = previous {
+            state
+                .last_emitted_state
+                .insert(String::from("output"), previous.clone());
+        }
+        state
+            .was_transitioning
+            .insert(String::from("output"), was_transitioning);
+        state
+            .was_gesturing
+            .insert(String::from("output"), was_gesturing);
+        state.should_emit_zoom_event("output", current, transitioning, gesturing)
+    }
+
+    #[test]
+    fn first_zoom_state_is_emitted() {
+        assert!(should_emit_zoom_event(
+            None,
+            &zoom(1.0, (0.0, 0.0), false),
+            false,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn small_sampled_changes_do_not_emit_when_idle() {
+        let previous = emitted(2.0, (10.0, 20.0), false);
+        assert!(!should_emit_zoom_event(
+            Some(&previous),
+            &zoom(2.0 + 1e-6 / 2.0, (10.0, 20.0), false),
+            false,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn meaningful_idle_changes_emit() {
+        let previous = emitted(2.0, (10.0, 20.0), false);
+        assert!(should_emit_zoom_event(
+            Some(&previous),
+            &zoom(2.1, (10.0, 20.0), false),
+            false,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn animation_samples_are_suppressed_until_settled() {
+        let previous = emitted(1.0, (960.0, 540.0), false);
+        let current = zoom(1.5, (800.0, 500.0), false);
+        assert!(!should_emit_zoom_event(
+            Some(&previous),
+            &current,
+            false,
+            true,
+            false,
+            false,
+        ));
+        assert!(should_emit_zoom_event(
+            Some(&previous),
+            &current,
+            true,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn gesture_boundaries_emit_but_updates_do_not() {
+        let previous = emitted(1.0, (960.0, 540.0), false);
+        let current = zoom(1.2, (900.0, 500.0), false);
+        let current_emitted = emitted(1.2, (900.0, 500.0), false);
+        assert!(should_emit_zoom_event(
+            Some(&previous),
+            &current,
+            false,
+            true,
+            false,
+            true,
+        ));
+        assert!(!should_emit_zoom_event(
+            Some(&current_emitted),
+            &zoom(1.3, (850.0, 480.0), false),
+            true,
+            true,
+            true,
+            true,
+        ));
+        assert!(should_emit_zoom_event(
+            Some(&current_emitted),
+            &zoom(1.3, (850.0, 480.0), false),
+            true,
+            false,
+            true,
+            false,
+        ));
+    }
+
+    #[test]
+    fn lock_changes_emit_during_animation() {
+        let previous = emitted(1.0, (960.0, 540.0), false);
+        assert!(should_emit_zoom_event(
+            Some(&previous),
+            &zoom(1.2, (900.0, 500.0), true),
+            false,
+            true,
+            false,
+            false,
+        ));
     }
 }

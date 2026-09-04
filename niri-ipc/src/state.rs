@@ -9,7 +9,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use crate::{Cast, Event, KeyboardLayouts, Window, Workspace};
+use crate::{Cast, Event, KeyboardLayouts, Window, Workspace, Zoom};
 
 /// Part of the state communicated via the event stream.
 pub trait EventStreamStatePart {
@@ -116,6 +116,40 @@ pub struct ZoomChangedState {
     pub was_transitioning: HashMap<String, bool>,
     /// Previous snapshot `is_gesture` flag per output (transient, not IPC).
     pub was_gesturing: HashMap<String, bool>,
+    /// Last zoom state sent to event-stream clients (transient, not IPC).
+    pub last_emitted_state: HashMap<String, ZoomOutputState>,
+}
+
+impl ZoomChangedState {
+    const EVENT_EPSILON: f64 = 1e-6;
+
+    /// Returns whether a sampled zoom state should be pushed to event-stream clients.
+    ///
+    /// Intermediate animation samples are intentionally suppressed. Transition and gesture
+    /// boundaries, lock changes, and settled state changes are emitted instead.
+    pub fn should_emit_zoom_event(
+        &self,
+        output: &str,
+        current: &Zoom,
+        transitioning: bool,
+        gesturing: bool,
+    ) -> bool {
+        let Some(previous) = self.last_emitted_state.get(output) else {
+            return true;
+        };
+
+        let state_changed = (previous.level - current.level).abs() > Self::EVENT_EPSILON
+            || (previous.focal.0 - current.focal.0).abs() > Self::EVENT_EPSILON
+            || (previous.focal.1 - current.focal.1).abs() > Self::EVENT_EPSILON
+            || previous.is_locked != current.is_locked;
+        let was_transitioning = self.was_transitioning.get(output).copied().unwrap_or(false);
+        let was_gesturing = self.was_gesturing.get(output).copied().unwrap_or(false);
+
+        previous.is_locked != current.is_locked
+            || was_gesturing != gesturing
+            || (!transitioning && state_changed)
+            || (was_transitioning && !transitioning && state_changed)
+    }
 }
 
 impl EventStreamStatePart for EventStreamState {

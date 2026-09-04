@@ -3477,18 +3477,20 @@ impl Niri {
             return None;
         }
 
-        let (output, pos_within_output) = self.output_under(pos)?;
-        if self.is_sticky_obscured_under(output, pos_within_output) {
+        let (output, screen_pos_within_output) = self.output_under(pos)?;
+        if self.is_sticky_obscured_under(output, screen_pos_within_output) {
             return None;
         }
 
-        if self.is_layout_obscured_under(output, pos_within_output) {
+        if self.is_layout_obscured_under(output, screen_pos_within_output) {
             return None;
         }
+
+        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
 
         let ws = self
             .layout
-            .workspace_under(extended_bounds, output, pos_within_output)?;
+            .workspace_under(extended_bounds, output, content_pos_within_output)?;
         Some((output.clone(), ws))
     }
 
@@ -3518,23 +3520,27 @@ impl Niri {
             return None;
         }
 
-        let (output, pos_within_output) = self.output_under(pos)?;
-        if self.is_sticky_obscured_under(output, pos_within_output) {
+        let (output, screen_pos_within_output) = self.output_under(pos)?;
+        if self.is_sticky_obscured_under(output, screen_pos_within_output) {
             return None;
         }
 
+        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
+
         if let Some((window, _loc)) = self
             .layout
-            .interactive_moved_window_under(output, pos_within_output)
+            .interactive_moved_window_under(output, content_pos_within_output)
         {
             return Some(window);
         }
 
-        if self.is_layout_obscured_under(output, pos_within_output) {
+        if self.is_layout_obscured_under(output, screen_pos_within_output) {
             return None;
         }
 
-        let (window, _loc) = self.layout.window_under(output, pos_within_output)?;
+        let (window, _loc) = self
+            .layout
+            .window_under(output, content_pos_within_output)?;
         Some(window)
     }
 
@@ -3552,23 +3558,18 @@ impl Niri {
         self.window_under(pos)
     }
 
-    /// Transforms a global cursor position into content space for zoom-aware hit-testing.
-    ///
-    /// When zoom is active, the cursor's screen position maps to a different content position
-    /// (the inverse of the zoom transform). This is applied inside `contents_under` so all callers
-    /// get zoom-aware hit-testing without needing to transform at each call site.
-    pub fn effective_cursor_pos(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
-        let Some((output, _)) = self.output_under(pos) else {
-            return pos;
-        };
+    /// Transforms an output-local screen position into output-local content space.
+    pub fn screen_to_content(
+        &self,
+        output: &Output,
+        screen_local: Point<f64, Local>,
+    ) -> Point<f64, Local> {
         let Some(state) = self.layout.zoom_state_for_output(output) else {
-            return pos;
+            return screen_local;
         };
 
         let vt = state.viewport_transform(self.clock.now());
-        let pos_local = pos.to_local(&self.output_state[output].view_ctx);
-        let content_local = vt.apply_inverse(pos_local);
-        content_local.to_global(&self.output_state[output].view_ctx)
+        vt.apply_inverse(screen_local)
     }
 
     /// Returns contents under the given point.
@@ -3580,12 +3581,12 @@ impl Niri {
     pub fn contents_under(&self, pos: Point<f64, Global>) -> PointContents {
         let mut rv = PointContents::default();
 
-        let pos = self.effective_cursor_pos(pos);
-
-        let Some((output, pos_within_output)) = self.output_under(pos) else {
+        let Some((output, screen_pos_within_output)) = self.output_under(pos) else {
             return rv;
         };
         rv.output = Some(output.clone());
+
+        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
 
         // The ordering here must be consistent with the ordering in render() so that input is
         // consistent with the visuals.
@@ -3602,7 +3603,7 @@ impl Niri {
 
             rv.surface = under_from_surface_tree(
                 surface.wl_surface(),
-                pos_within_output.as_logical(),
+                screen_pos_within_output.as_logical(),
                 // We put lock surfaces at (0, 0).
                 (0, 0),
                 WindowSurfaceType::ALL,
@@ -3642,7 +3643,7 @@ impl Niri {
                     // Background and bottom layers move together with the workspaces.
                     if matches!(layer, Layer::Background | Layer::Bottom) {
                         let mon = self.layout.monitor_for_output(output)?;
-                        let (_, geo) = mon.workspace_under(pos_within_output)?;
+                        let (_, geo) = mon.workspace_under(content_pos_within_output)?;
                         layer_pos_within_output += geo.loc.as_logical();
                         // Don't need to deal with zoom here because in the overview background and
                         // bottom layers don't receive input.
@@ -3656,7 +3657,7 @@ impl Niri {
 
                     layer_surface
                         .surface_under(
-                            pos_within_output.as_logical() - layer_pos_within_output,
+                            content_pos_within_output.as_logical() - layer_pos_within_output,
                             surface_type,
                         )
                         .map(|(surface, pos_within_layer)| {
@@ -3678,7 +3679,7 @@ impl Niri {
                 let win_pos_within_output = win_pos;
                 window
                     .surface_under(
-                        pos_within_output.as_logical() - win_pos_within_output,
+                        content_pos_within_output.as_logical() - win_pos_within_output,
                         WindowSurfaceType::ALL,
                     )
                     .map(|(s, pos_within_window)| {
@@ -3692,12 +3693,12 @@ impl Niri {
 
         let interactive_moved_window_under = || {
             self.layout
-                .interactive_moved_window_under(output, pos_within_output)
+                .interactive_moved_window_under(output, content_pos_within_output)
                 .map(mapped_hit_data)
         };
         let window_under = || {
             self.layout
-                .window_under(output, pos_within_output)
+                .window_under(output, content_pos_within_output)
                 .map(mapped_hit_data)
         };
 
@@ -3721,7 +3722,7 @@ impl Niri {
                 .or_else(|| layer_toplevel_under(Layer::Bottom))
                 .or_else(|| layer_toplevel_under(Layer::Background));
         } else {
-            if self.is_inside_hot_corner(output, pos_within_output) {
+            if self.is_inside_hot_corner(output, screen_pos_within_output) {
                 rv.hot_corner = true;
                 return rv;
             }
