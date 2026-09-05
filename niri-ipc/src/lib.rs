@@ -120,7 +120,12 @@ pub enum Request {
     /// Request information about screencasts.
     Casts,
     /// Request information about zoom state.
-    ZoomState,
+    ZoomState {
+        /// Output name.
+        ///
+        /// Optional. If not specified, the zoom state of all outputs is printed.
+        output: Option<String>,
+    },
 }
 
 /// Reply from niri to client.

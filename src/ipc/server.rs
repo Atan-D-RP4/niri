@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -457,7 +457,7 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             let casts = state.casts.casts.values().cloned().collect();
             Response::Casts(casts)
         }
-        Request::ZoomState => {
+        Request::ZoomState { output } => {
             let (tx, rx) = async_channel::bounded(1);
             ctx.event_loop.insert_idle(move |state| {
                 let now = state.niri.clock.now();
@@ -468,22 +468,31 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                     .filter_map(|output| {
                         let zoom_state = state.niri.layout.zoom_state_for_output(output)?;
                         let vt = zoom_state.viewport_transform(now);
+                        let focal = vt.focal();
                         Some((
                             output.name().clone(),
                             niri_ipc::Zoom {
                                 is_locked: zoom_state.locked,
-                                level: vt.factor,
-                                focal: vt.focal.into(),
+                                level: vt.factor(),
+                                focal: (focal.x, focal.y),
                             },
                         ))
                     })
-                    .collect();
+                    .collect::<HashMap<String, niri_ipc::Zoom>>();
 
                 let _ = tx.send_blocking(zooms);
             });
             let result = rx.recv().await;
             let zooms = result.map_err(|_| String::from("error getting zoom states"))?;
-            Response::ZoomState(zooms)
+            if let Some(output) = output {
+                let zoom = zooms
+                    .get_key_value(&output)
+                    .map(|(name, zoom)| (name.clone(), zoom.clone()))
+                    .ok_or_else(|| format!("no zoom state found for output {output:?}"))?;
+                Response::ZoomState(HashMap::from([zoom]))
+            } else {
+                Response::ZoomState(zooms)
+            }
         }
     };
 
