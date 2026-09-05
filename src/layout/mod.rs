@@ -2368,15 +2368,15 @@ impl<W: LayoutElement> Layout<W> {
     pub fn interactive_moved_window_under(
         &self,
         output: &Output,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<(&W, HitType)> {
         if let Some(InteractiveMoveState::Moving(move_)) = &self.interactive_move {
             if move_.output == *output {
                 if self.overview_progress.is_some() {
                     let overview_zoom = self.overview_zoom();
                     let tile_pos = move_.tile_render_location(overview_zoom);
-                    let pos_within_tile =
-                        (pos_within_output.as_logical() - tile_pos).downscale(overview_zoom);
+                    let pos_within_tile = (content_pos_within_output.as_logical() - tile_pos)
+                        .downscale(overview_zoom);
                     // During the overview animation, we cannot do input hits because we cannot
                     // really represent scaled windows properly.
                     let (win, hit) =
@@ -2384,7 +2384,11 @@ impl<W: LayoutElement> Layout<W> {
                     Some((win, hit.to_activate()))
                 } else {
                     let tile_pos = move_.tile_render_location(1.);
-                    HitType::hit_tile(&move_.tile, tile_pos, pos_within_output.as_logical())
+                    HitType::hit_tile(
+                        &move_.tile,
+                        tile_pos,
+                        content_pos_within_output.as_logical(),
+                    )
                 }
             } else {
                 None
@@ -2398,29 +2402,29 @@ impl<W: LayoutElement> Layout<W> {
     pub fn window_under(
         &self,
         output: &Output,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<(&W, HitType)> {
         let mon = self.monitor_for_output(output)?;
-        mon.window_under(pos_within_output)
+        mon.window_under(content_pos_within_output)
     }
 
     pub fn resize_edges_under(
         &self,
         output: &Output,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<ResizeEdge> {
         let mon = self.monitor_for_output(output)?;
-        mon.resize_edges_under(pos_within_output)
+        mon.resize_edges_under(content_pos_within_output)
     }
 
     pub fn workspace_under(
         &self,
         extended_bounds: bool,
         output: &Output,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<&Workspace<W>> {
         if self
-            .interactive_moved_window_under(output, pos_within_output)
+            .interactive_moved_window_under(output, content_pos_within_output)
             .is_some()
         {
             return None;
@@ -2428,9 +2432,10 @@ impl<W: LayoutElement> Layout<W> {
 
         let mon = self.monitor_for_output(output)?;
         if extended_bounds {
-            mon.workspace_under(pos_within_output).map(|(ws, _)| ws)
+            mon.workspace_under(content_pos_within_output)
+                .map(|(ws, _)| ws)
         } else {
-            mon.workspace_under_narrow(pos_within_output)
+            mon.workspace_under_narrow(content_pos_within_output)
         }
     }
 
@@ -3122,7 +3127,7 @@ impl<W: LayoutElement> Layout<W> {
     /// - **CursorFollow**: focal ← cursor
     /// - **Centered**: focal ← output center
     /// - **OnEdge**: focal stays fixed unless cursor reaches the edge
-    pub fn update_focal_for_cursor(
+    pub fn update_cursor_zoom_focal(
         &mut self,
         output: &Output,
         cursor_local: Point<f64, Local>,
@@ -3269,6 +3274,19 @@ impl<W: LayoutElement> Layout<W> {
             }
 
             if mon.are_animations_ongoing() {
+                return true;
+            }
+        }
+
+        // Keep the render loop alive while a zoom level/focal animation is
+        // sampling. Gestures are excluded: `is_animating()` covers `Animating`
+        // only, gesture updates drive frames explicitly via `queue_redraw()`.
+        for (out, state) in &self.zoom_states {
+            if output.is_some_and(|output| *out != *output) {
+                continue;
+            }
+
+            if state.is_animating() {
                 return true;
             }
         }
@@ -4871,12 +4889,15 @@ impl<W: LayoutElement> Layout<W> {
         move_.output == *output
     }
 
-    pub fn dnd_update(&mut self, output: Output, pointer_pos_within_output: Point<f64, Local>) {
+    /// Records the pointer position for an ongoing DnD operation.
+    ///
+    /// Takes content-space geometry: drop targeting resolves against the scene.
+    pub fn dnd_update(&mut self, output: Output, content_pos_within_output: Point<f64, Local>) {
         let begin_gesture = self.dnd.is_none();
 
         self.dnd = Some(DndData {
             output,
-            pointer_pos_within_output,
+            pointer_pos_within_output: content_pos_within_output,
             hold: None,
         });
 
