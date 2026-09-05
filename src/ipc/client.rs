@@ -49,6 +49,9 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::RequestError => Request::ReturnError,
         Msg::OverviewState => Request::OverviewState,
         Msg::Casts => Request::Casts,
+        Msg::ZoomState { output } => Request::ZoomState {
+            output: output.clone(),
+        },
     };
 
     let mut socket = Socket::connect().context("error connecting to the niri socket")?;
@@ -536,6 +539,31 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
                 println!("Overview is open.");
             } else {
                 println!("Overview is closed.");
+            }
+        }
+        Msg::ZoomState { output } => {
+            let Response::ZoomState(response) = response else {
+                bail!("unexpected response: expected ZoomState, got {response:?}");
+            };
+
+            if json {
+                let response =
+                    serde_json::to_string(&response).context("error formatting response")?;
+                println!("{response}");
+                return Ok(());
+            }
+
+            if let Some(output) = output {
+                if let Some(state) = response.get(&output) {
+                    println!("Zoom state for output \"{output}\": {state:?}");
+                } else {
+                    println!("Output \"{output}\" is not connected.");
+                }
+            } else {
+                println!("Zoom state for all outputs:");
+                for (output, state) in response {
+                    println!("  Output \"{output}\": {state:?}");
+                }
             }
         }
         Msg::Casts => {
