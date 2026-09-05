@@ -58,6 +58,7 @@ use crate::utils::geometry::{
     RectLocalExt, SizeExt,
 };
 use crate::utils::spawning::{spawn, spawn_sh};
+use crate::utils::view::{OutputViewCtx, ViewportTransform};
 use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
 
 pub mod backend_ext;
@@ -2704,7 +2705,7 @@ impl State {
             }
         }
 
-        self.update_screenshot_ui(new_pos.assume_global(), None);
+        self.update_screenshot_from_content(new_pos.assume_global(), None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) =
@@ -2857,7 +2858,7 @@ impl State {
 
         let pointer = self.niri.seat.get_pointer().unwrap();
 
-        self.update_screenshot_ui(pos, None);
+        self.update_screenshot_from_screen(pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
@@ -3275,7 +3276,9 @@ impl State {
                 };
 
                 if let Some(output) = output.cloned() {
-                    let point = self.screenshot_ui_point(&output, pos.assume_global());
+                    // The regular pointer tracks content-space coords under
+                    // zoom, so no inverse mapping here.
+                    let point = self.screenshot_point_from_content(&output, pos.assume_global());
 
                     if self
                         .niri
@@ -3806,7 +3809,7 @@ impl State {
             return;
         };
 
-        self.update_screenshot_ui(pos, None);
+        self.update_screenshot_from_screen(pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
@@ -3946,7 +3949,8 @@ impl State {
                         };
 
                         if let Some(output) = output.cloned() {
-                            let point = self.screenshot_ui_point(&output, pos);
+                            // Tablet positions are screen-space.
+                            let point = self.screenshot_point_from_screen(&output, pos);
 
                             if self
                                 .niri
@@ -4842,7 +4846,8 @@ impl State {
             };
 
             if let Some(output) = output.cloned() {
-                let point = self.screenshot_ui_point(&output, pos);
+                // Touch positions are screen-space.
+                let point = self.screenshot_point_from_screen(&output, pos);
 
                 if self
                     .niri
@@ -4998,7 +5003,7 @@ impl State {
         self.niri.touch_points.insert(slot, pos_g);
 
         if let Some(output) = self.niri.screenshot_ui.selection_output().cloned() {
-            self.update_screenshot_ui(pos, Some(slot));
+            self.update_screenshot_from_screen(pos, Some(slot));
             self.niri.queue_redraw(&output);
         }
 
@@ -5089,45 +5094,71 @@ impl State {
         grab.is::<PickWindowGrab>() || grab.is::<PickColorGrab>() || Self::is_dnd_grab(grab)
     }
 
-    /// Converts a global logical position to screenshot UI physical coords
-    /// for the given output.
-    /// TODO(cursor-zoom): constrain against captured texture size, not output, when zoom is
-    /// integrated
-    fn screenshot_ui_point(
+    /// Content-space position to UI physical coords.
+    ///
+    /// The regular pointer already tracks content space (deltas scaled by
+    /// 1/level), so it converts directly. Captures are full-output, so the
+    /// output size is the texture size.
+    fn screenshot_point_from_content(
         &self,
         output: &Output,
         pos: Point<f64, Global>,
     ) -> Point<i32, Physical> {
-        // When zoomed, the screenshot UI shows the magnified content, so map the screen position
-        // back to content space before converting to the UI's physical pixel coordinates.
-        let pos = if let Some(state) = self.niri.layout.zoom_state_for_output(output) {
-            let vt = state.viewport_transform(self.niri.clock.now());
-            let ctx = self.niri.output_state[output].view_ctx;
-            let pos_local = pos.to_local(&ctx);
-            vt.apply_inverse(pos_local).to_global(&ctx)
-        } else {
-            pos
-        };
-
         let ctx = self.niri.output_state[output].view_ctx;
-        let point = pos.to_local(&ctx).as_logical();
-        let scale = output.current_scale().fractional_scale();
-        let point = point.to_physical_precise_round(scale);
-
-        let size = output.current_mode().unwrap().size;
-        let transform = output.current_transform();
-        let size = transform.transform_size(size);
-
-        point.constrain(Rectangle::from_size(size))
+        screenshot_point_in_content(&ctx, output, pos)
     }
 
-    /// Routes pointer or touch motion to the screenshot UI.
-    fn update_screenshot_ui(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
+    /// Screen-space position to UI coords via the inverse viewport.
+    /// Absolute, tablet and touch events report screen space.
+    fn screenshot_point_from_screen(
+        &self,
+        output: &Output,
+        pos: Point<f64, Global>,
+    ) -> Point<i32, Physical> {
+        // Always apply; at IDENTITY the inverse is the identity.
+        let viewport = self
+            .niri
+            .layout
+            .zoom_state_for_output(output)
+            .map(|state| state.viewport_transform(self.niri.clock.now()))
+            .unwrap_or_else(ViewportTransform::identity);
+        let ctx = self.niri.output_state[output].view_ctx;
+        let content = viewport.apply_inverse(pos.to_local(&ctx)).to_global(&ctx);
+        screenshot_point_in_content(&ctx, output, content)
+    }
+
+    /// Routes relative-pointer motion to the screenshot UI.
+    fn update_screenshot_from_content(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
         if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let point = self.screenshot_ui_point(output, pos);
+            let point = self.screenshot_point_from_content(output, pos);
             self.niri.screenshot_ui.pointer_motion(point, slot);
         }
     }
+
+    /// Routes absolute-pointer, tablet, or touch motion to the screenshot UI.
+    fn update_screenshot_from_screen(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
+        if let Some(output) = self.niri.screenshot_ui.selection_output() {
+            let point = self.screenshot_point_from_screen(output, pos);
+            self.niri.screenshot_ui.pointer_motion(point, slot);
+        }
+    }
+}
+
+/// Shared tail: content-space position to output pixels, constrained.
+fn screenshot_point_in_content(
+    ctx: &OutputViewCtx,
+    output: &Output,
+    pos: Point<f64, Global>,
+) -> Point<i32, Physical> {
+    let point = pos.to_local(ctx).as_logical();
+    let scale = output.current_scale().fractional_scale();
+    let point = point.to_physical_precise_round(scale);
+
+    let size = output.current_mode().unwrap().size;
+    let transform = output.current_transform();
+    let size = transform.transform_size(size);
+
+    point.constrain(Rectangle::from_size(size))
 }
 
 /// Check whether the key should be intercepted and mark intercepted

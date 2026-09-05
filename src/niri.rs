@@ -180,7 +180,10 @@ use crate::ui::exit_confirm_dialog::{ExitConfirmDialog, ExitConfirmDialogRenderE
 use crate::ui::hotkey_overlay::HotkeyOverlay;
 use crate::ui::mru::{MruCloseRequest, WindowMruUi, WindowMruUiRenderElement};
 use crate::ui::screen_transition::{self, ScreenTransition};
-use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
+use crate::ui::screenshot_ui::{
+    CapturedPointer, OutputScreenshot, ScreenshotPreviewZoom, ScreenshotUi,
+    ScreenshotUiRenderElement,
+};
 use crate::utils::geometry::{
     Global, Local, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt,
     RectLocalExt,
@@ -2259,13 +2262,23 @@ impl State {
     }
 
     pub fn confirm_screenshot(&mut self, write_to_disk: bool) {
-        let ScreenshotUi::Open { path, .. } = &mut self.niri.screenshot_ui else {
+        let ScreenshotUi::Open {
+            selection, path, ..
+        } = &mut self.niri.screenshot_ui
+        else {
             return;
         };
+
+        let output = selection.0.clone();
         let path = path.take();
 
+        // WYSIWYG - export uses the live viewport at confirm time, matching the
+        // preview the selection was drawn against.
+        let viewport = self.niri.live_viewport(&output);
+        let zoom = self.niri.preview_zoom(&output, viewport);
+
         self.backend.with_primary_renderer(|renderer| {
-            match self.niri.screenshot_ui.capture(renderer) {
+            match self.niri.screenshot_ui.capture(renderer, zoom) {
                 Ok((size, pixels)) => {
                     if let Err(err) = self.niri.save_screenshot(size, pixels, write_to_disk, path) {
                         warn!("error saving screenshot: {err:?}");
@@ -4562,8 +4575,8 @@ impl Niri {
         &self,
         elem: PointerRenderElements<R>,
         output: &Output,
-        target_rounded: Point<i32, Physical>,
-        pointer_local_phys: Point<f64, Physical>,
+        focal: Point<f64, Physical>,
+        display: Point<f64, Local>,
         vt: ViewportTransform,
         scale_with_zoom: bool,
     ) -> OutputRenderElements<R> {
@@ -4576,59 +4589,37 @@ impl Niri {
             (Kind::Cursor, Some(h)) => h,
             _ => {
                 let elem_loc = elem.geometry(output_scale).loc;
-                (pointer_local_phys - elem_loc.to_f64()).to_i32_round()
+                (focal - elem_loc.to_f64()).to_i32_round()
             }
         };
 
-        // The configuration controls the cursor graphic, not auxiliary
-        // pointer elements such as the DnD icon. Those elements still follow
-        // the displayed pointer position, but their offsets must not be
-        // magnified a second time.
-        let scale_with_zoom = scale_with_zoom && element_kind == Kind::Cursor;
-
-        // The cursor scales around its hotspot so the tip stays glued to the
-        // zoomed pointer position. ViewportTransform is Local-only, so express
-        // the Physical pointer position in Local (scale-only conversion;
-        // rotation composes downstream per the OutputViewCtx docs). With
-        // Relocate::Absolute the wrapper's size scales by the viewport factor
-        // while its location comes from final_pos below.
-        let (cursor_viewport, final_pos) = if scale_with_zoom {
-            let hotspot_scaled = hotspot.to_f64().upscale(vt.factor()).to_i32_round();
-            let pointer_local: Point<f64, Local> =
-                pointer_local_phys.to_logical(view_ctx.scale).assume_local();
-            (
-                ViewportTransform::new(pointer_local, vt.factor()),
-                (target_rounded - hotspot_scaled).to_f64(),
-            )
+        // Only real cursors scale; DnD icons just follow unscaled.
+        let graphic_scale = if scale_with_zoom && element_kind == Kind::Cursor {
+            vt.factor()
         } else {
-            (
-                ViewportTransform::identity(),
-                (target_rounded - hotspot).to_f64(),
-            )
+            1.
         };
 
-        ZoomRenderElement::Pointer(ZoomElement::from_element(
+        let elem = ZoomElement::cursor(
             elem,
-            cursor_viewport,
+            focal,
+            display,
+            hotspot,
+            vt,
+            graphic_scale,
             view_ctx,
-            final_pos,
-            Relocate::Absolute,
-        ))
-        .into()
+            output_scale,
+        );
+        ZoomRenderElement::Pointer(elem).into()
     }
 
-    /// Derive the displayed pointer position for the live output viewport.
-    ///
-    /// The real pointer is already in output-local screen space. When it is
-    /// outside the viewport preimage, clamp it to the nearest visible content
-    /// point before applying the forward transform. Keep the epsilon shrink:
-    /// it prevents a point exactly on the far edge from rounding one pixel
-    /// outside the output.
-    fn pointer_zoom_geometry(
+    /// Live-cursor focal anchor (raw position) and viewport-clamped display.
+    /// None at 1x or off-output. Epsilon shrink keeps edge points inside.
+    fn pointer_geometry(
         &self,
         output: &Output,
         vt: ViewportTransform,
-    ) -> Option<(Point<i32, Physical>, Point<f64, Physical>)> {
+    ) -> Option<(Point<f64, Physical>, Point<f64, Local>)> {
         if vt.factor() <= 1.0 {
             return None;
         }
@@ -4640,6 +4631,7 @@ impl Niri {
                 .current_location()
                 .assume_global()
         });
+
         let (pointer_output, pointer_local) = self.output_under(pointer_pos)?;
         if pointer_output != output {
             return None;
@@ -4648,18 +4640,36 @@ impl Niri {
         let view_ctx = self.output_state.get(output)?.view_ctx;
         let output_rect = Rectangle::from_size(view_ctx.local_geo.size);
         let viewport = vt.apply_inverse_rect(output_rect);
-        let viewport = Rectangle::new(
-            viewport.loc,
-            viewport.size - Size::from((f64::EPSILON, f64::EPSILON)),
-        );
+
         let display_cursor = pointer_local.constrain(viewport);
         let output_scale = Scale::from(output.current_scale().fractional_scale());
-        let target = vt.apply(display_cursor);
 
         Some((
-            target.as_logical().to_physical_precise_round(output_scale),
             pointer_local.as_logical().to_physical(output_scale),
+            display_cursor,
         ))
+    }
+
+    /// Live viewport for an output, or IDENTITY without zoom state.
+    ///
+    /// Display paths pass this; captures pass IDENTITY to stay native.
+    pub fn live_viewport(&self, output: &Output) -> ViewportTransform {
+        self.layout
+            .zoom_state_for_output(output)
+            .map(|state| state.viewport_transform(self.clock.now()))
+            .unwrap_or_else(ViewportTransform::identity)
+    }
+
+    /// Live preview/export parameters for the screenshot UI on an output.
+    fn preview_zoom(&self, output: &Output, viewport: ViewportTransform) -> ScreenshotPreviewZoom {
+        let view_ctx = self.output_state[output].view_ctx;
+        let config = self.config.borrow();
+        ScreenshotPreviewZoom {
+            viewport,
+            view_ctx,
+            filter: zoom_filter(viewport.factor(), config.zoom.zoom_filter_threshold),
+            scale_with_zoom: config.cursor.scale_with_zoom,
+        }
     }
 
     pub fn render_to_vec<R: NiriRenderer>(
@@ -4667,9 +4677,10 @@ impl Niri {
         ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
+        viewport: ViewportTransform,
     ) -> Vec<OutputRenderElements<R>> {
         let mut elements = Vec::new();
-        self.render(ctx, output, include_pointer, &mut |elem| {
+        self.render(ctx, output, include_pointer, viewport, &mut |elem| {
             elements.push(elem)
         });
         elements
@@ -4680,6 +4691,7 @@ impl Niri {
         mut ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
+        viewport: ViewportTransform,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
         let _span = tracy_client::span!("Niri::render");
@@ -4699,12 +4711,6 @@ impl Niri {
         let mut ctx = ctx.r();
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
-
-        let viewport = self
-            .layout
-            .zoom_state_for_output(output)
-            .map(|state| state.viewport_transform(self.clock.now()))
-            .unwrap_or_else(ViewportTransform::identity);
 
         let push = &mut move |elem| {
             let elem = self.zoom_element(elem, output, viewport);
@@ -4738,15 +4744,15 @@ impl Niri {
 
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
-            match self.pointer_zoom_geometry(output, viewport) {
-                Some((target_rounded, pointer_local_phys)) => {
+            match self.pointer_geometry(output, viewport) {
+                Some((focal, display)) => {
                     let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
                     self.render_pointer(ctx.renderer, output, &mut |elem| {
                         push(self.zoom_pointer(
                             elem,
                             output,
-                            target_rounded,
-                            pointer_local_phys,
+                            focal,
+                            display,
                             viewport,
                             scale_with_zoom,
                         ));
@@ -4813,8 +4819,9 @@ impl Niri {
 
         // If the screenshot UI is open, draw it.
         if self.screenshot_ui.is_open() {
+            let zoom = self.preview_zoom(output, viewport);
             self.screenshot_ui
-                .render_output(output, ctx.target, &mut |elem| push(elem.into()));
+                .render_output(output, ctx.target, zoom, &mut |elem| push(elem.into()));
 
             // Add the backdrop for outputs that were connected while the screenshot UI was open.
             push(backdrop);
@@ -5823,11 +5830,21 @@ impl Niri {
                     };
                     let offset = screencopy.region_loc().upscale(-1);
                     let mut elements = Vec::new();
-                    self.render(ctx, output, screencopy.overlay_cursor(), &mut |elem| {
-                        let elem =
-                            RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
-                        elements.push(elem);
-                    });
+                    // Screencopy records the unzoomed scene.
+                    self.render(
+                        ctx,
+                        output,
+                        screencopy.overlay_cursor(),
+                        ViewportTransform::identity(),
+                        &mut |elem| {
+                            let elem = RelocateRenderElement::from_element(
+                                elem,
+                                offset,
+                                Relocate::Relative,
+                            );
+                            elements.push(elem);
+                        },
+                    );
 
                     let (damages, states) = Self::damage_screencopy_internal(
                         output,
@@ -5901,10 +5918,17 @@ impl Niri {
         };
         let offset = screencopy.region_loc().upscale(-1);
         let mut elements = Vec::new();
-        self.render(ctx, output, screencopy.overlay_cursor(), &mut |elem| {
-            let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
-            elements.push(elem);
-        });
+        // Screencopy records the unzoomed scene.
+        self.render(
+            ctx,
+            output,
+            screencopy.overlay_cursor(),
+            ViewportTransform::identity(),
+            &mut |elem| {
+                let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
+                elements.push(elem);
+            },
+        );
 
         let Some(damage_tracker) = self.screencopy_state.damage_tracker(manager) else {
             error!("screencopy queue must not be deleted as long as frames exist");
@@ -5987,9 +6011,15 @@ impl Niri {
                     xray: None,
                 };
                 let mut elements = Vec::new();
-                self.render(ctx, output, draw_cursor, &mut |elem| {
-                    elements.push(elem);
-                });
+                self.render(
+                    ctx,
+                    output,
+                    draw_cursor,
+                    self.live_viewport(output),
+                    &mut |elem| {
+                        elements.push(elem);
+                    },
+                );
                 elements
             });
 
@@ -6411,6 +6441,13 @@ impl Niri {
             let size = transform.transform_size(size);
 
             let scale = Scale::from(output.current_scale().fractional_scale());
+            // Baseline for capture-relative pointer scaling; the texture
+            // itself is unzoomed.
+            let capture_level = self
+                .layout
+                .zoom_state_for_output(&output)
+                .map(|state| state.viewport_transform(self.clock.now()).factor())
+                .unwrap_or(1.);
             let targets = [
                 RenderTarget::Output,
                 RenderTarget::Screencast,
@@ -6422,7 +6459,10 @@ impl Niri {
                     target,
                     xray: None,
                 };
-                let elements = self.render_to_vec(ctx, &output, false);
+                // Static unzoomed scene for the UI; the preview re-applies
+                // the live viewport on top each frame.
+                let elements =
+                    self.render_to_vec(ctx, &output, false, ViewportTransform::identity());
                 let elements = elements.iter().rev();
 
                 let res = render_to_texture(
@@ -6464,11 +6504,34 @@ impl Niri {
                 };
 
                 res_output.map(|(texture, _)| {
+                    // Resolve hotspot and tip now; the preview maps the tip.
+                    let pointer = res_pointer.map(|(texture, _, geo)| {
+                        let cursor_pos = self.tablet_cursor_location.unwrap_or_else(|| {
+                            self.seat
+                                .get_pointer()
+                                .unwrap()
+                                .current_location()
+                                .assume_global()
+                        });
+                        let view_ctx = self.output_state[&output].view_ctx;
+                        let tip = cursor_pos
+                            .to_local(&view_ctx)
+                            .as_logical()
+                            .to_physical_precise_round(scale);
+                        let hotspot = tip - geo.loc;
+                        CapturedPointer {
+                            texture,
+                            geo,
+                            hotspot,
+                            tip,
+                        }
+                    });
                     OutputScreenshot::from_textures(
                         renderer,
                         scale,
                         texture,
-                        res_pointer.map(|(texture, _, geo)| (texture, geo)),
+                        pointer,
+                        capture_level,
                     )
                 })
             });
@@ -6504,7 +6567,8 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
         };
-        let elements = self.render_to_vec(ctx, output, include_pointer);
+        let elements =
+            self.render_to_vec(ctx, output, include_pointer, ViewportTransform::identity());
         let elements = elements.iter().rev();
         let pixels = render_to_vec(
             renderer,
@@ -6729,7 +6793,8 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
         };
-        let elements = self.render_to_vec(ctx, &output, include_pointer);
+        let elements =
+            self.render_to_vec(ctx, &output, include_pointer, ViewportTransform::identity());
         let elements = elements.iter().rev();
         let pixels = render_to_vec(
             renderer,
@@ -7212,7 +7277,10 @@ impl Niri {
                         target,
                         xray: None,
                     };
-                    let elements = self.render_to_vec(ctx, &output, false);
+                    // Transition snapshots record the unzoomed scene; the live
+                    // viewport keeps applying on top while they crossfade.
+                    let elements =
+                        self.render_to_vec(ctx, &output, false, ViewportTransform::identity());
                     let elements = elements.iter().rev();
 
                     let res = render_to_texture(
