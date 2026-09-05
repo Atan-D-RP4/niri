@@ -58,7 +58,12 @@ impl PickColorGrab {
                     target: RenderTarget::Output,
                     xray: None,
                 };
-                let elements = data.niri.render_to_vec(ctx, &output, false);
+
+                // Sample the displayed pixels: the pointer position is in
+                // screen space, so the render must apply the live viewport.
+                let elements =
+                    data.niri
+                        .render_to_vec(ctx, &output, false, data.niri.live_viewport(&output));
 
                 let mapping = match render_and_download(
                     renderer,

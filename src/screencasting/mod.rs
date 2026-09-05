@@ -606,7 +606,10 @@ impl Niri {
                     target: RenderTarget::Screencast,
                     xray: None,
                 };
-                self.render(ctx, output, false, &mut |elem| elements.push(elem.into()));
+                // Output screencasts show the output as seen: live viewport.
+                self.render(ctx, output, false, self.live_viewport(output), &mut |elem| {
+                    elements.push(elem.into())
+                });
 
                 cursor_data = Some(CursorData::compute(
                     &elements,

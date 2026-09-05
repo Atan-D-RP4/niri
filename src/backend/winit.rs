@@ -244,7 +244,7 @@ impl Winit {
             target: RenderTarget::Output,
             xray: None,
         };
-        let mut elements = niri.render_to_vec(ctx, output, true);
+        let mut elements = niri.render_to_vec(ctx, output, true, niri.live_viewport(output));
 
         // Visualize the damage, if enabled.
         if niri.debug_draw_damage {

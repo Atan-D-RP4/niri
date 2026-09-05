@@ -74,6 +74,14 @@ impl SolidColorBuffer {
         self.color
     }
 
+    pub fn id(&self) -> Id {
+        self.id.clone()
+    }
+
+    pub fn commit(&self) -> CommitCounter {
+        self.commit
+    }
+
     pub fn size(&self) -> Size<f64, Logical> {
         self.size
     }

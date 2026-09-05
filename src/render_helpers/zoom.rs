@@ -8,6 +8,7 @@ use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame;
+use crate::utils::geometry::Local;
 use crate::utils::view::{OutputViewCtx, ViewportTransform};
 
 /// Helper macro: wrap a draw/capture_framebuffer call with filter set/restore.
@@ -125,6 +126,24 @@ impl<E: Element> ZoomElement<E> {
             relocate,
             filter: None,
         }
+    }
+
+    /// Cursor element with tip-glued placement, shared by the live pointer
+    /// and the screenshot preview.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cursor(
+        elem: E,
+        focal: Point<f64, Physical>,
+        display: Point<f64, Local>,
+        hotspot: Point<i32, Physical>,
+        viewport: ViewportTransform,
+        graphic_scale: f64,
+        view_ctx: OutputViewCtx,
+        scale: Scale<f64>,
+    ) -> Self {
+        let (final_pos, wrapper) =
+            viewport.place_cursor(focal, display, hotspot, graphic_scale, scale);
+        Self::from_element(elem, wrapper, view_ctx, final_pos, Relocate::Absolute)
     }
 
     pub fn with_filter(mut self, filter: Option<TextureFilter>) -> Self {
@@ -316,6 +335,148 @@ impl<'render, E: RenderElement<TtyRenderer<'render>>> RenderElement<TtyRenderer<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::geometry::RectExt;
+
+    #[derive(Debug, Clone)]
+    struct StaticElement {
+        id: Id,
+        geometry: Rectangle<i32, Physical>,
+    }
+
+    impl Element for StaticElement {
+        fn id(&self) -> &Id {
+            &self.id
+        }
+
+        fn current_commit(&self) -> CommitCounter {
+            CommitCounter::default()
+        }
+
+        fn src(&self) -> Rectangle<f64, Buffer> {
+            Rectangle::from_size((8., 8.).into())
+        }
+
+        fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+            self.geometry
+        }
+    }
+
+    /// An IDENTITY viewport wrapper must preserve geometry exactly: this is
+    /// the `scale_with_zoom == false` preview path, where the cursor graphic
+    /// keeps its captured size and is only repositioned.
+    #[test]
+    fn identity_viewport_preserves_geometry() {
+        let cases = [
+            // (view scale, geometry)
+            (
+                Scale::from(1.),
+                Rectangle::new((7, 5).into(), (24, 24).into()),
+            ),
+            (
+                Scale::from(1.),
+                Rectangle::new((0, 0).into(), (100, 100).into()),
+            ),
+            (
+                Scale::from(1.5),
+                Rectangle::new((7, 5).into(), (25, 25).into()),
+            ),
+        ];
+
+        for (scale, geometry) in cases {
+            let view_ctx = OutputViewCtx::new(
+                Rectangle::new((0., 0.).into(), (150., 150.).into()).assume_global(),
+                Rectangle::new((0., 0.).into(), (100., 100.).into()).assume_local(),
+                Transform::Normal,
+                scale,
+            );
+
+            // Relative with a zero offset leaves geometry untouched.
+            let wrapped = ZoomElement::from_element(
+                StaticElement {
+                    id: Id::new(),
+                    geometry,
+                },
+                ViewportTransform::identity(),
+                view_ctx,
+                Point::from((0., 0.)),
+                Relocate::Relative,
+            );
+            assert_eq!(wrapped.geometry(scale), geometry);
+
+            // Absolute pointed at the same location also preserves size.
+            let wrapped = ZoomElement::from_element(
+                StaticElement {
+                    id: Id::new(),
+                    geometry,
+                },
+                ViewportTransform::identity(),
+                view_ctx,
+                geometry.loc.to_f64(),
+                Relocate::Absolute,
+            );
+            assert_eq!(wrapped.geometry(scale), geometry);
+        }
+    }
+
+    fn placement_viewport() -> ViewportTransform {
+        ViewportTransform::new((4., 4.).into(), 2.)
+    }
+
+    #[test]
+    fn tip_glued_when_scaling() {
+        // Graphic top-left (10, 10), hotspot (2, 3): tip (12, 13) goes
+        // through the viewport, not the top-left.
+        let tip = Point::<f64, Physical>::from((12., 13.));
+        let display = Point::<f64, Local>::from((12., 13.));
+        let (final_pos, wrapper) =
+            placement_viewport().place_cursor(tip, display, (2, 3).into(), 2., Scale::from(1.));
+
+        // Tip displays at focal + (p - focal) * 2; top-left lands at (16, 16).
+        assert_eq!(final_pos, Point::<f64, Physical>::from((16., 16.)));
+        // The wrapper scales around the tip itself.
+        assert_eq!(wrapper.focal(), Point::<f64, Local>::from((12., 13.)));
+        assert_eq!(wrapper.factor(), 2.);
+    }
+
+    #[test]
+    fn placement_matches_rigid_transform() {
+        // With focal at the origin the viewport is a pure scale: the
+        // hotspot-centered construction must agree with wrapping the whole
+        // graphic in the scene viewport.
+        let viewport = ViewportTransform::new((0., 0.).into(), 2.);
+        let tip = Point::<f64, Physical>::from((10., 10.));
+        let display = Point::<f64, Local>::from((10., 10.));
+        let (final_pos, _) =
+            viewport.place_cursor(tip, display, (4, 4).into(), 2., Scale::from(1.));
+
+        // Tip (10, 10) -> (20, 20); top-left (6, 6) -> (12, 12).
+        assert_eq!(final_pos, Point::<f64, Physical>::from((12., 12.)));
+    }
+
+    #[test]
+    fn placement_crosses_scale_once() {
+        // Fractional output scale: Local math, one crossing each way.
+        let tip = Point::<f64, Physical>::from((21., 21.));
+        let display = Point::<f64, Local>::from((10.5, 10.5));
+        let (final_pos, _) =
+            placement_viewport().place_cursor(tip, display, (0, 0).into(), 1., Scale::from(2.));
+
+        // Logical (10.5, 10.5) -> (17, 17) -> physical (34, 34).
+        assert_eq!(final_pos, Point::<f64, Physical>::from((34., 34.)));
+    }
+
+    #[test]
+    fn placement_splits_focal_and_display() {
+        // Live path: the raw tip anchors the wrapper while the constrained
+        // display position maps the target.
+        let focal = Point::<f64, Physical>::from((0., 0.));
+        let display = Point::<f64, Local>::from((10., 10.));
+        let (final_pos, wrapper) =
+            placement_viewport().place_cursor(focal, display, (2, 3).into(), 2., Scale::from(1.));
+
+        assert_eq!(final_pos, Point::<f64, Physical>::from((12., 10.)));
+        assert_eq!(wrapper.focal(), Point::<f64, Local>::from((0., 0.)));
+    }
 
     #[test]
     fn zoom_filter_below_threshold() {

@@ -4,7 +4,9 @@ use smithay::desktop::Space;
 use smithay::output::Output;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform};
 
-use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, RectExt, RectLocalExt};
+use crate::utils::geometry::{
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
+};
 
 /// Immutable, sampled transformation of output-local logical geometry.
 ///
@@ -56,6 +58,29 @@ impl ViewportTransform {
         let transformed =
             self.to_matrix().inverse() * Vec2::new(point.x as f32, point.y as f32).extend(1.);
         Point::new(transformed.x as f64, transformed.y as f64).assume_local()
+    }
+
+    /// Tip-glued cursor placement shared by the live pointer and the preview.
+    ///
+    /// Returns the physical position of the cursor hotspot and a new transform
+    /// with the focal point in local coordinates. The hotspot is scaled by the
+    /// graphic scale, which is independent of the output scale.
+    pub(crate) fn place_cursor(
+        self,
+        focal: Point<f64, Physical>,
+        display: Point<f64, Local>,
+        hotspot: Point<i32, Physical>,
+        graphic_scale: f64,
+        scale: Scale<f64>,
+    ) -> (Point<f64, Physical>, Self) {
+        let focal_local: Point<f64, Local> = focal.to_logical(scale).assume_local();
+        let target_rounded: Point<i32, Physical> =
+            self.apply(display).to_physical_precise_round(scale);
+        let hotspot_scaled = hotspot.to_f64().upscale(graphic_scale).to_i32_round();
+        (
+            (target_rounded - hotspot_scaled).to_f64(),
+            Self::new(focal_local, graphic_scale),
+        )
     }
 
     /// Returns the axis-aligned bounding box of the transformed rectangle.
