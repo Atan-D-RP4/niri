@@ -2516,7 +2516,7 @@ impl State {
                                 let ctx = self.niri.output_state[&output].view_ctx;
                                 let cursor_local = cursor_pos.to_local(&ctx);
                                 self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
-                                self.niri.layout.update_focal_for_cursor(
+                                self.niri.layout.update_cursor_zoom_focal(
                                     &output,
                                     cursor_local,
                                     true,
@@ -2820,7 +2820,7 @@ impl State {
             self.niri.layout.set_zoom_cursor_pos(output, cursor_local);
             self.niri
                 .layout
-                .update_focal_for_cursor(output, cursor_local, false);
+                .update_cursor_zoom_focal(output, cursor_local, false);
         }
 
         // Notify a11y.
@@ -2913,9 +2913,15 @@ impl State {
             .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
             .unwrap_or(false);
         if is_dnd_grab {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
+            if let Some((output, screen_pos_within_output)) = self.niri.output_under(pos) {
                 let output = output.clone();
-                self.niri.layout.dnd_update(output, pos_within_output);
+                // DnD targeting resolves against scene geometry.
+                let content_pos_within_output = self
+                    .niri
+                    .screen_to_content(&output, screen_pos_within_output);
+                self.niri
+                    .layout
+                    .dnd_update(output, content_pos_within_output);
             }
         }
 
@@ -2957,7 +2963,7 @@ impl State {
                 self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
                 self.niri
                     .layout
-                    .update_focal_for_cursor(&output, cursor_local, false);
+                    .update_cursor_zoom_focal(&output, cursor_local, false);
             }
         }
 
@@ -3152,12 +3158,16 @@ impl State {
                 // Check if we need to start an interactive resize.
                 else if button == Some(MouseButton::Right) && !pointer.is_grabbed() && mod_down {
                     let location = pointer.current_location();
-                    let (output, pos_within_output) =
+                    let (output, screen_pos_within_output) =
                         self.niri.output_under(location.assume_global()).unwrap();
+                    // Resize edges are scene geometry: hit-test in content space.
+                    let content_pos_within_output = self
+                        .niri
+                        .screen_to_content(output, screen_pos_within_output);
                     let edges = self
                         .niri
                         .layout
-                        .resize_edges_under(output, pos_within_output)
+                        .resize_edges_under(output, content_pos_within_output)
                         .unwrap_or(ResizeEdge::empty());
 
                     if !edges.is_empty() {
@@ -3918,7 +3928,7 @@ impl State {
                             self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
                             self.niri
                                 .layout
-                                .update_focal_for_cursor(&output, cursor_local, false);
+                                .update_cursor_zoom_focal(&output, cursor_local, false);
                         }
                     }
 

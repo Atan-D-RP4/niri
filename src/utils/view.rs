@@ -2,9 +2,9 @@ use glam::{Mat3, Vec2};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::Space;
 use smithay::output::Output;
-use smithay::utils::{Logical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform};
 
-use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, RectExt};
+use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, RectExt, RectLocalExt};
 
 /// Immutable, sampled transformation of output-local logical geometry.
 ///
@@ -107,6 +107,37 @@ impl OutputViewCtx {
         self.global_geo.loc.as_logical()
     }
 
+    /// Converts output-local Physical geometry into Local logical geometry.
+    ///
+    /// Render elements use Physical units, while viewport policy is defined in
+    /// Local logical units. This is a unit conversion only (divide by
+    /// [`Self::scale`]); [`Self::output_transform`] is intentionally not
+    /// consulted. Element Physical geometry is already expressed in the
+    /// output's presented orientation — output rotation/reflection composes
+    /// *after* the viewport per the `Local → ViewportTransform → output
+    /// Transform → Physical` pipeline — so the viewport stays axis-aligned in
+    /// unrotated Local space.
+    #[inline]
+    pub(crate) fn physical_rect_to_local(
+        &self,
+        rect: Rectangle<f64, Physical>,
+    ) -> Rectangle<f64, Local> {
+        rect.to_logical(self.scale).assume_local()
+    }
+
+    /// Converts Local logical geometry into output-local Physical geometry.
+    ///
+    /// Inverse of [`Self::physical_rect_to_local`]: multiply by
+    /// [`Self::scale`] only, leaving [`Self::output_transform`] to the render
+    /// target downstream.
+    #[inline]
+    pub(crate) fn local_rect_to_physical(
+        &self,
+        rect: Rectangle<f64, Local>,
+    ) -> Rectangle<f64, Physical> {
+        rect.as_logical().to_physical(self.scale)
+    }
+
     /// Creates a minimal context from an output geometry rectangle.
     ///
     /// Only the output origin is meaningful for Global ↔ Local translation;
@@ -160,7 +191,11 @@ impl OutputViewCtx {
             .assume_global();
         let mode = output.current_mode()?;
         let scale = output.current_scale().fractional_scale();
-        let logical_size = mode.size.to_f64().to_logical(scale);
+        // Local size is in the presented orientation: apply the output
+        // transform before the scale conversion, matching
+        // `Layout::output_size_for_focal`.
+        let mode_size = output.current_transform().transform_size(mode.size);
+        let logical_size = mode_size.to_f64().to_logical(scale);
         let local_geo = Rectangle::from_size(logical_size).assume_local();
         let transform = output.current_transform();
         Some(Self::new(

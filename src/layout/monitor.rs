@@ -1565,7 +1565,7 @@ impl<W: LayoutElement> Monitor<W> {
 
     pub fn workspace_under(
         &self,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<(&Workspace<W>, Rectangle<f64, Local>)> {
         let (ws, geo) = self.workspaces_with_render_geo().find_map(|(ws, geo)| {
             // Extend width to entire output.
@@ -1573,42 +1573,51 @@ impl<W: LayoutElement> Monitor<W> {
             let size = Size::from((self.view_size.w, geo.size.h));
             let bounds = Rectangle::new(loc, size);
 
-            bounds.contains(pos_within_output).then_some((ws, geo))
+            bounds
+                .contains(content_pos_within_output)
+                .then_some((ws, geo))
         })?;
         Some((ws, geo))
     }
 
     pub fn workspace_under_narrow(
         &self,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<&Workspace<W>> {
         self.workspaces_with_render_geo()
-            .find_map(|(ws, geo)| geo.contains(pos_within_output).then_some(ws))
+            .find_map(|(ws, geo)| geo.contains(content_pos_within_output).then_some(ws))
     }
 
-    pub fn window_under(&self, pos_within_output: Point<f64, Local>) -> Option<(&W, HitType)> {
-        let (ws, geo) = self.workspace_under(pos_within_output)?;
+    pub fn window_under(
+        &self,
+        content_pos_within_output: Point<f64, Local>,
+    ) -> Option<(&W, HitType)> {
+        let (ws, geo) = self.workspace_under(content_pos_within_output)?;
 
         if self.overview_progress.is_some() {
             let overview_zoom = self.overview_zoom();
-            let pos_within_workspace = (pos_within_output - geo.loc).downscale(overview_zoom);
+            let pos_within_workspace =
+                (content_pos_within_output - geo.loc).downscale(overview_zoom);
             let (win, hit) = ws.window_under(pos_within_workspace)?;
             // During the overview animation, we cannot do input hits because we cannot really
             // represent scaled windows properly.
             Some((win, hit.to_activate()))
         } else {
-            let (win, hit) = ws.window_under(pos_within_output - geo.loc)?;
+            let (win, hit) = ws.window_under(content_pos_within_output - geo.loc)?;
             Some((win, hit.offset_win_pos(geo.loc.as_logical())))
         }
     }
 
-    pub fn resize_edges_under(&self, pos_within_output: Point<f64, Local>) -> Option<ResizeEdge> {
+    pub fn resize_edges_under(
+        &self,
+        content_pos_within_output: Point<f64, Local>,
+    ) -> Option<ResizeEdge> {
         if self.overview_progress.is_some() {
             return None;
         }
 
-        let (ws, geo) = self.workspace_under(pos_within_output)?;
-        ws.resize_edges_under(pos_within_output - geo.loc)
+        let (ws, geo) = self.workspace_under(content_pos_within_output)?;
+        ws.resize_edges_under(content_pos_within_output - geo.loc)
     }
 
     pub(super) fn insert_position(
