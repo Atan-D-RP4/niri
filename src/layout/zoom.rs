@@ -25,9 +25,19 @@ pub struct OutputZoomState {
 
 impl OutputZoomState {
     pub fn new_for_output(output: &Output) -> Self {
-        let mode_size = output.current_mode().map_or((0, 0).into(), |m| m.size);
         let scale = output.current_scale().fractional_scale();
-        let logical_size = mode_size.to_f64().to_logical(scale);
+        // Presented size: apply the output transform before the scale conversion,
+        // matching `OutputViewCtx::for_output` and `output_size()`.
+        let logical_size = output
+            .current_mode()
+            .map(|m| {
+                output
+                    .current_transform()
+                    .transform_size(m.size)
+                    .to_f64()
+                    .to_logical(scale)
+            })
+            .unwrap_or_else(|| Size::from((0., 0.)));
         Self {
             level: 1.0,
             focal: Point::from((logical_size.w / 2.0, logical_size.h / 2.0)),
@@ -255,7 +265,11 @@ impl FocalTrackingContext {
             return cursor;
         }
 
-        let viewport_size = output_size.downscale(level);
+        // Viewport size is the inverse image of the output under the zoom,
+        // matching `focal_for_cursor`; only the anchor placement differs.
+        let viewport_size = ViewportTransform::new(cursor, level)
+            .apply_inverse_rect(Rectangle::from_size(output_size))
+            .size;
         let anchor_offset = Point::from((viewport_size.w * anchor.x, viewport_size.h * anchor.y));
         let viewport_loc: Point<f64, Local> = cursor - anchor_offset;
         let scale_factor = level / (level - 1.0).max(0.001);
@@ -626,8 +640,8 @@ mod tests {
         };
         let viewport = state.viewport_transform(Duration::ZERO);
 
-        assert_eq!(viewport.factor(), 3.0);
-        assert_eq!(viewport.focal(), (200.0, 100.0).into());
+        assert_eq!(viewport.factor, 3.0);
+        assert_eq!(viewport.focal, (200.0, 100.0).into());
     }
 
     #[test]

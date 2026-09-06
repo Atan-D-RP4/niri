@@ -1729,7 +1729,7 @@ impl<W: LayoutElement> Monitor<W> {
                 // The offset we get from workspaces_with_render_geo() is already
                 // rounded to physical pixels, but it's in the logical coordinate
                 // space, so we need to convert it to physical.
-                geo.loc.as_logical().to_physical_precise_round(scale),
+                geo.loc.to_physical_precise_round(scale),
                 Relocate::Relative,
             )
         };
@@ -1864,7 +1864,7 @@ impl<W: LayoutElement> Monitor<W> {
                     RescaleRenderElement::from_element(elem, Point::from((0, 0)), overview_zoom);
                 let elem = RelocateRenderElement::from_element(
                     elem,
-                    geo.loc.as_logical().to_physical_precise_round(scale),
+                    geo.loc.to_physical_precise_round(scale),
                     Relocate::Relative,
                 );
                 push(elem);
@@ -2249,10 +2249,7 @@ impl<W: LayoutElement> Monitor<W> {
         let iter = self.workspaces_with_render_geo();
         for (_ws, ws_geo) in iter {
             let pos = ws_geo.loc;
-            let rounded_pos = pos
-                .as_logical()
-                .to_physical_precise_round(scale)
-                .to_logical(scale);
+            let rounded_pos = pos.to_physical_precise_round(scale).to_logical(scale);
 
             // Workspace positions must be rounded to physical pixels.
             assert_abs_diff_eq!(pos.x, rounded_pos.x, epsilon = 1e-5);

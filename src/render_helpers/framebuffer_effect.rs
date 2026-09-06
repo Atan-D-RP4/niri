@@ -149,7 +149,7 @@ impl Element for FramebufferEffectElement {
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.geometry.as_logical().to_physical_precise_round(scale)
+        self.geometry.to_physical_precise_round(scale)
     }
 
     fn is_framebuffer_effect(&self) -> bool {

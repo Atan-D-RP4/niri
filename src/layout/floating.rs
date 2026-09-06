@@ -1380,7 +1380,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             use crate::layout::SizingMode;
 
             assert!(Rc::ptr_eq(&self.options, &tile.options));
-            assert_eq!(self.view_size, tile.view_size().assume_local());
+            assert_eq!(self.view_size.as_logical(), tile.view_size());
             assert_eq!(self.clock, tile.clock);
             assert_eq!(self.scale, tile.scale());
             tile.verify_invariants();

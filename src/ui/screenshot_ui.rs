@@ -793,7 +793,7 @@ impl ScreenshotUi {
         } = zoom;
         // Render-path optimization, not an "is zoom active" predicate: the
         // factor <= 1 skip only avoids needless wrapping.
-        let zoomed = viewport.factor() > 1.0;
+        let zoomed = viewport.factor > 1.0;
 
         if show_pointer {
             if let Some(frozen) = screenshot.pointer.clone() {
@@ -803,9 +803,9 @@ impl ScreenshotUi {
                     // the frozen graphic scales relative to its capture baseline,
                     // preserving the open-frame ratio.
                     let graphic_scale = if scale_with_zoom {
-                        viewport.factor()
+                        viewport.factor
                     } else {
-                        pointer_scale(viewport.factor(), screenshot.capture_level)
+                        pointer_scale(viewport.factor, screenshot.capture_level)
                     };
                     let tip = frozen.tip.to_f64();
                     let elem = ZoomElement::cursor(
@@ -1385,14 +1385,14 @@ mod tests {
     fn pointer_scales_relative_to_capture() {
         // Opened at 2x, now at 3x: graphic scales 1.5x around its tip.
         let viewport = ViewportTransform::new((0., 0.).into(), 3.);
-        let scale = pointer_scale(viewport.factor(), 2.);
+        let scale = pointer_scale(viewport.factor, 2.);
         let tip = Point::<f64, Physical>::from((10., 10.));
         let display = Point::<f64, Local>::from((10., 10.));
         let (final_pos, wrapper) =
             viewport.place_cursor(tip, display, (4, 4).into(), scale, Scale::from(1.));
 
         // Tip (10, 10) -> (30, 30); hotspot (4, 4) * 1.5 -> (6, 6).
-        assert_eq!(wrapper.factor(), 1.5);
+        assert_eq!(wrapper.factor, 1.5);
         assert_eq!(final_pos, Point::<f64, Physical>::from((24., 24.)));
     }
 

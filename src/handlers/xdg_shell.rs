@@ -19,7 +19,7 @@ use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{self, Resource, WEnum};
-use smithay::utils::{Logical, Rectangle, Serial};
+use smithay::utils::{Logical, Rectangle, Serial, Size};
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorHandler as _,
     HookId, SurfaceAttributes,
@@ -1319,15 +1319,23 @@ impl State {
         layer_surface: &LayerSurface,
         output: &Output,
     ) {
-        let output_geo = self.niri.global_space.output_geometry(output).unwrap();
         let map = layer_map_for_output(output);
         let Some(layer_geo) = map.layer_geometry(layer_surface) else {
             return;
         };
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
-        // we will compute that here.
-        let mut target = Rectangle::from_size(output_geo.size).assume_local();
+        // we will compute that here. Sourced from the cached local size.
+        let output_size = self
+            .niri
+            .output_state
+            .get(output)
+            .map(|s| s.view_ctx.local_geo.size)
+            .unwrap_or_else(|| {
+                let size = self.niri.global_space.output_geometry(output).unwrap().size;
+                Size::from((size.w as f64, size.h as f64))
+            });
+        let mut target = Rectangle::from_size(output_size);
 
         // Background and bottom layer popups render below the top and the overlay layer, so let's
         // put them into the non-exclusive zone.
@@ -1338,14 +1346,14 @@ impl State {
         // FIXME: related to the above, top layer popups should use the "overlay layer"
         // non-exclusive zone.
         if matches!(layer_surface.layer(), Layer::Background | Layer::Bottom) {
-            target = map.non_exclusive_zone().assume_local();
+            target = map.non_exclusive_zone().to_f64().assume_local();
         }
 
-        target.loc -= layer_geo.loc.assume_local();
-        target.loc -= get_popup_toplevel_coords(popup).assume_local();
+        target.loc -= layer_geo.loc.to_f64().assume_local();
+        target.loc -= get_popup_toplevel_coords(popup).to_f64().assume_local();
 
         // Don't add padding to layer-shell popups. It's not really needed, and it's unexpected.
-        self.position_popup_within_rect(popup, target.to_f64(), false);
+        self.position_popup_within_rect(popup, target, false);
     }
 
     fn position_popup_within_rect(

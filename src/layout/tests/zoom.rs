@@ -322,31 +322,31 @@ fn on_edge_gesture_focal_uses_anchor_when_cursor_within_viewport() {
 
     let viewport = current_viewport(&layout, &output);
     assert!(
-        viewport.factor() > 1.0,
+        viewport.factor > 1.0,
         "gesture level should increase above 1.0, got {}",
-        viewport.factor(),
+        viewport.factor,
     );
     assert!(
-        (viewport.focal().x - cursor_local.x).abs() < (960.0 - cursor_local.x).abs(),
+        (viewport.focal.x - cursor_local.x).abs() < (960.0 - cursor_local.x).abs(),
         "OnEdge focal should track cursor (focal.x={}, cursor.x={})",
-        viewport.focal().x,
+        viewport.focal.x,
         cursor_local.x,
     );
     assert!(
-        (viewport.focal().y - cursor_local.y).abs() < (540.0 - cursor_local.y).abs(),
+        (viewport.focal.y - cursor_local.y).abs() < (540.0 - cursor_local.y).abs(),
         "OnEdge focal should track cursor (focal.y={}, cursor.y={})",
-        viewport.focal().y,
+        viewport.focal.y,
         cursor_local.y,
     );
     assert!(
-        viewport.focal().x >= 0.0 && viewport.focal().x <= 1920.0,
+        viewport.focal.x >= 0.0 && viewport.focal.x <= 1920.0,
         "focal.x {} out of bounds",
-        viewport.focal().x
+        viewport.focal.x
     );
     assert!(
-        viewport.focal().y >= 0.0 && viewport.focal().y <= 1080.0,
+        viewport.focal.y >= 0.0 && viewport.focal.y <= 1080.0,
         "focal.y {} out of bounds",
-        viewport.focal().y
+        viewport.focal.y
     );
 }
 
@@ -378,19 +378,19 @@ fn on_edge_gesture_tracks_cursor_pos_within_viewport() {
 
     let viewport = current_viewport(&layout, &output);
     assert!(
-        viewport.focal().x >= 0.0 && viewport.focal().x <= 1920.0,
+        viewport.focal.x >= 0.0 && viewport.focal.x <= 1920.0,
         "focal.x {} out of bounds",
-        viewport.focal().x
+        viewport.focal.x
     );
     assert!(
-        viewport.focal().y >= 0.0 && viewport.focal().y <= 1080.0,
+        viewport.focal.y >= 0.0 && viewport.focal.y <= 1080.0,
         "focal.y {} out of bounds",
-        viewport.focal().y
+        viewport.focal.y
     );
     assert!(
-        (viewport.focal().x - new_cursor.x).abs() < (960.0 - new_cursor.x).abs(),
+        (viewport.focal.x - new_cursor.x).abs() < (960.0 - new_cursor.x).abs(),
         "focal.x {} should be closer to cursor.x={} than to center",
-        viewport.focal().x,
+        viewport.focal.x,
         new_cursor.x,
     );
 }
@@ -590,7 +590,7 @@ fn zoom_gesture_cursor_moves_between_outputs() {
         Some(output_size),
     );
 
-    let level1 = current_viewport(&layout, &output1).factor();
+    let level1 = current_viewport(&layout, &output1).factor;
     assert!(
         level1 > 1.0,
         "output 1 level should increase during pinch gesture"
@@ -637,7 +637,7 @@ fn zoom_gesture_update_accepts_cursor_local_and_updates_focal() {
     );
     assert!(result.is_some());
 
-    let focal = current_viewport(&layout, &output).focal();
+    let focal = current_viewport(&layout, &output).focal;
     assert!(
         (focal.x - 500.0).abs() < 1e-6,
         "CursorFollow focal.x {} != 500.0",

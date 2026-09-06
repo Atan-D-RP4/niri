@@ -434,8 +434,8 @@ mod tests {
         // Tip displays at focal + (p - focal) * 2; top-left lands at (16, 16).
         assert_eq!(final_pos, Point::<f64, Physical>::from((16., 16.)));
         // The wrapper scales around the tip itself.
-        assert_eq!(wrapper.focal(), Point::<f64, Local>::from((12., 13.)));
-        assert_eq!(wrapper.factor(), 2.);
+        assert_eq!(wrapper.focal, Point::<f64, Local>::from((12., 13.)));
+        assert_eq!(wrapper.factor, 2.);
     }
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
             placement_viewport().place_cursor(focal, display, (2, 3).into(), 2., Scale::from(1.));
 
         assert_eq!(final_pos, Point::<f64, Physical>::from((12., 10.)));
-        assert_eq!(wrapper.focal(), Point::<f64, Local>::from((0., 0.)));
+        assert_eq!(wrapper.focal, Point::<f64, Local>::from((0., 0.)));
     }
 
     #[test]
