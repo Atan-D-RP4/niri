@@ -300,7 +300,7 @@ impl Element for XrayElement {
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.geometry.as_logical().to_physical_precise_round(scale)
+        self.geometry.to_physical_precise_round(scale)
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {

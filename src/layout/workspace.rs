@@ -35,7 +35,7 @@ use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::RenderCtx;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, SizeExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::{
@@ -541,28 +541,20 @@ impl<W: LayoutElement> Workspace<W> {
         let transform = output.current_transform();
         let view_size = output_size(output).assume_local();
         let working_area = compute_working_area(output);
-        self.set_view_size(
-            scale,
-            transform,
-            view_size.as_logical(),
-            working_area.as_logical(),
-        );
+        self.set_view_size(scale, transform, view_size, working_area);
     }
 
     fn set_view_size(
         &mut self,
         scale: smithay::output::Scale,
         transform: Transform,
-        size: Size<f64, Logical>,
-        working_area: Rectangle<f64, Logical>,
+        size: Size<f64, Local>,
+        working_area: Rectangle<f64, Local>,
     ) {
         let scale_transform_changed = self.transform != transform
             || self.scale.integer_scale() != scale.integer_scale()
             || self.scale.fractional_scale() != scale.fractional_scale();
-        if !scale_transform_changed
-            && self.view_size == size.assume_local()
-            && self.working_area == working_area.assume_local()
-        {
+        if !scale_transform_changed && self.view_size == size && self.working_area == working_area {
             return;
         }
 
@@ -570,8 +562,8 @@ impl<W: LayoutElement> Workspace<W> {
 
         self.scale = scale;
         self.transform = transform;
-        self.view_size = size.assume_local();
-        self.working_area = working_area.assume_local();
+        self.view_size = size;
+        self.working_area = working_area;
 
         if fractional_scale_changed {
             // Options need to be recomputed for the new scale.
@@ -579,14 +571,14 @@ impl<W: LayoutElement> Workspace<W> {
         } else {
             // Pass our existing options as is.
             self.scrolling.update_config(
-                size.assume_local(),
-                working_area.assume_local(),
+                size,
+                working_area,
                 scale.fractional_scale(),
                 self.options.clone(),
             );
             self.floating.update_config(
-                size.assume_local(),
-                working_area.assume_local(),
+                size,
+                working_area,
                 scale.fractional_scale(),
                 self.options.clone(),
             );
@@ -598,7 +590,7 @@ impl<W: LayoutElement> Workspace<W> {
             self.shadow.update_config(shadow_config);
         }
 
-        self.background_buffer.resize(size);
+        self.background_buffer.resize(size.as_logical());
 
         if scale_transform_changed {
             for window in self.windows() {

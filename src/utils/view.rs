@@ -2,7 +2,7 @@ use glam::{Mat3, Vec2};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::Space;
 use smithay::output::Output;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Transform};
 
 use crate::utils::geometry::{
     Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
@@ -37,14 +37,6 @@ impl ViewportTransform {
     pub fn new(focal: Point<f64, Local>, factor: f64) -> Self {
         assert!(factor.is_finite() && factor > 0.);
         Self { focal, factor }
-    }
-
-    pub fn focal(&self) -> Point<f64, Local> {
-        self.focal
-    }
-
-    pub fn factor(&self) -> f64 {
-        self.factor
     }
 
     /// Applies this transform to a local point.
@@ -96,7 +88,7 @@ impl ViewportTransform {
     /// Returns the equivalent 2D affine matrix.
     pub fn to_matrix(&self) -> Mat3 {
         let scale = Vec2::splat(self.factor as f32);
-        let focal = self.focal();
+        let focal = self.focal;
         let focal = Vec2::new(focal.x as f32, focal.y as f32);
 
         Mat3::from_translation(focal) * Mat3::from_scale(scale) * Mat3::from_translation(-focal)
@@ -149,7 +141,6 @@ impl OutputViewCtx {
     ) -> Rectangle<f64, Local> {
         rect.to_logical(self.scale).assume_local()
     }
-
     /// Converts Local logical geometry into output-local Physical geometry.
     ///
     /// Inverse of [`Self::physical_rect_to_local`]: multiply by
@@ -160,20 +151,29 @@ impl OutputViewCtx {
         &self,
         rect: Rectangle<f64, Local>,
     ) -> Rectangle<f64, Physical> {
-        rect.as_logical().to_physical(self.scale)
+        rect.to_physical(self.scale)
     }
 
-    /// Creates a minimal context from an output geometry rectangle.
+    /// Converts a Local logical point into output-local Physical coordinates.
     ///
-    /// Only the output origin is meaningful for Global ↔ Local translation;
-    /// transform and scale are set to defaults (Normal, 1.0).
-    pub fn from_output_rect(rect: Rectangle<i32, Logical>) -> Self {
-        Self::new(
-            rect.to_f64().assume_global(),
-            Rectangle::from_size(rect.size.to_f64()).assume_local(),
-            Transform::Normal,
-            Scale::from(1.0),
-        )
+    /// Point-level counterpart of [`Self::local_rect_to_physical`]: exact
+    /// unit conversion only, no pixel snapping. Use
+    /// [`Self::local_point_to_physical_precise_round`] for render placement.
+    #[inline]
+    pub(crate) fn local_point_to_physical(&self, point: Point<f64, Local>) -> Point<f64, Physical> {
+        point.to_physical(self.scale)
+    }
+
+    /// Converts a Local logical point into Physical pixels with rounding.
+    ///
+    /// Point-level counterpart of the `as_logical().to_physical_precise_round()`
+    /// chains at render boundaries.
+    #[inline]
+    pub(crate) fn to_physical_precise_round<N: Coordinate>(
+        self,
+        point: Point<f64, Local>,
+    ) -> Point<N, Physical> {
+        point.to_physical_precise_round(self.scale)
     }
 
     /// Creates a minimal context from an output origin point.

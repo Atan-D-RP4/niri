@@ -468,12 +468,12 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                     .filter_map(|output| {
                         let zoom_state = state.niri.layout.zoom_state_for_output(output)?;
                         let vt = zoom_state.viewport_transform(now);
-                        let focal = vt.focal();
+                        let focal = vt.focal;
                         Some((
                             output.name().clone(),
                             niri_ipc::Zoom {
                                 is_locked: zoom_state.locked,
-                                level: vt.factor(),
+                                level: vt.factor,
                                 focal: (focal.x, focal.y),
                             },
                         ))

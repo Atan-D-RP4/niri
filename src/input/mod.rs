@@ -59,7 +59,7 @@ use crate::utils::geometry::{
 };
 use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::view::{OutputViewCtx, ViewportTransform};
-use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
+use crate::utils::{center_f64, get_monotonic_time, CastSessionId, ResizeEdge};
 
 pub mod backend_ext;
 pub mod click_grab;
@@ -364,9 +364,9 @@ impl State {
                 output.current_transform(),
             )
         } else if let Some(output) = mapped_output {
-            let geo = self.niri.global_space.output_geometry(output).unwrap();
+            let geo = self.niri.output_global_geo(output).unwrap();
             (
-                geo.to_f64().assume_global(),
+                geo,
                 true,
                 1. / output.current_scale().fractional_scale(),
                 output.current_transform(),
@@ -384,9 +384,12 @@ impl State {
         };
 
         let mut pos = {
-            let size = transform
-                .invert()
-                .transform_size(target_geo.size.as_logical());
+            // Note: `invert()` is intentionally not used here. For sizes,
+            // `transform_size` is identical with or without inversion (only the
+            // 90°/270° swap class matters), and device positions map with the
+            // forward transform. See `inverse_transform_point` docs for why
+            // `invert()` must not be used on points.
+            let size = transform.transform_size(target_geo.size.as_logical());
             transform.transform_point_in(event.position_transformed(size.to_i32_round()), &size)
         };
 
@@ -398,9 +401,7 @@ impl State {
             if let Some(device) = (&device as &dyn Any).downcast_ref::<input::Device>() {
                 if let Some(data) = self.niri.tablets.get(device) {
                     // This code does the same thing as mutter with "keep aspect ratio" enabled.
-                    let size = transform
-                        .invert()
-                        .transform_size(target_geo.size.as_logical());
+                    let size = transform.transform_size(target_geo.size.as_logical());
                     let output_aspect_ratio = size.w / size.h;
                     let ratio = data.aspect_ratio / output_aspect_ratio;
 
@@ -2567,7 +2568,7 @@ impl State {
             };
 
         // We have an output, so we can compute the new location and focus.
-        let mut new_pos = pos + delta;
+        let mut new_pos = (pos + delta).assume_global();
 
         // We received an event for the regular pointer, so show it now.
         self.niri.pointer_visibility = PointerVisibility::Visible;
@@ -2644,80 +2645,75 @@ impl State {
             None
         });
         if let Some((output, horizontal)) = spatial_grab.flatten() {
-            if let Some(geo) = self.niri.global_space.output_geometry(&output) {
-                let geo = geo.to_f64();
-                let geo_extent = geo.loc + geo.size.to_f64();
+            if let Some(ctx) = self.niri.output_state.get(&output).map(|s| s.view_ctx) {
+                let mut local = new_pos.to_local(&ctx);
+                let size = ctx.local_geo.size;
                 if horizontal {
-                    new_pos.x = (new_pos.x - geo.loc.x).rem_euclid(geo.size.w) + geo.loc.x;
-                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo_extent.y - 1.);
+                    local.x = local.x.rem_euclid(size.w);
+                    local.y = local.y.clamp(0., size.h - 1.);
                 } else {
-                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo_extent.x - 1.);
-                    new_pos.y = (new_pos.y - geo.loc.y).rem_euclid(geo.size.h) + geo.loc.y;
+                    local.x = local.x.clamp(0., size.w - 1.);
+                    local.y = local.y.rem_euclid(size.h);
                 }
+                new_pos = local.to_global(&ctx);
             }
         }
 
-        if self
-            .niri
-            .global_space
-            .output_under(new_pos)
-            .next()
-            .is_none()
-        {
+        if self.niri.output_under(new_pos).is_none() {
             // We ended up outside the outputs and need to clip the movement.
-            if let Some(output) = self.niri.global_space.output_under(pos).next() {
+            if let Some((output, _)) = self.niri.output_under(pos.assume_global()) {
                 // The pointer was previously on some output. Clip the movement against its
                 // boundaries.
-                let geom = self.niri.global_space.output_geometry(output).unwrap();
-                new_pos.x = new_pos
-                    .x
-                    .clamp(geom.loc.x as f64, (geom.loc.x + geom.size.w - 1) as f64);
-                new_pos.y = new_pos
-                    .y
-                    .clamp(geom.loc.y as f64, (geom.loc.y + geom.size.h - 1) as f64);
+                let ctx = self.niri.output_state[output].view_ctx;
+                let mut local = new_pos.to_local(&ctx);
+                let size = ctx.local_geo.size;
+                local.x = local.x.clamp(0., size.w - 1.);
+                local.y = local.y.clamp(0., size.h - 1.);
+                new_pos = local.to_global(&ctx);
             } else {
                 // The pointer was not on any output in the first place. Find one for it.
                 // Let's do the simple thing and just put it on the first output.
                 let output = self.niri.global_space.outputs().next().unwrap();
-                let geom = self.niri.global_space.output_geometry(output).unwrap();
-                new_pos = center(geom).to_f64();
+                let ctx = self.niri.output_state[output].view_ctx;
+                new_pos = center_f64(ctx.global_geo);
             }
         }
 
         // Clamp to the zoomed viewport when zoom is locked, so the pointer cannot escape the
         // visible (magnified) region.
-        let zoom_output = self.niri.global_space.output_under(new_pos).next().cloned();
+        let zoom_output = self
+            .niri
+            .output_under(new_pos)
+            .map(|(output, _)| output.clone());
         let zoom_ctx = zoom_output
             .as_ref()
             .and_then(|o| self.niri.output_state.get(o).map(|s| s.view_ctx));
         if let (Some(output), Some(ctx)) = (&zoom_output, &zoom_ctx) {
             if let Some(state) = self.niri.layout.zoom_state_for_output(output) {
                 if state.locked {
-                    let new_pos_local = new_pos.assume_global().to_local(ctx);
+                    let new_pos_local = new_pos.to_local(ctx);
                     if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
                         output,
                         new_pos_local,
                         ctx.local_geo.size,
                     ) {
-                        new_pos = clamped.to_global(ctx).as_logical();
+                        new_pos = clamped.to_global(ctx);
                     }
                 }
             }
         }
 
-        self.update_screenshot_from_content(new_pos.assume_global(), None);
+        self.update_screenshot_from_content(new_pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) =
-                self.niri.output_under(new_pos.assume_global())
-            {
+            if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
                 if mru_output == output {
                     self.niri.window_mru_ui.pointer_motion(pos_within_output);
                 }
             }
         }
 
-        let under = self.niri.contents_under(new_pos.assume_global());
+        let under = self.niri.contents_under(new_pos);
 
         // Handle confined pointer.
         if let Some((focus_surface, region)) = pointer_confined {
@@ -2730,8 +2726,7 @@ impl State {
 
             // Prevent the pointer from leaving the confine region, if any.
             if let Some(region) = region {
-                let new_pos_within_surface =
-                    new_pos.assume_global().surface_offset(focus_surface.1);
+                let new_pos_within_surface = new_pos.surface_offset(focus_surface.1);
                 if !region.contains(new_pos_within_surface.as_logical().to_i32_round()) {
                     prevent = true;
                 }
@@ -2765,7 +2760,7 @@ impl State {
                 .clone()
                 .map(|(surface, location)| (surface, location.as_logical())),
             &MotionEvent {
-                location: new_pos,
+                location: new_pos.as_logical(),
                 serial,
                 time: event.time(),
             },
@@ -2806,9 +2801,7 @@ impl State {
             .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
             .unwrap_or(false);
         if is_dnd_grab {
-            if let Some((output, pos_within_output)) =
-                self.niri.output_under(new_pos.assume_global())
-            {
+            if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
                 let output = output.clone();
                 self.niri.layout.dnd_update(output, pos_within_output);
             }
@@ -2817,7 +2810,7 @@ impl State {
         // Keep the zoom focal tracking the cursor (CursorFollow mode) or update its stored cursor
         // position for OnEdge mode. No-op during active transitions (they drive the focal).
         if let (Some(output), Some(ctx)) = (&zoom_output, &zoom_ctx) {
-            let cursor_local = new_pos.assume_global().to_local(ctx);
+            let cursor_local = new_pos.to_local(ctx);
             self.niri.layout.set_zoom_cursor_pos(output, cursor_local);
             self.niri
                 .layout
@@ -4475,15 +4468,6 @@ impl State {
         }
     }
 
-    /// Get the output origin in global logical space.
-    #[allow(dead_code)] // Used when zoom input wiring is completed.
-    fn output_origin(&self, output: &Output) -> Point<f64, Logical> {
-        self.niri
-            .global_space
-            .output_geometry(output)
-            .map_or(Point::from((0., 0.)), |g| g.loc.to_f64())
-    }
-
     fn pinch_output_geometry(
         &self,
         output: &Output,
@@ -4783,7 +4767,9 @@ impl State {
         let output = output.as_ref().or(fallback_output)?;
         let output_geo = self.niri.global_space.output_geometry(output).unwrap();
         let transform = output.current_transform();
-        let size = transform.invert().transform_size(output_geo.size);
+        // Same note as in `compute_tablet_position`: `invert()` is a no-op for
+        // sizes, and device positions use the forward transform.
+        let size = transform.transform_size(output_geo.size);
         let pos = transform.transform_point_in(evt.position_transformed(size), &size.to_f64());
         Some(
             pos.assume_local()
@@ -5150,9 +5136,7 @@ fn screenshot_point_in_content(
     output: &Output,
     pos: Point<f64, Global>,
 ) -> Point<i32, Physical> {
-    let point = pos.to_local(ctx).as_logical();
-    let scale = output.current_scale().fractional_scale();
-    let point = point.to_physical_precise_round(scale);
+    let point = ctx.to_physical_precise_round(pos.to_local(ctx));
 
     let size = output.current_mode().unwrap().size;
     let transform = output.current_transform();

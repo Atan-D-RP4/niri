@@ -1254,8 +1254,8 @@ impl State {
     }
 
     pub fn move_cursor_to_output(&mut self, output: &Output) {
-        let geo = self.niri.global_space.output_geometry(output).unwrap();
-        self.move_cursor(center(geo).to_f64().assume_global());
+        let geo = self.niri.output_global_geo(output).unwrap();
+        self.move_cursor(center_f64(geo));
     }
 
     pub fn refresh_popup_grab(&mut self) {
@@ -3077,6 +3077,17 @@ impl Niri {
                 self.queue_redraw(&output);
             }
         }
+
+        // Keep the cached view contexts in sync: any output that moved has a stale
+        // global_geo.loc, which would corrupt to_local/to_global conversions.
+        let outputs: Vec<Output> = self.global_space.outputs().cloned().collect();
+        for output in &outputs {
+            if let Some(view_ctx) = OutputViewCtx::for_output(&self.global_space, output) {
+                if let Some(state) = self.output_state.get_mut(output) {
+                    state.view_ctx = view_ctx;
+                }
+            }
+        }
     }
 
     pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>, vrr: bool) {
@@ -3157,13 +3168,8 @@ impl Niri {
         assert!(rv.is_none(), "output was already tracked");
 
         // Must be last since it will call queue_redraw(output) which needs things to be filled-in.
+        // It also refreshes the cached view contexts, including for the new output.
         self.reposition_outputs(Some(&output));
-
-        // Now that the output position is established in the space, compute the cached view
-        // context.
-        if let Some(view_ctx) = OutputViewCtx::for_output(&self.global_space, &output) {
-            self.output_state.get_mut(&output).unwrap().view_ctx = view_ctx;
-        }
     }
 
     pub fn output_exists(&self, output: &Output) -> bool {
@@ -3333,6 +3339,20 @@ impl Niri {
         Some((output, pos_within_output))
     }
 
+    /// Cached global geometry for an output.
+    ///
+    /// Reads the view-context cache (kept in sync by `reposition_outputs` and
+    /// `output_resized`), falling back to `global_space` for outputs without
+    /// cached state. Prefer this over hand-rolling `to_f64().assume_global()`.
+    pub fn output_global_geo(&self, output: &Output) -> Option<Rectangle<f64, Global>> {
+        if let Some(ctx) = self.output_state.get(output).map(|s| s.view_ctx) {
+            return Some(ctx.global_geo);
+        }
+        self.global_space
+            .output_geometry(output)
+            .map(|geo| geo.to_f64().assume_global())
+    }
+
     fn is_inside_hot_corner(&self, output: &Output, pos: Point<f64, Local>) -> bool {
         let config = self.config.borrow();
         let hot_corners = output
@@ -3346,10 +3366,8 @@ impl Niri {
             return false;
         }
 
-        // Use size from the ceiled output geometry, since that's what we currently use for pointer
-        // motion clamping.
-        let geom = self.global_space.output_geometry(output).unwrap();
-        let size = geom.size.to_f64();
+        // Use the cached local size, matching the content-space clamping elsewhere.
+        let size = self.output_state[output].view_ctx.local_geo.size;
 
         let contains = move |corner: Point<f64, Local>| {
             Rectangle::new(corner, Size::new(1., 1.)).contains(pos)
@@ -4516,11 +4534,11 @@ impl Niri {
         // optimization, not an "is zoom active" predicate — callers still
         // sample the viewport unconditionally via viewport_transform(now),
         // and everything below derives from that one value.
-        if vt.factor() <= 1.0 {
+        if vt.factor <= 1.0 {
             return element;
         }
 
-        let zoom_filter = zoom_filter(vt.factor(), self.config.borrow().zoom.zoom_filter_threshold);
+        let zoom_filter = zoom_filter(vt.factor, self.config.borrow().zoom.zoom_filter_threshold);
         let view_ctx = self.output_state[output].view_ctx;
 
         macro_rules! apply_zoom {
@@ -4586,7 +4604,7 @@ impl Niri {
         // Only real cursors scale; DnD icons just follow unscaled.
         let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
         let graphic_scale = if scale_with_zoom && element_kind == Kind::Cursor {
-            vt.factor()
+            vt.factor
         } else {
             1.
         };
@@ -4611,7 +4629,7 @@ impl Niri {
         output: &Output,
         vt: ViewportTransform,
     ) -> Option<(Point<f64, Physical>, Point<f64, Local>)> {
-        if vt.factor() <= 1.0 {
+        if vt.factor <= 1.0 {
             return None;
         }
 
@@ -4633,10 +4651,9 @@ impl Niri {
         let viewport = vt.apply_inverse_rect(output_rect);
 
         let display_cursor = pointer_local.constrain(viewport);
-        let output_scale = Scale::from(output.current_scale().fractional_scale());
 
         Some((
-            pointer_local.as_logical().to_physical(output_scale),
+            view_ctx.local_point_to_physical(pointer_local),
             display_cursor,
         ))
     }
@@ -4658,7 +4675,7 @@ impl Niri {
         ScreenshotPreviewZoom {
             viewport,
             view_ctx,
-            filter: zoom_filter(viewport.factor(), config.zoom.zoom_filter_threshold),
+            filter: zoom_filter(viewport.factor, config.zoom.zoom_filter_threshold),
             scale_with_zoom: config.cursor.scale_with_zoom,
         }
     }
@@ -6422,7 +6439,7 @@ impl Niri {
             let capture_level = self
                 .layout
                 .zoom_state_for_output(&output)
-                .map(|state| state.viewport_transform(self.clock.now()).factor())
+                .map(|state| state.viewport_transform(self.clock.now()).factor)
                 .unwrap_or(1.);
             let targets = [
                 RenderTarget::Output,
@@ -6490,10 +6507,8 @@ impl Niri {
                                 .assume_global()
                         });
                         let view_ctx = self.output_state[&output].view_ctx;
-                        let tip = cursor_pos
-                            .to_local(&view_ctx)
-                            .as_logical()
-                            .to_physical_precise_round(scale);
+                        let tip =
+                            view_ctx.to_physical_precise_round(cursor_pos.to_local(&view_ctx));
                         let hotspot = tip - geo.loc;
                         CapturedPointer {
                             texture,
@@ -7486,7 +7501,7 @@ fn scale_relocate_crop<E: Element>(
     zoom: f64,
     ws_geo: Rectangle<f64, Local>,
 ) -> Option<CropRenderElement<RelocateRenderElement<RescaleRenderElement<E>>>> {
-    let ws_geo = ws_geo.as_logical().to_physical_precise_round(output_scale);
+    let ws_geo = ws_geo.to_physical_precise_round(output_scale);
     let elem = RescaleRenderElement::from_element(elem, Point::from((0, 0)), zoom);
     let elem = RelocateRenderElement::from_element(elem, ws_geo.loc, Relocate::Relative);
     CropRenderElement::from_element(elem, output_scale, ws_geo)

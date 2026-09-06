@@ -5549,7 +5549,7 @@ impl<W: LayoutElement> Column<W> {
                 self.pending_sizing_mode(),
                 tile.window().pending_sizing_mode()
             );
-            assert_eq!(self.view_size, tile.view_size().assume_local());
+            assert_eq!(self.view_size.as_logical(), tile.view_size());
             tile.verify_invariants();
 
             let mut data2 = *data;
