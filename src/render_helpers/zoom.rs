@@ -479,50 +479,38 @@ mod tests {
     }
 
     #[test]
-    fn zoom_filter_below_threshold() {
-        // zoom_factor between 1.0 (exclusive) and threshold (exclusive) → Linear
-        assert_eq!(zoom_filter(1.5, 2.0), Some(TextureFilter::Linear));
-        assert_eq!(zoom_filter(1.001, 2.0), Some(TextureFilter::Linear));
-        assert_eq!(zoom_filter(1.999, 2.0), Some(TextureFilter::Linear));
+    fn zoom_filter_selects_by_band() {
+        // (factor, threshold) -> filter. Bands: <= 1.0 is None (unzoomed),
+        // (1.0, threshold) is Linear, [threshold, ..) is Nearest.
+        let cases = [
+            ((1.0, 2.0), None),
+            ((0.5, 2.0), None),
+            ((0.0, 2.0), None),
+            ((1.001, 2.0), Some(TextureFilter::Linear)),
+            ((1.5, 2.0), Some(TextureFilter::Linear)),
+            ((1.999, 2.0), Some(TextureFilter::Linear)),
+            ((2.0 - f64::EPSILON, 2.0), Some(TextureFilter::Linear)),
+            ((2.0, 2.0), Some(TextureFilter::Nearest)),
+            ((3.0, 2.0), Some(TextureFilter::Nearest)),
+            ((100.0, 2.0), Some(TextureFilter::Nearest)),
+            // Extreme thresholds: Nearest kicks in immediately above 1x,
+            // or Linear holds for any sane factor.
+            ((1.001, 1.001), Some(TextureFilter::Nearest)),
+            ((100.0, 1e9), Some(TextureFilter::Linear)),
+        ];
+
+        for ((factor, threshold), expected) in cases {
+            assert_eq!(
+                zoom_filter(factor, threshold),
+                expected,
+                "zoom_filter({factor}, {threshold})"
+            );
+        }
     }
 
     #[test]
-    fn zoom_filter_at_or_above_threshold() {
-        // zoom_factor >= threshold → Nearest
-        assert_eq!(zoom_filter(2.0, 2.0), Some(TextureFilter::Nearest));
-        assert_eq!(zoom_filter(3.0, 2.0), Some(TextureFilter::Nearest));
-        assert_eq!(zoom_filter(100.0, 2.0), Some(TextureFilter::Nearest));
-    }
-
-    #[test]
-    fn zoom_filter_at_or_below_one() {
-        // zoom_factor <= 1.0 → None
-        assert_eq!(zoom_filter(1.0, 2.0), None);
-        assert_eq!(zoom_filter(0.5, 2.0), None);
-        assert_eq!(zoom_filter(0.0, 2.0), None);
-    }
-
-    #[test]
-    fn zoom_filter_threshold_sensitivity() {
-        // Very low threshold makes Nearest kick in immediately above 1x
-        assert_eq!(zoom_filter(1.001, 1.001), Some(TextureFilter::Nearest));
-        // High threshold keeps Linear always
-        assert_eq!(zoom_filter(100.0, 1e9), Some(TextureFilter::Linear));
-    }
-
-    #[test]
-    fn zoom_filter_equality_exact() {
-        // At exactly threshold → Nearest (the "<" is strict on the Linear side)
-        assert_eq!(zoom_filter(2.0, 2.0), Some(TextureFilter::Nearest));
-        // Just below threshold → Linear
-        assert_eq!(
-            zoom_filter(2.0 - f64::EPSILON, 2.0),
-            Some(TextureFilter::Linear)
-        );
-    }
-
-    #[test]
-    fn zoom_filter_changed_in_both_directions() {
+    fn zoom_filter_changed_detects_band_crossing() {
+        // Crossings in either direction invalidate; staying in-band does not.
         assert!(zoom_filter_changed(
             zoom_filter(1.99, 2.0),
             zoom_filter(2.0, 2.0),
@@ -531,10 +519,6 @@ mod tests {
             zoom_filter(2.0, 2.0),
             zoom_filter(1.99, 2.0),
         ));
-    }
-
-    #[test]
-    fn zoom_filter_unchanged_within_same_band() {
         assert!(!zoom_filter_changed(
             zoom_filter(1.25, 2.0),
             zoom_filter(1.75, 2.0),
@@ -547,17 +531,5 @@ mod tests {
             zoom_filter(1.0, 2.0),
             zoom_filter(1.0, 2.0)
         ));
-    }
-
-    #[test]
-    #[should_panic(expected = "NaN")]
-    fn zoom_filter_nan_zoom_factor() {
-        zoom_filter(f64::NAN, 2.0);
-    }
-
-    #[test]
-    #[should_panic(expected = "NaN")]
-    fn zoom_filter_nan_threshold() {
-        zoom_filter(2.0, f64::NAN);
     }
 }

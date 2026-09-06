@@ -1406,37 +1406,32 @@ mod tests {
     }
 
     #[test]
-    fn export_rect_is_identity_without_zoom() {
-        let content = Rectangle::new((10, 20).into(), (100, 80).into());
+    fn export_rect_maps_content_through_viewport() {
         let ctx = export_view_ctx(1.);
-        assert_eq!(
-            export_rect(content, ViewportTransform::identity(), &ctx),
-            content
-        );
-    }
+        let cases = [
+            // Identity viewport preserves content exactly.
+            (
+                Rectangle::new((10, 20).into(), (100, 80).into()),
+                ViewportTransform::identity(),
+                Rectangle::new((10, 20).into(), (100, 80).into()),
+            ),
+            // Pure 2x around the origin: the screen image is the doubled rect.
+            (
+                Rectangle::new((10, 20).into(), (100, 80).into()),
+                ViewportTransform::new((0., 0.).into(), 2.),
+                Rectangle::new((20, 40).into(), (200, 160).into()),
+            ),
+            // Loc (110, 90) -> (120, 100); BR (130, 100) -> (160, 120).
+            (
+                Rectangle::new((110, 90).into(), (20, 10).into()),
+                ViewportTransform::new((100., 80.).into(), 2.),
+                Rectangle::new((120, 100).into(), (40, 20).into()),
+            ),
+        ];
 
-    #[test]
-    fn export_rect_matches_displayed_image() {
-        // Pure 2x around the origin: the screen image is the doubled rect.
-        let viewport = ViewportTransform::new((0., 0.).into(), 2.);
-        let ctx = export_view_ctx(1.);
-        let content = Rectangle::new((10, 20).into(), (100, 80).into());
-        assert_eq!(
-            export_rect(content, viewport, &ctx),
-            Rectangle::new((20, 40).into(), (200, 160).into())
-        );
-    }
-
-    #[test]
-    fn export_rect_follows_focal_and_scale() {
-        let viewport = ViewportTransform::new((100., 80.).into(), 2.);
-        let ctx = export_view_ctx(1.);
-        let content = Rectangle::new((110, 90).into(), (20, 10).into());
-        // Loc (110, 90) -> (120, 100); BR (130, 100) -> (160, 120).
-        assert_eq!(
-            export_rect(content, viewport, &ctx),
-            Rectangle::new((120, 100).into(), (40, 20).into())
-        );
+        for (content, viewport, expected) in cases {
+            assert_eq!(export_rect(content, viewport, &ctx), expected);
+        }
     }
 
     #[test]

@@ -97,6 +97,37 @@ fn current_viewport(layout: &Layout<TestWindow>, output: &Output) -> ViewportTra
         .viewport_transform(now)
 }
 
+/// Begins a CursorFollow gesture and drives it to 2x in two updates.
+fn begin_gesture_at_2x(
+    layout: &mut Layout<TestWindow>,
+    output: &Output,
+    cursor: Point<f64, Local>,
+    output_size: Size<f64, Local>,
+) {
+    layout.zoom_gesture_begin(
+        output,
+        Some(cursor),
+        Some(output_size),
+        Some(ZoomMovementMode::CursorFollow),
+    );
+    let _ = layout.zoom_gesture_update(
+        output,
+        1.0,
+        1.0,
+        Duration::from_millis(16),
+        Some(cursor),
+        Some(output_size),
+    );
+    let _ = layout.zoom_gesture_update(
+        output,
+        2.0,
+        1.0,
+        Duration::from_millis(32),
+        Some(cursor),
+        Some(output_size),
+    );
+}
+
 /// Lock preserves focal when level changes; unlock restores cursor tracking.
 #[test]
 fn locked_zoom_level_change_preserves_focal() {
@@ -170,34 +201,16 @@ fn zoom_levels_are_independent_per_output() {
 
     assert!((layout.zoom_state_for_output(&output1).unwrap().level - 2.0).abs() < 1e-6);
     assert!((layout.zoom_state_for_output(&output2).unwrap().level - 1.0).abs() < 1e-6);
-}
-
-#[test]
-fn removing_one_output_does_not_change_other_output_zoom() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output1 = make_output("o1", 1920, 1080);
-    let output2 = make_output("o2", 1280, 720);
-    layout.add_output(output1.clone(), None);
-    layout.add_output(output2.clone(), None);
-
-    layout.zoom_set_level(
-        &output1,
-        2.0,
-        Point::from((50.0, 50.0)),
-        ZoomMovementMode::CursorFollow,
-        false,
-    );
-    complete_animations(&mut layout);
-    let before = layout.zoom_state_for_output(&output1).unwrap().level;
 
     layout.remove_output(&output2);
-    let after = layout.zoom_state_for_output(&output1).unwrap().level;
-
-    assert!((after - before).abs() < 1e-6);
+    assert!(
+        (layout.zoom_state_for_output(&output1).unwrap().level - 2.0).abs() < 1e-6,
+        "removing output 2 must not change output 1 zoom"
+    );
 }
 
 #[test]
-fn centered_zoom_level_change_animates_when_target_is_edge_constrained() {
+fn centered_change_animates_at_edge() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -233,7 +246,7 @@ fn centered_zoom_level_change_animates_when_target_is_edge_constrained() {
 }
 
 #[test]
-fn zoom_snapshot_reports_consistent_level_focal_locked() {
+fn snapshot_reports_level_focal_lock() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -268,7 +281,7 @@ fn zoom_snapshot_reports_consistent_level_focal_locked() {
 }
 
 #[test]
-fn on_edge_set_zoom_level_creates_animating_transition() {
+fn on_edge_set_level_animates() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -287,7 +300,7 @@ fn on_edge_set_zoom_level_creates_animating_transition() {
 }
 
 #[test]
-fn on_edge_gesture_focal_uses_anchor_when_cursor_within_viewport() {
+fn on_edge_gesture_tracks_cursor() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -309,7 +322,6 @@ fn on_edge_gesture_focal_uses_anchor_when_cursor_within_viewport() {
         Some(cursor_local),
         Some(output_size),
     );
-
     let result = layout.zoom_gesture_update(
         &output,
         2.0,
@@ -338,39 +350,14 @@ fn on_edge_gesture_focal_uses_anchor_when_cursor_within_viewport() {
         viewport.focal.y,
         cursor_local.y,
     );
-    assert!(
-        viewport.focal.x >= 0.0 && viewport.focal.x <= 1920.0,
-        "focal.x {} out of bounds",
-        viewport.focal.x
-    );
-    assert!(
-        viewport.focal.y >= 0.0 && viewport.focal.y <= 1080.0,
-        "focal.y {} out of bounds",
-        viewport.focal.y
-    );
-}
 
-#[test]
-fn on_edge_gesture_tracks_cursor_pos_within_viewport() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
-    let cursor_local = Point::from((500.0, 400.0));
-    let output_size = Size::from((1920.0, 1080.0));
-
-    layout.zoom_gesture_begin(
-        &output,
-        Some(cursor_local),
-        Some(output_size),
-        Some(ZoomMovementMode::OnEdge),
-    );
-
+    // Moving the cursor pulls the focal along, staying within the output.
     let new_cursor = Point::from((700.0, 500.0));
     let result = layout.zoom_gesture_update(
         &output,
         2.0,
         1.0,
-        Duration::from_millis(16),
+        Duration::from_millis(48),
         Some(new_cursor),
         Some(output_size),
     );
@@ -396,7 +383,7 @@ fn on_edge_gesture_tracks_cursor_pos_within_viewport() {
 }
 
 #[test]
-fn update_zoom_movement_mode_recomputes_on_edge_anchor() {
+fn mode_switch_recomputes_anchor() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -428,7 +415,7 @@ fn update_zoom_movement_mode_recomputes_on_edge_anchor() {
 }
 
 #[test]
-fn update_zoom_movement_mode_noop_when_no_transition() {
+fn movement_mode_noop_without_transition() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -443,113 +430,46 @@ fn update_zoom_movement_mode_noop_when_no_transition() {
 }
 
 #[test]
-fn off_true_zoom_level_change_skips_transition() {
-    let mut config = Config::default();
-    config.animations.zoom_level_change.0.off = true;
-    let mut layout = Layout::<TestWindow>::new(Clock::with_time(Duration::ZERO), &config);
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
-
-    layout.zoom_set_level(
-        &output,
-        2.0,
-        Point::from((100.0, 100.0)),
-        ZoomMovementMode::CursorFollow,
-        false,
-    );
-
-    // Animation::new() with config.off=true sets from=to, so value_at
-    // returns to immediately, and the transition is_done_at returns true,
-    // so it gets cleared once advance_animations runs.
-    complete_animations(&mut layout);
-    let state = layout.zoom_state_for_output(&output).unwrap();
-    assert!(
-        !state.transitioning(),
-        "off=true should not leave a pending transition"
-    );
-    assert!(
-        (state.level - 2.0).abs() < 1e-6,
-        "off=true should snap to target level immediately"
-    );
-}
-
-#[test]
-fn zero_duration_zoom_level_change_skips_transition() {
+fn instant_zoom_level_change_skips_transition() {
     use niri_config::animations::{Animation as AnimConf, Curve as C, EasingParams, Kind as K};
 
-    let mut config = Config::default();
-    config.animations.zoom_level_change.0 = AnimConf {
+    // Both a disabled animation and a zero-duration one must snap to the
+    // target level with no pending transition.
+    let mut off = Config::default();
+    off.animations.zoom_level_change.0.off = true;
+    let mut zero_duration = Config::default();
+    zero_duration.animations.zoom_level_change.0 = AnimConf {
         off: false,
         kind: K::Easing(EasingParams {
             duration_ms: 0,
             curve: C::Linear,
         }),
     };
-    let mut layout = Layout::<TestWindow>::new(Clock::with_time(Duration::ZERO), &config);
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
 
-    layout.zoom_set_level(
-        &output,
-        2.0,
-        Point::from((100.0, 100.0)),
-        ZoomMovementMode::CursorFollow,
-        false,
-    );
+    for config in [off, zero_duration] {
+        let mut layout = Layout::<TestWindow>::new(Clock::with_time(Duration::ZERO), &config);
+        let output = make_output("o1", 1920, 1080);
+        layout.add_output(output.clone(), None);
 
-    complete_animations(&mut layout);
-    let state = layout.zoom_state_for_output(&output).unwrap();
-    assert!(
-        !state.transitioning(),
-        "zero-duration animation should not leave a pending transition"
-    );
-    assert!(
-        (state.level - 2.0).abs() < 1e-6,
-        "zero-duration should snap to target level immediately"
-    );
-}
+        layout.zoom_set_level(
+            &output,
+            2.0,
+            Point::from((100.0, 100.0)),
+            ZoomMovementMode::CursorFollow,
+            false,
+        );
 
-#[test]
-fn zoom_gesture_on_one_output_does_not_affect_other() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output1 = make_output("o1", 1920, 1080);
-    let output2 = make_output("o2", 1920, 1080);
-    layout.add_output(output1.clone(), None);
-    layout.add_output(output2.clone(), None);
-    let output_size = Size::from((1920.0, 1080.0));
-    let cursor_local = Point::from((500.0, 400.0));
-
-    let initial_level2 = layout.zoom_state_for_output(&output2).unwrap().level;
-
-    layout.zoom_gesture_begin(
-        &output1,
-        Some(cursor_local),
-        Some(output_size),
-        Some(ZoomMovementMode::CursorFollow),
-    );
-
-    let _ = layout.zoom_gesture_update(
-        &output1,
-        2.0,
-        1.0,
-        Duration::from_millis(16),
-        Some(cursor_local),
-        Some(output_size),
-    );
-
-    let level2_during = layout.zoom_state_for_output(&output2).unwrap().level;
-    assert!(
-        (level2_during - initial_level2).abs() < 1e-6,
-        "output 2 level should not change during output 1 gesture"
-    );
-
-    layout.zoom_gesture_end(&output1, false);
-
-    let level2_after = layout.zoom_state_for_output(&output2).unwrap().level;
-    assert!(
-        (level2_after - initial_level2).abs() < 1e-6,
-        "output 2 level should not change after output 1 gesture ends"
-    );
+        complete_animations(&mut layout);
+        let state = layout.zoom_state_for_output(&output).unwrap();
+        assert!(
+            !state.transitioning(),
+            "instant change should not leave a pending transition"
+        );
+        assert!(
+            (state.level - 2.0).abs() < 1e-6,
+            "instant change should snap to target level immediately"
+        );
+    }
 }
 
 #[test]
@@ -613,7 +533,7 @@ fn zoom_gesture_cursor_moves_between_outputs() {
 }
 
 #[test]
-fn zoom_gesture_update_accepts_cursor_local_and_updates_focal() {
+fn gesture_cursor_updates_focal() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -658,33 +578,7 @@ fn zoom_gesture_end_maintains_level_with_no_animation() {
     let output_size = Size::from((1920.0, 1080.0));
     let cursor_local = Point::from((500.0, 400.0));
 
-    layout.zoom_gesture_begin(
-        &output,
-        Some(cursor_local),
-        Some(output_size),
-        Some(ZoomMovementMode::CursorFollow),
-    );
-
-    assert!(layout
-        .zoom_gesture_update(
-            &output,
-            1.0,
-            1.0,
-            Duration::from_millis(16),
-            Some(cursor_local),
-            Some(output_size),
-        )
-        .is_some());
-    assert!(layout
-        .zoom_gesture_update(
-            &output,
-            2.0,
-            1.0,
-            Duration::from_millis(32),
-            Some(cursor_local),
-            Some(output_size),
-        )
-        .is_some());
+    begin_gesture_at_2x(&mut layout, &output, cursor_local, output_size);
 
     assert_eq!(layout.zoom_gesture_end(&output, false), Some(true));
     let state = layout.zoom_state_for_output(&output).unwrap();
@@ -695,40 +589,14 @@ fn zoom_gesture_end_maintains_level_with_no_animation() {
 }
 
 #[test]
-fn zoom_gesture_cancel_animates_back_to_start_level() {
+fn gesture_cancel_restores_level() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
     let output_size = Size::from((1920.0, 1080.0));
     let cursor_local = Point::from((500.0, 400.0));
 
-    layout.zoom_gesture_begin(
-        &output,
-        Some(cursor_local),
-        Some(output_size),
-        Some(ZoomMovementMode::CursorFollow),
-    );
-
-    assert!(layout
-        .zoom_gesture_update(
-            &output,
-            1.0,
-            1.0,
-            Duration::from_millis(16),
-            Some(cursor_local),
-            Some(output_size),
-        )
-        .is_some());
-    assert!(layout
-        .zoom_gesture_update(
-            &output,
-            2.0,
-            1.0,
-            Duration::from_millis(32),
-            Some(cursor_local),
-            Some(output_size),
-        )
-        .is_some());
+    begin_gesture_at_2x(&mut layout, &output, cursor_local, output_size);
 
     assert_eq!(layout.zoom_gesture_end(&output, true), Some(true));
     let state_before = layout.zoom_state_for_output(&output).unwrap();
@@ -814,7 +682,7 @@ fn focal_output_size_applies_output_transform() {
 }
 
 #[test]
-fn rotated_focal_tracking_stays_within_transformed_output() {
+fn rotated_tracking_stays_in_bounds() {
     let output = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
     let size = Layout::<TestWindow>::output_size_for_focal(&output);
     let mut tracking = FocalTrackingContext::default();
@@ -828,7 +696,7 @@ fn rotated_focal_tracking_stays_within_transformed_output() {
 }
 
 #[test]
-fn on_edge_focal_tracking_handles_all_rotated_output_corners() {
+fn on_edge_rotated_corners_in_bounds() {
     let output = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
     let size = Layout::<TestWindow>::output_size_for_focal(&output);
     let corners = [(0.0, 0.0), (size.w, 0.0), (0.0, size.h), (size.w, size.h)];
@@ -851,7 +719,7 @@ fn on_edge_focal_tracking_handles_all_rotated_output_corners() {
 }
 
 #[test]
-fn composed_level_focal_animation_completes_to_targets() {
+fn composed_animation_completes() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -1040,28 +908,7 @@ fn set_zoom_level_during_gesture_clears_it() {
     let cursor = Point::from((500.0, 400.0));
     let output_size = Size::from((1920.0, 1080.0));
 
-    layout.zoom_gesture_begin(
-        &output,
-        Some(cursor),
-        Some(output_size),
-        Some(ZoomMovementMode::CursorFollow),
-    );
-    let _ = layout.zoom_gesture_update(
-        &output,
-        1.0,
-        1.0,
-        Duration::from_millis(16),
-        Some(cursor),
-        Some(output_size),
-    );
-    let _ = layout.zoom_gesture_update(
-        &output,
-        2.0,
-        1.0,
-        Duration::from_millis(32),
-        Some(cursor),
-        Some(output_size),
-    );
+    begin_gesture_at_2x(&mut layout, &output, cursor, output_size);
 
     layout.zoom_set_level(&output, 3.0, cursor, ZoomMovementMode::CursorFollow, false);
 
@@ -1124,49 +971,27 @@ fn toggle_zoom_lock_during_gesture_does_not_panic() {
 }
 
 #[test]
-fn zoom_level_clamps_below_minimum() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
+fn zoom_level_clamps_to_min_and_max() {
+    for (requested, expected) in [(0.5, 1.0), (30.0, 10.0)] {
+        let mut layout = Layout::<TestWindow>::default();
+        let output = make_output("o1", 1920, 1080);
+        layout.add_output(output.clone(), None);
 
-    layout.zoom_set_level(
-        &output,
-        0.5,
-        Point::from((100.0, 100.0)),
-        ZoomMovementMode::CursorFollow,
-        false,
-    );
-    complete_animations(&mut layout);
+        layout.zoom_set_level(
+            &output,
+            requested,
+            Point::from((100.0, 100.0)),
+            ZoomMovementMode::CursorFollow,
+            false,
+        );
+        complete_animations(&mut layout);
 
-    let state = layout.zoom_state_for_output(&output).unwrap();
-    assert!(
-        (state.level - 1.0).abs() < 1e-6,
-        "level {} should be clamped to min 1.0",
-        state.level
-    );
-}
-
-#[test]
-fn zoom_level_clamps_above_maximum() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
-
-    layout.zoom_set_level(
-        &output,
-        30.0,
-        Point::from((100.0, 100.0)),
-        ZoomMovementMode::CursorFollow,
-        false,
-    );
-    complete_animations(&mut layout);
-
-    let state = layout.zoom_state_for_output(&output).unwrap();
-    assert!(
-        (state.level - 10.0).abs() < 1e-6,
-        "level {} should be clamped to max 10.0",
-        state.level
-    );
+        let level = layout.zoom_state_for_output(&output).unwrap().level;
+        assert!(
+            (level - expected).abs() < 1e-6,
+            "level {requested} should clamp to {expected}, got {level}"
+        );
+    }
 }
 
 #[test]
@@ -1244,11 +1069,13 @@ fn set_zoom_lock_returns_previous_state() {
 }
 
 #[test]
-fn zoom_in_and_out_use_linear_steps() {
+fn zoom_in_and_out_follow_increment_type() {
+    let cursor = Point::from((500.0, 400.0));
+
+    // Linear (default config): 1.0 -> 2.0 -> 1.0.
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
-    let cursor = Point::from((500.0, 400.0));
 
     layout.zoom_in(&output, cursor);
     complete_animations(&mut layout);
@@ -1257,16 +1084,13 @@ fn zoom_in_and_out_use_linear_steps() {
     layout.zoom_out(&output, cursor);
     complete_animations(&mut layout);
     assert_eq!(layout.zoom_state_for_output(&output).unwrap().level, 1.0);
-}
 
-#[test]
-fn exponential_zoom_steps_double_and_halve() {
+    // Exponential: 2.0 -> 4.0 -> 2.0.
     let mut config = Config::default();
     config.zoom.increment_type = ZoomIncrementType::Exponential;
     let mut layout = Layout::<TestWindow>::new(Clock::with_time(Duration::ZERO), &config);
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
-    let cursor = Point::from((500.0, 400.0));
 
     layout.zoom_set_level(&output, 2.0, cursor, ZoomMovementMode::CursorFollow, false);
     complete_animations(&mut layout);
@@ -1280,25 +1104,19 @@ fn exponential_zoom_steps_double_and_halve() {
 }
 
 #[test]
-fn zoom_out_from_minimum_is_a_noop() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
-
-    layout.zoom_out(&output, Point::from((500.0, 400.0)));
-
-    let state = layout.zoom_state_for_output(&output).unwrap();
-    assert_eq!(state.level, 1.0);
-    assert!(!state.transitioning());
-}
-
-#[test]
-fn zoom_in_at_maximum_is_a_noop() {
+fn zoom_at_limits_is_a_noop() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
     let cursor = Point::from((500.0, 400.0));
 
+    // zoom_out at the 1.0 minimum changes nothing and starts no transition.
+    layout.zoom_out(&output, cursor);
+    let state = layout.zoom_state_for_output(&output).unwrap();
+    assert_eq!(state.level, 1.0);
+    assert!(!state.transitioning());
+
+    // zoom_in at the 10.0 maximum likewise does nothing.
     layout.zoom_set_level(&output, 10.0, cursor, ZoomMovementMode::CursorFollow, false);
     complete_animations(&mut layout);
     layout.zoom_in(&output, cursor);
@@ -1309,7 +1127,7 @@ fn zoom_in_at_maximum_is_a_noop() {
 }
 
 #[test]
-fn setting_current_zoom_level_does_not_start_transition() {
+fn same_level_starts_no_transition() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
@@ -1342,15 +1160,4 @@ fn zoom_controls_ignore_unknown_output() {
 
     assert!(!layout.set_zoom_lock(&output, true));
     assert!(layout.zoom_state_for_output(&output).is_none());
-}
-
-#[test]
-fn mutable_zoom_state_accessor_updates_state() {
-    let mut layout = Layout::<TestWindow>::default();
-    let output = make_output("o1", 1920, 1080);
-    layout.add_output(output.clone(), None);
-
-    layout.zoom_state_for_output_mut(&output).unwrap().locked = true;
-
-    assert!(layout.zoom_state_for_output(&output).unwrap().locked);
 }

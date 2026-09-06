@@ -167,7 +167,8 @@ impl OutputViewCtx {
     /// Converts a Local logical point into Physical pixels with rounding.
     ///
     /// Point-level counterpart of the `as_logical().to_physical_precise_round()`
-    /// chains at render boundaries.
+    /// chains at render boundaries. Like Smithay's method of the same name,
+    /// but sourced from the output scale with the frame carried in the types.
     #[inline]
     pub(crate) fn to_physical_precise_round<N: Coordinate>(
         self,
