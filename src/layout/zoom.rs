@@ -782,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn viewport_global_translates_local_viewport_to_output_origin() {
+    fn viewport_global_adds_origin() {
         let state = state(2.0, (960.0, 540.0).into());
         let ctx = OutputViewCtx::new(
             Rectangle::new((100.0, 200.0).into(), (1920.0, 1080.0).into()),

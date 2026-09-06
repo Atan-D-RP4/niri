@@ -1159,8 +1159,9 @@ mod tests {
     }
 
     #[test]
-    fn small_sampled_changes_do_not_emit_when_idle() {
+    fn idle_emission_threshold() {
         let previous = emitted(2.0, (10.0, 20.0), false);
+        // Sub-epsilon sampling noise stays silent.
         assert!(!should_emit_zoom_event(
             Some(&previous),
             &zoom(2.0 + 1e-6 / 2.0, (10.0, 20.0), false),
@@ -1169,11 +1170,7 @@ mod tests {
             false,
             false,
         ));
-    }
-
-    #[test]
-    fn meaningful_idle_changes_emit() {
-        let previous = emitted(2.0, (10.0, 20.0), false);
+        // A meaningful change emits.
         assert!(should_emit_zoom_event(
             Some(&previous),
             &zoom(2.1, (10.0, 20.0), false),
