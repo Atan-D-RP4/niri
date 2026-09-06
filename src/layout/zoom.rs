@@ -234,17 +234,20 @@ impl FocalTrackingContext {
 
         match mode {
             ZoomMovementMode::CursorFollow => cursor,
-            // OnEdge uses the same static focal as Centered; it only differs
-            // in how it updates the focal as the cursor moves relative to the
-            // viewport.
+            // Centered keeps the cursor at the viewport center; OnEdge uses
+            // the same static focal and only differs in how it updates the
+            // focal as the cursor moves relative to the viewport. The output
+            // clamp parks the viewport at the bounds near edges, letting the
+            // cursor roam free inside until it moves back inward.
             ZoomMovementMode::Centered | ZoomMovementMode::OnEdge => {
                 let vt = ViewportTransform::new(cursor, level);
                 let output_rect = Rectangle::from_size(output_size);
                 let viewport = vt.apply_inverse_rect(output_rect);
+                let centered_loc =
+                    cursor - Point::from((viewport.size.w / 2.0, viewport.size.h / 2.0));
                 let scale_factor = level / (level - 1.0).max(0.001);
 
-                viewport
-                    .loc
+                centered_loc
                     .upscale(scale_factor)
                     .constrain(Rectangle::from_size(
                         output_size - Size::from((f64::EPSILON, f64::EPSILON)),

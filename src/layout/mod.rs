@@ -3124,8 +3124,9 @@ impl<W: LayoutElement> Layout<W> {
     ///
     /// When idle and unlocked, computes the target focal and either sets it
     /// immediately or animates. This handles all three movement modes:
-    /// - **CursorFollow**: focal ← cursor
-    /// - **Centered**: focal ← output center
+    /// - **CursorFollow**: focal ← cursor (content under cursor stays pinned)
+    /// - **Centered**: viewport follows cursor keeping it centered (parks at output bounds near
+    ///   edges, cursor roams free inside until back inward)
     /// - **OnEdge**: focal stays fixed unless cursor reaches the edge
     pub fn update_cursor_zoom_focal(
         &mut self,

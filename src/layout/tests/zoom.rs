@@ -719,6 +719,44 @@ fn on_edge_rotated_corners_in_bounds() {
 }
 
 #[test]
+fn centered_focal_centers_cursor_in_viewport() {
+    // Off-center cursor discriminates from CursorFollow (focal = cursor):
+    // S=(1920,1080), cursor=(700,400), L=2 →
+    // focal = (700-480, 400-270) * 2 = (440,260).
+    let output_size = Size::from((1920.0, 1080.0));
+    let cursor = Point::from((700.0, 400.0));
+    let focal = FocalTrackingContext::focal_for_cursor(
+        cursor,
+        2.0,
+        output_size,
+        &ZoomMovementMode::Centered,
+    );
+    assert!((focal.x - 440.0).abs() < 1e-6, "focal.x {}", focal.x);
+    assert!((focal.y - 260.0).abs() < 1e-6, "focal.y {}", focal.y);
+
+    // The viewport derived from that focal centers the cursor.
+    let viewport =
+        ViewportTransform::new(focal, 2.0).apply_inverse_rect(Rectangle::from_size(output_size));
+    let center: Point<f64, Local> = Point::from((
+        viewport.loc.x + viewport.size.w / 2.0,
+        viewport.loc.y + viewport.size.h / 2.0,
+    ));
+    assert!((center.x - 700.0).abs() < 1e-6, "center.x {}", center.x);
+    assert!((center.y - 400.0).abs() < 1e-6, "center.y {}", center.y);
+
+    // At the corner the focal clamps to the bound (viewport parks, cursor
+    // roams free inside until back inward).
+    let corner = FocalTrackingContext::focal_for_cursor(
+        (10.0, 10.0).into(),
+        2.0,
+        output_size,
+        &ZoomMovementMode::Centered,
+    );
+    assert!(corner.x.abs() < 1e-6, "corner.x {}", corner.x);
+    assert!(corner.y.abs() < 1e-6, "corner.y {}", corner.y);
+}
+
+#[test]
 fn composed_animation_completes() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
