@@ -34,7 +34,7 @@ use smithay::backend::renderer::element::{
 };
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::Color32F;
+use smithay::backend::renderer::{Color32F, TextureFilter};
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
@@ -168,7 +168,9 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::xray::{Xray, XrayPos};
-use crate::render_helpers::zoom::{zoom_filter, ZoomElement};
+use crate::render_helpers::zoom::{
+    threshold_flips_filter, zoom_filter, zoom_filter_changed, ZoomElement,
+};
 use crate::render_helpers::{
     encompassing_geo, render_to_dmabuf, render_to_encompassing_texture, render_to_shm,
     render_to_texture, render_to_vec, shaders, RenderCtx, RenderTarget,
@@ -533,6 +535,26 @@ pub struct OutputState {
     pub debug_damage_tracker: OutputDamageTracker,
     /// Cached output view context (global↔local conversion), rebuilt on resize.
     pub view_ctx: OutputViewCtx,
+    /// Filter last materialized into zoomed render elements for this output.
+    ///
+    /// Owned by [`OutputState::zoom_filter_for`]; the render path is `&self`,
+    /// hence the `Cell`. Captures pass `IDENTITY` and early-return before it.
+    pub last_zoom_filter: Cell<Option<TextureFilter>>,
+}
+
+impl OutputState {
+    /// Samples the texture filter for `factor`, reporting band changes.
+    ///
+    /// Sole owner of the per-output filter transition: compares against the
+    /// materialized band and records the new one in a single step. Both scene
+    /// producers call this per frame and forward the results; neither reads
+    /// the cell directly, so no producer can miss another's update.
+    pub fn zoom_filter_for(&self, factor: f64, threshold: f64) -> (Option<TextureFilter>, bool) {
+        let filter = zoom_filter(factor, threshold);
+        let changed = zoom_filter_changed(self.last_zoom_filter.get(), filter);
+        self.last_zoom_filter.set(filter);
+        (filter, changed)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1690,6 +1712,13 @@ impl State {
         // We need to check zoom movement mode change, but defer the action until after drop.
         let zoom_movement_mode_changed = config.zoom.movement_mode != old_config.zoom.movement_mode;
 
+        // Same for the zoom filter threshold: a band flip under a static zoom
+        // changes pixels without changing geometry, so affected outputs need
+        // a redraw (the wrapper then reports full damage for one frame).
+        let old_zoom_filter_threshold = old_config.zoom.zoom_filter_threshold;
+        let zoom_filter_threshold_changed =
+            config.zoom.zoom_filter_threshold != old_zoom_filter_threshold;
+
         // We need &mut self to reload the xkb config, so just store it here.
         if config.input.keyboard.xkb != old_config.input.keyboard.xkb {
             reload_xkb = Some(config.input.keyboard.xkb.clone());
@@ -1850,6 +1879,23 @@ impl State {
                         .update_cursor_zoom_focal(&output, cursor_local, true);
 
                     self.niri.queue_redraw(&output);
+                }
+            }
+        }
+
+        if zoom_filter_threshold_changed {
+            let new_threshold = self.niri.config.borrow().zoom.zoom_filter_threshold;
+            let now = self.niri.clock.now();
+            let outputs: Vec<Output> = self.niri.output_state.keys().cloned().collect();
+            for output in &outputs {
+                let factor = self
+                    .niri
+                    .layout
+                    .zoom_state_for_output(output)
+                    .map(|s| s.viewport_transform(now).factor)
+                    .unwrap_or(1.0);
+                if threshold_flips_filter(factor, old_zoom_filter_threshold, new_threshold) {
+                    self.niri.queue_redraw(output);
                 }
             }
         }
@@ -3163,6 +3209,7 @@ impl Niri {
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
             view_ctx: OutputViewCtx::from_origin((0., 0.).into()),
+            last_zoom_filter: Cell::new(None),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -4538,8 +4585,14 @@ impl Niri {
             return element;
         }
 
-        let zoom_filter = zoom_filter(vt.factor, self.config.borrow().zoom.zoom_filter_threshold);
         let view_ctx = self.output_state[output].view_ctx;
+
+        // Band flips change pixels without changing geometry or commit, so
+        // the wrapper needs the transition flag for correct damage. Both
+        // scene producers sample through the single owning helper.
+        let output_state = &self.output_state[output];
+        let (zoom_filter, filter_changed) = output_state
+            .zoom_filter_for(vt.factor, self.config.borrow().zoom.zoom_filter_threshold);
 
         macro_rules! apply_zoom {
             ($($variant:ident), *) => {
@@ -4553,7 +4606,8 @@ impl Niri {
                             Point::from((0.0, 0.0)),
                             Relocate::Relative,
                         )
-                        .with_filter(zoom_filter);
+                        .with_filter(zoom_filter)
+                        .with_filter_changed(filter_changed);
                         ZoomRenderElement::$variant(e).into()
                     }
                 )*
@@ -4672,10 +4726,13 @@ impl Niri {
     fn preview_zoom(&self, output: &Output, viewport: ViewportTransform) -> ScreenshotPreviewZoom {
         let view_ctx = self.output_state[output].view_ctx;
         let config = self.config.borrow();
+        let (filter, filter_changed) = self.output_state[output]
+            .zoom_filter_for(viewport.factor, config.zoom.zoom_filter_threshold);
         ScreenshotPreviewZoom {
             viewport,
             view_ctx,
-            filter: zoom_filter(viewport.factor, config.zoom.zoom_filter_threshold),
+            filter,
+            filter_changed,
             scale_with_zoom: config.cursor.scale_with_zoom,
         }
     }
