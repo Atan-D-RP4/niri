@@ -139,6 +139,9 @@ pub struct ScreenshotPreviewZoom {
     pub viewport: ViewportTransform,
     pub view_ctx: OutputViewCtx,
     pub filter: Option<TextureFilter>,
+    /// The filter band flipped since the last materialized frame; forwarded
+    /// to the preview wrapper so its damage covers the whole texture.
+    pub filter_changed: bool,
     /// Hotspot-centered construction like the live pointer; otherwise the
     /// graphic scales relative to the capture baseline.
     pub scale_with_zoom: bool,
@@ -789,6 +792,7 @@ impl ScreenshotUi {
             viewport,
             view_ctx,
             filter,
+            filter_changed,
             scale_with_zoom,
         } = zoom;
         // Render-path optimization, not an "is zoom active" predicate: the
@@ -833,7 +837,8 @@ impl ScreenshotUi {
                 Point::from((0., 0.)),
                 Relocate::Relative,
             )
-            .with_filter(filter);
+            .with_filter(filter)
+            .with_filter_changed(filter_changed);
             push(ScreenshotUiRenderElement::Zoomed(elem));
         } else {
             push(ScreenshotUiRenderElement::Screenshot(
