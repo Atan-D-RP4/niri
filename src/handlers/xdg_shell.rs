@@ -1325,7 +1325,7 @@ impl State {
         };
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
-        // we will compute that here. Sourced from the cached local size.
+        // compute it here, sourced from the cached local size.
         let output_size = self
             .niri
             .output_state

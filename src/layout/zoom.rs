@@ -128,7 +128,7 @@ impl OutputZoomState {
     /// subsequent focal computations use the correct mode.
     ///
     /// Does nothing when no level transition is active — the movement mode
-    /// is read fresh from config by `update_zoom_base_focal` in that case.
+    /// is read fresh from config by `update_cursor_zoom_focal` in that case.
     pub fn update_movement_mode(&mut self, mode: ZoomMovementMode) {
         match &mut self.level_transition {
             ZoomLevelTransition::Animating(a) => {
@@ -172,7 +172,7 @@ impl OutputZoomState {
         let output_local = Rectangle::from_size(view_ctx.local_geo.size);
         let viewport_local = vt.apply_inverse_rect(output_local);
         // Local→Global is a pure translation of location by the output origin.
-        // intentionally not part of the viewport rectangle calculation.
+        // Intentionally not part of the viewport rectangle calculation.
         let global_loc = viewport_local.loc.to_global(view_ctx);
         Rectangle::new(global_loc, viewport_local.size.assume_global())
     }

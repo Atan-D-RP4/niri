@@ -7328,7 +7328,7 @@ impl Niri {
                     // Transition snapshots record the unzoomed scene; the live
                     // viewport keeps applying on top while they crossfade.
                     let elements =
-                        self.render_to_vec(ctx, &output, false, ViewportTransform::identity());
+                        self.render_to_vec(ctx, &output, false, self.live_viewport(&output));
                     let elements = elements.iter().rev();
 
                     let res = render_to_texture(
