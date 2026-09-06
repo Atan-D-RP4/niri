@@ -384,7 +384,7 @@ impl State {
         };
 
         let mut pos = {
-            // Note: `invert()` is intentionally not used here. For sizes,
+            // NOTE: `invert()` is intentionally not used here. For sizes,
             // `transform_size` is identical with or without inversion (only the
             // 90°/270° swap class matters), and device positions map with the
             // forward transform. See `inverse_transform_point` docs for why
@@ -4398,18 +4398,6 @@ impl State {
         );
     }
 
-    // --- Continuous pinch gesture handlers (touchpad + touchscreen) ---
-    //
-    // These provide the generic pinch recognition layer. Both touchpad and
-    // touchscreen paths feed into `zoom_gesture_begin/update/end` on Layout,
-    // which is the stable consumer API.
-    //
-    // When PR #3771 lands, the touchscreen path can be replaced with
-    // `TouchPinch` → `ContinuousGestureKind` → `zoom_gesture_update()`,
-    // while the touchpad path stays (PR #3771's touchpad pinch is discrete).
-
-    // Callers (touch event handlers) arrive with Integrating Zoom 1.
-    #[allow(dead_code)]
     fn cancel_touch_pinch(&mut self, cancelled: bool) {
         if let Some(pinch) = self.niri.touch_pinch_state.take() {
             self.niri.layout.zoom_gesture_end(&pinch.output, cancelled);
@@ -4515,8 +4503,6 @@ impl State {
     /// On each touch point change, computes the distance between two touch
     /// points and feeds the cumulative ratio (`current / initial`) into
     /// `zoom_gesture_update`.
-    // Called from the touch event handlers with Integrating Zoom 1.
-    #[allow(dead_code)]
     fn handle_touch_pinch(&mut self, timestamp: Duration) {
         let touch_count = self.niri.touch_points.len();
 
@@ -4581,14 +4567,6 @@ impl State {
         }
     }
 
-    // --- Touchpad pinch (libinput GesturePinch*) ---
-    //
-    // Libinput provides cumulative `scale` (1.0 = unchanged) directly. We route
-    // 3-finger pinch to zoom; non-zoom pinches forward to Wayland clients.
-    //
-    // FIXME: make pinch-finger count configurable.
-    // See: https://github.com/niri-wm/niri/pull/3771
-
     fn on_gesture_pinch_begin<I: InputBackend>(&mut self, event: I::GesturePinchBeginEvent) {
         let serial = SERIAL_COUNTER.next_serial();
         let pointer = self.niri.seat.get_pointer().unwrap();
@@ -4597,7 +4575,11 @@ impl State {
             pointer.frame(self);
         }
 
+        // NOTE; Libinput provides cumulative `scale` (1.0 = unchanged) directly. We route 3-finger
+        // pinch to zoom; non-zoom pinches forward to Wayland clients.
+
         // FIXME: make pinch-finger count configurable.
+        // See: https://github.com/niri-wm/niri/pull/3771
         if event.fingers() == 3 {
             if let Some(output) = self.niri.output_under_cursor() {
                 if self

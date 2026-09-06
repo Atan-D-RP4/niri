@@ -124,16 +124,11 @@ impl OutputViewCtx {
         self.global_geo.loc.as_logical()
     }
 
-    /// Converts output-local Physical geometry into Local logical geometry.
+    /// Physical → Local: divide by [`Self::scale`] only.
     ///
-    /// Render elements use Physical units, while viewport policy is defined in
-    /// Local logical units. This is a unit conversion only (divide by
-    /// [`Self::scale`]); [`Self::output_transform`] is intentionally not
-    /// consulted. Element Physical geometry is already expressed in the
-    /// output's presented orientation — output rotation/reflection composes
-    /// *after* the viewport per the `Local → ViewportTransform → output
-    /// Transform → Physical` pipeline — so the viewport stays axis-aligned in
-    /// unrotated Local space.
+    /// [`Self::output_transform`] is intentionally ignored: element geometry
+    /// is already in presented orientation, and rotation composes after the
+    /// viewport, keeping it axis-aligned.
     #[inline]
     pub(crate) fn physical_rect_to_local(
         &self,
@@ -141,11 +136,7 @@ impl OutputViewCtx {
     ) -> Rectangle<f64, Local> {
         rect.to_logical(self.scale).assume_local()
     }
-    /// Converts Local logical geometry into output-local Physical geometry.
-    ///
-    /// Inverse of [`Self::physical_rect_to_local`]: multiply by
-    /// [`Self::scale`] only, leaving [`Self::output_transform`] to the render
-    /// target downstream.
+    /// Local → Physical: inverse of [`Self::physical_rect_to_local`], scale only.
     #[inline]
     pub(crate) fn local_rect_to_physical(
         &self,

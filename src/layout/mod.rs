@@ -2806,7 +2806,7 @@ impl<W: LayoutElement> Layout<W> {
     /// Begin a continuous pinch-to-zoom gesture on the given output.
     ///
     /// Creates a `ZoomLevelGesture` that tracks cumulative scale changes in
-    /// log-space. Subsequent calls to [`zoom_gesture_update`] feed scale deltas
+    /// log-space. Subsequent calls to `zoom_gesture_update` feed scale deltas
     /// into the gesture's `SwipeTracker`.
     ///
     /// When PR #3771 lands, this becomes the stable zoom gesture API — input
@@ -2864,7 +2864,7 @@ impl<W: LayoutElement> Layout<W> {
 
         if let Some(cursor_local) = cursor_local {
             gesture.set_cursor_pos(cursor_local);
-            // Note: on_edge_cursor_anchor is set once at gesture start and kept
+            // NOTE: on_edge_cursor_anchor is set once at gesture start and kept
             // fixed. Recomputing it here with the old focal causes teleporting
             // because the anchor shifts when the cursor pushes against edges.
         }
@@ -2938,8 +2938,6 @@ impl<W: LayoutElement> Layout<W> {
         Some(true)
     }
 
-    // --- Public zoom state accessors ---
-
     /// Read-only access to the zoom state for an output.
     ///
     /// Consumers call `state.viewport_transform(now)` to get the current
@@ -2953,8 +2951,6 @@ impl<W: LayoutElement> Layout<W> {
         self.zoom_states.get_mut(output)
     }
 
-    // --- Zoom lock ---
-
     /// Set the zoom lock on an output.
     ///
     /// Returns the previous lock state, or `false` if the output has no zoom
@@ -2967,8 +2963,6 @@ impl<W: LayoutElement> Layout<W> {
         state.locked = locked;
         was
     }
-
-    // --- Zoom level control ---
 
     /// Zoom in by one step on the given output.
     ///
@@ -3101,8 +3095,6 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    // --- Cursor/focal tracking ---
-
     /// Track cursor position for zoom state.
     ///
     /// Always updates the cursor position on state, which is needed for:
@@ -3111,7 +3103,7 @@ impl<W: LayoutElement> Layout<W> {
     /// - Edge detection in `FocalTrackingContext`
     ///
     /// This is a pure state mutation — it does not recompute focal.
-    /// Call [`update_focal_for_cursor`](Self::update_focal_for_cursor)
+    /// Call [`update_cursor_zoom_focal`](Self::update_cursor_zoom_focal)
     /// separately when the focal point should track the cursor.
     pub fn set_zoom_cursor_pos(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
         let Some(state) = self.zoom_states.get_mut(output) else {
@@ -3183,8 +3175,6 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    // --- Movement mode ---
-
     /// Update the zoom movement mode on an output.
     pub fn update_zoom_movement_mode(&mut self, output: &Output, movement_mode: ZoomMovementMode) {
         if let Some(state) = self.zoom_states.get_mut(output) {
@@ -3192,11 +3182,9 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    // --- Geometry helpers ---
-
     /// Clamp a position to the visible viewport when zoomed.
     ///
-    /// Uses [`ViewportTransform`] directly — when level is 1.0 the viewport
+    /// Uses `ViewportTransform` directly — when level is 1.0 the viewport
     /// equals the output rect and constraining is a no-op.
     pub fn zoom_clamp_to_viewport(
         &self,
@@ -3225,8 +3213,6 @@ impl<W: LayoutElement> Layout<W> {
             viewport_size - Size::from((f64::EPSILON, f64::EPSILON)),
         )))
     }
-
-    // --- Private helpers ---
 
     /// Compute the output's logical size in Local frame for focal tracking.
     fn output_size_for_focal(output: &Output) -> Size<f64, Local> {
