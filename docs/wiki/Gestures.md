@@ -66,6 +66,14 @@ Move the view horizontally with three-finger horizontal swipes.
 
 Open and close the overview with a four-finger vertical swipe.
 
+#### Pinch to Zoom
+
+<sup>Since: next release</sup>
+
+Zoom the output in and out with a three-finger pinch.
+See the [Zoom feature page](./Configuration:-Zoom.md) and the
+[`zoom {}` settings](./Configuration:-Miscellaneous.md#zoom).
+
 ### Touchscreen
 
 #### Interactive Move
@@ -79,6 +87,13 @@ Dragging a tiled window horizontally will scroll the view instead.
 You can customize the look of the window insertion preview in the [`insert-hint` layout config](./Configuration:-Layout.md#insert-hint).
 
 <sup>Since: 25.11</sup> Tap with a second finger while moving to toggle between floating and tiling layout to put the window into.
+
+#### Pinch to Zoom
+
+<sup>Since: next release</sup>
+
+Zoom the output in and out with a two-finger pinch.
+See the [Zoom feature page](./Configuration:-Zoom.md).
 
 ### Tablet
 
