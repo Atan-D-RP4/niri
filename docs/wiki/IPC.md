@@ -65,6 +65,16 @@ $ echo '{"Action":{"FocusWorkspace":{"reference":{"Id":8}}}}' | niri msg raw-req
 
 You can find all available requests and response types in the [niri-ipc sub-crate documentation](https://niri-wm.github.io/niri/niri_ipc/).
 
+### Zoom
+
+<sup>Since: next release</sup>
+
+Query per-output magnification with `niri msg zoom-state ["output-name"]`,
+drive it with the `set-zoom-level` / `toggle-zoom-lock` actions, and watch the
+`ZoomChanged` event on the event stream.
+See the [Zoom feature page](./Configuration:-Zoom.md#ipc) for the state fields
+and event granularity.
+
 ### Backwards Compatibility
 
 The JSON output *should* remain stable, as in:
