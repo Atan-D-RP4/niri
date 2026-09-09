@@ -42,4 +42,13 @@ If you're shipping niri and would like to make it work better for screen readers
 
 ## Desktop zoom
 
-There's no built-in zoom yet, but you can use third-party utilities like [wooz](https://github.com/negrel/wooz).
+<sup>Since: next release</sup>
+
+Niri has built-in screen magnification (zoom).
+See the [Zoom feature page](./Configuration:-Zoom.md) for how to use and configure it:
+three-finger touchpad pinch, two-finger touchscreen pinch, or `set-zoom-level` /
+`toggle-zoom-lock` key bindings, with per-output level and focal point, animated
+through the `zoom-level-change` / `zoom-focal-pan` settings.
+
+Zoom is an accessibility feature: the zoom binds work while the session is
+locked, and output screencasts include the live zoom viewport.
