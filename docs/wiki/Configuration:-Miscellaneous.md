@@ -19,6 +19,7 @@ environment {
 cursor {
     xcursor-theme "breeze_cursors"
     xcursor-size 48
+    // scale-with-zoom
 
     hide-when-typing
     hide-after-inactive-ms 1000
@@ -61,6 +62,14 @@ blur {
     offset 3.0
     noise 0.02
     saturation 1.5
+}
+
+zoom {
+    pinch-sensitivity 1.0
+    max-zoom 10.0
+    increment-type "linear"
+    movement-mode "cursor-follow"
+    zoom-filter-threshold 2.0
 }
 ```
 
@@ -193,6 +202,21 @@ If set, the cursor will automatically hide once this number of milliseconds pass
 cursor {
     // Hide the cursor after one second of inactivity.
     hide-after-inactive-ms 1000
+}
+```
+
+#### `scale-with-zoom`
+
+<sup>Since: next release</sup>
+
+If set, the rendered cursor grows with the [screen zoom](./Configuration:-Zoom.md).
+At 1.0× nothing changes; at higher zoom levels the cursor graphic is scaled by
+the current zoom level so it stays easy to find while magnified.
+The screenshot UI cursor indicator follows the same setting.
+
+```kdl
+cursor {
+    scale-with-zoom
 }
 ```
 
@@ -375,7 +399,7 @@ You will need to increase `passes` to be able to use a bigger `offset` without a
 
 When configuring blur, try increasing `offset` first (since it doesn't cause any extra GPU load) until you start getting artifacts.
 Then, if you still need smoother blur, increase `passes` by 1.
-Keep doing this until you get the desired visuals. 
+Keep doing this until you get the desired visuals.
 
 ```kdl
 blur {
@@ -405,5 +429,99 @@ Values above `1` increase saturation; values below `1` reduce it.
 ```kdl
 blur {
     saturation 1.5
+}
+```
+
+### `zoom`
+
+<sup>Since: next release</sup>
+
+Screen magnification settings.
+
+See the [Zoom feature page](./Configuration:-Zoom.md) for an overview of zoom.
+
+```kdl
+// These are the default values:
+zoom {
+    pinch-sensitivity 1.0
+    max-zoom 10.0
+    increment-type "linear"
+    movement-mode "cursor-follow"
+    zoom-filter-threshold 2.0
+}
+```
+
+#### `pinch-sensitivity` and `max-zoom`
+
+`pinch-sensitivity` controls how much the zoom level changes in response to
+pinch gestures. Higher values make zooming faster and more responsive, while
+lower values make it slower and more precise.
+Must be `> 0`. Invalid values are rejected with a config error and the reload
+is refused.
+
+`max-zoom` sets the maximum zoom level that can be reached. Must be `>= 1.0`
+(invalid values are likewise rejected).
+There is no upper limit — the value you set is used directly as the clamp.
+Default is `10.0`, which should be enough for most use cases, but you can set it
+higher if you want to be able to zoom in further.
+
+```kdl
+zoom {
+    pinch-sensitivity 0.8
+    max-zoom 5.0
+}
+```
+
+#### `increment-type`
+
+Controls how the zoom level changes for `set-zoom-level` actions with relative
+values like `"+0.5"`.
+
+- `"linear"` (default): the delta is added to the current level as-is, so a
+  fixed step feels smaller relative to the current zoom at high levels.
+- `"exponential"`: the delta is applied in log space (the level is multiplied),
+  so each step feels proportional to the current zoom. This makes zooming in
+  and out feel consistent at all levels.
+
+```kdl
+zoom {
+    increment-type "exponential"
+}
+```
+
+#### `movement-mode`
+
+Controls how the zoom viewport tracks the cursor position while zoomed in.
+
+- `"cursor-follow"` (default): the viewport follows the cursor. As you move the
+  mouse, the zoomed view scrolls to keep the cursor visible.
+- `"centered"`: the viewport stays centered on the output. The cursor can move
+  around freely without causing the viewport to scroll.
+- `"on-edge"`: the viewport only moves when the cursor reaches the edge of the
+  current viewport. Similar to strategy games where scrolling happens at screen
+  edges.
+
+```kdl
+zoom {
+    movement-mode "on-edge"
+}
+```
+
+#### `zoom-filter-threshold`
+
+Controls the texture filtering mode used when rendering zoomed content.
+
+- Below this zoom level: **Linear** filtering is used, which gives smooth,
+  interpolated rendering.
+- At or above this zoom level: **Nearest** (nearest-neighbour) filtering is
+  used, which keeps individual pixels crisp and sharp.
+
+Default is `2.0`. Must be `> 0` (invalid values are rejected with a config
+error and the reload is refused).
+
+```kdl
+zoom {
+    // Start using nearest-neighbour at 3x zoom.
+    zoom-filter-threshold 3.0
 }
 ```
