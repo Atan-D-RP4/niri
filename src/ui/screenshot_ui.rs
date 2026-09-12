@@ -94,8 +94,10 @@ pub struct OutputData {
     transform: Transform,
     // Output, screencast, screen capture.
     screenshot: [OutputScreenshot; 3],
+    // Chrome colors/ids/commits; layout derives at render time (see
+    // render_output). Only index 4 (fullscreen dim for other outputs) is
+    // sized in update_buffers.
     buffers: [SolidColorBuffer; 8],
-    locations: [Point<i32, Physical>; 8],
     panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
 }
 
@@ -240,8 +242,6 @@ impl ScreenshotUi {
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                 ];
-                let locations = [Default::default(); 8];
-
                 let mut render_panel_ = |text| {
                     render_panel(renderer, scale, text)
                         .map_err(|err| warn!("error rendering help panel: {err:?}"))
@@ -257,7 +257,6 @@ impl ScreenshotUi {
                     transform,
                     screenshot,
                     buffers,
-                    locations,
                     panel,
                 };
                 (output, data)
@@ -601,9 +600,7 @@ impl ScreenshotUi {
 
         for (output, data) in output_data {
             let buffers = &mut data.buffers;
-            let locations = &mut data.locations;
             let size = data.size;
-            let scale = data.scale;
 
             if output == selection_output {
                 // Check if the selection is still valid. If not, reset it back to default.
@@ -615,46 +612,10 @@ impl ScreenshotUi {
                     *a = rect.loc;
                     *b = rect.loc + rect.size - Size::from((1, 1));
                 }
-
-                let border = to_physical_precise_round(scale, SELECTION_BORDER);
-
-                let resize = move |buffer: &mut SolidColorBuffer, w: i32, h: i32| {
-                    let size = Size::<_, Physical>::from((w, h));
-                    buffer.resize(size.to_f64().to_logical(scale));
-                };
-
-                resize(&mut buffers[0], rect.size.w + border * 2, border);
-                resize(&mut buffers[1], rect.size.w + border * 2, border);
-                resize(&mut buffers[2], border, rect.size.h);
-                resize(&mut buffers[3], border, rect.size.h);
-
-                resize(&mut buffers[4], size.w, rect.loc.y);
-                resize(&mut buffers[5], size.w, size.h - rect.loc.y - rect.size.h);
-                resize(&mut buffers[6], rect.loc.x, rect.size.h);
-                resize(
-                    &mut buffers[7],
-                    size.w - rect.loc.x - rect.size.w,
-                    rect.size.h,
-                );
-
-                locations[0] = Point::from((rect.loc.x - border, rect.loc.y - border));
-                locations[1] = Point::from((rect.loc.x - border, rect.loc.y + rect.size.h));
-                locations[2] = Point::from((rect.loc.x - border, rect.loc.y));
-                locations[3] = Point::from((rect.loc.x + rect.size.w, rect.loc.y));
-
-                locations[5] = Point::from((0, rect.loc.y + rect.size.h));
-                locations[6] = Point::from((0, rect.loc.y));
-                locations[7] = Point::from((rect.loc.x + rect.size.w, rect.loc.y));
+                // Chrome layout happens at render time from the live viewport
+                // (see render_output); buffers only carry color/id/commit.
             } else {
-                buffers[0].resize((0., 0.));
-                buffers[1].resize((0., 0.));
-                buffers[2].resize((0., 0.));
-                buffers[3].resize((0., 0.));
-
                 buffers[4].resize(size.to_f64().to_logical(data.scale));
-                buffers[5].resize((0., 0.));
-                buffers[6].resize((0., 0.));
-                buffers[7].resize((0., 0.));
             }
         }
     }
@@ -673,11 +634,11 @@ impl ScreenshotUi {
         let _span = tracy_client::span!("ScreenshotUi::render_output");
 
         let Self::Open {
+            selection,
             output_data,
             show_pointer,
             button,
             open_anim,
-            selection,
             ..
         } = self
         else {
@@ -714,8 +675,9 @@ impl ScreenshotUi {
             push(ScreenshotUiRenderElement::Screenshot(elem))
         }
 
-        // Content layers magnify with the scene; the factor check only
-        // skips needless wrapping, it isn't an "is zoom active" branch.
+        // Chrome derives from one rounded screen rect with integer math, so
+        // adjacent strips abut exactly: independent viewport rounding per
+        // strip would open 1px hairlines as the focal animates.
         let viewport = zoom.viewport;
         if output == &selection.0 {
             let content = rect_from_corner_points(selection.1, selection.2);
@@ -1200,11 +1162,8 @@ fn pointer_scale(live_level: f64, capture_level: f64) -> f64 {
 
 /// Selection chrome rectangles from one rounded screen rect.
 ///
-/// Returns `(location, size)` for the 4 border strips then the 4 dimming
-/// strips, in output Physical pixels, pairing with `buffers` in order.
-/// Integer math from a single rect keeps adjacent strips exactly abutting
-/// under any viewport with no hairlines.
-/// Requires `display` clamped to the output (no negative sizes).
+/// Integer math from a single rect keeps adjacent strips exactly abutting under any viewport — no
+/// hairlines. Requires `display` clamped to the output (no negative sizes).
 fn selection_chrome(
     display: Rectangle<i32, Physical>,
     border: i32,
@@ -1478,5 +1437,30 @@ mod tests {
             export_rect(content, viewport, &ctx),
             Rectangle::new((120, 100).into(), (40, 20).into())
         );
+    }
+
+    #[test]
+    fn chrome_tiles_output_without_seams() {
+        let display = Rectangle::new((100, 80).into(), (400, 300).into());
+        let output = Size::from((1920, 1080));
+        let strips = selection_chrome(display, 2, output);
+
+        // Borders frame the hole; dimming abuts it exactly.
+        assert_eq!(strips[0], ((98, 78).into(), (404, 2).into()));
+        assert_eq!(strips[2], ((98, 80).into(), (2, 300).into()));
+        assert_eq!(strips[4], ((0, 0).into(), (1920, 80).into()));
+        assert_eq!(strips[6], ((0, 80).into(), (100, 300).into()));
+        assert_eq!(strips[7], ((500, 80).into(), (1420, 300).into()));
+
+        // Joints align: border bottom meets hole top, dim meets hole edge.
+        assert_eq!(strips[0].0.y + strips[0].1.h, display.loc.y);
+        assert_eq!(strips[2].0.x + strips[2].1.w, display.loc.x);
+        assert_eq!(strips[4].1.h, display.loc.y);
+        assert_eq!(strips[6].0.x + strips[6].1.w, display.loc.x);
+
+        // Dimming plus hole covers the output exactly once.
+        let dim_area: i32 = strips[4..].iter().map(|(_, s)| s.w * s.h).sum();
+        let hole = display.size.w * display.size.h;
+        assert_eq!(dim_area + hole, 1920 * 1080);
     }
 }
