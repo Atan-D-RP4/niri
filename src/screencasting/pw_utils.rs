@@ -785,6 +785,8 @@ impl PipeWire {
                                 ),
                             )
                         } else {
+                            debug!("negotiated inefficient shm stream, moving to ready state");
+
                             *state = CastState::Ready {
                                 size: format_size,
                                 alpha: format_has_alpha,
