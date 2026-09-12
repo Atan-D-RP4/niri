@@ -23,10 +23,8 @@ pub struct Local;
 
 /// A position or offset relative to a surface origin.
 ///
-/// Unlike [`Global`] and [`Local`], this is not a compositor frame at all: values are constructed
-/// and consumed within a single pass — pointer offsets within the focused surface on the input
-/// side, popup placement on the render side. It exists to keep surface-relative values from being
-/// mistaken for output-relative or global positions.
+/// Unlike [`Global`] and [`Local`], this is not a persistent compositor frame. It exists to keep
+/// surface-relative input offsets from being mistaken for global positions.
 ///
 /// Do not add further frame markers (e.g. WorkspaceLocal, BackdropLocal) without a
 /// call-site-driven reason: screen/content/surface distinctions stay nominal (see
@@ -126,8 +124,6 @@ pub(crate) trait RectGlobalExt<C: Coordinate> {
     ) -> Rectangle<R, Physical>;
 }
 
-// `pub` for `niri-visual-tests` which builds `Tile` sizes
-// through this trait; point/rect assertions stay crate-private.
 pub trait SizeExt<C: Coordinate> {
     /// Relabels a Size as Logical without translating it.
     fn as_logical(self) -> Size<C, Logical>;

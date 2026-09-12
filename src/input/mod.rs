@@ -4580,7 +4580,7 @@ impl State {
 
         // FIXME: make pinch-finger count configurable.
         // See: https://github.com/niri-wm/niri/pull/3771
-        if event.fingers() == 3 {
+        if event.fingers() == 2 {
             if let Some(output) = self.niri.output_under_cursor() {
                 if self
                     .niri

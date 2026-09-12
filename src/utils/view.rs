@@ -228,10 +228,12 @@ impl OutputViewCtx {
 mod tests {
     use approx::assert_relative_eq;
     use glam::Vec3;
-    use smithay::utils::{Point, Rectangle};
+    use smithay::utils::{Point, Rectangle, Scale, Transform};
 
-    use super::ViewportTransform;
-    use crate::utils::geometry::Local;
+    use super::{OutputViewCtx, ViewportTransform};
+    use crate::utils::geometry::{
+        Global, Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt,
+    };
 
     fn transform() -> ViewportTransform {
         ViewportTransform::new((100., 80.).into(), 2.)
@@ -298,5 +300,46 @@ mod tests {
 
         assert_eq!(identity.apply_rect(rect), rect);
         assert_eq!(identity.apply_inverse_rect(rect), rect);
+    }
+
+    #[test]
+    fn global_local_viewport_round_trip() {
+        // Cross-abstraction: Global → Local → Viewport → inverse Viewport → Global,
+        // with nonzero and negative output origins.
+        let viewport = ViewportTransform::new((100., 80.).into(), 2.);
+        let cases = [
+            // (origin, global point)
+            ((40., 25.), (120., 90.)),
+            ((-200., -100.), (-80., -30.)),
+        ];
+
+        for ((ox, oy), (gx, gy)) in cases {
+            let ctx = OutputViewCtx::new(
+                Rectangle::new((ox, oy).into(), (1920., 1080.).into()).assume_global(),
+                Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
+                Transform::Normal,
+                Scale::from(1.),
+            );
+            let global: Point<f64, Global> = (gx, gy).into();
+
+            let local = global.to_local(&ctx);
+            let round_trip = viewport
+                .apply_inverse(viewport.apply(local))
+                .to_global(&ctx);
+            assert_relative_eq!(round_trip.x, global.x, epsilon = 1e-6);
+            assert_relative_eq!(round_trip.y, global.y, epsilon = 1e-6);
+
+            // Rectangle variant: translate loc, preserve size across the pipeline.
+            let global_rect: Rectangle<f64, Global> =
+                Rectangle::new((gx, gy).into(), (800., 600.).into()).assume_global();
+            let local_rect = global_rect.to_local(&ctx);
+            let rt_rect = viewport
+                .apply_inverse_rect(viewport.apply_rect(local_rect))
+                .to_global(&ctx);
+            assert_relative_eq!(rt_rect.loc.x, global_rect.loc.x, epsilon = 1e-6);
+            assert_relative_eq!(rt_rect.loc.y, global_rect.loc.y, epsilon = 1e-6);
+            assert_relative_eq!(rt_rect.size.w, global_rect.size.w, epsilon = 1e-6);
+            assert_relative_eq!(rt_rect.size.h, global_rect.size.h, epsilon = 1e-6);
+        }
     }
 }

@@ -1606,14 +1606,8 @@ pub struct Cast {
 pub struct Zoom {
     /// Current zoom level.
     pub level: f64,
-    /// Whether zoom focal point is locked.
+    /// Whether zoom is locked.
     pub is_locked: bool,
-    /// Focal point coordinates in output-local logical pixels.
-    ///
-    /// The coordinate frame is the same as the output's logical coordinate space
-    /// (origin at the output's top-left corner). To convert to global logical
-    /// coordinates, add the output's position in global space.
-    pub focal: (f64, f64),
 }
 
 /// Kind of screencast.
@@ -1805,9 +1799,7 @@ pub enum Event {
         output: String,
         /// Current zoom level.
         level: f64,
-        /// Focal point coordinates in logical pixels.
-        focal: (f64, f64),
-        /// Whether zoom focal point is locked.
+        /// Whether zoom is locked.
         is_locked: bool,
     },
 }
