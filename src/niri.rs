@@ -4629,7 +4629,7 @@ impl Niri {
 
     /// Applies the zoom transform to the pointer/cursor render element by wrapping it in a
     /// hotspot-centered zoom transform, to keep it aligned with the pointer position.
-    fn zoom_pointer<R: NiriRenderer>(
+    pub(crate) fn zoom_pointer<R: NiriRenderer>(
         &self,
         elem: PointerRenderElements<R>,
         output: &Output,
@@ -4678,7 +4678,7 @@ impl Niri {
 
     /// Live-cursor focal anchor (raw position) and viewport-clamped display.
     /// None at 1x or off-output. Epsilon shrink keeps edge points inside.
-    fn pointer_geometry(
+    pub(crate) fn pointer_geometry(
         &self,
         output: &Output,
         vt: ViewportTransform,
@@ -4714,7 +4714,7 @@ impl Niri {
 
     /// Live viewport for an output, or IDENTITY without zoom state.
     ///
-    /// Display paths pass this; captures pass IDENTITY to stay native.
+    /// Display paths and output mirrors pass this; native captures pass IDENTITY.
     pub fn live_viewport(&self, output: &Output) -> ViewportTransform {
         self.layout
             .zoom_state_for_output(output)
@@ -5880,12 +5880,12 @@ impl Niri {
                     };
                     let offset = screencopy.region_loc().upscale(-1);
                     let mut elements = Vec::new();
-                    // Screencopy records the unzoomed scene.
+                    // Screencopy mirrors the output as seen: live viewport.
                     self.render(
                         ctx,
                         output,
                         screencopy.overlay_cursor(),
-                        ViewportTransform::identity(),
+                        self.live_viewport(output),
                         &mut |elem| {
                             let elem = RelocateRenderElement::from_element(
                                 elem,
@@ -5968,12 +5968,12 @@ impl Niri {
         };
         let offset = screencopy.region_loc().upscale(-1);
         let mut elements = Vec::new();
-        // Screencopy records the unzoomed scene.
+        // Screencopy mirrors the output as seen: live viewport.
         self.render(
             ctx,
             output,
             screencopy.overlay_cursor(),
-            ViewportTransform::identity(),
+            self.live_viewport(output),
             &mut |elem| {
                 let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
                 elements.push(elem);
