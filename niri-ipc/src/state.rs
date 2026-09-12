@@ -101,9 +101,7 @@ pub struct CastsState {
 pub struct ZoomOutputState {
     /// Current zoom level.
     pub level: f64,
-    /// Focal point coordinates within the output.
-    pub focal: (f64, f64),
-    /// Whether zoom focal point is locked.
+    /// Whether zoom is locked.
     pub is_locked: bool,
 }
 
@@ -139,8 +137,6 @@ impl ZoomChangedState {
         };
 
         let state_changed = (previous.level - current.level).abs() > Self::EVENT_EPSILON
-            || (previous.focal.0 - current.focal.0).abs() > Self::EVENT_EPSILON
-            || (previous.focal.1 - current.focal.1).abs() > Self::EVENT_EPSILON
             || previous.is_locked != current.is_locked;
         let was_transitioning = self.was_transitioning.get(output).copied().unwrap_or(false);
         let was_gesturing = self.was_gesturing.get(output).copied().unwrap_or(false);
@@ -390,7 +386,6 @@ impl EventStreamStatePart for ZoomChangedState {
             .map(|(output, state)| Event::ZoomChanged {
                 output: output.clone(),
                 level: state.level,
-                focal: state.focal,
                 is_locked: state.is_locked,
             })
             .collect()
@@ -401,17 +396,10 @@ impl EventStreamStatePart for ZoomChangedState {
             Event::ZoomChanged {
                 output,
                 level,
-                focal,
                 is_locked,
             } => {
-                self.outputs.insert(
-                    output,
-                    ZoomOutputState {
-                        level,
-                        focal,
-                        is_locked,
-                    },
-                );
+                self.outputs
+                    .insert(output, ZoomOutputState { level, is_locked });
             }
             event => return Some(event),
         }

@@ -468,13 +468,11 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                     .filter_map(|output| {
                         let zoom_state = state.niri.layout.zoom_state_for_output(output)?;
                         let vt = zoom_state.viewport_transform(now);
-                        let focal = vt.focal;
                         Some((
                             output.name().clone(),
                             niri_ipc::Zoom {
                                 is_locked: zoom_state.locked,
                                 level: vt.factor,
-                                focal: (focal.x, focal.y),
                             },
                         ))
                     })
@@ -650,7 +648,6 @@ impl State {
             let ipc_zoom = niri_ipc::Zoom {
                 is_locked: zoom_state.locked,
                 level: vt.factor,
-                focal: vt.focal.into(),
             };
 
             let transitioning = zoom_state.transitioning();
@@ -663,7 +660,6 @@ impl State {
                 events.push(Event::ZoomChanged {
                     output: output_name.clone(),
                     level: ipc_zoom.level,
-                    focal: ipc_zoom.focal,
                     is_locked: ipc_zoom.is_locked,
                 });
             }
@@ -687,7 +683,6 @@ impl State {
             if let Event::ZoomChanged {
                 output,
                 level,
-                focal,
                 is_locked,
             } = &event
             {
@@ -695,7 +690,6 @@ impl State {
                     output.clone(),
                     niri_ipc::state::ZoomOutputState {
                         level: *level,
-                        focal: *focal,
                         is_locked: *is_locked,
                     },
                 );
@@ -1108,20 +1102,12 @@ impl State {
 mod tests {
     use niri_ipc::state::{ZoomChangedState, ZoomOutputState};
 
-    fn zoom(level: f64, focal: (f64, f64), is_locked: bool) -> niri_ipc::Zoom {
-        niri_ipc::Zoom {
-            level,
-            focal,
-            is_locked,
-        }
+    fn zoom(level: f64, is_locked: bool) -> niri_ipc::Zoom {
+        niri_ipc::Zoom { level, is_locked }
     }
 
-    fn emitted(level: f64, focal: (f64, f64), is_locked: bool) -> niri_ipc::state::ZoomOutputState {
-        niri_ipc::state::ZoomOutputState {
-            level,
-            focal,
-            is_locked,
-        }
+    fn emitted(level: f64, is_locked: bool) -> niri_ipc::state::ZoomOutputState {
+        niri_ipc::state::ZoomOutputState { level, is_locked }
     }
 
     fn should_emit_zoom_event(
@@ -1151,7 +1137,7 @@ mod tests {
     fn first_zoom_state_is_emitted() {
         assert!(should_emit_zoom_event(
             None,
-            &zoom(1.0, (0.0, 0.0), false),
+            &zoom(1.0, false),
             false,
             false,
             false,
@@ -1161,11 +1147,11 @@ mod tests {
 
     #[test]
     fn idle_emission_threshold() {
-        let previous = emitted(2.0, (10.0, 20.0), false);
+        let previous = emitted(2.0, false);
         // Sub-epsilon sampling noise stays silent.
         assert!(!should_emit_zoom_event(
             Some(&previous),
-            &zoom(2.0 + 1e-6 / 2.0, (10.0, 20.0), false),
+            &zoom(2.0 + 1e-6 / 2.0, false),
             false,
             false,
             false,
@@ -1174,7 +1160,7 @@ mod tests {
         // A meaningful change emits.
         assert!(should_emit_zoom_event(
             Some(&previous),
-            &zoom(2.1, (10.0, 20.0), false),
+            &zoom(2.1, false),
             false,
             false,
             false,
@@ -1184,8 +1170,8 @@ mod tests {
 
     #[test]
     fn animation_samples_are_suppressed_until_settled() {
-        let previous = emitted(1.0, (960.0, 540.0), false);
-        let current = zoom(1.5, (800.0, 500.0), false);
+        let previous = emitted(1.0, false);
+        let current = zoom(1.5, false);
         assert!(!should_emit_zoom_event(
             Some(&previous),
             &current,
@@ -1206,9 +1192,9 @@ mod tests {
 
     #[test]
     fn gesture_boundaries_emit_but_updates_do_not() {
-        let previous = emitted(1.0, (960.0, 540.0), false);
-        let current = zoom(1.2, (900.0, 500.0), false);
-        let current_emitted = emitted(1.2, (900.0, 500.0), false);
+        let previous = emitted(1.0, false);
+        let current = zoom(1.2, false);
+        let current_emitted = emitted(1.2, false);
         assert!(should_emit_zoom_event(
             Some(&previous),
             &current,
@@ -1219,7 +1205,7 @@ mod tests {
         ));
         assert!(!should_emit_zoom_event(
             Some(&current_emitted),
-            &zoom(1.3, (850.0, 480.0), false),
+            &zoom(1.3, false),
             true,
             true,
             true,
@@ -1227,7 +1213,7 @@ mod tests {
         ));
         assert!(should_emit_zoom_event(
             Some(&current_emitted),
-            &zoom(1.3, (850.0, 480.0), false),
+            &zoom(1.3, false),
             true,
             false,
             true,
@@ -1237,10 +1223,10 @@ mod tests {
 
     #[test]
     fn lock_changes_emit_during_animation() {
-        let previous = emitted(1.0, (960.0, 540.0), false);
+        let previous = emitted(1.0, false);
         assert!(should_emit_zoom_event(
             Some(&previous),
-            &zoom(1.2, (900.0, 500.0), true),
+            &zoom(1.2, true),
             false,
             true,
             false,

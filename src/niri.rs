@@ -3002,6 +3002,35 @@ impl Niri {
     }
 
     /// Repositions all outputs, optionally adding a new output.
+    /// Refreshes the cached [`OutputViewCtx`] for one output.
+    ///
+    /// Central helper for the `output geometry ↔ cached OutputViewCtx` invariant:
+    /// call after any `map_output`, scale/transform change, or mode change.
+    /// `to_local`/`to_global` go stale (wrong origin, size, or scale) if this is skipped.
+    fn refresh_view_ctx(&mut self, output: &Output) {
+        if let Some(view_ctx) = OutputViewCtx::for_output(&self.global_space, output) {
+            if let Some(state) = self.output_state.get_mut(output) {
+                state.view_ctx = view_ctx;
+            }
+        }
+        debug_assert!(
+            self.output_state
+                .get(output)
+                .and_then(|s| OutputViewCtx::for_output(&self.global_space, output)
+                    .map(|fresh| s.view_ctx == fresh))
+                .unwrap_or(true),
+            "stale view_ctx after refresh for output"
+        );
+    }
+
+    /// Refreshes cached view contexts for all mapped outputs.
+    fn refresh_all_view_ctxs(&mut self) {
+        let outputs: Vec<Output> = self.global_space.outputs().cloned().collect();
+        for output in &outputs {
+            self.refresh_view_ctx(output);
+        }
+    }
+
     pub fn reposition_outputs(&mut self, new_output: Option<&Output>) {
         let _span = tracy_client::span!("Niri::reposition_outputs");
 
@@ -3126,14 +3155,7 @@ impl Niri {
 
         // Keep the cached view contexts in sync: any output that moved has a stale
         // global_geo.loc, which would corrupt to_local/to_global conversions.
-        let outputs: Vec<Output> = self.global_space.outputs().cloned().collect();
-        for output in &outputs {
-            if let Some(view_ctx) = OutputViewCtx::for_output(&self.global_space, output) {
-                if let Some(state) = self.output_state.get_mut(output) {
-                    state.view_ctx = view_ctx;
-                }
-            }
-        }
+        self.refresh_all_view_ctxs();
     }
 
     pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>, vrr: bool) {
@@ -3328,9 +3350,8 @@ impl Niri {
 
         self.layout.update_output_size(output);
 
+        self.refresh_view_ctx(output);
         if let Some(state) = self.output_state.get_mut(output) {
-            state.view_ctx =
-                OutputViewCtx::for_output(&self.global_space, output).unwrap_or(state.view_ctx);
             state.backdrop_buffer.resize(output_size);
 
             state.lock_color_buffer.resize(output_size);
@@ -4576,15 +4597,6 @@ impl Niri {
             return element;
         }
 
-        // IDENTITY means no magnification: skip wrapping to avoid needless
-        // allocation and element-type churn. This is a render-path
-        // optimization, not an "is zoom active" predicate — callers still
-        // sample the viewport unconditionally via viewport_transform(now),
-        // and everything below derives from that one value.
-        if vt.factor <= 1.0 {
-            return element;
-        }
-
         let view_ctx = self.output_state[output].view_ctx;
 
         // Band flips change pixels without changing geometry or commit, so
@@ -4677,16 +4689,13 @@ impl Niri {
     }
 
     /// Live-cursor focal anchor (raw position) and viewport-clamped display.
-    /// None at 1x or off-output. Epsilon shrink keeps edge points inside.
+    /// None when the pointer isn't on `output` (off-output or on another output),
+    /// or its state is missing. Epsilon shrink keeps edge points inside.
     pub(crate) fn pointer_geometry(
         &self,
         output: &Output,
         vt: ViewportTransform,
     ) -> Option<(Point<f64, Physical>, Point<f64, Local>)> {
-        if vt.factor <= 1.0 {
-            return None;
-        }
-
         let pointer_pos = self.tablet_cursor_location.unwrap_or_else(|| {
             self.seat
                 .get_pointer()

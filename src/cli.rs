@@ -112,7 +112,7 @@ pub enum Msg {
         /// Output name.
         ///
         /// Optional. If not specified, the zoom state of all outputs is printed.
-        #[arg(long, action = clap::ArgAction::Set)]
+        #[arg()]
         output: Option<String>,
     },
     /// List screencasts.
