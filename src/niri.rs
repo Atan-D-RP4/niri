@@ -4018,33 +4018,11 @@ impl Niri {
         }
     }
 
-    /// Returns the cursor hotspot in physical coordinates for the given output,
-    /// or `None` if the cursor is hidden.
-    fn cursor_hotspot(&self, output: &Output) -> Option<Point<i32, Physical>> {
-        // Get the render cursor to draw.
-        let cursor_scale = output.current_scale().integer_scale();
-        let render_cursor = self.cursor_manager.get_render_cursor(cursor_scale);
-
-        let output_scale = Scale::from(output.current_scale().fractional_scale());
-
-        match render_cursor {
-            RenderCursor::Hidden => None,
-            RenderCursor::Surface { hotspot, .. } => {
-                Some(hotspot.to_physical_precise_round(output_scale))
-            }
-            RenderCursor::Named { scale, cursor, .. } => {
-                let (_, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
-                let hotspot = XCursor::hotspot(frame).to_logical(scale);
-                Some(hotspot.to_physical_precise_round(output_scale))
-            }
-        }
-    }
-
     pub fn render_pointer<R: NiriRenderer>(
         &self,
         renderer: &mut R,
         output: &Output,
-        push: &mut dyn FnMut(PointerRenderElements<R>),
+        push: &mut dyn FnMut(PointerRenderElements<R>, Option<Point<i32, Physical>>),
     ) {
         let _span = tracy_client::span!("Niri::render_pointer");
         let output_scale = output.current_scale();
@@ -4080,7 +4058,12 @@ impl Niri {
                     output_scale,
                     1.,
                     Kind::Cursor,
-                    &mut |elem| push(elem.into()),
+                    &mut |elem| {
+                        push(
+                            elem.into(),
+                            Some(hotspot.to_physical_precise_round(output_scale)),
+                        )
+                    },
                 );
             }
             RenderCursor::Named {
@@ -4103,7 +4086,10 @@ impl Niri {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => push(element.into()),
+                    Ok(element) => push(
+                        element.into(),
+                        Some(hotspot.to_physical_precise_round(output_scale)),
+                    ),
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -4121,7 +4107,7 @@ impl Niri {
                 output_scale,
                 1.,
                 Kind::ScanoutCandidate,
-                &mut |elem| push(elem.into()),
+                &mut |elem| push(elem.into(), None),
             );
         }
     }
@@ -4575,15 +4561,19 @@ impl Niri {
         &self,
         elem: PointerRenderElements<R>,
         output: &Output,
-        focal: Point<f64, Physical>,
-        display: Point<f64, Local>,
         vt: ViewportTransform,
-        scale_with_zoom: bool,
+        cursor_hotspot: Option<Point<i32, Physical>>,
     ) -> OutputRenderElements<R> {
         let output_scale = Scale::from(output.current_scale().fractional_scale());
         let view_ctx = self.output_state[output].view_ctx;
-        let cursor_hotspot = self.cursor_hotspot(output);
         let element_kind = elem.kind();
+
+        let (focal, display) = match self.pointer_geometry(output, vt) {
+            Some((focal, display)) => (focal, display),
+            None => {
+                return elem.into();
+            }
+        };
 
         let hotspot = match (element_kind, cursor_hotspot) {
             (Kind::Cursor, Some(h)) => h,
@@ -4594,6 +4584,7 @@ impl Niri {
         };
 
         // Only real cursors scale; DnD icons just follow unscaled.
+        let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
         let graphic_scale = if scale_with_zoom && element_kind == Kind::Cursor {
             vt.factor()
         } else {
@@ -4744,24 +4735,9 @@ impl Niri {
 
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
-            match self.pointer_geometry(output, viewport) {
-                Some((focal, display)) => {
-                    let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
-                    self.render_pointer(ctx.renderer, output, &mut |elem| {
-                        push(self.zoom_pointer(
-                            elem,
-                            output,
-                            focal,
-                            display,
-                            viewport,
-                            scale_with_zoom,
-                        ));
-                    });
-                }
-                None => {
-                    self.render_pointer(ctx.renderer, output, &mut |elem| push(elem.into()));
-                }
-            }
+            self.render_pointer(ctx.renderer, output, &mut |elem, cursor_hotspot| {
+                push(self.zoom_pointer(elem, output, viewport, cursor_hotspot));
+            });
         }
 
         // Next, the screen transition texture.
@@ -6484,7 +6460,7 @@ impl Niri {
                 // show the pointer even when it's hidden through cursor {} options. The user can
                 // then toggle it in the screenshot UI as needed.
                 if self.pointer_visibility != PointerVisibility::Disabled {
-                    self.render_pointer(renderer, &output, &mut |elem| pointer.push(elem));
+                    self.render_pointer(renderer, &output, &mut |elem, _| pointer.push(elem));
                 }
 
                 let res_pointer = if pointer.is_empty() {
@@ -6613,7 +6589,7 @@ impl Niri {
                     .as_logical()
                     .to_physical_precise_round(scale)
                     .upscale(-1);
-                self.render_pointer(renderer, output, &mut |elem| {
+                self.render_pointer(renderer, output, &mut |elem, _| {
                     let elem = RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                     elements.push(elem.into());
                 });

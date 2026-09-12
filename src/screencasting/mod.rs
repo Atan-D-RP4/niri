@@ -219,7 +219,7 @@ impl State {
                             - buf_pos;
 
                         let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                        self.niri.render_pointer(renderer, output, &mut |elem| {
+                        self.niri.render_pointer(renderer, output, &mut |elem, _| {
                             let elem =
                                 RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                             elements.push(CastRenderElement::from(elem));
@@ -594,7 +594,7 @@ impl Niri {
                         pointer_pos = pointer_loc
                             .to_local(&self.output_state[output].view_ctx)
                             .as_logical();
-                        self.render_pointer(renderer, output, &mut |elem| {
+                        self.render_pointer(renderer, output, &mut |elem, _| {
                             elements.push(elem.into())
                         });
                     }
@@ -692,7 +692,7 @@ impl Niri {
                     pointer_location = pointer_pos - buf_pos;
 
                     let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                    self.render_pointer(renderer, output, &mut |elem| {
+                    self.render_pointer(renderer, output, &mut |elem, _| {
                         let elem =
                             RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                         elements.push(CastRenderElement::from(elem));
