@@ -1,12 +1,10 @@
-use glam::{Mat3, Vec2};
+use glam::{DMat3, DVec2};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::Space;
 use smithay::output::Output;
-use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform};
 
-use crate::utils::geometry::{
-    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
-};
+use crate::utils::geometry::{Global, Local, PointExt, PointLocalExt, RectExt};
 
 /// Immutable, sampled transformation of output-local logical geometry.
 ///
@@ -41,15 +39,14 @@ impl ViewportTransform {
 
     /// Applies this transform to a local point.
     pub fn apply(&self, point: Point<f64, Local>) -> Point<f64, Local> {
-        let transformed = self.to_matrix() * Vec2::new(point.x as f32, point.y as f32).extend(1.);
-        Point::new(transformed.x as f64, transformed.y as f64).assume_local()
+        let transformed = self.to_matrix() * DVec2::new(point.x, point.y).extend(1.);
+        Point::new(transformed.x, transformed.y).assume_local()
     }
 
     /// Applies the inverse transform to a local point.
     pub fn apply_inverse(&self, point: Point<f64, Local>) -> Point<f64, Local> {
-        let transformed =
-            self.to_matrix().inverse() * Vec2::new(point.x as f32, point.y as f32).extend(1.);
-        Point::new(transformed.x as f64, transformed.y as f64).assume_local()
+        let transformed = self.to_matrix().inverse() * DVec2::new(point.x, point.y).extend(1.);
+        Point::new(transformed.x, transformed.y).assume_local()
     }
 
     /// Tip-glued cursor placement shared by the live pointer and the preview.
@@ -86,12 +83,12 @@ impl ViewportTransform {
     }
 
     /// Returns the equivalent 2D affine matrix.
-    pub fn to_matrix(&self) -> Mat3 {
-        let scale = Vec2::splat(self.factor as f32);
+    pub fn to_matrix(&self) -> DMat3 {
+        let scale = DVec2::splat(self.factor);
         let focal = self.focal;
-        let focal = Vec2::new(focal.x as f32, focal.y as f32);
+        let focal = DVec2::new(focal.x, focal.y);
 
-        Mat3::from_translation(focal) * Mat3::from_scale(scale) * Mat3::from_translation(-focal)
+        DMat3::from_translation(focal) * DMat3::from_scale(scale) * DMat3::from_translation(-focal)
     }
 
     fn bounding_rect(
@@ -114,60 +111,6 @@ impl ViewportTransform {
 }
 
 impl OutputViewCtx {
-    /// The output's position in global logical space.
-    ///
-    /// This is the translation offset for Global ↔ Local conversion via the
-    /// geometry extension traits (`PointLocalExt::to_global`,
-    /// `PointGlobalExt::to_local`). Use this instead of separately computing
-    /// output geometry from `global_space.output_geometry()`.
-    pub fn output_origin(&self) -> Point<f64, Logical> {
-        self.global_geo.loc.as_logical()
-    }
-
-    /// Physical → Local: divide by [`Self::scale`] only.
-    ///
-    /// [`Self::output_transform`] is intentionally ignored: element geometry
-    /// is already in presented orientation, and rotation composes after the
-    /// viewport, keeping it axis-aligned.
-    #[inline]
-    pub(crate) fn physical_rect_to_local(
-        &self,
-        rect: Rectangle<f64, Physical>,
-    ) -> Rectangle<f64, Local> {
-        rect.to_logical(self.scale).assume_local()
-    }
-    /// Local → Physical: inverse of [`Self::physical_rect_to_local`], scale only.
-    #[inline]
-    pub(crate) fn local_rect_to_physical(
-        &self,
-        rect: Rectangle<f64, Local>,
-    ) -> Rectangle<f64, Physical> {
-        rect.to_physical(self.scale)
-    }
-
-    /// Converts a Local logical point into output-local Physical coordinates.
-    ///
-    /// Point-level counterpart of [`Self::local_rect_to_physical`]: exact
-    /// unit conversion only, no pixel snapping. Use
-    /// [`Self::local_point_to_physical_precise_round`] for render placement.
-    #[inline]
-    pub(crate) fn local_point_to_physical(&self, point: Point<f64, Local>) -> Point<f64, Physical> {
-        point.to_physical(self.scale)
-    }
-
-    /// Converts a Local logical point into Physical pixels with rounding.
-    ///
-    /// Point-level counterpart of the `as_logical().to_physical_precise_round()`
-    /// chains at render boundaries. Like Smithay's method of the same name,
-    /// but sourced from the output scale with the frame carried in the types.
-    #[inline]
-    pub(crate) fn to_physical_precise_round<N: Coordinate>(
-        self,
-        point: Point<f64, Local>,
-    ) -> Point<N, Physical> {
-        point.to_physical_precise_round(self.scale)
-    }
-
     /// Creates a minimal context from an output origin point.
     ///
     /// Only the origin is meaningful for Global ↔ Local translation;
@@ -227,7 +170,7 @@ impl OutputViewCtx {
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use glam::Vec3;
+    use glam::DVec3;
     use smithay::utils::{Point, Rectangle, Scale, Transform};
 
     use super::{OutputViewCtx, ViewportTransform};
@@ -272,10 +215,10 @@ mod tests {
         let point: Point<f64, Local> = (350., 275.).into();
         let sequential = outer.apply(inner.apply(point));
         let matrix = outer.to_matrix() * inner.to_matrix();
-        let composed = matrix * Vec3::new(point.x as f32, point.y as f32, 1.0);
+        let composed = matrix * DVec3::new(point.x, point.y, 1.0);
 
-        assert_relative_eq!(composed.x as f64, sequential.x, epsilon = 1e-4);
-        assert_relative_eq!(composed.y as f64, sequential.y, epsilon = 1e-4);
+        assert_relative_eq!(composed.x, sequential.x, epsilon = 1e-4);
+        assert_relative_eq!(composed.y, sequential.y, epsilon = 1e-4);
     }
 
     #[test]

@@ -4575,7 +4575,7 @@ impl State {
             pointer.frame(self);
         }
 
-        // NOTE; Libinput provides cumulative `scale` (1.0 = unchanged) directly. We route 3-finger
+        // NOTE; Libinput provides cumulative `scale` (1.0 = unchanged) directly. We route 2-finger
         // pinch to zoom; non-zoom pinches forward to Wayland clients.
 
         // FIXME: make pinch-finger count configurable.
@@ -5118,7 +5118,7 @@ fn screenshot_point_in_content(
     output: &Output,
     pos: Point<f64, Global>,
 ) -> Point<i32, Physical> {
-    let point = ctx.to_physical_precise_round(pos.to_local(ctx));
+    let point = pos.to_local(ctx).to_physical_precise_round(ctx.scale);
 
     let size = output.current_mode().unwrap().size;
     let transform = output.current_transform();

@@ -8,7 +8,7 @@ use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame;
-use crate::utils::geometry::Local;
+use crate::utils::geometry::{Local, RectExt, RectLocalExt};
 use crate::utils::view::{OutputViewCtx, ViewportTransform};
 
 /// Runs a draw/capture call with the texture filter set, restoring `Linear` after.
@@ -155,9 +155,9 @@ impl<E: Element> ZoomElement<E> {
 
     /// Viewport math in Local, unit crossings at the Physical boundary.
     fn transform_rect(&self, rect: Rectangle<f64, Physical>) -> Rectangle<f64, Physical> {
-        let local = self.view_ctx.physical_rect_to_local(rect);
+        let local = rect.to_logical(self.view_ctx.scale).assume_local();
         let transformed = self.viewport.apply_rect(local);
-        self.view_ctx.local_rect_to_physical(transformed)
+        transformed.to_physical(self.view_ctx.scale)
     }
 }
 
@@ -238,7 +238,8 @@ impl<E: Element> Element for ZoomElement<E> {
                 let absolute = Rectangle::new(inner_geometry.loc + rect.loc, rect.size);
                 let mut transformed = self.transform_rect(absolute);
                 transformed.loc -= self.transform_rect(inner_geometry).loc;
-                transformed.to_i32_up()
+                // NOTE: to_i32_round() here to avoid oversizing the opaque region.
+                transformed.to_i32_round()
             })
             .collect()
     }

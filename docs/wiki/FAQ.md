@@ -149,7 +149,7 @@ profile {
 	output eDP-1 enable scale 1.0
 }
 
-profile { 
+profile {
 	output HDMI-A-1 enable scale 1.0 position 0,0
 	output eDP-1 enable scale 1.25 position 1920,0
 }
@@ -170,8 +170,8 @@ Tune it in the [`zoom {}` block](./Configuration:-Miscellaneous.md#zoom).
 ### Why doesn't my app receive pinch gestures?
 
 <sup>Since: next release</sup> While zoom is unlocked, the compositor consumes
-three-finger touchpad pinches (and two-finger touchscreen pinches) for screen zoom,
-so apps with their own pinch gestures — browsers, art tools, readers — never see them.
+two-fingered touchpad pinches and touchscreen pinches for screen zoom, so apps
+with their own pinch gestures — browsers, art tools, readers — never see them.
 Lock the zoom with [`toggle-zoom-lock`](./Configuration:-Key-Bindings.md#toggle-zoom-lock)
 and niri forwards the gestures to the app instead.
 See [Zoom lock and app gestures](./Configuration:-Zoom.md#zoom-lock-and-app-gestures).

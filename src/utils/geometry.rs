@@ -154,8 +154,15 @@ impl<C: Coordinate> PointLocalExt<C> for Point<C, Local> {
         (self.x, self.y).into()
     }
 
+    /// Local → Global: translation by output origin only.
+    ///
+    /// `Local` is the presented orientation: `OutputViewCtx::for_output` already
+    /// applies the output transform before scale when sizing `local_geo`
+    /// (matching `Layout::output_size_for_focal`), and element geometry is
+    /// already presented. Rotation composes after the viewport, keeping it
+    /// axis-aligned, so no transform is applied here.
     fn to_global(self, ctx: &OutputViewCtx) -> Point<C, Global> {
-        let origin = ctx.output_origin();
+        let origin = ctx.global_geo.loc.as_logical();
         let point = self.to_f64().as_logical() + origin;
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }
@@ -177,8 +184,12 @@ impl<C: Coordinate> PointGlobalExt<C> for Point<C, Global> {
         (self.x, self.y).into()
     }
 
+    /// Global → Local: translation by output origin only.
+    ///
+    /// Inverse of [`PointLocalExt::to_global`]: `output_transform` is
+    /// intentionally ignored for the same presented-orientation reason.
     fn to_local(self, ctx: &OutputViewCtx) -> Point<C, Local> {
-        let origin = ctx.output_origin();
+        let origin = ctx.global_geo.loc.as_logical();
         let point = self.to_f64().as_logical() - origin;
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }

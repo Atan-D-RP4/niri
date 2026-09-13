@@ -540,19 +540,36 @@ pub struct OutputState {
     /// Owned by [`OutputState::zoom_filter_for`]; the render path is `&self`,
     /// hence the `Cell`. Captures pass `IDENTITY` and early-return before it.
     pub last_zoom_filter: Cell<Option<TextureFilter>>,
+    /// Band tracker for the screenshot preview, independent of the main scene.
+    ///
+    /// Prevents the preview from stealing the main Cell's changed flag on band
+    /// flips (and vice-versa).
+    pub last_preview_filter: Cell<Option<TextureFilter>>,
 }
 
 impl OutputState {
     /// Samples the texture filter for `factor`, reporting band changes.
     ///
-    /// Sole owner of the per-output filter transition: compares against the
-    /// materialized band and records the new one in a single step. Both scene
-    /// producers call this per frame and forward the results; neither reads
-    /// the cell directly, so no producer can miss another's update.
+    /// Compares against the materialized band and records the new one in a
+    /// single step. The caller must sample this **once per frame per output**
+    /// and clone the result into every `ZoomElement` it produces — never call
+    /// it per-element, or only the first caller sees `changed == true`.
     pub fn zoom_filter_for(&self, factor: f64, threshold: f64) -> (Option<TextureFilter>, bool) {
         let filter = zoom_filter(factor, threshold);
         let changed = zoom_filter_changed(self.last_zoom_filter.get(), filter);
         self.last_zoom_filter.set(filter);
+        (filter, changed)
+    }
+
+    /// Per-frame band sampling for the screenshot preview.
+    ///
+    /// Mirrors [`Self::zoom_filter_for`] but tracks the band independently so
+    /// the preview's transition flag is never clobbered by (or clobbers) the
+    /// main scene's.
+    pub fn preview_filter_for(&self, factor: f64, threshold: f64) -> (Option<TextureFilter>, bool) {
+        let filter = zoom_filter(factor, threshold);
+        let changed = zoom_filter_changed(self.last_preview_filter.get(), filter);
+        self.last_preview_filter.set(filter);
         (filter, changed)
     }
 }
@@ -767,6 +784,52 @@ impl KeyboardFocus {
 pub struct State {
     pub backend: Backend,
     pub niri: Niri,
+}
+
+/// Validate and clamp zoom config fields to sane defaults.
+///
+/// Returns `true` if any hard correction was made (caller should show a
+/// config-error notification).
+fn validate_zoom(zoom: &mut niri_config::Zoom) -> bool {
+    let mut corrected = false;
+
+    if !zoom.pinch_sensitivity.is_finite() || zoom.pinch_sensitivity <= 0.0 {
+        warn!(
+            "zoom.pinch_sensitivity must be > 0, got {}; clamping to 1.0",
+            zoom.pinch_sensitivity
+        );
+        zoom.pinch_sensitivity = 1.0;
+        corrected = true;
+    }
+
+    if !zoom.max_zoom.is_finite() || zoom.max_zoom < 1.0 {
+        warn!(
+            "zoom.max_zoom must be >= 1.0, got {}; clamping to 10.0",
+            zoom.max_zoom
+        );
+        zoom.max_zoom = 10.0;
+        corrected = true;
+    }
+
+    if !zoom.zoom_filter_threshold.is_finite() || zoom.zoom_filter_threshold <= 0.0 {
+        warn!(
+            "zoom.zoom_filter_threshold must be > 0, got {}; clamping to 2.0",
+            zoom.zoom_filter_threshold
+        );
+        zoom.zoom_filter_threshold = 2.0;
+        corrected = true;
+    }
+
+    if zoom.zoom_filter_threshold <= 1.01 {
+        warn!(
+            "zoom.zoom_filter_threshold is very low ({0}); \
+             nearest-neighbour filtering will kick in at almost any zoom level above 1x; \
+             consider raising it above the default of 2.0",
+            zoom.zoom_filter_threshold,
+        );
+    }
+
+    corrected
 }
 
 impl State {
@@ -1615,49 +1678,11 @@ impl State {
         self.niri.config_error_notification.hide();
 
         // Validate zoom config values.
-        if config.zoom.pinch_sensitivity <= 0.0 {
-            warn!(
-                "zoom.pinch_sensitivity must be > 0, got {}",
-                config.zoom.pinch_sensitivity
-            );
+        if validate_zoom(&mut config.zoom) {
             self.niri.config_error_notification.show();
-            self.niri.queue_redraw_all();
 
             #[cfg(feature = "dbus")]
             self.niri.a11y_announce_config_error();
-
-            return;
-        }
-        if config.zoom.max_zoom < 1.0 {
-            warn!("zoom.max_zoom must be >= 1.0, got {}", config.zoom.max_zoom);
-            self.niri.config_error_notification.show();
-            self.niri.queue_redraw_all();
-
-            #[cfg(feature = "dbus")]
-            self.niri.a11y_announce_config_error();
-
-            return;
-        }
-        if config.zoom.zoom_filter_threshold <= 0.0 {
-            warn!(
-                "zoom.zoom_filter_threshold must be > 0, got {}",
-                config.zoom.zoom_filter_threshold
-            );
-            self.niri.config_error_notification.show();
-            self.niri.queue_redraw_all();
-
-            #[cfg(feature = "dbus")]
-            self.niri.a11y_announce_config_error();
-
-            return;
-        }
-        if config.zoom.zoom_filter_threshold <= 1.01 {
-            warn!(
-                "zoom.zoom_filter_threshold is very low ({0}); \
-         Nearest-neighbour filtering will kick in at almost any zoom level above 1x. \
-         Set zoom_filter_threshold to a higher value (default is 2.0).",
-                config.zoom.zoom_filter_threshold,
-            );
         }
 
         // Find & orphan removed named workspaces.
@@ -3008,11 +3033,30 @@ impl Niri {
     /// call after any `map_output`, scale/transform change, or mode change.
     /// `to_local`/`to_global` go stale (wrong origin, size, or scale) if this is skipped.
     fn refresh_view_ctx(&mut self, output: &Output) {
-        if let Some(view_ctx) = OutputViewCtx::for_output(&self.global_space, output) {
+        let view_ctx = OutputViewCtx::for_output(&self.global_space, output);
+        if let Some(view_ctx) = view_ctx {
             if let Some(state) = self.output_state.get_mut(output) {
                 state.view_ctx = view_ctx;
             }
         }
+
+        // Recenter the focal point sentinel left by `new_for_output`'s
+        // hot-plug fallback when `current_mode()` was still `None`.
+        // At 1x zoom the focal is visually irrelevant, so this only fixes
+        // the anchor for the next zoom-in.  The `(0, 0)` gate ensures
+        // user-set focals are never clobbered.
+        if let Some(view_ctx) = view_ctx {
+            if let Some(zoom) = self.layout.zoom_state_for_output_mut(output) {
+                if zoom.level == 1.0 && !zoom.transitioning() && zoom.focal == Point::from((0., 0.))
+                {
+                    zoom.focal = Point::from((
+                        view_ctx.local_geo.loc.x + view_ctx.local_geo.size.w / 2.0,
+                        view_ctx.local_geo.loc.y + view_ctx.local_geo.size.h / 2.0,
+                    ));
+                }
+            }
+        }
+
         debug_assert!(
             self.output_state
                 .get(output)
@@ -3232,6 +3276,7 @@ impl Niri {
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
             view_ctx: OutputViewCtx::from_origin((0., 0.).into()),
             last_zoom_filter: Cell::new(None),
+            last_preview_filter: Cell::new(None),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -4592,19 +4637,14 @@ impl Niri {
         element: OutputRenderElements<R>,
         output: &Output,
         vt: ViewportTransform,
+        zoom_filter: Option<TextureFilter>,
+        filter_changed: bool,
     ) -> OutputRenderElements<R> {
         if matches!(element, OutputRenderElements::Pointer(_)) {
             return element;
         }
 
         let view_ctx = self.output_state[output].view_ctx;
-
-        // Band flips change pixels without changing geometry or commit, so
-        // the wrapper needs the transition flag for correct damage. Both
-        // scene producers sample through the single owning helper.
-        let output_state = &self.output_state[output];
-        let (zoom_filter, filter_changed) = output_state
-            .zoom_filter_for(vt.factor, self.config.borrow().zoom.zoom_filter_threshold);
 
         macro_rules! apply_zoom {
             ($($variant:ident), *) => {
@@ -4715,10 +4755,7 @@ impl Niri {
 
         let display_cursor = pointer_local.constrain(viewport);
 
-        Some((
-            view_ctx.local_point_to_physical(pointer_local),
-            display_cursor,
-        ))
+        Some((pointer_local.to_physical(view_ctx.scale), display_cursor))
     }
 
     /// Live viewport for an output, or IDENTITY without zoom state.
@@ -4736,7 +4773,7 @@ impl Niri {
         let view_ctx = self.output_state[output].view_ctx;
         let config = self.config.borrow();
         let (filter, filter_changed) = self.output_state[output]
-            .zoom_filter_for(viewport.factor, config.zoom.zoom_filter_threshold);
+            .preview_filter_for(viewport.factor, config.zoom.zoom_filter_threshold);
         ScreenshotPreviewZoom {
             viewport,
             view_ctx,
@@ -4786,8 +4823,15 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
+        // Sample the filter once per frame for the main scene so every
+        // ZoomElement sees the same changed flag.
+        let (zoom_filter, filter_changed) = self.output_state[output].zoom_filter_for(
+            viewport.factor,
+            self.config.borrow().zoom.zoom_filter_threshold,
+        );
+
         let push = &mut move |elem| {
-            let elem = self.zoom_element(elem, output, viewport);
+            let elem = self.zoom_element(elem, output, viewport, zoom_filter, filter_changed);
             push(elem);
         };
 
@@ -6573,8 +6617,9 @@ impl Niri {
                                 .assume_global()
                         });
                         let view_ctx = self.output_state[&output].view_ctx;
-                        let tip =
-                            view_ctx.to_physical_precise_round(cursor_pos.to_local(&view_ctx));
+                        let tip = cursor_pos
+                            .to_local(&view_ctx)
+                            .to_physical_precise_round(view_ctx.scale);
                         let hotspot = tip - geo.loc;
                         CapturedPointer {
                             texture,
@@ -7334,8 +7379,6 @@ impl Niri {
                         target,
                         xray: None,
                     };
-                    // Transition snapshots record the unzoomed scene; the live
-                    // viewport keeps applying on top while they crossfade.
                     let elements =
                         self.render_to_vec(ctx, &output, false, self.live_viewport(&output));
                     let elements = elements.iter().rev();

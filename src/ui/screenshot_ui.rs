@@ -28,7 +28,7 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::zoom::ZoomElement;
 use crate::render_helpers::{render_to_vec, RenderTarget};
-use crate::utils::geometry::PointExt;
+use crate::utils::geometry::{PointExt, RectExt, RectLocalExt};
 use crate::utils::to_physical_precise_round;
 use crate::utils::view::{OutputViewCtx, ViewportTransform};
 
@@ -1198,9 +1198,9 @@ fn export_rect(
     viewport: ViewportTransform,
     view_ctx: &OutputViewCtx,
 ) -> Rectangle<i32, Physical> {
-    let local = view_ctx.physical_rect_to_local(content.to_f64());
+    let local = content.to_f64().to_logical(view_ctx.scale).assume_local();
     let mapped = viewport.apply_rect(local);
-    let physical = view_ctx.local_rect_to_physical(mapped);
+    let physical = mapped.to_physical(view_ctx.scale);
     let loc = physical.loc.to_i32_round();
     let bottom_right = (physical.loc + physical.size).to_i32_round();
     Rectangle::new(loc, (bottom_right - loc).to_size())

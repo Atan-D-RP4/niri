@@ -70,7 +70,7 @@ Open and close the overview with a four-finger vertical swipe.
 
 <sup>Since: next release</sup>
 
-Zoom the output in and out with a three-finger pinch.
+Zoom the output in and out with a two-finger pinch.
 See the [Zoom feature page](./Configuration:-Zoom.md) and the
 [`zoom {}` settings](./Configuration:-Miscellaneous.md#zoom).
 
