@@ -539,6 +539,8 @@ impl Config {
             self.animations.window_open.custom_shader.clone(),
             self.animations.window_close.custom_shader.clone(),
             self.animations.window_resize.custom_shader.clone(),
+            self.animations.layer_open.custom_shader.clone(),
+            self.animations.layer_close.custom_shader.clone(),
         ];
         out.extend(global.into_iter().flatten());
 
@@ -553,6 +555,23 @@ impl Config {
                     .and_then(|anim| anim.custom_shader.clone()),
                 anims
                     .window_close
+                    .as_ref()
+                    .and_then(|anim| anim.custom_shader.clone()),
+            ];
+            out.extend(rule_sources.into_iter().flatten());
+        }
+
+        for rule in &self.layer_rules {
+            let Some(anims) = &rule.animations else {
+                continue;
+            };
+            let rule_sources = [
+                anims
+                    .layer_open
+                    .as_ref()
+                    .and_then(|anim| anim.custom_shader.clone()),
+                anims
+                    .layer_close
                     .as_ref()
                     .and_then(|anim| anim.custom_shader.clone()),
             ];
@@ -1008,6 +1027,18 @@ mod tests {
             layer-rule {
                 match namespace="^notifications$"
                 block-out-from "screencast"
+
+                animations {
+                    layer-open {
+                        duration-ms 150
+                        curve "ease-out-expo"
+                    }
+
+                    layer-close {
+                        duration-ms 150
+                        curve "ease-out-expo"
+                    }
+                }
             }
 
             binds {
@@ -1653,6 +1684,30 @@ mod tests {
                     },
                     custom_shader: None,
                 },
+                layer_open: LayerOpenAnim {
+                    anim: Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 150,
+                                curve: EaseOutExpo,
+                            },
+                        ),
+                    },
+                    custom_shader: None,
+                },
+                layer_close: LayerCloseAnim {
+                    anim: Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 150,
+                                curve: EaseOutQuad,
+                            },
+                        ),
+                    },
+                    custom_shader: None,
+                },
                 horizontal_view_movement: HorizontalViewMovementAnim(
                     Animation {
                         off: false,
@@ -2096,6 +2151,38 @@ mod tests {
                             saturation: None,
                         },
                     },
+                    animations: Some(
+                        LayerAnimationsRule {
+                            layer_open: Some(
+                                LayerOpenAnim {
+                                    anim: Animation {
+                                        off: false,
+                                        kind: Easing(
+                                            EasingParams {
+                                                duration_ms: 150,
+                                                curve: EaseOutExpo,
+                                            },
+                                        ),
+                                    },
+                                    custom_shader: None,
+                                },
+                            ),
+                            layer_close: Some(
+                                LayerCloseAnim {
+                                    anim: Animation {
+                                        off: false,
+                                        kind: Easing(
+                                            EasingParams {
+                                                duration_ms: 150,
+                                                curve: EaseOutExpo,
+                                            },
+                                        ),
+                                    },
+                                    custom_shader: None,
+                                },
+                            ),
+                        },
+                    ),
                 },
             ],
             binds: Binds(
@@ -2589,6 +2676,7 @@ mod tests {
         // Some notable omissions: the default config has some window rules, and an empty config
         // will not have any binds. Clear them out so they don't spam the diff.
         default_config.window_rules.clear();
+        default_config.layer_rules.clear();
         default_config.binds.0.clear();
 
         assert_snapshot!(
