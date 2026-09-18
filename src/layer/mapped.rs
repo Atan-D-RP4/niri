@@ -14,6 +14,7 @@ use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
 
 use super::ResolvedLayerRules;
 use crate::animation::{Animation, Clock};
+use crate::layer::closing_layer::ClosingLayerRenderElement;
 use crate::layer::opening_layer::{OpenAnimation, OpeningLayerRenderElement};
 use crate::layout::shadow::Shadow;
 use crate::niri_render_elements;
@@ -79,6 +80,7 @@ niri_render_elements! {
         Shadow = ShadowRenderElement,
         BackgroundEffect = BackgroundEffectElement,
         Opening = OpeningLayerRenderElement,
+        Closing = ClosingLayerRenderElement,
     }
 }
 
