@@ -23,6 +23,7 @@ use crate::niri_render_elements;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::RenderCtx;
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, SizeExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::ResizeEdge;
@@ -72,18 +73,18 @@ pub struct ScrollingSpace<W: LayoutElement> {
     closing_windows: Vec<ClosingWindow>,
 
     /// View size for this space.
-    view_size: Size<f64, Logical>,
+    view_size: Size<f64, Local>,
 
     /// Working area for this space.
     ///
     /// Takes into account layer-shell exclusive zones and niri struts.
-    working_area: Rectangle<f64, Logical>,
+    working_area: Rectangle<f64, Local>,
 
     /// Working area for this space excluding struts.
     ///
     /// Used for popup unconstraining. Popups can go over struts, but they shouldn't go over
     /// the layer-shell top layer (which renders on top of popups).
-    parent_area: Rectangle<f64, Logical>,
+    parent_area: Rectangle<f64, Local>,
 
     /// Scale of the output the space is on (and rounds its sizes to).
     scale: f64,
@@ -219,15 +220,15 @@ pub struct Column<W: LayoutElement> {
     move_y_animation: Option<MoveAnimation>,
 
     /// Latest known view size for this column's workspace.
-    view_size: Size<f64, Logical>,
+    view_size: Size<f64, Local>,
 
     /// Latest known working area for this column's workspace.
-    working_area: Rectangle<f64, Logical>,
+    working_area: Rectangle<f64, Local>,
 
     /// Working area for this column's workspace excluding struts.
     ///
     /// Used for maximize-to-edges.
-    parent_area: Rectangle<f64, Logical>,
+    parent_area: Rectangle<f64, Local>,
 
     /// Scale of the output the column is on (and rounds its sizes to).
     scale: f64,
@@ -314,8 +315,8 @@ struct MoveAnimation {
 
 impl<W: LayoutElement> ScrollingSpace<W> {
     pub fn new(
-        view_size: Size<f64, Logical>,
-        parent_area: Rectangle<f64, Logical>,
+        view_size: Size<f64, Local>,
+        parent_area: Rectangle<f64, Local>,
         scale: f64,
         clock: Clock,
         options: Rc<Options>,
@@ -342,8 +343,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn update_config(
         &mut self,
-        view_size: Size<f64, Logical>,
-        parent_area: Rectangle<f64, Logical>,
+        view_size: Size<f64, Local>,
+        parent_area: Rectangle<f64, Local>,
         scale: f64,
         options: Rc<Options>,
     ) {
@@ -439,7 +440,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let is_active = is_active && col_idx == active_idx;
             let col_off = Point::from((col_x, 0.));
             let col_pos = view_pos - col_off - col.render_offset();
-            let view_rect = Rectangle::new(col_pos, view_size);
+            let view_rect = Rectangle::new(col_pos, view_size.as_logical());
             col.update_render_elements(is_active, view_rect);
         }
     }
@@ -507,7 +508,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         compute_toplevel_bounds(
             border_config,
-            self.working_area.size,
+            self.working_area.size.as_logical(),
             extra_size,
             self.options.layout.gaps,
         )
@@ -833,7 +834,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
     }
 
-    pub(super) fn insert_position(&self, pos: Point<f64, Logical>) -> InsertPosition {
+    pub(super) fn insert_position(&self, pos: Point<f64, Local>) -> InsertPosition {
         if self.columns.is_empty() {
             return InsertPosition::NewColumn(0);
         }
@@ -1533,7 +1534,14 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             tile_pos.x -= offset;
         }
 
-        self.start_close_animation_for_tile(renderer, snapshot, tile_size, tile_pos, blocker);
+        self.start_close_animation_for_tile(
+            renderer,
+            snapshot,
+            tile_size,
+            // Closing-window animation stays Logical.
+            tile_pos.as_logical(),
+            blocker,
+        );
     }
 
     fn start_close_animation_for_tile(
@@ -2429,7 +2437,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn tiles_with_render_positions(
         &self,
-    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>, bool)> {
+    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>, bool)> {
         let scale = self.scale;
         self.columns_with_render_positions()
             .flat_map(move |(col, col_pos)| {
@@ -2438,7 +2446,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         let pos = col_pos + tile_off + tile.render_offset();
                         // Round to physical pixels.
                         let pos = pos.to_physical_precise_round(scale).to_logical(scale);
-                        (tile, pos, visible)
+                        // Output-relative render position; layout data stays Logical upstream.
+                        (tile, pos.assume_local(), visible)
                     })
             })
     }
@@ -2446,7 +2455,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     pub fn tiles_with_render_positions_mut(
         &mut self,
         round: bool,
-    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> {
         let scale = self.scale;
         self.columns_with_render_positions_mut()
             .flat_map(move |(col, col_pos)| {
@@ -2457,7 +2466,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         if round {
                             pos = pos.to_physical_precise_round(scale).to_logical(scale);
                         }
-                        (tile, pos)
+                        // Output-relative render position; layout data stays Logical upstream.
+                        (tile, pos.assume_local())
                     })
             })
     }
@@ -2481,7 +2491,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     pub(super) fn insert_hint_area(
         &self,
         position: InsertPosition,
-    ) -> Option<Rectangle<f64, Logical>> {
+    ) -> Option<Rectangle<f64, Local>> {
         let mut hint_area = match position {
             InsertPosition::NewColumn(column_index) => {
                 if column_index == 0 || column_index == self.columns.len() {
@@ -2588,7 +2598,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     /// Returns the geometry of the active window relative to and clamped to the view.
     ///
     /// During animations, assumes the final view position.
-    pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Logical>> {
+    pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Local>> {
         let col = self.columns.get(self.active_column_idx)?;
 
         let final_view_offset = self.view_offset.target();
@@ -2601,10 +2611,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let window_rect = Rectangle::new(window_pos, window_size);
 
         let view = Rectangle::from_size(self.view_size);
-        view.intersection(window_rect)
+        view.intersection(window_rect.assume_local())
     }
 
-    pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Logical>> {
+    pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Local>> {
         for col in &self.columns {
             for (tile, pos) in col.tiles() {
                 if tile.window().id() == id {
@@ -2955,7 +2965,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         // Draw the closing windows on top of the other windows.
         if layer.is_normal() {
-            let view_rect = Rectangle::new(Point::from((self.view_pos(), 0.)), self.view_size);
+            let view_rect = Rectangle::new(
+                Point::from((self.view_pos(), 0.)),
+                self.view_size.as_logical(),
+            );
             for closing in self.closing_windows.iter().rev() {
                 let elem = closing.render(ctx.as_gles(), view_rect, scale);
                 push(elem.into());
@@ -3004,15 +3017,20 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     continue;
                 }
 
-                let xray_pos = xray_pos.offset(tile_pos);
-                tile.render(ctx.r(), tile_pos, xray_pos, focus_ring, &mut |elem| {
-                    push(elem.into())
-                });
+                // Inline-computed output-relative position (mirrors the iterator above).
+                let xray_pos = xray_pos.offset(tile_pos.assume_local());
+                tile.render(
+                    ctx.r(),
+                    tile_pos.assume_local(),
+                    xray_pos,
+                    focus_ring,
+                    &mut |elem| push(elem.into()),
+                );
             }
         }
     }
 
-    pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<(&W, HitType)> {
+    pub fn window_under(&self, pos: Point<f64, Local>) -> Option<(&W, HitType)> {
         // This matches self.tiles_with_render_positions().
         let scale = self.scale;
         for (col, col_pos) in self.columns_with_render_positions() {
@@ -3024,7 +3042,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     col.tab_indicator_area(),
                     col.tiles.len(),
                     scale,
-                    pos - col_pos,
+                    pos.as_logical() - col_pos,
                 ) {
                     let hit = HitType::Activate {
                         is_tab_indicator: true,
@@ -3042,7 +3060,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 // Round to physical pixels.
                 let tile_pos = tile_pos.to_physical_precise_round(scale).to_logical(scale);
 
-                if let Some(rv) = HitType::hit_tile(tile, tile_pos, pos) {
+                if let Some(rv) = HitType::hit_tile(tile, tile_pos, pos.as_logical()) {
                     return Some(rv);
                 }
             }
@@ -3731,7 +3749,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 let border_config = self.options.layout.border.merged_with(&win.rules().border);
                 let bounds = compute_toplevel_bounds(
                     border_config,
-                    self.working_area.size,
+                    self.working_area.size.as_logical(),
                     extra_size,
                     self.options.layout.gaps,
                 );
@@ -3756,12 +3774,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     #[cfg(test)]
-    pub fn view_size(&self) -> Size<f64, Logical> {
+    pub fn view_size(&self) -> Size<f64, Local> {
         self.view_size
     }
 
     #[cfg(test)]
-    pub fn parent_area(&self) -> Rectangle<f64, Logical> {
+    pub fn parent_area(&self) -> Rectangle<f64, Local> {
         self.parent_area
     }
 
@@ -3970,9 +3988,9 @@ impl<W: LayoutElement> Column<W> {
     #[allow(clippy::too_many_arguments)]
     fn new_with_tile(
         tile: Tile<W>,
-        view_size: Size<f64, Logical>,
-        working_area: Rectangle<f64, Logical>,
-        parent_area: Rectangle<f64, Logical>,
+        view_size: Size<f64, Local>,
+        working_area: Rectangle<f64, Local>,
+        parent_area: Rectangle<f64, Local>,
         scale: f64,
         width: ColumnWidth,
         is_full_width: bool,
@@ -4053,9 +4071,9 @@ impl<W: LayoutElement> Column<W> {
 
     fn update_config(
         &mut self,
-        view_size: Size<f64, Logical>,
-        working_area: Rectangle<f64, Logical>,
-        parent_area: Rectangle<f64, Logical>,
+        view_size: Size<f64, Local>,
+        working_area: Rectangle<f64, Local>,
+        parent_area: Rectangle<f64, Local>,
         scale: f64,
         options: Rc<Options>,
     ) {
@@ -4094,7 +4112,7 @@ impl<W: LayoutElement> Column<W> {
         }
 
         for (tile, data) in zip(&mut self.tiles, &mut self.data) {
-            tile.update_config(view_size, scale, options.clone());
+            tile.update_config(view_size.as_logical(), scale, options.clone());
             data.update(tile);
         }
 
@@ -4426,7 +4444,11 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn add_tile_at(&mut self, idx: usize, mut tile: Tile<W>) {
-        tile.update_config(self.view_size, self.scale, self.options.clone());
+        tile.update_config(
+            self.view_size.as_logical(),
+            self.scale,
+            self.options.clone(),
+        );
 
         // Inserting a tile pushes down all tiles below it, but also in always-centering mode it
         // will affect the X position of all tiles in the column.
@@ -4561,7 +4583,11 @@ impl<W: LayoutElement> Column<W> {
                 if matches!(sizing_mode, SizingMode::Fullscreen) {
                     tile.request_fullscreen(animate, transaction);
                 } else {
-                    tile.request_maximized(self.parent_area.size, animate, transaction);
+                    tile.request_maximized(
+                        self.parent_area.size.as_logical(),
+                        animate,
+                        transaction,
+                    );
                 }
             }
             return;
@@ -5523,7 +5549,7 @@ impl<W: LayoutElement> Column<W> {
                 self.pending_sizing_mode(),
                 tile.window().pending_sizing_mode()
             );
-            assert_eq!(self.view_size, tile.view_size());
+            assert_eq!(self.view_size, tile.view_size().assume_local());
             tile.verify_invariants();
 
             let mut data2 = *data;
@@ -5620,10 +5646,10 @@ fn compute_new_view_offset(
 }
 
 fn compute_working_area(
-    parent_area: Rectangle<f64, Logical>,
+    parent_area: Rectangle<f64, Local>,
     scale: f64,
     struts: Struts,
-) -> Rectangle<f64, Logical> {
+) -> Rectangle<f64, Local> {
     let mut working_area = parent_area;
 
     // Add struts.
@@ -5636,8 +5662,10 @@ fn compute_working_area(
     // Round location to start at a physical pixel.
     let loc = working_area
         .loc
+        .as_logical()
         .to_physical_precise_ceil(scale)
-        .to_logical(scale);
+        .to_logical(scale)
+        .assume_local();
 
     let mut size_diff = (loc - working_area.loc).to_size();
     size_diff.w = f64::min(working_area.size.w, size_diff.w);

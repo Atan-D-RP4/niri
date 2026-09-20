@@ -11,7 +11,7 @@ use smithay::backend::renderer::gles::{
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
 use smithay::backend::renderer::Color32F;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::background_effect::RenderParams;
@@ -19,6 +19,7 @@ use crate::render_helpers::effect_buffer::EffectBuffer;
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
 use crate::render_helpers::{RenderCtx, RenderTarget};
+use crate::utils::geometry::{Local, PointLocalExt, RectExt, RectLocalExt};
 use crate::utils::region::TransformedRegion;
 
 #[derive(Debug)]
@@ -27,7 +28,7 @@ pub struct Xray {
     pub background: [Rc<RefCell<EffectBuffer>>; RenderTarget::COUNT],
     pub backdrop: [Rc<RefCell<EffectBuffer>>; RenderTarget::COUNT],
     pub backdrop_color: Color32F,
-    pub workspaces: Vec<(Rectangle<f64, Logical>, Color32F)>,
+    pub workspaces: Vec<(Rectangle<f64, Local>, Color32F)>,
 }
 
 /// Position for drawing xray background.
@@ -36,21 +37,23 @@ pub struct XrayPos {
     /// Position of geometry relative to the backdrop in zoomed coordinates.
     ///
     /// Should be upscaled by `zoom` to get position in backdrop coordinates.
-    pub pos_in_backdrop: Point<f64, Logical>,
+    pub pos_in_backdrop: Point<f64, Local>,
 
     /// Zoom factor between backdrop coordinates and geometry.
     pub backdrop_scale: f64,
 }
 
 impl XrayPos {
-    pub fn new(pos_in_backdrop: Point<f64, Logical>, backdrop_scale: f64) -> Self {
+    pub fn new(pos_in_backdrop: Point<f64, Local>, backdrop_scale: f64) -> Self {
         Self {
             pos_in_backdrop: pos_in_backdrop.downscale(backdrop_scale),
             backdrop_scale,
         }
     }
 
-    pub fn offset(mut self, offset: Point<f64, Logical>) -> Self {
+    /// Accumulates a pre-upscale geometry-space offset (position or displacement,
+    /// always in output-Local units); `render` scales the sum into backdrop space once.
+    pub fn offset(mut self, offset: Point<f64, Local>) -> Self {
         self.pos_in_backdrop += offset;
         self
     }
@@ -69,7 +72,7 @@ impl Default for XrayPos {
 pub struct XrayElement {
     buffer: Rc<RefCell<EffectBuffer>>,
     id: Id,
-    geometry: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
     src: Rectangle<f64, Buffer>,
     subregion: Option<TransformedRegion>,
     input_to_clip_geo: Mat3,
@@ -113,7 +116,8 @@ impl Xray {
             .clip
             .unwrap_or((params.geometry, CornerRadius::default()));
 
-        let clip_offset = clip_geo.loc - params.geometry.loc;
+        let geometry = params.geometry;
+        let clip_offset = clip_geo.loc - geometry.loc;
         let clip_pos_in_backdrop = pos_in_backdrop + clip_offset.upscale(backdrop_scale);
 
         let geo_in_backdrop = Rectangle::new(
@@ -122,7 +126,7 @@ impl Xray {
         );
 
         let mut backdrop = self.backdrop[ctx.target as usize].borrow_mut();
-        let backdrop_geo = Rectangle::from_size(backdrop.logical_size());
+        let backdrop_geo = Rectangle::from_size(backdrop.logical_size()).assume_local();
         let intersection_with_backdrop = backdrop_geo.intersection(geo_in_backdrop);
 
         let mut skip_backdrop = intersection_with_backdrop.is_none();
@@ -176,7 +180,9 @@ impl Xray {
                 let ws_zoom = ws_geo.size / buf_size;
 
                 let src = Rectangle::new(crop.loc - ws_geo.loc, crop.size).downscale(ws_zoom);
-                let src = src.to_buffer(background.scale(), Transform::Normal, &buf_size);
+                let src =
+                    src.as_logical()
+                        .to_buffer(background.scale(), Transform::Normal, &buf_size);
 
                 let buf_size = Vec2::new(buf_size.w as f32, buf_size.h as f32);
                 let pos_against_buf = (clip_pos_in_backdrop - ws_geo.loc).downscale(ws_zoom);
@@ -222,7 +228,11 @@ impl Xray {
             }
 
             let buf_size = backdrop.logical_size();
-            let src = geo_in_backdrop.to_buffer(backdrop.scale(), Transform::Normal, &buf_size);
+            let src = geo_in_backdrop.as_logical().to_buffer(
+                backdrop.scale(),
+                Transform::Normal,
+                &buf_size,
+            );
 
             let mut clip_geo_in_backdrop =
                 Rectangle::new(clip_offset, clip_geo.size).upscale(backdrop_scale);
@@ -290,7 +300,7 @@ impl Element for XrayElement {
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.geometry.to_physical_precise_round(scale)
+        self.geometry.as_logical().to_physical_precise_round(scale)
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
@@ -331,7 +341,7 @@ impl RenderElement<GlesRenderer> for XrayElement {
             let mut crop = crop.to_logical(1., Transform::Normal, &Size::default());
 
             // Then convert to subregion coordinates.
-            crop.loc += self.geometry.loc;
+            crop.loc += self.geometry.loc.as_logical();
 
             subregion.filter_damage(crop, dst, damage, &mut filtered_damage);
 

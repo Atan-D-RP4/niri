@@ -11,13 +11,14 @@ use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::{Frame as _, FrameContext, Offscreen, Texture as _};
 use smithay::gpu_span_location;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
+use smithay::utils::{Buffer, Physical, Rectangle, Scale, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::background_effect::RenderParams;
 use crate::render_helpers::blur::{Blur, BlurOptions};
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
+use crate::utils::geometry::{Local, PointLocalExt, RectExt, RectLocalExt, SizeExt};
 use crate::utils::region::TransformedRegion;
 
 #[derive(Debug)]
@@ -30,8 +31,8 @@ pub struct FramebufferEffect {
 pub struct FramebufferEffectElement {
     id: Id,
     commit: CommitCounter,
-    geometry: Rectangle<f64, Logical>,
-    clip_geo: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
+    clip_geo: Rectangle<f64, Local>,
     corner_radius: CornerRadius,
     subregion: Option<TransformedRegion>,
     scale: f32,
@@ -96,7 +97,7 @@ impl FramebufferEffect {
 impl FramebufferEffectElement {
     fn compute_uniforms(
         &self,
-        crop: Rectangle<f64, Logical>,
+        crop: Rectangle<f64, Local>,
         transform: Transform,
     ) -> [Uniform<'static>; 7] {
         let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
@@ -139,12 +140,16 @@ impl Element for FramebufferEffectElement {
 
     fn src(&self) -> Rectangle<f64, Buffer> {
         // We don't use src for drawing but we can use it to figure out how we were cropped.
-        let size = self.geometry.size.to_buffer(1., Transform::Normal);
+        let size = self
+            .geometry
+            .size
+            .as_logical()
+            .to_buffer(1., Transform::Normal);
         Rectangle::from_size(size)
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.geometry.to_physical_precise_round(scale)
+        self.geometry.as_logical().to_physical_precise_round(scale)
     }
 
     fn is_framebuffer_effect(&self) -> bool {
@@ -355,7 +360,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
         if let Some(subregion) = &self.subregion {
             // Convert to subregion coordinates.
             let mut crop = src.to_logical(1., Transform::Normal, &src.size);
-            crop.loc += self.geometry.loc;
+            crop.loc += self.geometry.loc.as_logical();
             subregion.filter_damage(crop, dst, damage, filtered);
         } else {
             filtered.extend(damage.iter());
@@ -386,7 +391,8 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
         let crop = Rectangle::new(
             src_loc + clamp_offset.to_f64().upscale(dst_to_src).to_logical(1.),
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
-        );
+        )
+        .assume_local();
 
         let program = Shaders::get_from_frame(frame).postprocess_and_clip.clone();
         let uniforms = program

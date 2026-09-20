@@ -30,6 +30,7 @@ use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{RenderCtx, RenderTarget};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
 use crate::utils::transaction::Transaction;
 use crate::utils::{
     baba_is_float_offset, round_logical_in_physical, round_logical_in_physical_max1,
@@ -921,10 +922,11 @@ impl<W: LayoutElement> Tile<W> {
 
     pub fn hit(&self, point: Point<f64, Logical>) -> Option<HitType> {
         let offset = self.bob_offset();
-        let point = point - offset;
+        // Input hit-testing stays Logical.
+        let point = point - offset.as_logical();
 
         if self.is_in_input_region(point) {
-            let win_pos = self.buf_loc() + offset;
+            let win_pos = self.buf_loc() + offset.as_logical();
             Some(HitType::Input { win_pos })
         } else if self.is_in_activation_region(point) {
             Some(HitType::Activate {
@@ -1049,7 +1051,7 @@ impl<W: LayoutElement> Tile<W> {
         size
     }
 
-    pub fn bob_offset(&self) -> Point<f64, Logical> {
+    pub fn bob_offset(&self) -> Point<f64, Local> {
         if self.window.rules().baba_is_float != Some(true) {
             return Point::from((0., 0.));
         }
@@ -1062,7 +1064,7 @@ impl<W: LayoutElement> Tile<W> {
     fn render_inner<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         mut xray_pos: XrayPos,
         focus_ring: bool,
         push: &mut dyn FnMut(TileRenderElement<R>),
@@ -1098,9 +1100,12 @@ impl<W: LayoutElement> Tile<W> {
         let window_loc = self.window_loc();
         let window_size = self.window_size();
         let animated_window_size = self.animated_window_size();
-        let window_render_loc = location + window_loc;
-        let area = Rectangle::new(window_render_loc, animated_window_size);
-        xray_pos = xray_pos.offset(window_loc);
+        let window_render_loc = location + window_loc.assume_local();
+        // Effect/clip area stays Logical for the Logical-typed element APIs below.
+        let area = Rectangle::new(window_render_loc.as_logical(), animated_window_size);
+        // Tile-relative displacement; output-relative only in sum with the
+        // upstream tile-position offset.
+        xray_pos = xray_pos.offset(window_loc.assume_local());
 
         let rules = self.window.rules();
 
@@ -1204,7 +1209,8 @@ impl<W: LayoutElement> Tile<W> {
         // If we're not resizing, render the window itself.
         let has_border_shader = BorderRenderElement::has_shader(ctx.renderer);
         if !pushed_resize {
-            let geo = Rectangle::new(window_render_loc, window_size);
+            // Element/clip geometry stays Logical for the Logical-typed APIs below.
+            let geo = Rectangle::new(window_render_loc, window_size.assume_local());
             let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
 
             let clip_shader = ClippedSurfaceRenderElement::shader(ctx.renderer).cloned();
@@ -1237,20 +1243,21 @@ impl<W: LayoutElement> Tile<W> {
                     // user-provided radius, so our blocked-out rendering should match that
                     // radius.
                     if radius != CornerRadius::default() && has_border_shader {
+                        // Border shader takes element-local geometry (relative uniforms).
                         return BorderRenderElement::new(
-                            geo.size,
-                            Rectangle::from_size(geo.size),
+                            geo.size.as_logical(),
+                            Rectangle::from_size(geo.size.as_logical()),
                             GradientInterpolation::default(),
                             Color::from_color32f(elem.color()),
                             Color::from_color32f(elem.color()),
                             0.,
-                            Rectangle::from_size(geo.size),
+                            Rectangle::from_size(geo.size.as_logical()),
                             0.,
                             radius,
                             scale.x as f32,
                             1.,
                         )
-                        .with_location(geo.loc)
+                        .with_location(geo.loc.as_logical())
                         .into();
                     }
 
@@ -1304,12 +1311,13 @@ impl<W: LayoutElement> Tile<W> {
                     scale.x as f32,
                     alpha,
                 )
-                .with_location(location);
+                // Render-element sinks stay Logical (Smithay-owned geometry).
+                .with_location(location.as_logical());
                 push(elem.into());
             } else {
                 let elem = SolidColorRenderElement::from_buffer(
                     &self.fullscreen_backdrop,
-                    location,
+                    location.as_logical(),
                     alpha,
                     Kind::Unspecified,
                 );
@@ -1320,7 +1328,7 @@ impl<W: LayoutElement> Tile<W> {
         if let Some(width) = self.visual_border_width() {
             self.border.render(
                 ctx.renderer,
-                location + Point::from((width, width)),
+                location.as_logical() + Point::from((width, width)),
                 &mut |elem| push(elem.into()),
             );
         }
@@ -1331,12 +1339,16 @@ impl<W: LayoutElement> Tile<W> {
         // a bit weird).
         if focus_ring && expanded_progress < 1. {
             self.focus_ring
-                .render(ctx.renderer, location, &mut |elem| push(elem.into()));
+                .render(ctx.renderer, location.as_logical(), &mut |elem| {
+                    push(elem.into())
+                });
         }
 
         if expanded_progress < 1. {
             self.shadow
-                .render(ctx.renderer, location, &mut |elem| push(elem.into()));
+                .render(ctx.renderer, location.as_logical(), &mut |elem| {
+                    push(elem.into())
+                });
         }
 
         let surface_anim_scale = animated_window_size / window_size;
@@ -1355,7 +1367,7 @@ impl<W: LayoutElement> Tile<W> {
     pub fn render<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         xray_pos: XrayPos,
         focus_ring: bool,
         push: &mut dyn FnMut(TileRenderElement<R>),
@@ -1386,7 +1398,8 @@ impl<W: LayoutElement> Tile<W> {
                 ctx.renderer,
                 &elements,
                 self.animated_tile_size(),
-                location,
+                // Opening animation runs offscreen-buffer math in Logical.
+                location.as_logical(),
                 scale,
                 tile_alpha,
             ) {
@@ -1412,7 +1425,10 @@ impl<W: LayoutElement> Tile<W> {
             match alpha.offscreen.render(ctx.renderer, scale, &elements) {
                 Ok((elem, _sync, data)) => {
                     let offset = elem.offset();
-                    let elem = elem.with_alpha(tile_alpha).with_offset(location + offset);
+                    // Offscreen-buffer space stays Logical (tile-relative, like window_loc).
+                    let elem = elem
+                        .with_alpha(tile_alpha)
+                        .with_offset(location.as_logical() + offset);
 
                     self.window().set_offscreen_data(Some(data));
                     push(elem.into());

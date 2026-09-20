@@ -39,6 +39,7 @@ use crate::render_helpers::surface::{
 };
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::{background_effect, BakedBuffer, RenderCtx, RenderTarget};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, PointSurfaceLocalExt, RectExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -549,7 +550,8 @@ impl Mapped {
                 target: RenderTarget::Screencast,
                 xray: None,
             },
-            location,
+            // Window-capture space plays the output-Local role for this render.
+            location.assume_local(),
             scale,
             1.,
             XrayPos::default(),
@@ -646,7 +648,7 @@ impl LayoutElement for Mapped {
     fn render_normal<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         scale: Scale<f64>,
         alpha: f32,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
@@ -654,11 +656,15 @@ impl LayoutElement for Mapped {
         if ctx.target.should_block_out(self.rules.block_out_from) {
             let mut buffer = self.block_out_buffer.borrow_mut();
             buffer.resize(self.window.geometry().size.to_f64());
-            let elem =
-                SolidColorRenderElement::from_buffer(&buffer, location, alpha, Kind::Unspecified);
+            let elem = SolidColorRenderElement::from_buffer(
+                &buffer,
+                location.as_logical(),
+                alpha,
+                Kind::Unspecified,
+            );
             push(elem.into());
         } else {
-            let buf_pos = location - self.window.geometry().loc.to_f64();
+            let buf_pos = location.as_logical() - self.window.geometry().loc.to_f64();
             let surface = self.toplevel().wl_surface();
             let mut push = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
             push_elements_from_surface_tree(
@@ -676,7 +682,7 @@ impl LayoutElement for Mapped {
     fn render_popups<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         scale: Scale<f64>,
         alpha: f32,
         xray_pos: XrayPos,
@@ -697,7 +703,10 @@ impl LayoutElement for Mapped {
 
             let surface = popup.wl_surface();
             let popup_geo = popup.geometry();
-            let surface_loc = location + (offset - popup.geometry().loc).to_f64();
+            let surface_loc = (offset - popup_geo.loc)
+                .to_f64()
+                .assume_surface_local()
+                .to_local(location);
 
             push_elements_from_surface_tree(
                 ctx.renderer,
@@ -709,7 +718,10 @@ impl LayoutElement for Mapped {
                 &mut |elem| push(elem.into()),
             );
 
-            let geometry = Rectangle::new(location + offset.to_f64(), popup_geo.size.to_f64());
+            let geometry = Rectangle::new(
+                location.as_logical() + offset.to_f64(),
+                popup_geo.size.to_f64(),
+            );
             let surface_off = popup_geo.loc.upscale(-1).to_f64();
             let surface_anim_scale = Scale::from(1.);
             let mut effect = popup_rules.background_effect;
@@ -717,15 +729,19 @@ impl LayoutElement for Mapped {
             if effect.xray.is_none() {
                 effect.xray = Some(false);
             }
-            let xray_pos = xray_pos.offset(offset.to_f64());
+            // Surface-space offset placed through the surface origin; coincides with
+            // output-Local units as asserted on `geometry` below.
+            let xray_pos =
+                xray_pos.offset(offset.to_f64().assume_surface_local().to_local(location));
             background_effect::render_for_tile(
                 ctx.as_gles(),
                 None,
-                geometry,
+                geometry.assume_local(),
                 scale.x,
                 false,
                 surface,
-                surface_off,
+                // Surface-relative offset in output units, like the xray_pos above.
+                surface_off.assume_local(),
                 surface_anim_scale,
                 self.blur_config,
                 popup_rules.geometry_corner_radius.unwrap_or_default(),
@@ -752,11 +768,12 @@ impl LayoutElement for Mapped {
         background_effect::render_for_tile(
             ctx,
             None,
-            geometry,
+            geometry.assume_local(),
             scale,
             clip_to_geometry,
             self.toplevel().wl_surface(),
-            self.buf_loc().to_f64(),
+            // Buffer-derived offset in output units.
+            self.buf_loc().to_f64().assume_local(),
             surface_anim_scale,
             self.blur_config,
             radius,

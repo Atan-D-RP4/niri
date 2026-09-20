@@ -14,6 +14,7 @@ use smithay::utils::{Logical, Physical, Point, Scale, Size, Transform};
 
 use crate::niri::State;
 use crate::render_helpers::{render_and_download, RenderCtx, RenderTarget};
+use crate::utils::geometry::{Global, PointExt, PointLocalExt};
 
 pub struct PickColorGrab {
     start_data: PointerGrabStartData<State>,
@@ -35,7 +36,7 @@ impl PickColorGrab {
         state.niri.queue_redraw_all();
     }
 
-    fn pick_color_at_point(location: Point<f64, Logical>, data: &mut State) -> Option<PickedColor> {
+    fn pick_color_at_point(location: Point<f64, Global>, data: &mut State) -> Option<PickedColor> {
         let (output, pos_within_output) = data.niri.output_under(location)?;
         let output = output.clone();
 
@@ -46,7 +47,9 @@ impl PickColorGrab {
                 let scale = Scale::from(output.current_scale().fractional_scale());
                 // FIXME: perhaps replace floor with round once we figure out the pointer behavior
                 // at the bottom/right edges of the monitors.
-                let pos = pos_within_output.to_physical_precise_floor(scale);
+                let pos = pos_within_output
+                    .as_logical()
+                    .to_physical_precise_floor(scale);
                 let size = Size::<i32, Physical>::from((1, 1));
 
                 let ctx = RenderCtx {
@@ -130,7 +133,7 @@ impl PointerGrab<State> for PickColorGrab {
         data.niri.suppressed_buttons.insert(event.button);
 
         if let Some(tx) = data.niri.pick_color.take() {
-            let color = Self::pick_color_at_point(handle.current_location(), data);
+            let color = Self::pick_color_at_point(handle.current_location().assume_global(), data);
             let _ = tx.send_blocking(color);
         }
 
