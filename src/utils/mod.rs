@@ -53,8 +53,6 @@ pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
 
 use id::IdCounter;
 
-use self::geometry::{Local, RectExt};
-
 /// Unique ID for a screencast session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CastSessionId(u64);
@@ -343,15 +341,13 @@ pub fn is_laptop_panel(connector: &str) -> bool {
 /// Returns the geometry of the surface.
 ///
 /// Returns `None` if the surface isn't mapped.
-pub fn surface_geo(states: &SurfaceData) -> Option<Rectangle<i32, Local>> {
+pub fn surface_geo(states: &SurfaceData) -> Option<Rectangle<i32, Logical>> {
     let data = states.data_map.get::<RendererSurfaceStateUserData>();
-    data.and_then(|d| d.lock().unwrap().view()).map(|view| {
-        Rectangle {
+    data.and_then(|d| d.lock().unwrap().view())
+        .map(|view| Rectangle {
             loc: view.offset,
             size: view.dst,
-        }
-        .assume_local()
-    })
+        })
 }
 
 pub fn with_toplevel_role<T>(
