@@ -2,20 +2,21 @@ use std::iter::zip;
 
 use niri_config::{CornerRadius, Gradient, GradientRelativeTo};
 use smithay::backend::renderer::element::{Element as _, Kind};
-use smithay::utils::{Logical, Point, Rectangle, Size};
+use smithay::utils::{Point, Rectangle, Size};
 
 use crate::niri_render_elements;
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
+use crate::utils::geometry::Local;
 
 #[derive(Debug)]
 pub struct FocusRing {
     buffers: [SolidColorBuffer; 8],
-    locations: [Point<f64, Logical>; 8],
-    sizes: [Size<f64, Logical>; 8],
+    locations: [Point<f64, Local>; 8],
+    sizes: [Size<f64, Local>; 8],
     borders: [BorderRenderElement; 8],
-    full_size: Size<f64, Logical>,
+    full_size: Size<f64, Local>,
     is_border: bool,
     use_border_shader: bool,
     config: niri_config::FocusRing,
@@ -57,15 +58,16 @@ impl FocusRing {
     #[allow(clippy::too_many_arguments)]
     pub fn update_render_elements(
         &mut self,
-        win_size: Size<f64, Logical>,
+        win_size: Size<f64, Local>,
         is_active: bool,
         is_border: bool,
         is_urgent: bool,
-        view_rect: Rectangle<f64, Logical>,
+        view_rect: Rectangle<f64, Local>,
         radius: CornerRadius,
         scale: f64,
         alpha: f32,
     ) {
+        // Window-relative ring geometry in output-local units.
         let width = self.config.width;
         self.full_size = win_size + Size::from((width, width)).upscale(2.);
         self.is_border = is_border;
@@ -218,7 +220,7 @@ impl FocusRing {
     pub fn render(
         &self,
         renderer: &mut impl NiriRenderer,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         push: &mut dyn FnMut(FocusRingRenderElement),
     ) {
         if self.config.off {
@@ -234,7 +236,7 @@ impl FocusRing {
 
         let has_border_shader = BorderRenderElement::has_shader(renderer);
 
-        let mut push = |buffer, border: &BorderRenderElement, location: Point<f64, Logical>| {
+        let mut push = |buffer, border: &BorderRenderElement, location: Point<f64, Local>| {
             let elem = if self.use_border_shader && has_border_shader {
                 border.clone().with_location(location).into()
             } else {

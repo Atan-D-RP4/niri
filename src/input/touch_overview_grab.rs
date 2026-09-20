@@ -16,6 +16,7 @@ use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
 use crate::input::AnyStartData;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::niri::State;
+use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt};
 use crate::window::Mapped;
 
 // When the touch is stationary for this much time, it becomes an interactive move.
@@ -24,16 +25,16 @@ const INTERACTIVE_MOVE_THRESHOLD: Duration = Duration::from_millis(500);
 pub struct TouchOverviewGrab {
     start_data: AnyStartData<State>,
     start_timestamp: Duration,
-    last_location: Point<f64, Logical>,
+    last_location: Point<f64, Global>,
     output: Output,
-    start_pos_within_output: Point<f64, Logical>,
+    start_pos_within_output: Point<f64, Local>,
     workspace_id: Option<WorkspaceId>,
     workspace_matched_narrow: bool,
     window: Option<Window>,
     gesture: GestureState,
 
     // Accumulated and applied in frame().
-    new_location: Point<f64, Logical>,
+    new_location: Point<f64, Global>,
     event_timestamp: Option<Duration>,
 }
 
@@ -50,7 +51,7 @@ impl TouchOverviewGrab {
         start_data: AnyStartData<State>,
         start_timestamp: Duration,
         output: Output,
-        start_pos_within_output: Point<f64, Logical>,
+        start_pos_within_output: Point<f64, Local>,
         workspace_id: Option<WorkspaceId>,
         workspace_matched_narrow: bool,
         window: Option<Window>,
@@ -103,7 +104,7 @@ impl TouchOverviewGrab {
 
         // Check if we should become a spatial scroll.
         if matches!(self.gesture, GestureState::Recognizing) {
-            let c = self.new_location - self.start_data.location();
+            let c = (self.new_location - self.start_data.location()).as_logical();
 
             // Check if the gesture moved far enough to decide. Threshold copied from libadwaita.
             if c.x * c.x + c.y * c.y >= 16. * 16. {
@@ -140,7 +141,7 @@ impl TouchOverviewGrab {
             return true;
         }
 
-        let delta = self.new_location - self.last_location;
+        let delta = (self.new_location - self.last_location).as_logical();
         self.last_location = self.new_location;
 
         let ongoing = match self.gesture {
@@ -281,7 +282,11 @@ impl TouchGrab<State> for TouchOverviewGrab {
             return;
         }
 
-        self.new_location = event.location;
+        // Touch grabs mirror the pointer grabs and live in screen space;
+        // the Wayland event carries content space, so invert it back.
+        self.new_location = data
+            .niri
+            .touch_content_to_screen(event.location.assume_global());
         self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 
@@ -350,7 +355,7 @@ impl TabletToolGrab<State> for TouchOverviewGrab {
     ) {
         handle.motion(data, None, event);
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
         self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 

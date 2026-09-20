@@ -83,6 +83,7 @@ use crate::protocols::virtual_pointer::{
     VirtualPointerInputBackend, VirtualPointerManagerState, VirtualPointerMotionAbsoluteEvent,
     VirtualPointerMotionEvent,
 };
+use crate::utils::geometry::{PointExt, PointGlobalExt, RectExt};
 use crate::utils::{output_size, send_scale_transform};
 
 pub const XDG_ACTIVATION_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -191,15 +192,24 @@ impl PointerConstraintsHandler for State {
             root = parent;
         }
 
+        // Convert the trait-provided Logical offset into the Global frame once; the Smithay
+        // trait signature above stays Logical.
+        let location = location.assume_global();
+
         let target = self
             .niri
             .output_for_root(&root)
             .and_then(|output| self.niri.global_space.output_geometry(output))
-            .map_or(origin + location, |mut output_geometry| {
-                // i32 sizes are exclusive, but f64 sizes are inclusive.
-                output_geometry.size -= (1, 1).into();
-                (origin + location).constrain(output_geometry.to_f64())
-            });
+            .map_or(
+                origin.surface_position(location.as_logical()),
+                |mut output_geometry| {
+                    // i32 sizes are exclusive, but f64 sizes are inclusive.
+                    output_geometry.size -= (1, 1).into();
+                    origin
+                        .surface_position(location.as_logical())
+                        .constrain(output_geometry.assume_global().to_f64())
+                },
+            );
         self.niri.pointer_constraint_position_hint = Some(target);
     }
 
@@ -224,7 +234,7 @@ impl PointerConstraintsHandler for State {
             return;
         }
 
-        pointer.set_location(target);
+        pointer.set_location(target.as_logical());
 
         // Redraw to update the cursor position if it's visible.
         if self.niri.pointer_visibility.is_visible() {
@@ -389,7 +399,7 @@ impl DndGrabHandler for State {
 
         if activate_output {
             // Find the output from drop coordinates.
-            if let Some((output, _)) = self.niri.output_under(location) {
+            if let Some((output, _)) = self.niri.output_under(location.assume_global()) {
                 let output = output.clone();
                 self.niri.layout.focus_output(&output);
             }

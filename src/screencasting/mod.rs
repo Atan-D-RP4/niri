@@ -19,6 +19,7 @@ use crate::dbus::mutter_screen_cast::{self, CursorMode, ScreenCastToNiri, Stream
 use crate::niri::{CastTarget, Niri, OutputRenderElements, PointerRenderElements, State};
 use crate::niri_render_elements;
 use crate::render_helpers::{RenderCtx, RenderTarget};
+use crate::utils::geometry::{PointExt, PointGlobalExt, PointLocalExt};
 use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
 use crate::window::mapped::{MappedId, WindowCastRenderElements};
 
@@ -214,13 +215,14 @@ impl State {
                         // - win_pos is the position of the main window surface in output-local
                         //   coordinates
                         // - bbox.loc moves us relative to the screencast buffer
-                        let buf_pos = win_pos + bbox.loc.to_f64().to_logical(scale);
-                        let output_pos =
-                            self.niri.global_space.output_geometry(output).unwrap().loc;
-                        pointer_location = pointer_pos - output_pos.to_f64() - buf_pos;
+                        let buf_pos = win_pos.as_logical() + bbox.loc.to_f64().to_logical(scale);
+                        pointer_location = pointer_pos
+                            .to_local(&self.niri.output_state[output].view_ctx)
+                            .as_logical()
+                            - buf_pos;
 
                         let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                        self.niri.render_pointer(renderer, output, &mut |elem| {
+                        self.niri.render_pointer(renderer, output, &mut |elem, _| {
                             let elem =
                                 RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                             elements.push(CastRenderElement::from(elem));
@@ -577,18 +579,32 @@ impl Niri {
             }
 
             if cursor_data.is_none() {
+                // Output screencasts show the output as seen: live viewport.
+                let viewport = self.live_viewport(output);
                 let mut pointer_pos = Point::default();
                 if self.pointer_visibility.is_visible() {
-                    let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
-                    let pointer_loc = self
-                        .tablet_cursor_location
-                        .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+                    let view_ctx = self.output_state[output].view_ctx;
+                    let pointer_loc = self.tablet_cursor_location.unwrap_or_else(|| {
+                        self.seat
+                            .get_pointer()
+                            .unwrap()
+                            .current_location()
+                            .assume_global()
+                    });
                     // Only render when the pointer is within the output. Otherwise, it will
                     // happily appear anywhere outside the output video source in OBS.
-                    if output_geo.contains(pointer_loc) {
-                        pointer_pos = pointer_loc - output_geo.loc;
-                        self.render_pointer(renderer, output, &mut |elem| {
-                            elements.push(elem.into())
+                    if view_ctx.global_geo.contains(pointer_loc) {
+                        // Metadata tracks the displayed tip; the graphic wraps below.
+                        if let Some((_, display)) = self.pointer_geometry(output, viewport) {
+                            pointer_pos = viewport.apply(display).as_logical();
+                        } else {
+                            pointer_pos = pointer_loc.to_local(&view_ctx).as_logical();
+                        }
+                        self.render_pointer(renderer, output, &mut |elem, cursor_hotspot| {
+                            elements.push(
+                                self.zoom_pointer(elem, output, viewport, cursor_hotspot)
+                                    .into(),
+                            )
                         });
                     }
                 }
@@ -599,7 +615,14 @@ impl Niri {
                     target: RenderTarget::Screencast,
                     xray: None,
                 };
-                self.render(ctx, output, false, &mut |elem| elements.push(elem.into()));
+                // Output screencasts show the output as seen: live viewport.
+                self.render(
+                    ctx,
+                    output,
+                    false,
+                    self.live_viewport(output),
+                    &mut |elem| elements.push(elem.into()),
+                );
 
                 cursor_data = Some(CursorData::compute(
                     &elements,
@@ -675,12 +698,14 @@ impl Niri {
                     // - win_pos is the position of the main window surface in output-local
                     //   coordinates
                     // - bbox.loc moves us relative to the screencast buffer
-                    let buf_pos = win_pos + bbox.loc.to_f64().to_logical(scale);
-                    let output_pos = self.global_space.output_geometry(output).unwrap().loc;
-                    pointer_location = pointer_pos - output_pos.to_f64() - buf_pos;
+                    let buf_pos = win_pos.as_logical() + bbox.loc.to_f64().to_logical(scale);
+                    let pointer_pos = pointer_pos
+                        .to_local(&self.output_state[output].view_ctx)
+                        .as_logical();
+                    pointer_location = pointer_pos - buf_pos;
 
                     let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                    self.render_pointer(renderer, output, &mut |elem| {
+                    self.render_pointer(renderer, output, &mut |elem, _| {
                         let elem =
                             RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                         elements.push(CastRenderElement::from(elem));

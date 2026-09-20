@@ -4,6 +4,7 @@ use std::time::Duration;
 use niri::layout::Options;
 use niri::render_helpers::xray::XrayPos;
 use niri::render_helpers::{RenderCtx, RenderTarget};
+use niri::utils::geometry::SizeExt;
 use niri_config::Color;
 use smithay::backend::renderer::element::RenderElement;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -115,10 +116,15 @@ impl TestCase for Tile {
         let size = size.to_f64();
         let tile_size = self.tile.tile_size().to_physical(1.);
         let location = Point::from((size.w - tile_size.w, size.h - tile_size.h)).downscale(2.);
+        let location_local =
+            Point::from((size.w - tile_size.w, size.h - tile_size.h)).downscale(2.);
 
         self.tile.update_render_elements(
             true,
-            Rectangle::new(Point::from((-location.x, -location.y)), size.to_logical(1.)),
+            Rectangle::new(
+                Point::from((-location.x, -location.y)),
+                size.to_logical(1.).assume_local(),
+            ),
         );
 
         let mut rv = Vec::new();
@@ -127,7 +133,7 @@ impl TestCase for Tile {
             target: RenderTarget::Output,
             xray: None,
         };
-        let xray_pos = XrayPos::new(location, 1.);
+        let xray_pos = XrayPos::new(location_local, 1.);
         self.tile
             .render(ctx, location, xray_pos, true, &mut |elem| {
                 rv.push(Box::new(elem) as _)

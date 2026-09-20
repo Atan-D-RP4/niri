@@ -120,7 +120,12 @@ pub enum Request {
     /// Request information about screencasts.
     Casts,
     /// Request information about zoom state.
-    ZoomState,
+    ZoomState {
+        /// Output name.
+        ///
+        /// Optional. If not specified, the zoom state of all outputs is printed.
+        output: Option<String>,
+    },
 }
 
 /// Reply from niri to client.
@@ -1599,14 +1604,10 @@ pub struct Cast {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Zoom {
-    /// Current zoom level
+    /// Current zoom level.
     pub level: f64,
-    /// Whether zoom focal point is locked
+    /// Whether zoom is locked.
     pub is_locked: bool,
-    /// Focal point X coordinate in logical pixels
-    pub focal_x: f64,
-    /// Focal point Y coordinate in logical pixels
-    pub focal_y: f64,
 }
 
 /// Kind of screencast.
@@ -1798,11 +1799,7 @@ pub enum Event {
         output: String,
         /// Current zoom level.
         level: f64,
-        /// Focal point X coordinate in logical pixels.
-        focal_x: f64,
-        /// Focal point Y coordinate in logical pixels.
-        focal_y: f64,
-        /// Whether zoom focal point is locked.
+        /// Whether zoom is locked.
         is_locked: bool,
     },
 }

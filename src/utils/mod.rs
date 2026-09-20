@@ -36,6 +36,7 @@ use wayland_backend::server::Credentials;
 
 use crate::handlers::KdeDecorationsModeState;
 use crate::niri::ClientState;
+use crate::utils::geometry::Local;
 
 pub mod geometry;
 pub mod id;
@@ -52,6 +53,8 @@ pub mod xwayland;
 pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
 
 use id::IdCounter;
+
+use self::geometry::RectExt;
 
 /// Unique ID for a screencast session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -204,8 +207,10 @@ pub fn output_size(output: &Output) -> Size<f64, Logical> {
     let output_scale = output.current_scale().fractional_scale();
     let output_transform = output.current_transform();
     let output_mode = output.current_mode().unwrap();
-    let logical_size = output_mode.size.to_f64().to_logical(output_scale);
-    output_transform.transform_size(logical_size)
+    // Transform first and then Scaling to logical since the inverse is only valid because
+    // fractional_scale is scalar and commutes with the axis-swap.
+    let transformed_size = output_transform.transform_size(output_mode.size);
+    transformed_size.to_f64().to_logical(output_scale)
 }
 
 pub fn logical_output(output: &Output) -> niri_ipc::LogicalOutput {
@@ -341,13 +346,15 @@ pub fn is_laptop_panel(connector: &str) -> bool {
 /// Returns the geometry of the surface.
 ///
 /// Returns `None` if the surface isn't mapped.
-pub fn surface_geo(states: &SurfaceData) -> Option<Rectangle<i32, Logical>> {
+pub fn surface_geo(states: &SurfaceData) -> Option<Rectangle<i32, Local>> {
     let data = states.data_map.get::<RendererSurfaceStateUserData>();
-    data.and_then(|d| d.lock().unwrap().view())
-        .map(|view| Rectangle {
+    data.and_then(|d| d.lock().unwrap().view()).map(|view| {
+        Rectangle {
             loc: view.offset,
             size: view.dst,
-        })
+        }
+        .assume_local()
+    })
 }
 
 pub fn with_toplevel_role<T>(
@@ -521,8 +528,8 @@ pub fn ensure_min_max_size_maybe_zero(x: i32, min_size: i32, max_size: i32) -> i
 }
 
 pub fn clamp_preferring_top_left_in_area(
-    area: Rectangle<f64, Logical>,
-    rect: &mut Rectangle<f64, Logical>,
+    area: Rectangle<f64, Local>,
+    rect: &mut Rectangle<f64, Local>,
 ) {
     rect.loc.x = f64::min(rect.loc.x, area.loc.x + area.size.w - rect.size.w);
     rect.loc.y = f64::min(rect.loc.y, area.loc.y + area.size.h - rect.size.h);
@@ -533,9 +540,9 @@ pub fn clamp_preferring_top_left_in_area(
 }
 
 pub fn center_preferring_top_left_in_area(
-    area: Rectangle<f64, Logical>,
-    size: Size<f64, Logical>,
-) -> Point<f64, Logical> {
+    area: Rectangle<f64, Local>,
+    size: Size<f64, Local>,
+) -> Point<f64, Local> {
     let area_size = area.size.to_point();
     let size = size.to_point();
     let mut offset = (area_size - size).downscale(2.);

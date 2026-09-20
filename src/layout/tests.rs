@@ -15,6 +15,7 @@ use super::*;
 
 mod animations;
 mod fullscreen;
+mod zoom;
 
 impl<W: LayoutElement> Default for Layout<W> {
     fn default() -> Self {
@@ -160,11 +161,11 @@ impl LayoutElement for TestWindow {
         self.0.bbox.get().size
     }
 
-    fn buf_loc(&self) -> Point<i32, Logical> {
+    fn buf_loc(&self) -> Point<i32, Local> {
         (0, 0).into()
     }
 
-    fn is_in_input_region(&self, _point: Point<f64, Logical>) -> bool {
+    fn is_in_input_region(&self, _point: Point<f64, Local>) -> bool {
         false
     }
 

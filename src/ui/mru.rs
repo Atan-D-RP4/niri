@@ -37,6 +37,7 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::RenderCtx;
+use crate::utils::geometry::{Local, PointLocalExt, RectExt, SizeExt};
 use crate::utils::{
     baba_is_float_offset, output_size, round_logical_in_physical, to_physical_precise_round,
     with_toplevel_role,
@@ -302,7 +303,7 @@ impl Thumbnail {
         self.size = mapped.size();
     }
 
-    fn preview_size(&self, output_size: Size<f64, Logical>, scale: f64) -> Size<f64, Logical> {
+    fn preview_size(&self, output_size: Size<f64, Logical>, scale: f64) -> Size<f64, Local> {
         let max_height = f64::max(1., self.config.max_height);
         let max_scale = f64::max(0.001, self.config.max_scale);
 
@@ -316,10 +317,12 @@ impl Thumbnail {
         let thumb_scale = f64::min(max_width / size.w, max_height / size.h);
         let thumb_scale = f64::min(max_scale, thumb_scale);
         let thumb_scale = f64::max(min_scale, thumb_scale);
-        let size = size.to_f64().upscale(thumb_scale);
+        let size = size.upscale(thumb_scale);
 
         // Round to physical pixels.
-        size.to_physical_precise_round(scale).to_logical(scale)
+        size.to_physical_precise_round(scale)
+            .to_logical(scale)
+            .assume_local()
     }
 
     fn title_texture(
@@ -341,7 +344,7 @@ impl Thumbnail {
         mut ctx: RenderCtx<R>,
         config: &niri_config::RecentWindows,
         mapped: &Mapped,
-        preview_geo: Rectangle<f64, Logical>,
+        preview_geo: Rectangle<f64, Local>,
         scale: f64,
         is_active: bool,
         bob_y: f64,
@@ -379,6 +382,8 @@ impl Thumbnail {
         let clip_shader = ClippedSurfaceRenderElement::shader(ctx.renderer).cloned();
         let geo = Rectangle::from_size(self.size.to_f64());
         // FIXME: deduplicate code with Tile::render_inner()
+        // Widget-space geometry plays the output-Local role for this clip.
+        let geo = geo.assume_local();
         let clip = move |elem| match elem {
             LayoutElementRenderElement::Wayland(elem) => {
                 if let Some(shader) = clip_shader.clone() {
@@ -402,6 +407,7 @@ impl Thumbnail {
                 // radius.
                 if radius != CornerRadius::default() && has_border_shader {
                     return BorderRenderElement::new(
+                        // Border shader takes element-local geometry (relative uniforms).
                         geo.size,
                         Rectangle::from_size(geo.size),
                         GradientInterpolation::default(),
@@ -1024,7 +1030,7 @@ impl WindowMruUi {
         self.set_scope(scope);
     }
 
-    pub fn pointer_motion(&mut self, pos_within_output: Point<f64, Logical>) -> Option<MappedId> {
+    pub fn pointer_motion(&mut self, pos_within_output: Point<f64, Local>) -> Option<MappedId> {
         let UiState::Open(inner) = &mut self.state else {
             return None;
         };
@@ -1119,7 +1125,7 @@ impl WindowMruUi {
         // Put a backdrop above the current desktop view to contrast the thumbnails.
         let mut buffers = inner.backdrop_buffers.borrow_mut();
         let buffer = buffers.entry(output.clone()).or_default();
-        buffer.resize(output_size(output));
+        buffer.resize(output_size(output).assume_local());
         buffer.set_color(BACKDROP_COLOR);
         let render_backdrop = |alpha| {
             SolidColorRenderElement::from_buffer(
@@ -1483,7 +1489,7 @@ impl Inner {
         self.view_pos.offset(-delta);
     }
 
-    fn thumbnails(&self) -> impl Iterator<Item = (&Thumbnail, Rectangle<f64, Logical>)> {
+    fn thumbnails(&self) -> impl Iterator<Item = (&Thumbnail, Rectangle<f64, Local>)> {
         let output_size = output_size(&self.output);
         let scale = self.output.current_scale().fractional_scale();
         let round = move |logical: f64| round_logical_in_physical(scale, logical);
@@ -1497,7 +1503,7 @@ impl Inner {
             let size = thumbnail.preview_size(output_size, scale);
             let y = round((output_size.h - size.h) / 2.);
 
-            let loc = Point::new(x, y);
+            let loc: Point<f64, Local> = Point::new(x, y);
             x += size.w + gap;
 
             let geo = Rectangle::new(loc, size);
@@ -1507,7 +1513,7 @@ impl Inner {
 
     fn thumbnails_in_view_static(
         &self,
-    ) -> impl Iterator<Item = (&Thumbnail, Rectangle<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&Thumbnail, Rectangle<f64, Local>)> {
         let output_size = output_size(&self.output);
         let scale = self.output.current_scale().fractional_scale();
         let round = |logical: f64| round_logical_in_physical(scale, logical);
@@ -1531,7 +1537,7 @@ impl Inner {
 
     fn thumbnails_in_view_render(
         &self,
-    ) -> impl Iterator<Item = (&Thumbnail, Rectangle<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&Thumbnail, Rectangle<f64, Local>)> {
         let output_size = output_size(&self.output);
         let scale = self.output.current_scale().fractional_scale();
         let round = move |logical: f64| round_logical_in_physical(scale, logical);
@@ -1600,7 +1606,7 @@ impl Inner {
         }
     }
 
-    fn thumbnail_under(&self, pos: Point<f64, Logical>) -> Option<MappedId> {
+    fn thumbnail_under(&self, pos: Point<f64, Local>) -> Option<MappedId> {
         let scale = self.output.current_scale().fractional_scale();
         let round = move |logical: f64| round_logical_in_physical(scale, logical);
         let padding = self.config.borrow().recent_windows.highlight.padding;

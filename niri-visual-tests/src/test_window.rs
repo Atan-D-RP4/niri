@@ -10,6 +10,7 @@ use niri::render_helpers::offscreen::OffscreenData;
 use niri::render_helpers::renderer::NiriRenderer;
 use niri::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use niri::render_helpers::RenderCtx;
+use niri::utils::geometry::{Local, SizeExt};
 use niri::utils::transaction::Transaction;
 use niri::window::ResolvedWindowRules;
 use smithay::backend::renderer::element::Kind;
@@ -41,7 +42,7 @@ impl TestWindow {
         let size = Size::from((100, 200));
         let min_size = Size::from((0, 0));
         let max_size = Size::from((0, 0));
-        let buffer = SolidColorBuffer::new(size.to_f64(), [0.15, 0.64, 0.41, 1.]);
+        let buffer = SolidColorBuffer::new(size.to_f64().assume_local(), [0.15, 0.64, 0.41, 1.]);
 
         Self {
             id,
@@ -117,14 +118,16 @@ impl TestWindow {
 
         if inner.size != new_size {
             inner.size = new_size;
-            inner.buffer.resize(new_size.to_f64());
+            inner.buffer.resize(new_size.to_f64().assume_local());
             rv = true;
         }
 
         let mut csd_shadow_size = new_size;
         csd_shadow_size.w += inner.csd_shadow_width * 2;
         csd_shadow_size.h += inner.csd_shadow_width * 2;
-        inner.csd_shadow_buffer.resize(csd_shadow_size.to_f64());
+        inner
+            .csd_shadow_buffer
+            .resize(csd_shadow_size.to_f64().assume_local());
 
         rv
     }
@@ -141,18 +144,18 @@ impl LayoutElement for TestWindow {
         self.inner.borrow().size
     }
 
-    fn buf_loc(&self) -> Point<i32, Logical> {
+    fn buf_loc(&self) -> Point<i32, Local> {
         (0, 0).into()
     }
 
-    fn is_in_input_region(&self, _point: Point<f64, Logical>) -> bool {
+    fn is_in_input_region(&self, _point: Point<f64, Local>) -> bool {
         false
     }
 
     fn render_normal<R: NiriRenderer>(
         &self,
         _ctx: RenderCtx<R>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         _scale: Scale<f64>,
         alpha: f32,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),

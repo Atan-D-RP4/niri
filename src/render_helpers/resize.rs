@@ -15,6 +15,7 @@ use super::renderer::{AsGlesFrame, NiriRenderer};
 use super::shader_element::ShaderRenderElement;
 use super::shaders::{mat3_uniform, ProgramType, Shaders};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
+use crate::utils::geometry::{Local, PointExt, SizeExt};
 
 #[derive(Debug)]
 pub struct ResizeRenderElement(ShaderRenderElement);
@@ -22,7 +23,7 @@ pub struct ResizeRenderElement(ShaderRenderElement);
 impl ResizeRenderElement {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        area: Rectangle<f64, Logical>,
+        area: Rectangle<f64, Local>,
         scale: Scale<f64>,
         texture_prev: (GlesTexture, Rectangle<i32, Physical>),
         size_prev: Size<f64, Logical>,
@@ -39,8 +40,8 @@ impl ResizeRenderElement {
         let (texture_prev, tex_prev_geo) = texture_prev;
         let (texture_next, tex_next_geo) = texture_next;
 
-        let scale_prev = area.size / size_prev;
-        let scale_next = area.size / size_next;
+        let scale_prev = area.size.as_logical() / size_prev;
+        let scale_next = area.size.as_logical() / size_next;
 
         // Compute the area necessary to fit a crossfade.
         let tex_prev_geo_scaled = tex_prev_geo.to_f64().upscale(scale_prev);
@@ -48,8 +49,8 @@ impl ResizeRenderElement {
         let combined_geo = tex_prev_geo_scaled.merge(tex_next_geo_scaled).to_i32_up();
 
         let area = Rectangle::new(
-            area.loc + combined_geo.loc.to_logical(scale),
-            combined_geo.size.to_logical(scale),
+            area.loc + combined_geo.loc.to_logical(scale).assume_local(),
+            combined_geo.size.to_logical(scale).assume_local(),
         );
 
         // Convert Smithay types into glam types.

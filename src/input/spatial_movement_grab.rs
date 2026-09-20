@@ -13,16 +13,17 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use crate::layout::workspace::WorkspaceId;
 use crate::niri::State;
+use crate::utils::geometry::{Global, PointExt, PointGlobalExt};
 
 pub struct SpatialMovementGrab {
     start_data: PointerGrabStartData<State>,
-    last_location: Point<f64, Logical>,
+    last_location: Point<f64, Global>,
     output: Output,
     workspace_id: WorkspaceId,
     gesture: GestureState,
 
     // Accumulated and applied in frame().
-    new_location: Point<f64, Logical>,
+    new_location: Point<f64, Global>,
     event_timestamp: Option<Duration>,
     relative_delta: Option<Point<f64, Logical>>,
 }
@@ -41,7 +42,7 @@ impl SpatialMovementGrab {
         workspace_id: WorkspaceId,
         is_view_offset: bool,
     ) -> Self {
-        let location = start_data.location;
+        let location = start_data.location.assume_global();
         let gesture = if is_view_offset {
             GestureState::ViewOffset
         } else {
@@ -76,13 +77,13 @@ impl SpatialMovementGrab {
         let delta = self
             .relative_delta
             .take()
-            .unwrap_or(self.new_location - self.last_location);
+            .unwrap_or((self.new_location - self.last_location).as_logical());
         self.last_location = self.new_location;
 
         let layout = &mut data.niri.layout;
         let res = match self.gesture {
             GestureState::Recognizing => {
-                let c = self.new_location - self.start_data.location;
+                let c = (self.new_location - self.start_data.location.assume_global()).as_logical();
 
                 // Check if the gesture moved far enough to decide. Threshold copied from GTK 4.
                 if c.x * c.x + c.y * c.y >= 8. * 8. {
@@ -155,7 +156,7 @@ impl PointerGrab<State> for SpatialMovementGrab {
         // While the grab is active, no client has pointer focus.
         handle.motion(data, None, event);
 
-        self.new_location = event.location;
+        self.new_location = event.location.assume_global();
 
         // Relative motion takes precedence over normal motion.
         if self.relative_delta.is_none() {

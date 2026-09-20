@@ -20,6 +20,7 @@ use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
+use crate::utils::geometry::SizeExt;
 use crate::utils::{output_size, to_physical_precise_round};
 
 const KEY_NAME: &str = "Enter";
@@ -206,11 +207,11 @@ impl ExitConfirmDialog {
         // Backdrop.
         let data = output.user_data().get_or_insert(|| {
             Mutex::new(OutputData {
-                backdrop: SolidColorBuffer::new(output_size, BACKDROP_COLOR),
+                backdrop: SolidColorBuffer::new(output_size.assume_local(), BACKDROP_COLOR),
             })
         });
         let mut data = data.lock().unwrap();
-        data.backdrop.resize(output_size);
+        data.backdrop.resize(output_size.assume_local());
 
         let elem = SolidColorRenderElement::from_buffer(
             &data.backdrop,

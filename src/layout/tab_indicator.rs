@@ -10,13 +10,14 @@ use crate::animation::{Animation, Clock};
 use crate::niri_render_elements;
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
+use crate::utils::geometry::{Local, PointExt, SizeExt};
 use crate::utils::{
     floor_logical_in_physical_max1, round_logical_in_physical, round_logical_in_physical_max1,
 };
 
 #[derive(Debug)]
 pub struct TabIndicator {
-    shader_locs: Vec<Point<f64, Logical>>,
+    shader_locs: Vec<Point<f64, Local>>,
     shaders: Vec<BorderRenderElement>,
     open_anim: Option<Animation>,
     config: niri_config::TabIndicator,
@@ -27,7 +28,7 @@ pub struct TabInfo {
     /// Gradient for the tab indicator.
     pub gradient: Gradient,
     /// Tab geometry in the same coordinate system as the area.
-    pub geometry: Rectangle<f64, Logical>,
+    pub geometry: Rectangle<f64, Local>,
 }
 
 niri_render_elements! {
@@ -74,10 +75,10 @@ impl TabIndicator {
 
     fn tab_rects(
         &self,
-        area: Rectangle<f64, Logical>,
+        area: Rectangle<f64, Local>,
         count: usize,
         scale: f64,
-    ) -> impl Iterator<Item = Rectangle<f64, Logical>> {
+    ) -> impl Iterator<Item = Rectangle<f64, Local>> {
         let round = |logical: f64| round_logical_in_physical(scale, logical);
         let round_max1 = |logical: f64| round_logical_in_physical_max1(scale, logical);
 
@@ -159,9 +160,9 @@ impl TabIndicator {
         &mut self,
         enabled: bool,
         // Geometry of the tabs area.
-        area: Rectangle<f64, Logical>,
+        area: Rectangle<f64, Local>,
         // View rect relative to the tabs area.
-        area_view_rect: Rectangle<f64, Logical>,
+        area_view_rect: Rectangle<f64, Local>,
         // Tab count, should match the tabs iterator length.
         tab_count: usize,
         tabs: impl Iterator<Item = TabInfo>,
@@ -200,7 +201,7 @@ impl TabIndicator {
                 GradientRelativeTo::Window => tab.geometry,
                 GradientRelativeTo::WorkspaceView => area_view_rect,
             };
-            gradient_area.loc -= *loc;
+            gradient_area.loc -= rect.loc;
 
             let mut color_from = tab.gradient.from;
             let mut color_to = tab.gradient.to;
@@ -271,10 +272,10 @@ impl TabIndicator {
 
     pub fn hit(
         &self,
-        area: Rectangle<f64, Logical>,
+        area: Rectangle<f64, Local>,
         tab_count: usize,
         scale: f64,
-        point: Point<f64, Logical>,
+        point: Point<f64, Local>,
     ) -> Option<usize> {
         if self.config.off {
             return None;
@@ -293,7 +294,7 @@ impl TabIndicator {
     pub fn render(
         &self,
         renderer: &mut impl NiriRenderer,
-        pos: Point<f64, Logical>,
+        pos: Point<f64, Local>,
         push: &mut dyn FnMut(TabIndicatorRenderElement),
     ) {
         let has_border_shader = BorderRenderElement::has_shader(renderer);
@@ -331,10 +332,10 @@ impl TabIndicator {
     }
 
     /// Offset of the tabbed content due to space occupied by the tab indicator.
-    pub fn content_offset(&self, tab_count: usize, scale: f64) -> Point<f64, Logical> {
+    pub fn content_offset(&self, tab_count: usize, scale: f64) -> Point<f64, Local> {
         match self.config.position {
             TabIndicatorPosition::Left | TabIndicatorPosition::Top => {
-                self.extra_size(tab_count, scale).to_point()
+                self.extra_size(tab_count, scale).to_point().assume_local()
             }
             TabIndicatorPosition::Right | TabIndicatorPosition::Bottom => Point::from((0., 0.)),
         }
@@ -348,7 +349,7 @@ impl TabIndicator {
 impl TabInfo {
     pub fn from_tile<W: LayoutElement>(
         tile: &Tile<W>,
-        position: Point<f64, Logical>,
+        position: Point<f64, Local>,
         is_active: bool,
         is_urgent: bool,
         config: &niri_config::TabIndicator,
@@ -405,7 +406,7 @@ impl TabInfo {
             .or_else(gradient_from_config)
             .unwrap_or_else(gradient_from_border);
 
-        let geometry = Rectangle::new(position, tile.animated_tile_size());
+        let geometry = Rectangle::new(position, tile.animated_tile_size().assume_local());
 
         TabInfo { gradient, geometry }
     }

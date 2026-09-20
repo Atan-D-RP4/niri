@@ -21,6 +21,7 @@ use crate::niri_render_elements;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::RenderCtx;
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
 use crate::utils::transaction::TransactionBlocker;
 use crate::utils::{
     center_preferring_top_left_in_area, clamp_preferring_top_left_in_area, ensure_min_max_size,
@@ -55,10 +56,10 @@ pub struct FloatingSpace<W: LayoutElement> {
     closing_windows: Vec<ClosingWindow>,
 
     /// View size for this space.
-    view_size: Size<f64, Logical>,
+    view_size: Size<f64, Local>,
 
     /// Working area for this space.
-    working_area: Rectangle<f64, Logical>,
+    working_area: Rectangle<f64, Local>,
 
     /// Scale of the output the space is on (and rounds its sizes to).
     scale: f64,
@@ -86,20 +87,20 @@ struct Data {
     /// Cached position in logical coordinates.
     ///
     /// Not rounded to physical pixels.
-    logical_pos: Point<f64, Logical>,
+    logical_pos: Point<f64, Local>,
 
     /// Cached actual size of the tile.
     size: Size<f64, Logical>,
 
     /// Working area used for conversions.
-    working_area: Rectangle<f64, Logical>,
+    working_area: Rectangle<f64, Local>,
 }
 
 impl Data {
     pub fn new<W: LayoutElement>(
-        working_area: Rectangle<f64, Logical>,
+        working_area: Rectangle<f64, Local>,
         tile: &Tile<W>,
-        logical_pos: Point<f64, Logical>,
+        logical_pos: Point<f64, Local>,
     ) -> Self {
         let mut rv = Self {
             pos: Point::default(),
@@ -113,9 +114,9 @@ impl Data {
     }
 
     pub fn scale_by_working_area(
-        area: Rectangle<f64, Logical>,
+        area: Rectangle<f64, Local>,
         pos: Point<f64, SizeFrac>,
-    ) -> Point<f64, Logical> {
+    ) -> Point<f64, Local> {
         let mut logical_pos = Point::from((pos.x, pos.y));
         logical_pos.x *= area.size.w;
         logical_pos.y *= area.size.h;
@@ -124,8 +125,8 @@ impl Data {
     }
 
     pub fn logical_to_size_frac_in_working_area(
-        area: Rectangle<f64, Logical>,
-        logical_pos: Point<f64, Logical>,
+        area: Rectangle<f64, Local>,
+        logical_pos: Point<f64, Local>,
     ) -> Point<f64, SizeFrac> {
         let pos = logical_pos - area.loc;
         let mut pos = Point::from((pos.x, pos.y));
@@ -159,7 +160,7 @@ impl Data {
         self.logical_pos = logical_pos;
     }
 
-    pub fn update_config(&mut self, working_area: Rectangle<f64, Logical>) {
+    pub fn update_config(&mut self, working_area: Rectangle<f64, Local>) {
         if self.working_area == working_area {
             return;
         }
@@ -178,15 +179,15 @@ impl Data {
         self.recompute_logical_pos();
     }
 
-    pub fn set_logical_pos(&mut self, logical_pos: Point<f64, Logical>) {
+    pub fn set_logical_pos(&mut self, logical_pos: Point<f64, Local>) {
         self.pos = Self::logical_to_size_frac_in_working_area(self.working_area, logical_pos);
 
         // This will clamp the logical position to the current working area.
         self.recompute_logical_pos();
     }
 
-    pub fn center(&self) -> Point<f64, Logical> {
-        self.logical_pos + self.size.downscale(2.)
+    pub fn center(&self) -> Point<f64, Local> {
+        self.logical_pos + self.size.downscale(2.).assume_local()
     }
 
     #[cfg(test)]
@@ -202,8 +203,8 @@ impl Data {
 
 impl<W: LayoutElement> FloatingSpace<W> {
     pub fn new(
-        view_size: Size<f64, Logical>,
-        working_area: Rectangle<f64, Logical>,
+        view_size: Size<f64, Local>,
+        working_area: Rectangle<f64, Local>,
         scale: f64,
         clock: Clock,
         options: Rc<Options>,
@@ -224,13 +225,13 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn update_config(
         &mut self,
-        view_size: Size<f64, Logical>,
-        working_area: Rectangle<f64, Logical>,
+        view_size: Size<f64, Local>,
+        working_area: Rectangle<f64, Local>,
         scale: f64,
         options: Rc<Options>,
     ) {
         for (tile, data) in zip(&mut self.tiles, &mut self.data) {
-            tile.update_config(view_size, scale, options.clone());
+            tile.update_config(view_size.as_logical(), scale, options.clone());
             data.update(tile);
             data.update_config(working_area);
         }
@@ -269,7 +270,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
     pub fn update_render_elements(
         &mut self,
         is_active: bool,
-        view_rect: Rectangle<f64, Logical>,
+        view_rect: Rectangle<f64, Local>,
         layer: RenderLayer,
     ) {
         let active = self.active_window_id.clone();
@@ -296,26 +297,30 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.tiles.iter_mut()
     }
 
-    pub fn tiles_with_offsets(&self) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>)> + '_ {
+    pub fn tiles_with_offsets(&self) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>)> + '_ {
         let offsets = self.data.iter().map(|d| d.logical_pos);
         zip(&self.tiles, offsets)
     }
 
     pub fn tiles_with_offsets_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> + '_ {
+    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> + '_ {
         let offsets = self.data.iter().map(|d| d.logical_pos);
         zip(&mut self.tiles, offsets)
     }
 
     pub fn tiles_with_render_positions(
         &self,
-    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>)> {
         let scale = self.scale;
         self.tiles_with_offsets().map(move |(tile, offset)| {
             let pos = offset + tile.render_offset();
             // Round to physical pixels.
-            let pos = pos.to_physical_precise_round(scale).to_logical(scale);
+            let pos = pos
+                .to_physical_precise_round(scale)
+                .to_logical(scale)
+                .assume_local();
+            // Output-relative render position; layout data stays Logical upstream.
             (tile, pos)
         })
     }
@@ -323,13 +328,16 @@ impl<W: LayoutElement> FloatingSpace<W> {
     pub fn tiles_with_render_positions_mut(
         &mut self,
         round: bool,
-    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> {
         let scale = self.scale;
         self.tiles_with_offsets_mut().map(move |(tile, offset)| {
             let mut pos = offset + tile.render_offset();
             // Round to physical pixels.
             if round {
-                pos = pos.to_physical_precise_round(scale).to_logical(scale);
+                pos = pos
+                    .to_physical_precise_round(scale)
+                    .to_logical(scale)
+                    .assume_local();
             }
             (tile, pos)
         })
@@ -353,13 +361,13 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn new_window_toplevel_bounds(&self, rules: &ResolvedWindowRules) -> Size<i32, Logical> {
         let border_config = self.options.layout.border.merged_with(&rules.border);
-        compute_toplevel_bounds(border_config, self.working_area.size)
+        compute_toplevel_bounds(border_config, self.working_area.size.as_logical())
     }
 
     /// Returns the geometry of the active window relative to and clamped to the working area.
     ///
     /// During animations, assumes the final tile position.
-    pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Logical>> {
+    pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Local>> {
         let active_id = self.active_window_id.as_ref()?;
         let (tile, offset) = self
             .tiles_with_offsets()
@@ -367,12 +375,12 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
         let window_pos = offset + tile.window_loc();
         let window_size = tile.window_size();
-        let window_rect = Rectangle::new(window_pos, window_size);
+        let window_rect = Rectangle::new(window_pos, window_size.assume_local());
 
         self.working_area.intersection(window_rect)
     }
 
-    pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Logical>> {
+    pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Local>> {
         for (tile, pos) in self.tiles_with_offsets() {
             if tile.window().id() == id {
                 // Position within the working area.
@@ -423,7 +431,11 @@ impl<W: LayoutElement> FloatingSpace<W> {
     }
 
     fn add_tile_at(&mut self, mut idx: usize, mut tile: Tile<W>, activate: bool) {
-        tile.update_config(self.view_size, self.scale, self.options.clone());
+        tile.update_config(
+            self.view_size.as_logical(),
+            self.scale,
+            self.options.clone(),
+        );
 
         // Restore the previous floating window size, and in case the tile is fullscreen,
         // unfullscreen it.
@@ -461,7 +473,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
 
         let pos = self.stored_or_default_tile_pos(&tile).unwrap_or_else(|| {
-            center_preferring_top_left_in_area(self.working_area, tile.tile_size())
+            center_preferring_top_left_in_area(self.working_area, tile.tile_size().assume_local())
         });
 
         let data = Data::new(self.working_area, &tile, pos);
@@ -477,8 +489,11 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let above_pos = self.data[idx].logical_pos;
         let above_size = self.data[idx].size;
         let tile_size = tile.tile_size();
-        let pos = above_pos + (above_size.to_point() - tile_size.to_point()).downscale(2.);
-        let pos = self.clamp_within_working_area(pos, tile_size);
+        let pos = above_pos
+            + (above_size.to_point() - tile_size.to_point())
+                .downscale(2.)
+                .assume_local();
+        let pos = self.clamp_within_working_area(pos, tile_size.assume_local());
         tile.floating_pos = Some(self.logical_to_size_frac(pos));
 
         self.add_tile_at(idx, tile, activate);
@@ -568,7 +583,14 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
         let tile_size = tile.tile_size();
 
-        self.start_close_animation_for_tile(renderer, snapshot, tile_size, tile_pos, blocker);
+        self.start_close_animation_for_tile(
+            renderer,
+            snapshot,
+            tile_size,
+            // Closing-window animation stays Logical.
+            tile_pos.as_logical(),
+            blocker,
+        );
     }
 
     pub fn activate_window_without_raising(&mut self, id: &W::Id) -> bool {
@@ -847,7 +869,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     fn focus_directional(
         &mut self,
-        distance: impl Fn(Point<f64, Logical>, Point<f64, Logical>) -> f64,
+        distance: impl Fn(Point<f64, Local>, Point<f64, Local>) -> f64,
     ) -> bool {
         let Some(active_id) = &self.active_window_id else {
             return false;
@@ -925,7 +947,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
     }
 
-    fn move_to(&mut self, idx: usize, new_pos: Point<f64, Logical>, animate: bool) {
+    fn move_to(&mut self, idx: usize, new_pos: Point<f64, Local>, animate: bool) {
         if animate {
             self.move_and_animate(idx, new_pos);
         } else {
@@ -935,7 +957,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.interactive_resize_end(None);
     }
 
-    fn move_by(&mut self, amount: Point<f64, Logical>) {
+    fn move_by(&mut self, amount: Point<f64, Local>) {
         let Some(active_id) = &self.active_window_id else {
             return;
         };
@@ -1017,7 +1039,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
         };
         let idx = self.idx_of(&id).unwrap();
 
-        let new_pos = center_preferring_top_left_in_area(self.working_area, self.data[idx].size);
+        let new_pos = center_preferring_top_left_in_area(
+            self.working_area,
+            self.data[idx].size.assume_local(),
+        );
         self.move_to(idx, new_pos, true);
     }
 
@@ -1201,7 +1226,8 @@ impl<W: LayoutElement> FloatingSpace<W> {
             win.set_interactive_resize(resize_data);
 
             let border_config = self.options.layout.border.merged_with(&win.rules().border);
-            let bounds = compute_toplevel_bounds(border_config, self.working_area.size);
+            let bounds =
+                compute_toplevel_bounds(border_config, self.working_area.size.as_logical());
             win.set_bounds(bounds);
 
             // If transactions are disabled, also disable combined throttling, for more
@@ -1225,23 +1251,23 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn clamp_within_working_area(
         &self,
-        pos: Point<f64, Logical>,
-        size: Size<f64, Logical>,
-    ) -> Point<f64, Logical> {
+        pos: Point<f64, Local>,
+        size: Size<f64, Local>,
+    ) -> Point<f64, Local> {
         let mut rect = Rectangle::new(pos, size);
         clamp_preferring_top_left_in_area(self.working_area, &mut rect);
         rect.loc
     }
 
-    pub fn scale_by_working_area(&self, pos: Point<f64, SizeFrac>) -> Point<f64, Logical> {
+    pub fn scale_by_working_area(&self, pos: Point<f64, SizeFrac>) -> Point<f64, Local> {
         Data::scale_by_working_area(self.working_area, pos)
     }
 
-    pub fn logical_to_size_frac(&self, logical_pos: Point<f64, Logical>) -> Point<f64, SizeFrac> {
+    pub fn logical_to_size_frac(&self, logical_pos: Point<f64, Local>) -> Point<f64, SizeFrac> {
         Data::logical_to_size_frac_in_working_area(self.working_area, logical_pos)
     }
 
-    fn move_and_animate(&mut self, idx: usize, new_pos: Point<f64, Logical>) {
+    fn move_and_animate(&mut self, idx: usize, new_pos: Point<f64, Local>) {
         // Moves up to this logical pixel distance are not animated.
         const ANIMATION_THRESHOLD_SQ: f64 = 10. * 10.;
 
@@ -1290,7 +1316,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         Size::from((width, height))
     }
 
-    pub fn stored_or_default_tile_pos(&self, tile: &Tile<W>) -> Option<Point<f64, Logical>> {
+    pub fn stored_or_default_tile_pos(&self, tile: &Tile<W>) -> Option<Point<f64, Local>> {
         let pos = tile.floating_pos.map(|pos| self.scale_by_working_area(pos));
         pos.or_else(|| {
             tile.window().rules().default_floating_position.map(|pos| {
@@ -1324,11 +1350,11 @@ impl<W: LayoutElement> FloatingSpace<W> {
     }
 
     #[cfg(test)]
-    pub fn view_size(&self) -> Size<f64, Logical> {
+    pub fn view_size(&self) -> Size<f64, Local> {
         self.view_size
     }
 
-    pub fn working_area(&self) -> Rectangle<f64, Logical> {
+    pub fn working_area(&self) -> Rectangle<f64, Local> {
         self.working_area
     }
 
@@ -1357,7 +1383,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             use crate::layout::SizingMode;
 
             assert!(Rc::ptr_eq(&self.options, &tile.options));
-            assert_eq!(self.view_size, tile.view_size());
+            assert_eq!(self.view_size.as_logical(), tile.view_size());
             assert_eq!(self.clock, tile.clock);
             assert_eq!(self.scale, tile.scale());
             tile.verify_invariants();

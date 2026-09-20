@@ -18,6 +18,7 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::{background_effect, RenderCtx};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, PointSurfaceLocalExt, SizeExt};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
 
 #[derive(Debug)]
@@ -118,12 +119,12 @@ impl MappedLayer {
             .to_physical_precise_round(self.scale)
             .to_logical(self.scale);
 
-        self.block_out_buffer.resize(size);
+        self.block_out_buffer.resize(size.assume_local());
 
         let radius = self.rules.geometry_corner_radius.unwrap_or_default();
         // FIXME: is_active based on keyboard focus?
         self.shadow
-            .update_render_elements(size, true, radius, self.scale, 1.);
+            .update_render_elements(size.assume_local(), true, radius, self.scale, 1.);
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
@@ -174,7 +175,7 @@ impl MappedLayer {
         true
     }
 
-    pub fn bob_offset(&self) -> Point<f64, Logical> {
+    pub fn bob_offset(&self) -> Point<f64, Local> {
         if !self.rules.baba_is_float {
             return Point::from((0., 0.));
         }
@@ -188,7 +189,7 @@ impl MappedLayer {
         &self,
         mut ctx: RenderCtx<R>,
         ns: Option<usize>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         xray_pos: XrayPos,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
@@ -209,7 +210,7 @@ impl MappedLayer {
             // FIXME: take geometry-corner-radius into account.
             let elem = SolidColorRenderElement::from_buffer(
                 &self.block_out_buffer,
-                location,
+                location.assume_local(),
                 alpha,
                 Kind::Unspecified,
             );
@@ -229,7 +230,10 @@ impl MappedLayer {
             );
         }
 
-        let location = location.to_physical_precise_round(scale).to_logical(scale);
+        let location = location
+            .to_physical_precise_round(scale)
+            .to_logical(scale)
+            .assume_local();
         self.shadow
             .render(ctx.renderer, location, &mut |elem| push(elem.into()));
 
@@ -259,7 +263,7 @@ impl MappedLayer {
         &self,
         mut ctx: RenderCtx<R>,
         ns: Option<usize>,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         xray_pos: XrayPos,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
@@ -284,8 +288,12 @@ impl MappedLayer {
             let alpha = alpha * popup_rules.opacity.unwrap_or(1.).clamp(0., 1.);
 
             let surface = popup.wl_surface();
-            let popup_geo = popup.geometry();
-            let surface_loc = location + (offset - popup_geo.loc).to_f64();
+            let popup_geo = popup.geometry().to_f64();
+            let offset = offset.to_f64();
+
+            let surface_loc = (offset - popup_geo.loc)
+                .assume_surface_local()
+                .to_local(location);
 
             push_elements_from_surface_tree(
                 ctx.renderer,
@@ -297,15 +305,21 @@ impl MappedLayer {
                 &mut |elem| push(elem.into()),
             );
 
-            let geometry = Rectangle::new(location + offset.to_f64(), popup_geo.size.to_f64());
-            let surface_off = popup_geo.loc.upscale(-1).to_f64();
+            let geometry = Rectangle::new(
+                offset.assume_surface_local().to_local(location),
+                popup_geo.size.assume_local(),
+            );
+            let surface_off = popup_geo.loc.upscale(-1.).assume_local();
             let surface_anim_scale = Scale::from(1.);
+
             let mut effect = popup_rules.background_effect;
             // Default xray to false for pop-ups since they're always on top of something.
             if effect.xray.is_none() {
                 effect.xray = Some(false);
             }
-            let xray_pos = xray_pos.offset(offset.to_f64());
+            // Surface-space offset placed through the surface origin; coincides with
+            // output-Local units as asserted on `geometry` below.
+            let xray_pos = xray_pos.offset(offset.assume_local());
             background_effect::render_for_tile(
                 ctx.as_gles(),
                 ns,
@@ -313,6 +327,7 @@ impl MappedLayer {
                 self.scale,
                 false,
                 surface,
+                // Surface-relative offset in output units, like the xray_pos above.
                 surface_off,
                 surface_anim_scale,
                 self.blur_config,

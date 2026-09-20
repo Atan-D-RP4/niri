@@ -11,12 +11,13 @@ use smithay::backend::renderer::gles::{
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
 use smithay::backend::renderer::DebugFlags;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size};
+use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size};
 
 use super::renderer::AsGlesFrame;
 use super::resources::Resources;
 use super::shaders::{ProgramType, Shaders};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
+use crate::utils::geometry::{Local, RectLocalExt};
 
 /// Renders a shader with optional texture input, on the primary GPU.
 #[derive(Debug, Clone)]
@@ -24,8 +25,8 @@ pub struct ShaderRenderElement {
     program: ProgramType,
     id: Id,
     commit_counter: CommitCounter,
-    area: Rectangle<f64, Logical>,
-    opaque_regions: Vec<Rectangle<f64, Logical>>,
+    area: Rectangle<f64, Local>,
+    opaque_regions: Vec<Rectangle<f64, Local>>,
     // Should only be used for visual improvements, i.e. corner radius anti-aliasing.
     scale: f32,
     alpha: f32,
@@ -181,8 +182,8 @@ impl ShaderRenderElement {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         program: ProgramType,
-        size: Size<f64, Logical>,
-        opaque_regions: Option<Vec<Rectangle<f64, Logical>>>,
+        size: Size<f64, Local>,
+        opaque_regions: Option<Vec<Rectangle<f64, Local>>>,
         // Should only be used for visual improvements, i.e. corner radius anti-aliasing.
         scale: f32,
         alpha: f32,
@@ -225,8 +226,8 @@ impl ShaderRenderElement {
 
     pub fn update(
         &mut self,
-        size: Size<f64, Logical>,
-        opaque_regions: Option<Vec<Rectangle<f64, Logical>>>,
+        size: Size<f64, Local>,
+        opaque_regions: Option<Vec<Rectangle<f64, Local>>>,
         scale: f32,
         alpha: f32,
         uniforms: Rc<[Uniform<'static>]>,
@@ -242,7 +243,7 @@ impl ShaderRenderElement {
         self.commit_counter.increment();
     }
 
-    pub fn with_location(mut self, location: Point<f64, Logical>) -> Self {
+    pub fn with_location(mut self, location: Point<f64, Local>) -> Self {
         self.area.loc = location;
         self
     }
@@ -267,13 +268,13 @@ impl Element for ShaderRenderElement {
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.area.to_physical_precise_round(scale)
+        self.area.as_logical().to_physical_precise_round(scale)
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         self.opaque_regions
             .iter()
-            .map(|region| region.to_physical_precise_down(scale))
+            .map(|region| region.as_logical().to_physical_precise_down(scale))
             .collect()
     }
 
