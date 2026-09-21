@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 
 use glam::{Mat3, Vec2};
+use niri_config::BackgroundEffectKind;
 use niri_config::CornerRadius;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::{Element, Id, RenderElement};
@@ -16,6 +17,9 @@ use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::background_effect::RenderParams;
 use crate::render_helpers::blur::{Blur, BlurOptions};
+use crate::render_helpers::effect::EffectImpl;
+use crate::render_helpers::effect::GlassOptions;
+use crate::render_helpers::glass::GlassEffect;
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
 use crate::utils::region::TransformedRegion;
@@ -35,17 +39,16 @@ pub struct FramebufferEffectElement {
     corner_radius: CornerRadius,
     subregion: Option<TransformedRegion>,
     scale: f32,
+    kind: BackgroundEffectKind,
     blur_options: Option<BlurOptions>,
     noise: f32,
     saturation: f32,
-    pointer: Option<(f32, f32)>,
-    time: f32,
 }
 
 #[derive(Debug)]
 struct Inner {
     framebuffer: Option<GlesTexture>,
-    blur: Option<Blur>,
+    effect: Option<crate::render_helpers::effect::EffectImpl>,
     intermediate: Option<GlesTexture>,
     /// Reusable storage for subregion-filtered damage rects.
     subregion_damage: Vec<Rectangle<i32, Physical>>,
@@ -69,10 +72,8 @@ impl FramebufferEffect {
         ns: Option<usize>,
         params: RenderParams,
         blur_options: Option<BlurOptions>,
-        noise: f32,
-        saturation: f32,
-        pointer: Option<(f32, f32)>,
-        time: f32,
+        effect: GlassOptions,
+        kind: BackgroundEffectKind,
     ) -> FramebufferEffectElement {
         let (clip_geo, corner_radius) = params
             .clip
@@ -91,11 +92,10 @@ impl FramebufferEffect {
             corner_radius,
             subregion: params.subregion,
             scale: params.scale as f32,
+            kind,
             blur_options,
-            noise,
-            saturation,
-            pointer,
-            time,
+            noise: effect.noise,
+            saturation: effect.saturation,
         }
     }
 }
@@ -239,7 +239,22 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             };
 
             // Prepare blur textures.
-            let mut blur = Option::zip(inner.blur.as_mut(), self.blur_options);
+            if inner.effect.is_none() {
+                inner.effect = match self.kind {
+                    BackgroundEffectKind::Blur => Blur::new(guard.as_mut())
+                        .map(crate::render_helpers::effect::EffectImpl::Blur),
+                    BackgroundEffectKind::Glass => Some(
+                        crate::render_helpers::effect::EffectImpl::Glass(GlassEffect::new()),
+                    ),
+                };
+            }
+
+            let mut blur = match inner.effect.as_mut() {
+                Some(crate::render_helpers::effect::EffectImpl::Blur(blur)) => {
+                    Some((blur, self.blur_options.expect("blur options required")))
+                }
+                _ => None,
+            };
             if let Some((b, options)) = &mut blur {
                 let renderer = guard.as_mut();
                 if let Err(err) = b.prepare_textures(
@@ -395,7 +410,6 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
         );
 
-        // Fallback chain: custom_background_effect → postprocess_and_clip
         let transform = frame.transformation();
         let shaders = Shaders::get_from_frame(frame);
         let program = shaders
@@ -403,44 +417,10 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             .borrow()
             .clone()
             .or_else(|| {
-
-                debug!("framebuffer using postprocess_and_clip program, since no custom shader was provided");
+                debug!("framebuffer using postprocess_and_clip program fallback");
                 shaders.postprocess_and_clip.clone()
             });
-        let uniforms: Vec<Uniform<'static>> = if shaders.custom_background_effect.borrow().is_some()
-        {
-            let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
-            let offset = Vec2::new(offset.x as f32, offset.y as f32);
-            let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
-            let clip_size = Vec2::new(self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
-
-            let input_to_clip_geo = Mat3::from_scale(crop_size / clip_size)
-                * Mat3::from_translation(offset / crop_size);
-
-            let transform_mat = Mat3::from_translation(Vec2::new(0.5, 0.5))
-                * Mat3::from_cols_array(transform.matrix().as_ref())
-                * Mat3::from_translation(Vec2::new(-0.5, -0.5));
-            let input_to_clip_geo = input_to_clip_geo * transform_mat;
-
-            let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
-            let window_size = clip_geo_size;
-            let pointer = self.pointer.unwrap_or((-1.0f32, -1.0f32));
-
-            vec![
-                Uniform::new("niri_pointer", [pointer.0, pointer.1]),
-                Uniform::new("niri_window_size", [window_size.0, window_size.1]),
-                Uniform::new("niri_time", self.time),
-                Uniform::new("noise", self.noise),
-                Uniform::new("saturation", self.saturation),
-                Uniform::new("bg_color", [0f32, 0., 0., 0.]),
-                Uniform::new("niri_scale", self.scale),
-                Uniform::new("geo_size", clip_geo_size),
-                Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
-                mat3_uniform("input_to_geo", input_to_clip_geo),
-            ]
-        } else {
-            self.compute_uniforms(crop, transform).to_vec()
-        };
+        let uniforms = self.compute_uniforms(crop, transform);
         let uniforms = uniforms.as_slice();
 
         frame.render_texture_from_to(
@@ -498,7 +478,9 @@ impl Inner {
     fn new(renderer: &mut GlesRenderer) -> Self {
         Inner {
             framebuffer: None,
-            blur: Blur::new(renderer),
+            effect: Some(EffectImpl::Blur(
+                Blur::new(renderer).expect("failed to init blur"),
+            )),
             intermediate: None,
             subregion_damage: Vec::new(),
         }

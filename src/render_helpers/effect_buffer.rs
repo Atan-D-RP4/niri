@@ -302,14 +302,26 @@ impl EffectBuffer {
     }
 
     pub fn render(&mut self, frame: &mut GlesFrame, blur: bool) -> anyhow::Result<GlesTexture> {
+        let (sharp, blurred) = self.render_pair(frame, blur)?;
+        Ok(if blur { blurred } else { sharp })
+    }
+
+    pub fn render_pair(
+        &mut self,
+        frame: &mut GlesFrame,
+        blur: bool,
+    ) -> anyhow::Result<(GlesTexture, GlesTexture)> {
         let offscreen = self.offscreen.as_mut().context("offscreen is missing")?;
+        let sharp = offscreen.texture.clone();
 
         if !blur {
-            return Ok(offscreen.texture.clone());
+            return Ok((sharp.clone(), sharp));
         }
 
-        let texture = if let Some(texture) = &offscreen.blurred {
+        let blurred = if let Some(texture) = &offscreen.blurred {
             texture.clone()
+        } else if self.blur.is_none() {
+            sharp.clone()
         } else {
             let blur = self.blur.as_mut().context("blur is missing")?;
             let mut guard = frame.renderer();
@@ -320,6 +332,6 @@ impl EffectBuffer {
             offscreen.blurred.insert(blurred).clone()
         };
 
-        Ok(texture)
+        Ok((sharp, blurred))
     }
 }

@@ -24,12 +24,12 @@
 //
 // Quality variants: edit LOW/MEDIUM/HIGH sections below to change quality.
 
-// Baked visual constants (replaces removed lg-* config fields).
-const float LG_DISTORTION = 0.020;                 // convex lens distortion strength
-const float LG_ABERRATION = 1.2;                   // chromatic aberration amount
-const float LG_HIGHLIGHT  = 0.26;                  // specular highlight brightness
-const vec3  LG_TINT       = vec3(0.93, 0.96, 0.98); // cool glass absorption tint
-const vec2  LG_UV_EPS     = vec2(0.0015);          // keeps samples safely in-bounds
+// Baked visual constants
+const float LG_DISTORTION = 0.028;                  // convex lens distortion strength
+const float LG_ABERRATION = 1.6;                    // chromatic aberration amount
+const float LG_HIGHLIGHT  = 0.34;                   // specular highlight brightness
+const vec3  LG_TINT       = vec3(0.92, 0.96, 0.99); // cool glass absorption tint
+const vec2  LG_UV_EPS     = vec2(0.0015);           // keeps samples safely in-bounds
 
 vec2 lg_safe_uv(vec2 uv) {
     return clamp(uv, LG_UV_EPS, vec2(1.0) - LG_UV_EPS);
@@ -107,7 +107,7 @@ vec4 custom_postprocess() {
 
     // Soft convex refraction. Keep strength low for polished, glassy depth.
     float r2 = r * r;
-    float warp = LG_DISTORTION * (0.25 + 0.75 * smoothstep(0.0, 0.65, r));
+    float warp = LG_DISTORTION * (0.28 + 0.72 * smoothstep(0.0, 0.62, r));
     vec2 dist_vec = from_center * r2 * warp;
     vec2 pointer_vec = vec2(0.0);
 
@@ -116,12 +116,12 @@ vec4 custom_postprocess() {
         vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
         vec2 to_pointer = local_uv - pointer_local;
         float p_dist = length(to_pointer);
-        float p_influence = (1.0 - smoothstep(0.0, 0.28, p_dist)) * DISTORTION * 0.008;
+        float p_influence = (1.0 - smoothstep(0.0, 0.28, p_dist)) * LG_DISTORTION * 0.008;
         pointer_vec = normalize(to_pointer + vec2(0.001)) * p_influence;
     }
 
     // Radial chromatic split with bounded sampling.
-    vec2 ca = radial_dir * r * (LG_ABERRATION * 0.0025);
+    vec2 ca = radial_dir * r * (LG_ABERRATION * 0.0032);
     vec2 shift = dist_vec + pointer_vec;
     vec2 excursion = abs(shift) + abs(ca);
     vec2 budget = max(min(v_coords, vec2(1.0) - v_coords) - LG_UV_EPS, vec2(0.0));
@@ -139,20 +139,22 @@ vec4 custom_postprocess() {
     // aberration already reduces saturation — but it helps unify the look and
     // smooth out some remaining color noise from the CA sampling.
     float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    color.rgb = mix(vec3(luma), color.rgb, 0.94);
+    color.rgb = mix(vec3(luma), color.rgb, 0.92);
     color.rgb *= LG_TINT;
-    color.rgb += 0.02 * color.a;
+    color.rgb += 0.03 * color.a;
 
     // Apple-like glazing: fresnel edge lift + narrow specular + top sheen.
     vec3 n = normalize(vec3(from_center * 2.0, 1.25));
     vec3 v = vec3(0.0, 0.0, 1.0);
-    vec3 l = normalize(vec3(-0.45, -0.85, 0.35));
-    float fresnel = pow(1.0 - max(dot(n, v), 0.0), 3.5);
-    float specular = pow(max(dot(reflect(-l, n), v), 0.0), 22.0);
-    float top_sheen = exp(-pow((local_uv.y - 0.05) * 7.0, 2.0)) * 0.20;
-    float edge_lift = fresnel * 0.14;
+    vec3 l1 = normalize(vec3(-0.45, -0.82, 0.35));
+    vec3 l2 = normalize(vec3(0.35, -0.68, 0.42));
+    float fresnel = pow(1.0 - max(dot(n, v), 0.0), 3.8);
+    float specular = pow(max(dot(reflect(-l1, n), v), 0.0), 24.0)
+        + pow(max(dot(reflect(-l2, n), v), 0.0), 34.0) * 0.6;
+    float top_sheen = exp(-pow((local_uv.y - 0.04) * 7.5, 2.0)) * 0.24;
+    float edge_lift = fresnel * 0.18;
 
-    float highlight = (specular * 0.45 + edge_lift + top_sheen) * LG_HIGHLIGHT;
+    float highlight = (specular * 0.5 + edge_lift + top_sheen) * LG_HIGHLIGHT;
 
     // Pointer proximity glow: subtle halo around the cursor, using the same
     // fresnel highlight for consistency.
@@ -160,7 +162,7 @@ vec4 custom_postprocess() {
     if (niri_pointer.x >= 0.0) {
         vec2 pointer_local = niri_pointer / max(niri_window_size, vec2(1.0));
         float pointer_dist = length(local_uv - pointer_local);
-        p_glow = (1.0 - smoothstep(0.0, 0.16, pointer_dist)) * LG_HIGHLIGHT * 0.23;
+        p_glow = (1.0 - smoothstep(0.0, 0.16, pointer_dist)) * LG_HIGHLIGHT * 0.18;
     }
 
     color.rgb += (highlight + p_glow) * color.a;

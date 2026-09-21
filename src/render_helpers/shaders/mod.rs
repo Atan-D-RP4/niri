@@ -9,6 +9,7 @@ use smithay::backend::renderer::gles::{
 use super::renderer::NiriRenderer;
 use super::shader_element::ShaderProgram;
 use crate::render_helpers::blur::BlurProgram;
+use crate::render_helpers::glass::GlassProgram;
 
 pub struct Shaders {
     pub border: Option<ShaderProgram>,
@@ -18,6 +19,7 @@ pub struct Shaders {
     pub resize: Option<ShaderProgram>,
     pub gradient_fade: Option<GlesTexProgram>,
     pub blur: Option<BlurProgram>,
+    pub glass: Option<GlassProgram>,
     pub custom_resize: RefCell<Option<ShaderProgram>>,
     pub custom_close: RefCell<Option<ShaderProgram>>,
     pub custom_open: RefCell<Option<ShaderProgram>>,
@@ -31,6 +33,7 @@ pub enum ProgramType {
     Resize,
     Close,
     Open,
+    Glass,
 }
 
 impl Shaders {
@@ -149,6 +152,12 @@ impl Shaders {
             })
             .ok();
 
+        let glass = GlassProgram::compile(renderer)
+            .map_err(|err| {
+                warn!("error compiling glass background shader: {err:?}");
+            })
+            .ok();
+
         Self {
             border,
             shadow,
@@ -157,6 +166,7 @@ impl Shaders {
             resize,
             gradient_fade,
             blur,
+            glass,
             custom_resize: RefCell::new(None),
             custom_close: RefCell::new(None),
             custom_open: RefCell::new(None),
@@ -216,6 +226,7 @@ impl Shaders {
                 .or_else(|| self.resize.clone()),
             ProgramType::Close => self.custom_close.borrow().clone(),
             ProgramType::Open => self.custom_open.borrow().clone(),
+            ProgramType::Glass => self.glass.as_ref().map(GlassProgram::program),
         }
     }
 }

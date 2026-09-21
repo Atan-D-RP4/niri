@@ -15,6 +15,7 @@ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, T
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::background_effect::RenderParams;
+use crate::render_helpers::effect::GlassOptions;
 use crate::render_helpers::effect_buffer::EffectBuffer;
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
@@ -28,14 +29,6 @@ pub struct Xray {
     pub backdrop: [Rc<RefCell<EffectBuffer>>; RenderTarget::COUNT],
     pub backdrop_color: Color32F,
     pub workspaces: Vec<(Rectangle<f64, Logical>, Color32F)>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct EffectParams {
-    pub noise: f32,
-    pub saturation: f32,
-    pub pointer: Option<(f32, f32)>,
-    pub time: f32,
 }
 
 /// Position for drawing xray background.
@@ -111,10 +104,9 @@ impl Xray {
         params: RenderParams,
         xray_pos: XrayPos,
         blur: bool,
-        effect: EffectParams,
+        effect: GlassOptions,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        // Fallback chain: custom_background_effect → postprocess_and_clip
         let custom_program = Shaders::get(ctx.renderer)
             .custom_background_effect
             .borrow()

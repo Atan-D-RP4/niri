@@ -9,6 +9,7 @@ use smithay::gpu_span_location;
 use smithay::utils::{Buffer, Size};
 
 use crate::render_helpers::shaders::Shaders;
+use crate::render_helpers::effect::Effect;
 
 /// Threshold above which tiled blur rendering is used (2048×2048 pixels).
 const TILING_THRESHOLD: i32 = 2048;
@@ -95,6 +96,20 @@ impl BlurProgram {
             gl.DeleteProgram(self.0.down.program);
             gl.DeleteProgram(self.0.up.program);
         })
+    }
+}
+
+impl Effect for Blur {
+    fn kind(&self) -> niri_config::BackgroundEffectKind {
+        niri_config::BackgroundEffectKind::Blur
+    }
+
+    fn damage(&mut self) {
+        let _ = self;
+    }
+
+    fn needs_continuous_damage(&self) -> bool {
+        false
     }
 }
 

@@ -1057,6 +1057,8 @@ impl MergeWith<BlurPart> for Blur {
 
 #[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffectRule {
+    #[knuffel(child, unwrap(argument, str), default)]
+    pub kind: BackgroundEffectKind,
     #[knuffel(child, unwrap(argument))]
     pub xray: Option<bool>,
     #[knuffel(child, unwrap(argument))]
@@ -1074,6 +1076,9 @@ pub struct BackgroundEffectRule {
 /// Resolved background effect rule.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct BackgroundEffect {
+    /// Which background-effect renderer to use.
+    pub kind: BackgroundEffectKind,
+
     /// Whether to render with xray effect (see through).
     ///
     /// - `None`: xray if any background effect is active
@@ -1097,6 +1102,7 @@ pub struct BackgroundEffect {
 
 impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
     fn merge_with(&mut self, part: &BackgroundEffectRule) {
+        self.kind = part.kind;
         merge_clone_opt!((self, part), xray, blur);
 
         if let Some(x) = part.noise {
@@ -1108,6 +1114,25 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
         }
 
         merge_clone_opt!((self, part), animate, custom_shader);
+    }
+}
+
+#[derive(knuffel::DecodeScalar, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundEffectKind {
+    #[default]
+    Blur,
+    Glass,
+}
+
+impl FromStr for BackgroundEffectKind {
+    type Err = miette::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "blur" => Ok(Self::Blur),
+            "glass" => Ok(Self::Glass),
+            _ => Err(miette!("invalid background-effect kind: {s}")),
+        }
     }
 }
 

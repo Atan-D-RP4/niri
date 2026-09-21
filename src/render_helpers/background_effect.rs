@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use niri_config::CornerRadius;
+use niri_config::{BackgroundEffectKind, CornerRadius};
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
 use smithay::wayland::compositor::{with_states, SurfaceData};
@@ -10,8 +10,10 @@ use crate::handlers::background_effect::get_cached_blur_region;
 use crate::niri_render_elements;
 use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::damage::ExtraDamage;
+use crate::render_helpers::effect::{Effect, GlassOptions};
 use crate::render_helpers::framebuffer_effect::{FramebufferEffect, FramebufferEffectElement};
-use crate::render_helpers::xray::{EffectParams as XrayEffectParams, XrayElement, XrayPos};
+use crate::render_helpers::glass::{self, GlassEffect, GlassEffectElement, GlassXrayElement};
+use crate::render_helpers::xray::{XrayElement, XrayPos};
 use crate::render_helpers::RenderCtx;
 use crate::utils::region::TransformedRegion;
 use crate::utils::surface_geo;
@@ -19,6 +21,7 @@ use crate::utils::surface_geo;
 #[derive(Debug)]
 pub struct BackgroundEffect {
     nonxray: FramebufferEffect,
+    glass: GlassEffect,
     /// Damage when options change.
     damage: ExtraDamage,
     /// Corner radius for clipping.
@@ -34,6 +37,7 @@ pub struct BackgroundEffect {
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Options {
+    pub kind: BackgroundEffectKind,
     pub blur: bool,
     pub xray: bool,
     pub noise: Option<f64>,
@@ -45,10 +49,27 @@ pub struct Options {
 impl Options {
     fn is_visible(&self) -> bool {
         self.xray
+            || self.kind == BackgroundEffectKind::Glass
             || self.blur
             || self.has_custom_shader
             || self.noise.is_some_and(|x| x > 0.)
             || self.saturation.is_some_and(|x| x != 1.)
+    }
+}
+
+impl Effect for Options {
+    fn kind(&self) -> BackgroundEffectKind {
+        self.kind
+    }
+
+    fn damage(&mut self) {}
+
+    fn needs_continuous_damage(&self) -> bool {
+        self.animate && (self.has_custom_shader || self.kind == BackgroundEffectKind::Glass)
+    }
+
+    fn has_custom_shader(&self) -> bool {
+        self.has_custom_shader
     }
 }
 
@@ -81,6 +102,8 @@ impl RenderParams {
 niri_render_elements! {
     BackgroundEffectElement => {
         FramebufferEffect = FramebufferEffectElement,
+        GlassEffect = GlassEffectElement,
+        GlassXray = GlassXrayElement,
         Xray = XrayElement,
         ExtraDamage = ExtraDamage,
     }
@@ -90,6 +113,7 @@ impl BackgroundEffect {
     pub fn new() -> Self {
         Self {
             nonxray: FramebufferEffect::new(),
+            glass: GlassEffect::new(),
             damage: ExtraDamage::new(),
             corner_radius: CornerRadius::default(),
             blur_config: niri_config::Blur::default(),
@@ -106,6 +130,7 @@ impl BackgroundEffect {
     pub fn damage(&mut self) {
         self.damage.damage_all();
         self.nonxray.damage();
+        self.glass.damage();
     }
 
     pub fn update_config(&mut self, config: niri_config::Blur) {
@@ -116,6 +141,7 @@ impl BackgroundEffect {
         self.blur_config = config;
         self.damage.damage_all();
         self.nonxray.damage();
+        self.glass.damage();
     }
 
     pub fn update_render_elements(
@@ -132,6 +158,7 @@ impl BackgroundEffect {
         };
 
         let options = Options {
+            kind: effect.kind,
             blur,
             xray: effect.xray == Some(true),
             noise: effect.noise,
@@ -153,6 +180,7 @@ impl BackgroundEffect {
         self.corner_radius = corner_radius;
         self.damage.damage_all();
         self.nonxray.damage();
+        self.glass.damage();
     }
 
     pub fn is_visible(&self) -> bool {
@@ -185,7 +213,7 @@ impl BackgroundEffect {
         // Use noise/saturation from options, falling back to blur defaults if blurred, and
         // to no effect if not blurred.
         let blur = self.options.blur && !self.blur_config.off;
-        let blur_options = blur.then_some({
+        let blur_options = (blur && self.options.kind == BackgroundEffectKind::Blur).then_some({
             let mut opts = BlurOptions::from(self.blur_config);
             match self.adaptive_quality_level {
                 0 => opts.passes = 1,
@@ -211,6 +239,12 @@ impl BackgroundEffect {
             None
         };
         let time = ctx.time;
+        let effect = GlassOptions {
+            noise,
+            saturation,
+            pointer,
+            time,
+        };
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
@@ -218,25 +252,61 @@ impl BackgroundEffect {
             };
 
             push(damage.into());
-            xray.render(
-                ctx,
-                params,
-                xray_pos,
-                blur,
-                XrayEffectParams {
-                    noise,
-                    saturation,
-                    pointer,
-                    time,
-                },
-                &mut |elem: XrayElement| push(elem.into()),
-            );
+            match self.options.kind {
+                BackgroundEffectKind::Glass => {
+                    glass::render_xray(
+                        xray,
+                        ctx,
+                        params,
+                        xray_pos,
+                        blur,
+                        GlassOptions {
+                            noise,
+                            saturation,
+                            pointer,
+                            time,
+                        },
+                        &mut |elem: GlassXrayElement| push(elem.into()),
+                    );
+                }
+                BackgroundEffectKind::Blur => {
+                    xray.render(
+                        ctx,
+                        params,
+                        xray_pos,
+                        blur,
+                        GlassOptions {
+                            noise: effect.noise,
+                            saturation: effect.saturation,
+                            pointer: effect.pointer,
+                            time: effect.time,
+                        },
+                        &mut |elem: XrayElement| push(elem.into()),
+                    );
+                }
+            }
         } else {
             // Render non-xray effect.
-            let elem =
-                self.nonxray
-                    .render(ns, params, blur_options, noise, saturation, pointer, time);
-            push(elem.into());
+            match self.options.kind {
+                BackgroundEffectKind::Blur => {
+                    let elem =
+                        self.nonxray
+                            .render(ns, params, blur_options, effect, self.options.kind);
+                    push(elem.into());
+                }
+                BackgroundEffectKind::Glass => {
+                    let elem = self.glass.render(
+                        ns,
+                        params,
+                        blur_options,
+                        effect.noise,
+                        effect.saturation,
+                        effect.pointer,
+                        effect.time,
+                    );
+                    push(elem.into());
+                }
+            }
         }
     }
 }
@@ -310,7 +380,7 @@ impl SurfaceBackgroundEffect {
 
 impl Options {
     fn needs_continuous_damage(&self) -> bool {
-        self.animate && self.has_custom_shader
+        self.animate && (self.has_custom_shader || self.kind == BackgroundEffectKind::Glass)
     }
 }
 
