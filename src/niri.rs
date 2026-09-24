@@ -3693,6 +3693,29 @@ impl Niri {
         vt.apply(content_local)
     }
 
+    /// Content-space movement between two screen-space pointer positions.
+    ///
+    /// Converts each endpoint with its own output, then differences them: dividing a
+    /// screen delta by zoom is wrong for focal-tracking modes. Returns zero across
+    /// outputs; the caller still advances its baseline to rebase.
+    pub fn content_delta(
+        &self,
+        prev: Point<f64, Global>,
+        now: Point<f64, Global>,
+    ) -> Point<f64, Logical> {
+        let (Some((prev_output, prev_screen)), Some((now_output, now_screen))) =
+            (self.output_under(prev), self.output_under(now))
+        else {
+            return Point::from((0., 0.));
+        };
+        if prev_output != now_output {
+            return Point::from((0., 0.));
+        }
+        (self.screen_to_content(now_output, now_screen)
+            - self.screen_to_content(prev_output, prev_screen))
+        .as_logical()
+    }
+
     /// Maps a content-space touch location (as sent in the Wayland touch event)
     /// back to screen space.
     pub fn touch_content_to_screen(&self, content: Point<f64, Global>) -> Point<f64, Global> {

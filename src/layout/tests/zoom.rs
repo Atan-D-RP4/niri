@@ -1199,3 +1199,203 @@ fn zoom_controls_ignore_unknown_output() {
     assert!(!layout.set_zoom_lock(&output, true));
     assert!(layout.zoom_state_for_output(&output).is_none());
 }
+
+/// Rubber-band threshold applies in content space: focal (200, 200) at zoom 2 turns the
+/// (200, 0) screen drag into a (100, 0) content delta, below the 256px threshold.
+#[test]
+fn interactive_move_rubber_band_uses_content_deltas_at_zoom() {
+    let mut layout = Layout::<TestWindow>::default();
+    let output = make_output("o1", 1280, 720);
+    layout.add_output(output.clone(), None);
+
+    let win = TestWindow::new(TestWindowParams::new(0));
+    layout.add_window(
+        win,
+        AddWindowTarget::Auto,
+        None,
+        None,
+        false,
+        false,
+        ActivateWindow::default(),
+    );
+
+    // Static focal point away from the cursor at zoom 2.
+    let focal = Point::from((200.0, 200.0));
+    layout.zoom_set_state_for_test(&output, 2.0, focal, zoom::ZoomLevelTransition::Idle, None);
+    let vt = current_viewport(&layout, &output);
+    assert_eq!(vt.factor, 2.0);
+    assert_eq!(vt.focal, focal);
+
+    // Ground truth as literals.
+    let c0 = vt.apply_inverse((800.0, 600.0).into());
+    assert_eq!(c0, Point::from((500.0, 400.0)));
+    let c1 = vt.apply_inverse((1000.0, 600.0).into());
+    assert_eq!(c1, Point::from((600.0, 400.0)));
+    let content_delta = Point::from((c1.x - c0.x, c1.y - c0.y));
+    assert_eq!(content_delta, Point::from((100.0, 0.0)));
+
+    assert!(layout.interactive_move_begin(0, &output, c0));
+    layout.verify_invariants();
+
+    // 100px of content movement: still rubber-banding (screen would read 200px).
+    assert!(layout.interactive_move_update(&0, content_delta, output.clone(), c1));
+    layout.verify_invariants();
+    assert!(
+        matches!(
+            layout.interactive_move,
+            Some(InteractiveMoveState::Starting { .. })
+        ),
+        "100px of content movement must still be rubber-banding"
+    );
+    assert!(layout.has_window(&0));
+
+    // 400px total: past the threshold, the window leaves the layout.
+    let c2 = Point::from((900.0, 400.0));
+    assert!(layout.interactive_move_update(&0, Point::from((300.0, 0.0)), output.clone(), c2));
+    layout.verify_invariants();
+    assert!(
+        matches!(
+            layout.interactive_move,
+            Some(InteractiveMoveState::Moving(_))
+        ),
+        "400px of content movement must leave the rubber-band state"
+    );
+    // NOTE: still reported by `windows()`/`has_window()` while moved.
+    assert!(
+        layout.workspaces().all(|(_, _, ws)| !ws.has_window(&0)),
+        "window must leave the workspaces once past the threshold"
+    );
+
+    layout.interactive_move_end(&0);
+    layout.verify_invariants();
+    assert!(layout.has_window(&0));
+}
+
+/// Zoom-off control: screen and content coincide, same transitions.
+#[test]
+fn interactive_move_rubber_band_without_zoom() {
+    let mut layout = Layout::<TestWindow>::default();
+    let output = make_output("o1", 1280, 720);
+    layout.add_output(output.clone(), None);
+
+    let win = TestWindow::new(TestWindowParams::new(0));
+    layout.add_window(
+        win,
+        AddWindowTarget::Auto,
+        None,
+        None,
+        false,
+        false,
+        ActivateWindow::default(),
+    );
+
+    let c0 = Point::from((100.0, 100.0));
+    assert!(layout.interactive_move_begin(0, &output, c0));
+    layout.verify_invariants();
+
+    let c1 = Point::from((200.0, 100.0));
+    assert!(layout.interactive_move_update(&0, Point::from((100.0, 0.0)), output.clone(), c1));
+    layout.verify_invariants();
+    assert!(matches!(
+        layout.interactive_move,
+        Some(InteractiveMoveState::Starting { .. })
+    ));
+    assert!(layout.has_window(&0));
+
+    let c2 = Point::from((500.0, 100.0));
+    assert!(layout.interactive_move_update(&0, Point::from((300.0, 0.0)), output.clone(), c2));
+    layout.verify_invariants();
+    assert!(matches!(
+        layout.interactive_move,
+        Some(InteractiveMoveState::Moving(_))
+    ));
+    // NOTE: still reported by `windows()`/`has_window()` while moved.
+    assert!(
+        layout.workspaces().all(|(_, _, ws)| !ws.has_window(&0)),
+        "window must leave the workspaces once past the threshold"
+    );
+
+    layout.interactive_move_end(&0);
+    layout.verify_invariants();
+    assert!(layout.has_window(&0));
+}
+
+/// Resize applies the content delta verbatim: the 200px screen drag is 100px in content,
+/// so the 100px-wide window becomes 200px wide.
+#[test]
+fn interactive_resize_applies_content_delta_at_zoom() {
+    let mut layout = Layout::<TestWindow>::default();
+    let output = make_output("o1", 1280, 720);
+    layout.add_output(output.clone(), None);
+
+    let params = TestWindowParams {
+        is_floating: true,
+        ..TestWindowParams::new(0)
+    };
+    let win = TestWindow::new(params);
+    layout.add_window(
+        win,
+        AddWindowTarget::Auto,
+        None,
+        None,
+        false,
+        true,
+        ActivateWindow::default(),
+    );
+
+    // Static focal point away from the cursor at zoom 2.
+    let focal = Point::from((200.0, 200.0));
+    layout.zoom_set_state_for_test(&output, 2.0, focal, zoom::ZoomLevelTransition::Idle, None);
+    let vt = current_viewport(&layout, &output);
+
+    // Ground truth as literals.
+    let c0 = vt.apply_inverse((800.0, 600.0).into());
+    assert_eq!(c0, Point::from((500.0, 400.0)));
+    let c1 = vt.apply_inverse((1000.0, 600.0).into());
+    assert_eq!(c1, Point::from((600.0, 400.0)));
+    let content_delta = Point::from((c1.x - c0.x, c1.y - c0.y));
+    assert_eq!(content_delta, Point::from((100.0, 0.0)));
+
+    assert!(layout.interactive_resize_begin(0, ResizeEdge::RIGHT));
+    assert!(layout.interactive_resize_update(&0, content_delta));
+    layout.verify_invariants();
+
+    let (_, win) = layout.windows().find(|(_, w)| *w.id() == 0).unwrap();
+    assert_eq!(win.requested_size(), Some(Size::from((200, 200))));
+
+    layout.interactive_resize_end(&0);
+    layout.verify_invariants();
+}
+
+/// Zoom-off control: 200px screen drag is a 200px content delta.
+#[test]
+fn interactive_resize_applies_screen_delta_without_zoom() {
+    let mut layout = Layout::<TestWindow>::default();
+    let output = make_output("o1", 1280, 720);
+    layout.add_output(output.clone(), None);
+
+    let params = TestWindowParams {
+        is_floating: true,
+        ..TestWindowParams::new(0)
+    };
+    let win = TestWindow::new(params);
+    layout.add_window(
+        win,
+        AddWindowTarget::Auto,
+        None,
+        None,
+        false,
+        true,
+        ActivateWindow::default(),
+    );
+
+    assert!(layout.interactive_resize_begin(0, ResizeEdge::RIGHT));
+    assert!(layout.interactive_resize_update(&0, Point::from((200.0, 0.0))));
+    layout.verify_invariants();
+
+    let (_, win) = layout.windows().find(|(_, w)| *w.id() == 0).unwrap();
+    assert_eq!(win.requested_size(), Some(Size::from((300, 200))));
+
+    layout.interactive_resize_end(&0);
+    layout.verify_invariants();
+}

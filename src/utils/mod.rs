@@ -36,7 +36,7 @@ use wayland_backend::server::Credentials;
 
 use crate::handlers::KdeDecorationsModeState;
 use crate::niri::ClientState;
-use crate::utils::geometry::Local;
+use crate::utils::geometry::{Local, RectExt};
 
 pub mod geometry;
 pub mod id;
@@ -53,8 +53,6 @@ pub mod xwayland;
 pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
 
 use id::IdCounter;
-
-use self::geometry::RectExt;
 
 /// Unique ID for a screencast session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

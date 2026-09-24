@@ -447,8 +447,8 @@ enum InteractiveMoveState<W: LayoutElement> {
         window_id: W::Id,
         /// Current pointer delta from the starting location.
         ///
-        /// It is accumulated in screen orientation and is zoom-corrected during overview;
-        /// use sites compensate via by upscaling the delta by the overview zoom factor.
+        /// Accumulated in content space (the grab converts each endpoint); use sites upscale
+        /// by the overview zoom factor. Cursor-zoom correction happens in the grab.
         pointer_delta: Point<f64, Logical>,
         /// Pointer location within the visual window geometry as ratio from geometry size.
         ///
@@ -465,8 +465,8 @@ struct InteractiveMoveData<W: LayoutElement> {
     pub(self) tile: Tile<W>,
     /// Output where the window is currently located/rendered.
     pub(self) output: Output,
-    /// Current pointer position within output.
-    pub(self) pointer_pos_within_output: Point<f64, Local>,
+    /// Current pointer position within output, in content space.
+    pub(self) pointer_content_pos_within_output: Point<f64, Local>,
     /// Window column width.
     pub(self) width: ColumnWidth,
     /// Whether the window column was full-width.
@@ -649,7 +649,7 @@ impl<W: LayoutElement> InteractiveMoveData<W> {
             window_size.w * self.pointer_ratio_within_window.0,
             window_size.h * self.pointer_ratio_within_window.1,
         ));
-        let pos = self.pointer_pos_within_output
+        let pos = self.pointer_content_pos_within_output
             - (pointer_offset_within_window + self.tile.window_loc() - self.tile.render_offset())
                 .upscale(overview_zoom);
 
@@ -2682,7 +2682,7 @@ impl<W: LayoutElement> Layout<W> {
             if dnd_scroll.is_none() {
                 dnd_scroll = Some((
                     move_.output.clone(),
-                    move_.pointer_pos_within_output,
+                    move_.pointer_content_pos_within_output,
                     !move_.is_floating,
                 ));
             }
@@ -3383,13 +3383,13 @@ impl<W: LayoutElement> Layout<W> {
 
         if let Some(mon) = self.monitor_for_output_mut(&move_.output) {
             let overview_zoom = mon.overview_zoom();
-            let (insert_ws, geo) = mon.insert_position(move_.pointer_pos_within_output);
+            let (insert_ws, geo) = mon.insert_position(move_.pointer_content_pos_within_output);
             match insert_ws {
                 InsertWorkspace::Existing(ws_id) => {
                     let idx = mon.idx_of_ws(ws_id).unwrap();
                     let ws = &mut mon.workspaces[idx];
-                    let pos_within_workspace =
-                        (move_.pointer_pos_within_output - geo.loc).downscale(overview_zoom);
+                    let pos_within_workspace = (move_.pointer_content_pos_within_output - geo.loc)
+                        .downscale(overview_zoom);
                     let position = if move_.is_floating {
                         InsertPosition::Floating
                     } else {
@@ -4316,11 +4316,13 @@ impl<W: LayoutElement> Layout<W> {
         true
     }
 
+    /// Starts an interactive move. Takes a content-space position: convert the
+    /// `output_under()` screen position with `screen_to_content()` first, like DnD.
     pub fn interactive_move_begin(
         &mut self,
         window_id: W::Id,
         output: &Output,
-        start_pos_within_output: Point<f64, Local>,
+        start_content_pos_within_output: Point<f64, Local>,
     ) -> bool {
         if self.interactive_move.is_some() {
             return false;
@@ -4351,7 +4353,7 @@ impl<W: LayoutElement> Layout<W> {
         let tile_pos = ws_geo.loc + tile_offset.upscale(overview_zoom);
 
         let pointer_offset_within_window =
-            start_pos_within_output - tile_pos - window_offset.upscale(overview_zoom);
+            start_content_pos_within_output - tile_pos - window_offset.upscale(overview_zoom);
         let window_size = tile.window_size().upscale(overview_zoom);
         let pointer_ratio_within_window = (
             f64::clamp(pointer_offset_within_window.x / window_size.w, 0., 1.),
@@ -4378,12 +4380,15 @@ impl<W: LayoutElement> Layout<W> {
         true
     }
 
+    /// Updates an ongoing interactive move. Takes a content-space position (convert with
+    /// `screen_to_content()` first) and a content-space delta; the delta is still downscaled
+    /// by the overview zoom below, a separate layout-space transform.
     pub fn interactive_move_update(
         &mut self,
         window: &W::Id,
         delta: Point<f64, Logical>,
         output: Output,
-        pointer_pos_within_output: Point<f64, Local>,
+        pointer_content_pos_within_output: Point<f64, Local>,
     ) -> bool {
         let Some(state) = self.interactive_move.take() else {
             return false;
@@ -4404,6 +4409,7 @@ impl<W: LayoutElement> Layout<W> {
                     return false;
                 }
 
+                // Content-space delta; the overview zoom below is a separate transform.
                 let overview_zoom = self.overview_zoom();
                 let delta = delta.downscale(overview_zoom);
 
@@ -4433,9 +4439,7 @@ impl<W: LayoutElement> Layout<W> {
                     })
                     .unwrap();
 
-                // pointer_delta accumulates in screen orientation and is zoom-corrected during
-                // overview; use sites compensate with upscale(overview_zoom), so entering
-                // output-space render arithmetic here is the documented seam, not a silent cast.
+                // Content-space delta; upscale compensates the overview zoom at the render seam.
                 tile.interactive_move_offset = pointer_delta.upscale(factor).assume_local();
 
                 // Put it back to be able to easily return.
@@ -4536,7 +4540,7 @@ impl<W: LayoutElement> Layout<W> {
                 let mut data = InteractiveMoveData {
                     tile,
                     output,
-                    pointer_pos_within_output,
+                    pointer_content_pos_within_output,
                     width,
                     is_full_width,
                     is_floating,
@@ -4561,7 +4565,8 @@ impl<W: LayoutElement> Layout<W> {
 
                 let mut ws_id = None;
                 if let Some(mon) = self.monitor_for_output(&output) {
-                    let (insert_ws, _) = mon.insert_position(move_.pointer_pos_within_output);
+                    let (insert_ws, _) =
+                        mon.insert_position(move_.pointer_content_pos_within_output);
                     if let InsertWorkspace::Existing(id) = insert_ws {
                         ws_id = Some(id);
                     }
@@ -4603,7 +4608,7 @@ impl<W: LayoutElement> Layout<W> {
                     move_.tile.update_config(view_size, scale, Rc::new(options));
                 }
 
-                move_.pointer_pos_within_output = pointer_pos_within_output;
+                move_.pointer_content_pos_within_output = pointer_content_pos_within_output;
 
                 self.interactive_move = Some(InteractiveMoveState::Moving(move_));
             }
@@ -4697,7 +4702,8 @@ impl<W: LayoutElement> Layout<W> {
                     if let Some(mon) = monitors.iter_mut().find(|mon| mon.output == move_.output) {
                         let overview_zoom = mon.overview_zoom();
 
-                        let (insert_ws, geo) = mon.insert_position(move_.pointer_pos_within_output);
+                        let (insert_ws, geo) =
+                            mon.insert_position(move_.pointer_content_pos_within_output);
                         let (position, offset) = match insert_ws {
                             InsertWorkspace::Existing(ws_id) => {
                                 let ws_idx = mon.idx_of_ws(ws_id).unwrap();
@@ -4705,9 +4711,9 @@ impl<W: LayoutElement> Layout<W> {
                                 let position = if move_.is_floating {
                                     InsertPosition::Floating
                                 } else {
-                                    let pos_within_workspace = (move_.pointer_pos_within_output
-                                        - geo.loc)
-                                        .downscale(overview_zoom);
+                                    let pos_within_workspace =
+                                        (move_.pointer_content_pos_within_output - geo.loc)
+                                            .downscale(overview_zoom);
                                     let ws = &mut mon.workspaces[ws_idx];
                                     ws.scrolling_insert_position(pos_within_workspace)
                                 };
@@ -5307,11 +5313,12 @@ impl<W: LayoutElement> Layout<W> {
                 let tile_size = move_.tile.tile_size();
 
                 let output = move_.output.clone();
-                let pointer_pos_within_output = move_.pointer_pos_within_output;
+                let pointer_content_pos_within_output = move_.pointer_content_pos_within_output;
                 let Some(mon) = self.monitor_for_output_mut(&output) else {
                     return;
                 };
-                let Some((ws, ws_geo)) = mon.workspace_under(pointer_pos_within_output) else {
+                let Some((ws, ws_geo)) = mon.workspace_under(pointer_content_pos_within_output)
+                else {
                     return;
                 };
                 let idx = mon.idx_of_ws(ws.id()).unwrap();

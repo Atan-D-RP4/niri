@@ -2699,6 +2699,15 @@ impl State {
             }
         }
 
+        // Update the zoom focal first so conversions use the rendered viewport.
+        if let (Some(output), Some(ctx)) = (&zoom_output, &zoom_ctx) {
+            let cursor_local = new_pos.to_local(ctx);
+            self.niri.layout.set_zoom_cursor_pos(output, cursor_local);
+            self.niri
+                .layout
+                .update_cursor_zoom_focal(output, cursor_local, false);
+        }
+
         self.update_screenshot_from_content(new_pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
@@ -2809,16 +2818,6 @@ impl State {
             }
         }
 
-        // Keep the zoom focal tracking the cursor (CursorFollow mode) or update its stored cursor
-        // position for OnEdge mode. No-op during active transitions (they drive the focal).
-        if let (Some(output), Some(ctx)) = (&zoom_output, &zoom_ctx) {
-            let cursor_local = new_pos.to_local(ctx);
-            self.niri.layout.set_zoom_cursor_pos(output, cursor_local);
-            self.niri
-                .layout
-                .update_cursor_zoom_focal(output, cursor_local, false);
-        }
-
         // Notify a11y.
         #[cfg(feature = "dbus")]
         self.a11y_notify_pointer_motion();
@@ -2836,7 +2835,7 @@ impl State {
         // Any of the early returns here mean that the pointer is not inside the hot corner.
         self.niri.pointer_inside_hot_corner = false;
 
-        let Some(pos) = self.compute_absolute_location(&event, None).or_else(|| {
+        let Some(mut pos) = self.compute_absolute_location(&event, None).or_else(|| {
             self.global_bounding_rectangle().map(|output_geo| {
                 output_geo.loc.to_f64().surface_position(
                     event
@@ -2852,6 +2851,31 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
 
         let pointer = self.niri.seat.get_pointer().unwrap();
+
+        // Clamp and update the zoom focal first so conversions use the rendered viewport.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            let output = output.clone();
+            if let Some(ctx) = self.niri.output_state.get(&output).map(|s| s.view_ctx) {
+                if let Some(state) = self.niri.layout.zoom_state_for_output(&output) {
+                    if state.locked {
+                        let pos_local = pos.to_local(&ctx);
+                        if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
+                            &output,
+                            pos_local,
+                            ctx.local_geo.size,
+                        ) {
+                            pos = clamped.to_global(&ctx);
+                        }
+                    }
+                }
+
+                let cursor_local = pos.to_local(&ctx);
+                self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
+                self.niri
+                    .layout
+                    .update_cursor_zoom_focal(&output, cursor_local, false);
+            }
+        }
 
         self.update_screenshot_from_screen(pos, None);
 
@@ -2918,48 +2942,6 @@ impl State {
                 self.niri
                     .layout
                     .dnd_update(output, content_pos_within_output);
-            }
-        }
-
-        // Clamp to the zoomed viewport when zoom is locked, and keep the focal tracking the cursor.
-        if let Some((output, _)) = self.niri.output_under(pos) {
-            let output = output.clone();
-            let ctx = self.niri.output_state.get(&output).map(|s| s.view_ctx);
-            if let Some(ctx) = &ctx {
-                if let Some(state) = self.niri.layout.zoom_state_for_output(&output) {
-                    if state.locked {
-                        let pos_local = pos.to_local(ctx);
-                        if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
-                            &output,
-                            pos_local,
-                            ctx.local_geo.size,
-                        ) {
-                            let new_pos = clamped.to_global(ctx);
-                            // Re-run the motion with the clamped position.
-                            let under = self.niri.contents_under(new_pos);
-                            let surface = under.surface.clone().map(|(s, l)| (s, l.as_logical()));
-                            self.niri.pointer_contents = under;
-                            pointer.motion(
-                                self,
-                                surface,
-                                &MotionEvent {
-                                    location: new_pos.as_logical(),
-                                    serial: SERIAL_COUNTER.next_serial(),
-                                    time: event.time(),
-                                },
-                            );
-                            pointer.frame(self);
-                        }
-                    }
-                }
-            }
-
-            if let Some(ctx) = &ctx {
-                let cursor_local = pos.to_local(ctx);
-                self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
-                self.niri
-                    .layout
-                    .update_cursor_zoom_focal(&output, cursor_local, false);
             }
         }
 

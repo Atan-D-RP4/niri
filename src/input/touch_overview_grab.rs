@@ -78,6 +78,10 @@ impl TouchOverviewGrab {
             return true;
         };
 
+        let start_content_pos_within_output = data
+            .niri
+            .screen_to_content(&self.output, self.start_pos_within_output);
+
         let layout = &mut data.niri.layout;
 
         // Check if we should become interactive move.
@@ -88,7 +92,7 @@ impl TouchOverviewGrab {
                     && layout.interactive_move_begin(
                         window.clone(),
                         &self.output,
-                        self.start_pos_within_output,
+                        start_content_pos_within_output,
                     )
                 {
                     self.gesture = GestureState::InteractiveMove;
@@ -142,26 +146,42 @@ impl TouchOverviewGrab {
         }
 
         let delta = (self.new_location - self.last_location).as_logical();
-        self.last_location = self.new_location;
 
         let ongoing = match self.gesture {
             GestureState::Recognizing => unreachable!(),
-            GestureState::ViewOffset => layout
-                .view_offset_gesture_update(-delta.x, timestamp, false)
-                .is_some(),
-            GestureState::WorkspaceSwitch => layout
-                .workspace_switch_gesture_update(-delta.y, timestamp, false)
-                .is_some(),
+            GestureState::ViewOffset => {
+                self.last_location = self.new_location;
+                layout
+                    .view_offset_gesture_update(-delta.x, timestamp, false)
+                    .is_some()
+            }
+            GestureState::WorkspaceSwitch => {
+                self.last_location = self.new_location;
+                layout
+                    .workspace_switch_gesture_update(-delta.y, timestamp, false)
+                    .is_some()
+            }
             GestureState::InteractiveMove => {
+                // Content movement this frame; cross-output frames contribute zero and rebase.
+                // NOTE: scroll gestures above intentionally keep the screen-space delta.
+                let content_delta = data
+                    .niri
+                    .content_delta(self.last_location, self.new_location);
+                self.last_location = self.new_location;
                 let window = self.window.as_ref().unwrap();
-                if let Some((output, pos_within_output)) = data.niri.output_under(self.new_location)
+                if let Some((output, screen_pos_within_output)) =
+                    data.niri.output_under(self.new_location)
                 {
                     let output = output.clone();
+                    // Interactive move consumes content-space positions.
+                    let content_pos_within_output = data
+                        .niri
+                        .screen_to_content(&output, screen_pos_within_output);
                     data.niri.layout.interactive_move_update(
                         window,
-                        delta,
+                        content_delta,
                         output,
-                        pos_within_output,
+                        content_pos_within_output,
                     )
                 } else {
                     false

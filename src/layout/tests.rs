@@ -3097,6 +3097,43 @@ fn interactive_move_toggle_floating_ends_dnd_gesture() {
 }
 
 #[test]
+fn interactive_move_consumes_content_space_positions() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddOutput(2),
+        Op::AddWindow {
+            params: TestWindowParams::new(0),
+        },
+        Op::ToggleWindowFloating { id: Some(0) },
+        Op::InteractiveMoveBegin {
+            window: 0,
+            output_idx: 1,
+            px: 100.,
+            py: 100.,
+        },
+        Op::InteractiveMoveUpdate {
+            window: 0,
+            dx: 2000.,
+            dy: 0.,
+            output_idx: 2,
+            px: 100.,
+            py: 100.,
+        },
+        Op::InteractiveMoveEnd { window: 0 },
+    ];
+
+    let layout = check_ops(ops);
+
+    // The window must have followed the content-space pointer onto output2.
+    let output_name = layout
+        .workspaces()
+        .find(|(_, _, ws)| ws.has_window(&0))
+        .and_then(|(mon, _, _)| mon)
+        .map(|mon| mon.output_name().to_owned());
+    assert_eq!(output_name.as_deref(), Some("output2"));
+}
+
+#[test]
 fn interactive_move_from_workspace_with_layout_config() {
     let ops = [
         Op::AddNamedWorkspace {

@@ -36,6 +36,9 @@ pub struct MoveGrab {
     new_location: Point<f64, Global>,
     event_timestamp: Option<Duration>,
     relative_delta: Option<Point<f64, Logical>>,
+    /// Content-space movement since grab start, from converted endpoints. Drives the
+    /// move rubber-band and the move delta.
+    content_moved: Point<f64, Logical>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +72,7 @@ impl MoveGrab {
             new_location: location,
             event_timestamp: None,
             relative_delta: None,
+            content_moved: Point::from((0., 0.)),
         })
     }
 
@@ -118,10 +122,15 @@ impl MoveGrab {
     }
 
     fn begin_move(&mut self, data: &mut State) -> bool {
+        // output_under() yields a screen-local position; interactive move consumes
+        // content-space positions.
+        let start_content_pos_within_output = data
+            .niri
+            .screen_to_content(&self.start_output, self.start_pos_within_output);
         if !data.niri.layout.interactive_move_begin(
             self.window.clone(),
             &self.start_output,
-            self.start_pos_within_output,
+            start_content_pos_within_output,
         ) {
             // Can no longer start the move.
             return false;
@@ -176,9 +185,19 @@ impl MoveGrab {
             return true;
         };
 
-        let mut delta = (self.new_location - self.last_location).as_logical();
-        let mut relative_delta = self.relative_delta.take().unwrap_or(delta);
+        let screen_delta = (self.new_location - self.last_location).as_logical();
+        let mut relative_delta = self.relative_delta.take().unwrap_or(screen_delta);
+        // Content movement for this frame: endpoints converted with their own outputs.
+        // Cross-output frames contribute zero and rebase via `last_location` below.
+        // NOTE: `relative_delta` stays screen-space for the view-offset gesture.
+        let content_frame_delta = data
+            .niri
+            .content_delta(self.last_location, self.new_location);
         self.last_location = self.new_location;
+        self.content_moved += content_frame_delta;
+
+        // Move delta; replaced with the recognizing total when the gesture starts.
+        let mut move_delta = content_frame_delta;
 
         // Try to recognize the gesture.
         if self.gesture == GestureState::Recognizing {
@@ -187,8 +206,8 @@ impl MoveGrab {
                 return false;
             }
 
-            // Check if the gesture moved far enough to decide.
-            let c = (self.new_location - self.start_data.location()).as_logical();
+            // Recognition threshold applies in content space (== screen space at zoom 1).
+            let c = self.content_moved;
             if c.x * c.x + c.y * c.y >= 8. * 8. {
                 let is_floating = data
                     .niri
@@ -213,28 +232,34 @@ impl MoveGrab {
                     return false;
                 }
 
-                // Apply the whole delta that accumulated during recognizing.
-                delta = c;
-                relative_delta = c;
+                // Apply the accumulated content delta; view-offset keeps the screen total.
+                move_delta = c;
+                relative_delta = (self.new_location - self.start_data.location()).as_logical();
             }
         }
 
         match self.gesture {
             GestureState::Recognizing => return true,
             GestureState::Move => {
-                let Some((output, pos_within_output)) = data.niri.output_under(self.last_location)
+                let Some((output, screen_pos_within_output)) =
+                    data.niri.output_under(self.last_location)
                 else {
                     return true;
                 };
                 let output = output.clone();
+                // Interactive move consumes content-space positions; raw screen/global pointer
+                // tracking above is intentionally untouched.
+                let content_pos_within_output = data
+                    .niri
+                    .screen_to_content(&output, screen_pos_within_output);
 
                 // Interactive move always uses absolute delta since the window must remain pinned
                 // to the cursor even when it's clamped to monitor bounds.
                 let ongoing = data.niri.layout.interactive_move_update(
                     &self.window,
-                    delta,
+                    move_delta,
                     output,
-                    pos_within_output,
+                    content_pos_within_output,
                 );
                 if ongoing {
                     // FIXME: only redraw the previous and the new output.
@@ -267,22 +292,27 @@ impl MoveGrab {
 
         // Start move if still recognizing.
         if self.gesture == GestureState::Recognizing {
-            let Some((output, pos_within_output)) = data.niri.output_under(self.last_location)
+            let Some((output, screen_pos_within_output)) =
+                data.niri.output_under(self.last_location)
             else {
                 return false;
             };
             let output = output.clone();
+            // Interactive move consumes content-space positions.
+            let content_pos_within_output = data
+                .niri
+                .screen_to_content(&output, screen_pos_within_output);
 
             if !self.begin_move(data) {
                 return false;
             }
 
-            // Apply the delta accumulated during recognizing.
+            // Apply the content delta accumulated during recognizing.
             let ongoing = data.niri.layout.interactive_move_update(
                 &self.window,
-                (self.last_location - self.start_data.location()).as_logical(),
+                self.content_moved,
                 output,
-                pos_within_output,
+                content_pos_within_output,
             );
             if !ongoing {
                 return false;
