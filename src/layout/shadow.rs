@@ -1,14 +1,15 @@
 use std::iter::zip;
 
 use niri_config::CornerRadius;
-use smithay::utils::{Logical, Point, Rectangle, Size};
+use smithay::utils::{Point, Rectangle, Size};
 
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
+use crate::utils::geometry::Local;
 
 #[derive(Debug)]
 pub struct Shadow {
-    shader_rects: Vec<Rectangle<f64, Logical>>,
+    shader_rects: Vec<Rectangle<f64, Local>>,
     shaders: Vec<ShadowRenderElement>,
     config: niri_config::Shadow,
 }
@@ -34,12 +35,13 @@ impl Shadow {
 
     pub fn update_render_elements(
         &mut self,
-        win_size: Size<f64, Logical>,
+        win_size: Size<f64, Local>,
         is_active: bool,
         radius: CornerRadius,
         scale: f64,
         alpha: f32,
     ) {
+        // Window-relative shadow geometry in output-local units.
         let ceil = |logical: f64| (logical * scale).ceil() / scale;
 
         // All of this stuff should end up aligned to physical pixels because:
@@ -165,7 +167,7 @@ impl Shadow {
     pub fn render(
         &self,
         renderer: &mut impl NiriRenderer,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         push: &mut dyn FnMut(ShadowRenderElement),
     ) {
         if !self.config.on {

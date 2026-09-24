@@ -10,13 +10,14 @@ use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, Unifo
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::gpu_span_location;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::renderer::NiriRenderer;
 use super::shader_element::ShaderRenderElement;
 use super::shaders::{mat3_uniform, ProgramType, Shaders};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame as _;
+use crate::utils::geometry::Local;
 
 /// Renders a wide variety of borders and border parts.
 ///
@@ -32,13 +33,13 @@ pub struct BorderRenderElement {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Parameters {
-    size: Size<f64, Logical>,
-    gradient_area: Rectangle<f64, Logical>,
+    size: Size<f64, Local>,
+    gradient_area: Rectangle<f64, Local>,
     gradient_format: GradientInterpolation,
     color_from: Color,
     color_to: Color,
     angle: f32,
-    geometry: Rectangle<f64, Logical>,
+    geometry: Rectangle<f64, Local>,
     border_width: f32,
     corner_radius: CornerRadius,
     // Should only be used for visual improvements, i.e. corner radius anti-aliasing.
@@ -49,13 +50,13 @@ struct Parameters {
 impl BorderRenderElement {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        size: Size<f64, Logical>,
-        gradient_area: Rectangle<f64, Logical>,
+        size: Size<f64, Local>,
+        gradient_area: Rectangle<f64, Local>,
         gradient_format: GradientInterpolation,
         color_from: Color,
         color_to: Color,
         angle: f32,
-        geometry: Rectangle<f64, Logical>,
+        geometry: Rectangle<f64, Local>,
         border_width: f32,
         corner_radius: CornerRadius,
         scale: f32,
@@ -109,13 +110,13 @@ impl BorderRenderElement {
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        size: Size<f64, Logical>,
-        gradient_area: Rectangle<f64, Logical>,
+        size: Size<f64, Local>,
+        gradient_area: Rectangle<f64, Local>,
         gradient_format: GradientInterpolation,
         color_from: Color,
         color_to: Color,
         angle: f32,
-        geometry: Rectangle<f64, Logical>,
+        geometry: Rectangle<f64, Local>,
         border_width: f32,
         corner_radius: CornerRadius,
         scale: f32,
@@ -218,7 +219,7 @@ impl BorderRenderElement {
         );
     }
 
-    pub fn with_location(mut self, location: Point<f64, Logical>) -> Self {
+    pub fn with_location(mut self, location: Point<f64, Local>) -> Self {
         self.inner = self.inner.with_location(location);
         self
     }

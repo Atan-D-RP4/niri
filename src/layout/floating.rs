@@ -21,7 +21,7 @@ use crate::niri_render_elements;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::RenderCtx;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
 use crate::utils::transaction::TransactionBlocker;
 use crate::utils::{
     center_preferring_top_left_in_area, clamp_preferring_top_left_in_area, ensure_min_max_size,
@@ -270,7 +270,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
     pub fn update_render_elements(
         &mut self,
         is_active: bool,
-        view_rect: Rectangle<f64, Logical>,
+        view_rect: Rectangle<f64, Local>,
         layer: RenderLayer,
     ) {
         let active = self.active_window_id.clone();
@@ -297,15 +297,15 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.tiles.iter_mut()
     }
 
-    pub fn tiles_with_offsets(&self) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>)> + '_ {
-        let offsets = self.data.iter().map(|d| d.logical_pos.as_logical());
+    pub fn tiles_with_offsets(&self) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>)> + '_ {
+        let offsets = self.data.iter().map(|d| d.logical_pos);
         zip(&self.tiles, offsets)
     }
 
     pub fn tiles_with_offsets_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> + '_ {
-        let offsets = self.data.iter().map(|d| d.logical_pos.as_logical());
+    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> + '_ {
+        let offsets = self.data.iter().map(|d| d.logical_pos);
         zip(&mut self.tiles, offsets)
     }
 
@@ -316,9 +316,12 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.tiles_with_offsets().map(move |(tile, offset)| {
             let pos = offset + tile.render_offset();
             // Round to physical pixels.
-            let pos = pos.to_physical_precise_round(scale).to_logical(scale);
+            let pos = pos
+                .to_physical_precise_round(scale)
+                .to_logical(scale)
+                .assume_local();
             // Output-relative render position; layout data stays Logical upstream.
-            (tile, pos.assume_local())
+            (tile, pos)
         })
     }
 
@@ -331,10 +334,12 @@ impl<W: LayoutElement> FloatingSpace<W> {
             let mut pos = offset + tile.render_offset();
             // Round to physical pixels.
             if round {
-                pos = pos.to_physical_precise_round(scale).to_logical(scale);
+                pos = pos
+                    .to_physical_precise_round(scale)
+                    .to_logical(scale)
+                    .assume_local();
             }
-            // Output-relative render position; layout data stays Logical upstream.
-            (tile, pos.assume_local())
+            (tile, pos)
         })
     }
 
@@ -370,20 +375,20 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
         let window_pos = offset + tile.window_loc();
         let window_size = tile.window_size();
-        let window_rect = Rectangle::new(window_pos, window_size);
+        let window_rect = Rectangle::new(window_pos, window_size.assume_local());
 
-        self.working_area.intersection(window_rect.assume_local())
+        self.working_area.intersection(window_rect)
     }
 
     pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Local>> {
         for (tile, pos) in self.tiles_with_offsets() {
             if tile.window().id() == id {
                 // Position within the working area.
-                let mut target = self.working_area.as_logical();
+                let mut target = self.working_area;
                 target.loc -= pos;
                 target.loc -= tile.window_loc();
 
-                return Some(target.assume_local());
+                return Some(target);
             }
         }
         None
@@ -468,8 +473,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
 
         let pos = self.stored_or_default_tile_pos(&tile).unwrap_or_else(|| {
-            center_preferring_top_left_in_area(self.working_area.as_logical(), tile.tile_size())
-                .assume_local()
+            center_preferring_top_left_in_area(self.working_area, tile.tile_size().assume_local())
         });
 
         let data = Data::new(self.working_area, &tile, pos);
@@ -482,12 +486,15 @@ impl<W: LayoutElement> FloatingSpace<W> {
     pub fn add_tile_above(&mut self, above: &W::Id, mut tile: Tile<W>, activate: bool) {
         let idx = self.idx_of(above).unwrap();
 
-        let above_pos = self.data[idx].logical_pos.as_logical();
+        let above_pos = self.data[idx].logical_pos;
         let above_size = self.data[idx].size;
         let tile_size = tile.tile_size();
-        let pos = above_pos + (above_size.to_point() - tile_size.to_point()).downscale(2.);
-        let pos = self.clamp_within_working_area(pos, tile_size);
-        tile.floating_pos = Some(self.logical_to_size_frac(pos.assume_local()));
+        let pos = above_pos
+            + (above_size.to_point() - tile_size.to_point())
+                .downscale(2.)
+                .assume_local();
+        let pos = self.clamp_within_working_area(pos, tile_size.assume_local());
+        tile.floating_pos = Some(self.logical_to_size_frac(pos));
 
         self.add_tile_at(idx, tile, activate);
     }
@@ -862,7 +869,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     fn focus_directional(
         &mut self,
-        distance: impl Fn(Point<f64, Logical>, Point<f64, Logical>) -> f64,
+        distance: impl Fn(Point<f64, Local>, Point<f64, Local>) -> f64,
     ) -> bool {
         let Some(active_id) = &self.active_window_id else {
             return false;
@@ -872,12 +879,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
         let result = zip(&self.tiles, &self.data)
             .filter(|(tile, _)| tile.window().id() != active_id)
-            .map(|(tile, data)| {
-                (
-                    tile,
-                    distance(center.as_logical(), data.center().as_logical()),
-                )
-            })
+            .map(|(tile, data)| (tile, distance(center, data.center())))
             .filter(|(_, dist)| *dist > 0.)
             .min_by(|(_, dist_a), (_, dist_b)| f64::total_cmp(dist_a, dist_b));
         if let Some((tile, _)) = result {
@@ -1037,9 +1039,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
         };
         let idx = self.idx_of(&id).unwrap();
 
-        let new_pos =
-            center_preferring_top_left_in_area(self.working_area.as_logical(), self.data[idx].size)
-                .assume_local();
+        let new_pos = center_preferring_top_left_in_area(
+            self.working_area,
+            self.data[idx].size.assume_local(),
+        );
         self.move_to(idx, new_pos, true);
     }
 
@@ -1248,11 +1251,11 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn clamp_within_working_area(
         &self,
-        pos: Point<f64, Logical>,
-        size: Size<f64, Logical>,
-    ) -> Point<f64, Logical> {
+        pos: Point<f64, Local>,
+        size: Size<f64, Local>,
+    ) -> Point<f64, Local> {
         let mut rect = Rectangle::new(pos, size);
-        clamp_preferring_top_left_in_area(self.working_area.as_logical(), &mut rect);
+        clamp_preferring_top_left_in_area(self.working_area, &mut rect);
         rect.loc
     }
 
@@ -1277,7 +1280,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
         let diff = prev_pos - new_pos;
         if diff.x * diff.x + diff.y * diff.y > ANIMATION_THRESHOLD_SQ {
-            tile.animate_move_from((prev_pos - new_pos).as_logical());
+            tile.animate_move_from(prev_pos - new_pos);
         }
     }
 
@@ -1341,7 +1344,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
                     pos.y += area.size.h / 2.0 - size.h / 2.0
                 }
 
-                (pos + self.working_area.loc.as_logical()).assume_local()
+                pos + self.working_area.loc
             })
         })
     }
@@ -1380,7 +1383,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             use crate::layout::SizingMode;
 
             assert!(Rc::ptr_eq(&self.options, &tile.options));
-            assert_eq!(self.view_size, tile.view_size().assume_local());
+            assert_eq!(self.view_size.as_logical(), tile.view_size());
             assert_eq!(self.clock, tile.clock);
             assert_eq!(self.scale, tile.scale());
             tile.verify_invariants();

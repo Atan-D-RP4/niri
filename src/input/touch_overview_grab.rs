@@ -56,7 +56,7 @@ impl TouchOverviewGrab {
         workspace_matched_narrow: bool,
         window: Option<Window>,
     ) -> Self {
-        let location = start_data.global_location();
+        let location = start_data.location();
 
         Self {
             last_location: location,
@@ -104,7 +104,7 @@ impl TouchOverviewGrab {
 
         // Check if we should become a spatial scroll.
         if matches!(self.gesture, GestureState::Recognizing) {
-            let c = (self.new_location - self.start_data.global_location()).as_logical();
+            let c = (self.new_location - self.start_data.location()).as_logical();
 
             // Check if the gesture moved far enough to decide. Threshold copied from libadwaita.
             if c.x * c.x + c.y * c.y >= 16. * 16. {
@@ -282,7 +282,11 @@ impl TouchGrab<State> for TouchOverviewGrab {
             return;
         }
 
-        self.new_location = event.location.assume_global();
+        // Touch grabs mirror the pointer grabs and live in screen space;
+        // the Wayland event carries content space, so invert it back.
+        self.new_location = data
+            .niri
+            .touch_content_to_screen(event.location.assume_global());
         self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 

@@ -98,7 +98,7 @@ pub struct Tile<W: LayoutElement> {
     pub(super) alpha_animation: Option<AlphaAnimation>,
 
     /// Offset during the initial interactive move rubberband.
-    pub(super) interactive_move_offset: Point<f64, Logical>,
+    pub(super) interactive_move_offset: Point<f64, Local>,
 
     /// Snapshot of the last render for use in the close animation.
     unmap_snapshot: Option<TileRenderSnapshot>,
@@ -352,7 +352,7 @@ impl<W: LayoutElement> Tile<W> {
 
             let change = self.window.size().to_f64().to_point() - size_from.to_point();
             let change = f64::max(change.x.abs(), change.y.abs());
-            let tile_change = self.tile_size().to_f64().to_point() - tile_size_from.to_point();
+            let tile_change = self.tile_size().to_point() - tile_size_from.to_point();
             let tile_change = f64::max(tile_change.x.abs(), tile_change.y.abs());
             let change = f64::max(change, tile_change);
             if change > RESIZE_ANIMATION_THRESHOLD {
@@ -471,7 +471,7 @@ impl<W: LayoutElement> Tile<W> {
                 .is_some_and(|anim| anim.is_between_workspaces)
     }
 
-    pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+    pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Local>) {
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
@@ -506,7 +506,7 @@ impl<W: LayoutElement> Tile<W> {
             .expanded_by(border_width as f32)
             .scaled_by(1. - expanded_progress as f32);
         self.border.update_render_elements(
-            border_window_size,
+            border_window_size.assume_local(),
             is_active,
             !draw_border_with_background,
             self.window.is_urgent(),
@@ -527,7 +527,7 @@ impl<W: LayoutElement> Tile<W> {
                 .scaled_by(1. - expanded_progress as f32)
         };
         self.shadow.update_render_elements(
-            animated_tile_size,
+            animated_tile_size.assume_local(),
             is_active,
             radius,
             self.scale,
@@ -541,7 +541,7 @@ impl<W: LayoutElement> Tile<W> {
         };
         let radius = radius.expanded_by(self.focus_ring.width() as f32);
         self.focus_ring.update_render_elements(
-            animated_tile_size,
+            animated_tile_size.assume_local(),
             is_active,
             !draw_focus_ring_with_background,
             self.window.is_urgent(),
@@ -551,14 +551,15 @@ impl<W: LayoutElement> Tile<W> {
             1. - expanded_progress as f32,
         );
 
-        self.fullscreen_backdrop.resize(animated_tile_size);
+        self.fullscreen_backdrop
+            .resize(animated_tile_size.assume_local());
     }
 
     pub fn scale(&self) -> f64 {
         self.scale
     }
 
-    pub fn render_offset(&self) -> Point<f64, Logical> {
+    pub fn render_offset(&self) -> Point<f64, Local> {
         let mut offset = Point::from((0., 0.));
 
         if let Some(move_) = &self.move_x_animation {
@@ -587,13 +588,13 @@ impl<W: LayoutElement> Tile<W> {
         self.resize_animation.as_ref().map(|resize| &resize.anim)
     }
 
-    pub fn animate_move_from(&mut self, from: Point<f64, Logical>) {
+    pub fn animate_move_from(&mut self, from: Point<f64, Local>) {
         self.animate_move_from_with_config(from, self.options.animations.window_movement.0);
     }
 
     pub fn animate_move_from_with_config(
         &mut self,
-        from: Point<f64, Logical>,
+        from: Point<f64, Local>,
         config: niri_config::Animation,
     ) {
         self.animate_move_x_from_with_config(from.x, config);
@@ -776,7 +777,7 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     /// Returns the location of the window's visual geometry within this Tile.
-    pub fn window_loc(&self) -> Point<f64, Logical> {
+    pub fn window_loc(&self) -> Point<f64, Local> {
         let mut loc = Point::from((0., 0.));
 
         let window_size = self.animated_window_size();
@@ -798,7 +799,7 @@ impl<W: LayoutElement> Tile<W> {
             .to_physical_precise_round(self.scale)
             .to_logical(self.scale);
 
-        loc
+        loc.assume_local()
     }
 
     pub fn tile_size(&self) -> Size<f64, Logical> {
@@ -861,7 +862,7 @@ impl<W: LayoutElement> Tile<W> {
 
         if let Some(resize) = &self.resize_animation {
             let val = resize.anim.value();
-            let size_from = resize.size_from.to_f64();
+            let size_from = resize.size_from;
 
             size.w = f64::max(1., size_from.w + (size.w - size_from.w) * val);
             size.h = f64::max(1., size_from.h + (size.h - size_from.h) * val);
@@ -878,7 +879,7 @@ impl<W: LayoutElement> Tile<W> {
 
         if let Some(resize) = &self.resize_animation {
             let val = resize.anim.value();
-            let size_from = resize.tile_size_from.to_f64();
+            let size_from = resize.tile_size_from;
 
             size.w = f64::max(1., size_from.w + (size.w - size_from.w) * val);
             size.h = f64::max(1., size_from.h + (size.h - size_from.h) * val);
@@ -890,7 +891,7 @@ impl<W: LayoutElement> Tile<W> {
         size
     }
 
-    pub fn buf_loc(&self) -> Point<f64, Logical> {
+    pub fn buf_loc(&self) -> Point<f64, Local> {
         let mut loc = Point::from((0., 0.));
         loc += self.window_loc();
         loc += self.window.buf_loc().to_f64();
@@ -910,23 +911,22 @@ impl<W: LayoutElement> Tile<W> {
         }
     }
 
-    fn is_in_input_region(&self, mut point: Point<f64, Logical>) -> bool {
+    fn is_in_input_region(&self, mut point: Point<f64, Local>) -> bool {
         point -= self.window_loc().to_f64();
         self.window.is_in_input_region(point)
     }
 
-    fn is_in_activation_region(&self, point: Point<f64, Logical>) -> bool {
+    fn is_in_activation_region(&self, point: Point<f64, Local>) -> bool {
         let activation_region = Rectangle::from_size(self.tile_size());
-        activation_region.contains(point)
+        activation_region.contains(point.as_logical())
     }
 
-    pub fn hit(&self, point: Point<f64, Logical>) -> Option<HitType> {
+    pub fn hit(&self, point: Point<f64, Local>) -> Option<HitType> {
         let offset = self.bob_offset();
-        // Input hit-testing stays Logical.
-        let point = point - offset.as_logical();
+        let point = point - offset;
 
         if self.is_in_input_region(point) {
-            let win_pos = self.buf_loc() + offset.as_logical();
+            let win_pos = self.buf_loc() + offset;
             Some(HitType::Input { win_pos })
         } else if self.is_in_activation_region(point) {
             Some(HitType::Activate {
@@ -1100,12 +1100,12 @@ impl<W: LayoutElement> Tile<W> {
         let window_loc = self.window_loc();
         let window_size = self.window_size();
         let animated_window_size = self.animated_window_size();
-        let window_render_loc = location + window_loc.assume_local();
-        // Effect/clip area stays Logical for the Logical-typed element APIs below.
-        let area = Rectangle::new(window_render_loc.as_logical(), animated_window_size);
+        let window_render_loc = location + window_loc;
+        // Effect/clip area stays Local; Logical exists only at Smithay sink boundaries below.
+        let area = Rectangle::new(window_render_loc, animated_window_size.assume_local());
         // Tile-relative displacement; output-relative only in sum with the
         // upstream tile-position offset.
-        xray_pos = xray_pos.offset(window_loc.assume_local());
+        xray_pos = xray_pos.offset(window_loc);
 
         let rules = self.window.rules();
 
@@ -1245,19 +1245,19 @@ impl<W: LayoutElement> Tile<W> {
                     if radius != CornerRadius::default() && has_border_shader {
                         // Border shader takes element-local geometry (relative uniforms).
                         return BorderRenderElement::new(
-                            geo.size.as_logical(),
-                            Rectangle::from_size(geo.size.as_logical()),
+                            geo.size,
+                            Rectangle::from_size(geo.size),
                             GradientInterpolation::default(),
                             Color::from_color32f(elem.color()),
                             Color::from_color32f(elem.color()),
                             0.,
-                            Rectangle::from_size(geo.size.as_logical()),
+                            Rectangle::from_size(geo.size),
                             0.,
                             radius,
                             scale.x as f32,
                             1.,
                         )
-                        .with_location(geo.loc.as_logical())
+                        .with_location(geo.loc)
                         .into();
                     }
 
@@ -1312,12 +1312,12 @@ impl<W: LayoutElement> Tile<W> {
                     alpha,
                 )
                 // Render-element sinks stay Logical (Smithay-owned geometry).
-                .with_location(location.as_logical());
+                .with_location(location);
                 push(elem.into());
             } else {
                 let elem = SolidColorRenderElement::from_buffer(
                     &self.fullscreen_backdrop,
-                    location.as_logical(),
+                    location,
                     alpha,
                     Kind::Unspecified,
                 );
@@ -1328,7 +1328,7 @@ impl<W: LayoutElement> Tile<W> {
         if let Some(width) = self.visual_border_width() {
             self.border.render(
                 ctx.renderer,
-                location.as_logical() + Point::from((width, width)),
+                location + Point::from((width, width)),
                 &mut |elem| push(elem.into()),
             );
         }
@@ -1339,16 +1339,12 @@ impl<W: LayoutElement> Tile<W> {
         // a bit weird).
         if focus_ring && expanded_progress < 1. {
             self.focus_ring
-                .render(ctx.renderer, location.as_logical(), &mut |elem| {
-                    push(elem.into())
-                });
+                .render(ctx.renderer, location, &mut |elem| push(elem.into()));
         }
 
         if expanded_progress < 1. {
             self.shadow
-                .render(ctx.renderer, location.as_logical(), &mut |elem| {
-                    push(elem.into())
-                });
+                .render(ctx.renderer, location, &mut |elem| push(elem.into()));
         }
 
         let surface_anim_scale = animated_window_size / window_size;

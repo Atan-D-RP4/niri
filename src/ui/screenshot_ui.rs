@@ -5,8 +5,7 @@ use std::f64::consts::TAU;
 use std::iter::zip;
 use std::rc::Rc;
 
-use anyhow::Context;
-use arrayvec::ArrayVec;
+use anyhow::bail;
 use niri_config::{Action, Config};
 use niri_ipc::SizeChange;
 use pango::{Alignment, FontDescription};
@@ -16,7 +15,7 @@ use smithay::backend::input::TouchSlot;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
-use smithay::backend::renderer::{ExportMem, Texture as _};
+use smithay::backend::renderer::{Texture as _, TextureFilter};
 use smithay::input::keyboard::{Keysym, ModifiersState};
 use smithay::output::{Output, WeakOutput};
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
@@ -27,8 +26,11 @@ use crate::niri_render_elements;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
-use crate::render_helpers::{render_to_texture, RenderTarget};
+use crate::render_helpers::zoom::ZoomElement;
+use crate::render_helpers::{render_to_vec, RenderTarget};
+use crate::utils::geometry::{PointExt, RectExt, RectLocalExt, SizeExt};
 use crate::utils::to_physical_precise_round;
+use crate::utils::view::{OutputViewCtx, ViewportTransform};
 
 const SELECTION_BORDER: i32 = 2;
 
@@ -92,21 +94,64 @@ pub struct OutputData {
     transform: Transform,
     // Output, screencast, screen capture.
     screenshot: [OutputScreenshot; 3],
+    // Chrome colors/ids/commits; layout derives at render time (see
+    // render_output). Only index 4 (fullscreen dim for other outputs) is
+    // sized in update_buffers.
     buffers: [SolidColorBuffer; 8],
-    locations: [Point<i32, Physical>; 8],
     panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
 }
 
 pub struct OutputScreenshot {
-    texture: GlesTexture,
     buffer: PrimaryGpuTextureRenderElement,
-    pointer: Option<PrimaryGpuTextureRenderElement>,
+    pointer: Option<FrozenPointer>,
+    /// Live zoom factor at capture time: baseline for relative scaling.
+    ///
+    /// The texture itself is always unzoomed — this is NOT baked zoom.
+    capture_level: f64,
+}
+
+/// A frozen pointer graphic: element plus capture-time hotspot and tip.
+///
+/// Tip is stored, not re-derived, so fractional scales can't shift it.
+#[derive(Debug, Clone)]
+struct FrozenPointer {
+    element: PrimaryGpuTextureRenderElement,
+    hotspot: Point<i32, Physical>,
+    tip: Point<i32, Physical>,
+}
+
+/// Captured pointer texture, placement, hotspot and tip.
+///
+/// Hotspot and tip are resolved once at capture time.
+pub(crate) struct CapturedPointer {
+    pub(crate) texture: GlesTexture,
+    pub(crate) geo: Rectangle<i32, Physical>,
+    pub(crate) hotspot: Point<i32, Physical>,
+    pub(crate) tip: Point<i32, Physical>,
+}
+
+/// Live-zoom parameters for the screenshot UI preview.
+///
+/// The captured scene is static and unzoomed; the preview re-applies these
+/// each frame so the UI acts as a magnifier while selecting.
+#[derive(Clone, Copy)]
+pub struct ScreenshotPreviewZoom {
+    pub viewport: ViewportTransform,
+    pub view_ctx: OutputViewCtx,
+    pub filter: Option<TextureFilter>,
+    /// The filter band flipped since the last materialized frame; forwarded
+    /// to the preview wrapper so its damage covers the whole texture.
+    pub filter_changed: bool,
+    /// Hotspot-centered construction like the live pointer; otherwise the
+    /// graphic scales relative to the capture baseline.
+    pub scale_with_zoom: bool,
 }
 
 niri_render_elements! {
     ScreenshotUiRenderElement => {
         Screenshot = PrimaryGpuTextureRenderElement,
         SolidColor = SolidColorRenderElement,
+        Zoomed = ZoomElement<PrimaryGpuTextureRenderElement>,
     }
 }
 
@@ -200,8 +245,6 @@ impl ScreenshotUi {
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                 ];
-                let locations = [Default::default(); 8];
-
                 let mut render_panel_ = |text| {
                     render_panel(renderer, scale, text)
                         .map_err(|err| warn!("error rendering help panel: {err:?}"))
@@ -217,7 +260,6 @@ impl ScreenshotUi {
                     transform,
                     screenshot,
                     buffers,
-                    locations,
                     panel,
                 };
                 (output, data)
@@ -561,9 +603,7 @@ impl ScreenshotUi {
 
         for (output, data) in output_data {
             let buffers = &mut data.buffers;
-            let locations = &mut data.locations;
             let size = data.size;
-            let scale = data.scale;
 
             if output == selection_output {
                 // Check if the selection is still valid. If not, reset it back to default.
@@ -575,59 +615,29 @@ impl ScreenshotUi {
                     *a = rect.loc;
                     *b = rect.loc + rect.size - Size::from((1, 1));
                 }
-
-                let border = to_physical_precise_round(scale, SELECTION_BORDER);
-
-                let resize = move |buffer: &mut SolidColorBuffer, w: i32, h: i32| {
-                    let size = Size::<_, Physical>::from((w, h));
-                    buffer.resize(size.to_f64().to_logical(scale));
-                };
-
-                resize(&mut buffers[0], rect.size.w + border * 2, border);
-                resize(&mut buffers[1], rect.size.w + border * 2, border);
-                resize(&mut buffers[2], border, rect.size.h);
-                resize(&mut buffers[3], border, rect.size.h);
-
-                resize(&mut buffers[4], size.w, rect.loc.y);
-                resize(&mut buffers[5], size.w, size.h - rect.loc.y - rect.size.h);
-                resize(&mut buffers[6], rect.loc.x, rect.size.h);
-                resize(
-                    &mut buffers[7],
-                    size.w - rect.loc.x - rect.size.w,
-                    rect.size.h,
-                );
-
-                locations[0] = Point::from((rect.loc.x - border, rect.loc.y - border));
-                locations[1] = Point::from((rect.loc.x - border, rect.loc.y + rect.size.h));
-                locations[2] = Point::from((rect.loc.x - border, rect.loc.y));
-                locations[3] = Point::from((rect.loc.x + rect.size.w, rect.loc.y));
-
-                locations[5] = Point::from((0, rect.loc.y + rect.size.h));
-                locations[6] = Point::from((0, rect.loc.y));
-                locations[7] = Point::from((rect.loc.x + rect.size.w, rect.loc.y));
+                // Chrome layout happens at render time from the live viewport
+                // (see render_output); buffers only carry color/id/commit.
             } else {
-                buffers[0].resize((0., 0.));
-                buffers[1].resize((0., 0.));
-                buffers[2].resize((0., 0.));
-                buffers[3].resize((0., 0.));
-
-                buffers[4].resize(size.to_f64().to_logical(data.scale));
-                buffers[5].resize((0., 0.));
-                buffers[6].resize((0., 0.));
-                buffers[7].resize((0., 0.));
+                buffers[4].resize(size.to_f64().to_logical(data.scale).assume_local());
             }
         }
     }
 
+    /// Renders the screenshot UI, magnifying captured-content layers through
+    /// the live viewport (loupe). Panel stays screen-fixed; at 1x everything
+    /// passes through. Selection stays in content pixels; export renders
+    /// these same layers into the selection's screen image.
     pub fn render_output(
         &self,
         output: &Output,
         target: RenderTarget,
+        zoom: ScreenshotPreviewZoom,
         push: &mut dyn FnMut(ScreenshotUiRenderElement),
     ) {
         let _span = tracy_client::span!("ScreenshotUi::render_output");
 
         let Self::Open {
+            selection,
             output_data,
             show_pointer,
             button,
@@ -665,17 +675,45 @@ impl ScreenshotUi {
                 None,
                 Kind::Unspecified,
             ));
-            push(elem.into());
+            push(ScreenshotUiRenderElement::Screenshot(elem))
         }
 
-        for (buffer, loc) in zip(&output_data.buffers, &output_data.locations) {
+        // Chrome derives from one rounded screen rect with integer math, so
+        // adjacent strips abut exactly: independent viewport rounding per
+        // strip would open 1px hairlines as the focal animates.
+        let viewport = zoom.viewport;
+        if output == &selection.0 {
+            let content = rect_from_corner_points(selection.1, selection.2);
+            let display = export_rect(content, viewport, &zoom.view_ctx)
+                .intersection(Rectangle::from_size(output_data.size))
+                .unwrap_or_default();
+            let border = to_physical_precise_round(scale, SELECTION_BORDER);
+            for (buffer, (loc, size)) in zip(
+                &output_data.buffers,
+                selection_chrome(display, border, output_data.size),
+            ) {
+                let elem = SolidColorRenderElement::new(
+                    buffer.id(),
+                    Rectangle::new(
+                        loc.to_f64().to_logical(scale),
+                        size.to_f64().to_logical(scale),
+                    )
+                    .assume_local(),
+                    buffer.commit(),
+                    buffer.color() * progress,
+                    Kind::Unspecified,
+                );
+                push(ScreenshotUiRenderElement::SolidColor(elem));
+            }
+        } else if let Some(buffer) = output_data.buffers.get(4) {
+            // Other outputs show a uniform fullscreen dim: viewport-invariant.
             let elem = SolidColorRenderElement::from_buffer(
                 buffer,
-                loc.to_f64().to_logical(scale),
+                Point::from((0., 0.)),
                 progress,
                 Kind::Unspecified,
             );
-            push(elem.into());
+            push(ScreenshotUiRenderElement::SolidColor(elem));
         }
 
         // The screenshot itself goes last.
@@ -686,17 +724,13 @@ impl ScreenshotUi {
         };
         let screenshot = &output_data.screenshot[index];
 
-        if *show_pointer {
-            if let Some(pointer) = screenshot.pointer.clone() {
-                push(pointer.into());
-            }
-        }
-        push(screenshot.buffer.clone().into());
+        Self::push_content(screenshot, zoom, *show_pointer, push);
     }
 
     pub fn capture(
         &self,
         renderer: &mut GlesRenderer,
+        zoom: ScreenshotPreviewZoom,
     ) -> anyhow::Result<(Size<i32, Physical>, Vec<u8>)> {
         let _span = tracy_client::span!("ScreenshotUi::capture");
 
@@ -711,57 +745,107 @@ impl ScreenshotUi {
         };
 
         let data = &output_data[&selection.0];
-        let rect = rect_from_corner_points(selection.1, selection.2);
+        let content_rect = rect_from_corner_points(selection.1, selection.2);
 
         let screenshot = &data.screenshot[0];
 
-        // Composite the pointer on top if needed.
-        let mut tex_rect = None;
-        if *show_pointer {
-            if let Some(pointer) = screenshot.pointer.clone() {
-                let scale = pointer.0.buffer().texture_scale();
-                let offset = rect.loc.upscale(-1);
+        // WYSIWYG export: re-render the displayed layers into the
+        // selection's screen image (never the chrome), then read back.
+        let export = export_rect(content_rect, zoom.viewport, &zoom.view_ctx);
+        if export.size.is_empty() {
+            bail!("screenshot selection is empty after zoom mapping");
+        }
 
-                let mut elements = ArrayVec::<_, 2>::new();
-                elements.push(pointer);
-                elements.push(screenshot.buffer.clone());
-                let elements = elements.iter().rev().map(|elem| {
-                    RelocateRenderElement::from_element(elem, offset, Relocate::Relative)
-                });
+        let mut elements = Vec::new();
+        Self::push_content(screenshot, zoom, *show_pointer, &mut |elem| {
+            elements.push(elem)
+        });
 
-                let res = render_to_texture(
-                    renderer,
-                    rect.size,
-                    scale,
-                    Transform::Normal,
-                    Fourcc::Abgr8888,
-                    elements,
-                );
-                match res {
-                    Ok((texture, _)) => {
-                        tex_rect = Some((texture, Rectangle::from_size(rect.size)));
-                    }
-                    Err(err) => {
-                        warn!("error compositing pointer onto screenshot: {err:?}");
-                    }
+        // Crop to the selection's screen image. Relocation happens in output
+        // space, so regions outside the output (selected content currently
+        // panned out of view) still render.
+        let offset = export.loc.upscale(-1);
+        let pixels = render_to_vec(
+            renderer,
+            export.size,
+            zoom.view_ctx.scale,
+            Transform::Normal,
+            Fourcc::Abgr8888,
+            elements
+                .iter()
+                .rev()
+                .map(|elem| RelocateRenderElement::from_element(elem, offset, Relocate::Relative)),
+        )?;
+
+        Ok((export.size, pixels))
+    }
+
+    /// Previewed content layers (scene + frozen pointer) without chrome.
+    ///
+    /// Shared by preview and WYSIWYG export so the file matches the display.
+    fn push_content(
+        screenshot: &OutputScreenshot,
+        zoom: ScreenshotPreviewZoom,
+        show_pointer: bool,
+        push: &mut dyn FnMut(ScreenshotUiRenderElement),
+    ) {
+        let ScreenshotPreviewZoom {
+            viewport,
+            view_ctx,
+            filter,
+            filter_changed,
+            scale_with_zoom,
+        } = zoom;
+        // Render-path optimization, not an "is zoom active" predicate: the
+        // factor <= 1 skip only avoids needless wrapping.
+        let zoomed = viewport.factor > 1.0;
+
+        if show_pointer {
+            if let Some(frozen) = screenshot.pointer.clone() {
+                if zoomed {
+                    let output_scale = view_ctx.scale;
+                    // A scaling cursor magnifies with the live level. Otherwise
+                    // the frozen graphic scales relative to its capture baseline,
+                    // preserving the open-frame ratio.
+                    let graphic_scale = if scale_with_zoom {
+                        viewport.factor
+                    } else {
+                        pointer_scale(viewport.factor, screenshot.capture_level)
+                    };
+                    let tip = frozen.tip.to_f64();
+                    let elem = ZoomElement::cursor(
+                        frozen.element,
+                        tip,
+                        tip.to_logical(output_scale).assume_local(),
+                        frozen.hotspot,
+                        viewport,
+                        graphic_scale,
+                        view_ctx,
+                        output_scale,
+                    );
+                    push(ScreenshotUiRenderElement::Zoomed(elem));
+                } else {
+                    push(ScreenshotUiRenderElement::Screenshot(frozen.element));
                 }
             }
         }
 
-        let (texture, rect) = tex_rect.unwrap_or_else(|| (screenshot.texture.clone(), rect));
-        // The size doesn't actually matter because we're not transforming anything.
-        let buf_rect = rect
-            .to_logical(1)
-            .to_buffer(1, Transform::Normal, &Size::from((1, 1)));
-
-        let mapping = renderer
-            .copy_texture(&texture, buf_rect, Fourcc::Abgr8888)
-            .context("error copying texture")?;
-        let copy = renderer
-            .map_texture(&mapping)
-            .context("error mapping texture")?;
-
-        Ok((rect.size, copy.to_vec()))
+        if zoomed {
+            let elem = ZoomElement::from_element(
+                screenshot.buffer.clone(),
+                viewport,
+                view_ctx,
+                Point::from((0., 0.)),
+                Relocate::Relative,
+            )
+            .with_filter(filter)
+            .with_filter_changed(filter_changed);
+            push(ScreenshotUiRenderElement::Zoomed(elem));
+        } else {
+            push(ScreenshotUiRenderElement::Screenshot(
+                screenshot.buffer.clone(),
+            ));
+        }
     }
 
     pub fn action(&self, raw: Keysym, mods: ModifiersState) -> Option<Action> {
@@ -1022,20 +1106,15 @@ impl ScreenshotUi {
 }
 
 impl OutputScreenshot {
-    pub fn from_textures(
+    pub(crate) fn from_textures(
         renderer: &mut GlesRenderer,
         scale: Scale<f64>,
         texture: GlesTexture,
-        pointer: Option<(GlesTexture, Rectangle<i32, Physical>)>,
+        pointer: Option<CapturedPointer>,
+        capture_level: f64,
     ) -> Self {
         let buffer = PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
-            TextureBuffer::from_texture(
-                renderer,
-                texture.clone(),
-                scale,
-                Transform::Normal,
-                Vec::new(),
-            ),
+            TextureBuffer::from_texture(renderer, texture, scale, Transform::Normal, Vec::new()),
             (0., 0.),
             1.,
             None,
@@ -1043,29 +1122,89 @@ impl OutputScreenshot {
             Kind::Unspecified,
         ));
 
-        let pointer = pointer.map(|(texture, geo)| {
-            PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
-                TextureBuffer::from_texture(
-                    renderer,
-                    texture,
-                    scale,
-                    Transform::Normal,
-                    Vec::new(),
-                ),
-                geo.to_f64().to_logical(scale).loc,
-                1.,
-                None,
-                None,
-                Kind::Unspecified,
-            ))
-        });
+        let pointer = pointer.map(
+            |CapturedPointer {
+                 texture,
+                 geo,
+                 hotspot,
+                 tip,
+             }| {
+                let element =
+                    PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
+                        TextureBuffer::from_texture(
+                            renderer,
+                            texture,
+                            scale,
+                            Transform::Normal,
+                            Vec::new(),
+                        ),
+                        geo.to_f64().to_logical(scale).loc,
+                        1.,
+                        None,
+                        None,
+                        Kind::Unspecified,
+                    ));
+                FrozenPointer {
+                    element,
+                    hotspot,
+                    tip,
+                }
+            },
+        );
 
         Self {
-            texture,
             buffer,
             pointer,
+            capture_level,
         }
     }
+}
+
+/// Frozen-pointer scale: `live / capture`, unfloored, so the open-frame
+/// appearance ratio holds at every level.
+fn pointer_scale(live_level: f64, capture_level: f64) -> f64 {
+    live_level / capture_level
+}
+
+/// Selection chrome rectangles from one rounded screen rect.
+///
+/// Integer math from a single rect keeps adjacent strips exactly abutting under any viewport — no
+/// hairlines. Requires `display` clamped to the output (no negative sizes).
+fn selection_chrome(
+    display: Rectangle<i32, Physical>,
+    border: i32,
+    output: Size<i32, Physical>,
+) -> [(Point<i32, Physical>, Size<i32, Physical>); 8] {
+    let (x, y) = (display.loc.x, display.loc.y);
+    let (w, h) = (display.size.w, display.size.h);
+    let strip = |x, y, w, h| (Point::from((x, y)), Size::from((w, h)));
+    [
+        // Borders around the selection.
+        strip(x - border, y - border, w + border * 2, border),
+        strip(x - border, y + h, w + border * 2, border),
+        strip(x - border, y, border, h),
+        strip(x + w, y, border, h),
+        // Dimming for the rest of the output.
+        strip(0, 0, output.w, y),
+        strip(0, y + h, output.w, output.h - y - h),
+        strip(0, y, x, h),
+        strip(x + w, y, output.w - x - w, h),
+    ]
+}
+
+/// Content-space selection to its screen image under the viewport.
+/// Rounds like `ZoomElement::geometry` so the crop aligns with display.
+fn export_rect(
+    content: Rectangle<i32, Physical>,
+    viewport: ViewportTransform,
+    view_ctx: &OutputViewCtx,
+) -> Rectangle<i32, Physical> {
+    let local = content.to_f64().to_logical(view_ctx.scale).assume_local();
+    let mapped = viewport.apply_rect(local);
+    let physical = mapped.to_physical(view_ctx.scale);
+    let loc = physical.loc.to_i32_round();
+    let bottom_right = (physical.loc + physical.size).to_i32_round();
+    Rectangle::new(loc, (bottom_right - loc).to_size())
 }
 
 fn action(raw: Keysym, mods: ModifiersState) -> Option<Action> {
@@ -1227,4 +1366,102 @@ fn render_panel(
     )?;
 
     Ok(buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::geometry::{Local, RectExt};
+
+    #[test]
+    fn scale_tracks_capture_baseline() {
+        // Opened unzoomed, zoomed to 2x: full relative scale.
+        assert_eq!(pointer_scale(2., 1.), 2.);
+        // Opened at 2x, zoomed to 3x: scales from the capture baseline.
+        assert_eq!(pointer_scale(3., 2.), 1.5);
+        // Unchanged level: captured size.
+        assert_eq!(pointer_scale(2., 2.), 1.);
+        // Zoomed back out below capture: shrinks proportionally, keeping the
+        // open-frame appearance ratio instead of looming over the scene.
+        assert_eq!(pointer_scale(1., 2.), 0.5);
+        assert_eq!(pointer_scale(1.5, 2.), 0.75);
+    }
+
+    #[test]
+    fn pointer_scales_relative_to_capture() {
+        // Opened at 2x, now at 3x: graphic scales 1.5x around its tip.
+        let viewport = ViewportTransform::new((0., 0.).into(), 3.);
+        let scale = pointer_scale(viewport.factor, 2.);
+        let tip = Point::<f64, Physical>::from((10., 10.));
+        let display = Point::<f64, Local>::from((10., 10.));
+        let (final_pos, wrapper) =
+            viewport.place_cursor(tip, display, (4, 4).into(), scale, Scale::from(1.));
+
+        // Tip (10, 10) -> (30, 30); hotspot (4, 4) * 1.5 -> (6, 6).
+        assert_eq!(wrapper.factor, 1.5);
+        assert_eq!(final_pos, Point::<f64, Physical>::from((24., 24.)));
+    }
+
+    fn export_view_ctx(scale: f64) -> OutputViewCtx {
+        OutputViewCtx::new(
+            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_global(),
+            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
+            Transform::Normal,
+            Scale::from(scale),
+        )
+    }
+
+    #[test]
+    fn export_rect_maps_content_through_viewport() {
+        let ctx = export_view_ctx(1.);
+        let cases = [
+            // Identity viewport preserves content exactly.
+            (
+                Rectangle::new((10, 20).into(), (100, 80).into()),
+                ViewportTransform::identity(),
+                Rectangle::new((10, 20).into(), (100, 80).into()),
+            ),
+            // Pure 2x around the origin: the screen image is the doubled rect.
+            (
+                Rectangle::new((10, 20).into(), (100, 80).into()),
+                ViewportTransform::new((0., 0.).into(), 2.),
+                Rectangle::new((20, 40).into(), (200, 160).into()),
+            ),
+            // Loc (110, 90) -> (120, 100); BR (130, 100) -> (160, 120).
+            (
+                Rectangle::new((110, 90).into(), (20, 10).into()),
+                ViewportTransform::new((100., 80.).into(), 2.),
+                Rectangle::new((120, 100).into(), (40, 20).into()),
+            ),
+        ];
+
+        for (content, viewport, expected) in cases {
+            assert_eq!(export_rect(content, viewport, &ctx), expected);
+        }
+    }
+
+    #[test]
+    fn chrome_tiles_output_without_seams() {
+        let display = Rectangle::new((100, 80).into(), (400, 300).into());
+        let output = Size::from((1920, 1080));
+        let strips = selection_chrome(display, 2, output);
+
+        // Borders frame the hole; dimming abuts it exactly.
+        assert_eq!(strips[0], ((98, 78).into(), (404, 2).into()));
+        assert_eq!(strips[2], ((98, 80).into(), (2, 300).into()));
+        assert_eq!(strips[4], ((0, 0).into(), (1920, 80).into()));
+        assert_eq!(strips[6], ((0, 80).into(), (100, 300).into()));
+        assert_eq!(strips[7], ((500, 80).into(), (1420, 300).into()));
+
+        // Joints align: border bottom meets hole top, dim meets hole edge.
+        assert_eq!(strips[0].0.y + strips[0].1.h, display.loc.y);
+        assert_eq!(strips[2].0.x + strips[2].1.w, display.loc.x);
+        assert_eq!(strips[4].1.h, display.loc.y);
+        assert_eq!(strips[6].0.x + strips[6].1.w, display.loc.x);
+
+        // Dimming plus hole covers the output exactly once.
+        let dim_area: i32 = strips[4..].iter().map(|(_, s)| s.w * s.h).sum();
+        let hole = display.size.w * display.size.h;
+        assert_eq!(dim_area + hole, 1920 * 1080);
+    }
 }

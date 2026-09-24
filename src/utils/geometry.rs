@@ -4,7 +4,8 @@ use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Siz
 
 use crate::utils::view::OutputViewCtx;
 
-/// Compositor-wide frame: positions absolute across all outputs, in logical units.
+/// Compositor-wide frame: positions relative to the global origin, or deltas measured against the
+/// global orientation and scale, in logical units.
 ///
 /// Global is the frame of cross-output concerns: hit-testing entry points such as
 /// `output_under`, cursor and pointer-grab state, and surface-origin bookkeeping.
@@ -13,7 +14,8 @@ use crate::utils::view::OutputViewCtx;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Global;
 
-/// Per-output frame: positions relative to an output's origin, in logical units.
+/// Per-output frame: positions relative to an output's origin, or deltas measured against output
+/// orientation and scale, in logical units.
 ///
 /// Local is the frame of output-relative geometry: render locations, tile and layer positions,
 /// and the `XrayPos` accumulation. The frame marks scope, not lifetime: values persist in layout
@@ -23,10 +25,8 @@ pub struct Local;
 
 /// A position or offset relative to a surface origin.
 ///
-/// Unlike [`Global`] and [`Local`], this is not a compositor frame at all: values are constructed
-/// and consumed within a single pass — pointer offsets within the focused surface on the input
-/// side, popup placement on the render side. It exists to keep surface-relative values from being
-/// mistaken for output-relative or global positions.
+/// Unlike [`Global`] and [`Local`], this is not a persistent compositor frame. It exists to keep
+/// surface-relative input offsets from being mistaken for global positions.
 ///
 /// Do not add further frame markers (e.g. WorkspaceLocal, BackdropLocal) without a
 /// call-site-driven reason: screen/content/surface distinctions stay nominal (see
@@ -94,6 +94,7 @@ pub(crate) trait RectExt<C: Coordinate> {
     /// Relabels a bare Logical rectangle as Local without translating it.
     fn assume_local(self) -> Rectangle<C, Local>;
     /// Relabels a bare Logical rectangle as SurfaceLocal without translating it.
+    #[allow(dead_code)]
     fn assume_surface_local(self) -> Rectangle<C, SurfaceLocal>;
 }
 
@@ -129,8 +130,7 @@ pub(crate) trait RectGlobalExt<C: Coordinate> {
     ) -> Rectangle<R, Physical>;
 }
 
-// `pub` for `niri-visual-tests` which builds `Tile` sizes
-// through this trait; point/rect assertions stay crate-private.
+/// Sizes are not translated between frames, so the only operations are relabeling.
 pub trait SizeExt<C: Coordinate> {
     /// Relabels a Size as Logical without translating it.
     fn as_logical(self) -> Size<C, Logical>;
@@ -161,8 +161,15 @@ impl<C: Coordinate> PointLocalExt<C> for Point<C, Local> {
         (self.x, self.y).into()
     }
 
+    /// Local → Global: translation by output origin only.
+    ///
+    /// `Local` is the presented orientation: `OutputViewCtx::for_output` already
+    /// applies the output transform before scale when sizing `local_geo`
+    /// (matching `Layout::output_size_for_focal`), and element geometry is
+    /// already presented. Rotation composes after the viewport, keeping it
+    /// axis-aligned, so no transform is applied here.
     fn to_global(self, ctx: &OutputViewCtx) -> Point<C, Global> {
-        let origin = ctx.output_origin();
+        let origin = ctx.global_geo.loc.as_logical();
         let point = self.to_f64().as_logical() + origin;
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }
@@ -184,8 +191,12 @@ impl<C: Coordinate> PointGlobalExt<C> for Point<C, Global> {
         (self.x, self.y).into()
     }
 
+    /// Global → Local: translation by output origin only.
+    ///
+    /// Inverse of [`PointLocalExt::to_global`]: `output_transform` is
+    /// intentionally ignored for the same presented-orientation reason.
     fn to_local(self, ctx: &OutputViewCtx) -> Point<C, Local> {
-        let origin = ctx.output_origin();
+        let origin = ctx.global_geo.loc.as_logical();
         let point = self.to_f64().as_logical() - origin;
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }

@@ -9,6 +9,7 @@ use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 
 use super::texture::TextureBuffer;
 use super::BakedBuffer;
+use crate::utils::geometry::{PointExt, RectExt, SizeExt};
 
 /// Renders elements from a surface tree as textures into `storage`.
 pub fn render_snapshot_from_surface_tree(
@@ -69,9 +70,11 @@ pub fn render_snapshot_from_surface_tree(
 
                 let baked = BakedBuffer {
                     buffer,
-                    location,
-                    src: Some(view.src),
-                    dst: Some(view.dst),
+                    // Snapshot buffer space shares output-logical units; relabel to Local for
+                    // BakedBuffer.
+                    location: location.assume_local(),
+                    src: Some(view.src.assume_local()),
+                    dst: Some(view.dst.assume_local()),
                 };
 
                 storage.push(baked);

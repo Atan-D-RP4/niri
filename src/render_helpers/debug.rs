@@ -7,6 +7,7 @@ use smithay::utils::Scale;
 use super::renderer::NiriRenderer;
 use super::solid_color::SolidColorRenderElement;
 use crate::niri::OutputRenderElements;
+use crate::utils::geometry::RectExt;
 
 pub fn push_opaque_regions<R: NiriRenderer>(
     elem: &OutputRenderElements<R>,
@@ -30,7 +31,7 @@ pub fn push_opaque_regions<R: NiriRenderer>(
     for rect in opaque {
         let color = SolidColorRenderElement::new(
             Id::new(),
-            rect.to_f64().to_logical(scale),
+            rect.to_f64().to_logical(scale).assume_local(),
             CommitCounter::default(),
             Color32F::from([0., 0., 0.2, 0.2]),
             Kind::Unspecified,
@@ -41,7 +42,7 @@ pub fn push_opaque_regions<R: NiriRenderer>(
     for rect in semitransparent {
         let color = SolidColorRenderElement::new(
             Id::new(),
-            rect.to_f64().to_logical(scale),
+            rect.to_f64().to_logical(scale).assume_local(),
             CommitCounter::default(),
             Color32F::from([0.3, 0., 0., 0.3]),
             Kind::Unspecified,
@@ -67,7 +68,7 @@ pub fn draw_damage<R: NiriRenderer>(
     for rect in damage {
         let color = SolidColorRenderElement::new(
             Id::new(),
-            rect.to_f64().to_logical(scale),
+            rect.to_f64().to_logical(scale).assume_local(),
             CommitCounter::default(),
             Color32F::from([0.3, 0., 0., 0.3]),
             Kind::Unspecified,

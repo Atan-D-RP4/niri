@@ -8,13 +8,14 @@ use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, Unifo
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::gpu_span_location;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::renderer::NiriRenderer;
 use super::shader_element::ShaderRenderElement;
 use super::shaders::{mat3_uniform, ProgramType, Shaders};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame as _;
+use crate::utils::geometry::Local;
 
 /// Renders a rounded rectangle shadow.
 #[derive(Debug, Clone)]
@@ -25,8 +26,8 @@ pub struct ShadowRenderElement {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Parameters {
-    size: Size<f64, Logical>,
-    geometry: Rectangle<f64, Logical>,
+    size: Size<f64, Local>,
+    geometry: Rectangle<f64, Local>,
     color: Color,
     sigma: f32,
     corner_radius: CornerRadius,
@@ -34,20 +35,20 @@ struct Parameters {
     scale: f32,
     alpha: f32,
 
-    window_geometry: Rectangle<f64, Logical>,
+    window_geometry: Rectangle<f64, Local>,
     window_corner_radius: CornerRadius,
 }
 
 impl ShadowRenderElement {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        size: Size<f64, Logical>,
-        geometry: Rectangle<f64, Logical>,
+        size: Size<f64, Local>,
+        geometry: Rectangle<f64, Local>,
         color: Color,
         sigma: f32,
         corner_radius: CornerRadius,
         scale: f32,
-        window_geometry: Rectangle<f64, Logical>,
+        window_geometry: Rectangle<f64, Local>,
         window_corner_radius: CornerRadius,
         alpha: f32,
     ) -> Self {
@@ -95,13 +96,13 @@ impl ShadowRenderElement {
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        size: Size<f64, Logical>,
-        geometry: Rectangle<f64, Logical>,
+        size: Size<f64, Local>,
+        geometry: Rectangle<f64, Local>,
         color: Color,
         sigma: f32,
         corner_radius: CornerRadius,
         scale: f32,
-        window_geometry: Rectangle<f64, Logical>,
+        window_geometry: Rectangle<f64, Local>,
         window_corner_radius: CornerRadius,
         alpha: f32,
     ) {
@@ -174,7 +175,7 @@ impl ShadowRenderElement {
         );
     }
 
-    pub fn with_location(mut self, location: Point<f64, Logical>) -> Self {
+    pub fn with_location(mut self, location: Point<f64, Local>) -> Self {
         self.inner = self.inner.with_location(location);
         self
     }

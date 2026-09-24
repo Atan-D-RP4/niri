@@ -28,7 +28,7 @@ pub struct ResizeGrab {
 
 impl ResizeGrab {
     pub fn new(start_data: AnyStartData<State>, window: Window) -> Self {
-        let location = start_data.global_location();
+        let location = start_data.location();
 
         Self {
             start_data,
@@ -53,7 +53,7 @@ impl ResizeGrab {
             return false;
         }
 
-        let delta = (self.new_location - self.start_data.global_location()).as_logical();
+        let delta = (self.new_location - self.start_data.location()).as_logical();
         data.niri
             .layout
             .interactive_resize_update(&self.window, delta)
@@ -243,7 +243,11 @@ impl TouchGrab<State> for ResizeGrab {
             return;
         }
 
-        self.new_location = event.location.assume_global();
+        // Touch grabs mirror the pointer grabs and live in screen space;
+        // the Wayland event carries content space, so invert it back.
+        self.new_location = data
+            .niri
+            .touch_content_to_screen(event.location.assume_global());
     }
 
     fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {

@@ -905,8 +905,8 @@ impl<W: LayoutElement> Monitor<W> {
             .find(|(tile, _)| tile.window().id() == &window)
             .unwrap();
         tile.animate_move_from_with_config(
-            // Move animation data stays Logical.
-            (old_render_pos - new_render_pos).as_logical(),
+            // Move animation data is output-local render geometry.
+            old_render_pos - new_render_pos,
             config,
         );
         tile.set_anim_y_between_workspaces();
@@ -1139,8 +1139,8 @@ impl<W: LayoutElement> Monitor<W> {
 
                             let view_rect = Rectangle::new(area.loc.upscale(-1.), view_size);
                             self.insert_hint_element.update_render_elements(
-                                area.size.as_logical(),
-                                view_rect.as_logical(),
+                                area.size,
+                                view_rect,
                                 hint.corner_radius,
                                 scale,
                             );
@@ -1180,7 +1180,7 @@ impl<W: LayoutElement> Monitor<W> {
 
                     self.insert_hint_element.update_render_elements(
                         hint_size,
-                        view_rect.as_logical(),
+                        view_rect,
                         CornerRadius::default(),
                         scale,
                     );
@@ -1565,7 +1565,7 @@ impl<W: LayoutElement> Monitor<W> {
 
     pub fn workspace_under(
         &self,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<(&Workspace<W>, Rectangle<f64, Local>)> {
         let (ws, geo) = self.workspaces_with_render_geo().find_map(|(ws, geo)| {
             // Extend width to entire output.
@@ -1573,42 +1573,51 @@ impl<W: LayoutElement> Monitor<W> {
             let size = Size::from((self.view_size.w, geo.size.h));
             let bounds = Rectangle::new(loc, size);
 
-            bounds.contains(pos_within_output).then_some((ws, geo))
+            bounds
+                .contains(content_pos_within_output)
+                .then_some((ws, geo))
         })?;
         Some((ws, geo))
     }
 
     pub fn workspace_under_narrow(
         &self,
-        pos_within_output: Point<f64, Local>,
+        content_pos_within_output: Point<f64, Local>,
     ) -> Option<&Workspace<W>> {
         self.workspaces_with_render_geo()
-            .find_map(|(ws, geo)| geo.contains(pos_within_output).then_some(ws))
+            .find_map(|(ws, geo)| geo.contains(content_pos_within_output).then_some(ws))
     }
 
-    pub fn window_under(&self, pos_within_output: Point<f64, Local>) -> Option<(&W, HitType)> {
-        let (ws, geo) = self.workspace_under(pos_within_output)?;
+    pub fn window_under(
+        &self,
+        content_pos_within_output: Point<f64, Local>,
+    ) -> Option<(&W, HitType)> {
+        let (ws, geo) = self.workspace_under(content_pos_within_output)?;
 
         if self.overview_progress.is_some() {
             let overview_zoom = self.overview_zoom();
-            let pos_within_workspace = (pos_within_output - geo.loc).downscale(overview_zoom);
+            let pos_within_workspace =
+                (content_pos_within_output - geo.loc).downscale(overview_zoom);
             let (win, hit) = ws.window_under(pos_within_workspace)?;
             // During the overview animation, we cannot do input hits because we cannot really
             // represent scaled windows properly.
             Some((win, hit.to_activate()))
         } else {
-            let (win, hit) = ws.window_under(pos_within_output - geo.loc)?;
-            Some((win, hit.offset_win_pos(geo.loc.as_logical())))
+            let (win, hit) = ws.window_under(content_pos_within_output - geo.loc)?;
+            Some((win, hit.offset_win_pos(geo.loc)))
         }
     }
 
-    pub fn resize_edges_under(&self, pos_within_output: Point<f64, Local>) -> Option<ResizeEdge> {
+    pub fn resize_edges_under(
+        &self,
+        content_pos_within_output: Point<f64, Local>,
+    ) -> Option<ResizeEdge> {
         if self.overview_progress.is_some() {
             return None;
         }
 
-        let (ws, geo) = self.workspace_under(pos_within_output)?;
-        ws.resize_edges_under(pos_within_output - geo.loc)
+        let (ws, geo) = self.workspace_under(content_pos_within_output)?;
+        ws.resize_edges_under(content_pos_within_output - geo.loc)
     }
 
     pub(super) fn insert_position(
@@ -1686,7 +1695,7 @@ impl<W: LayoutElement> Monitor<W> {
         };
 
         self.insert_hint_element
-            .render(renderer, render_loc.location.as_logical(), &mut |elem| {
+            .render(renderer, render_loc.location, &mut |elem| {
                 let elem = MonitorInnerRenderElement::UncroppedInsertHint(elem);
                 let elem = RescaleRenderElement::from_element(elem, Point::default(), 1.);
                 let elem =
@@ -1720,7 +1729,7 @@ impl<W: LayoutElement> Monitor<W> {
                 // The offset we get from workspaces_with_render_geo() is already
                 // rounded to physical pixels, but it's in the logical coordinate
                 // space, so we need to convert it to physical.
-                geo.loc.as_logical().to_physical_precise_round(scale),
+                geo.loc.to_physical_precise_round(scale),
                 Relocate::Relative,
             )
         };
@@ -1803,7 +1812,7 @@ impl<W: LayoutElement> Monitor<W> {
                             if loc.workspace == InsertWorkspace::Existing(ws.id()) {
                                 self.insert_hint_element.render(
                                     ctx.renderer,
-                                    loc.location.as_logical(),
+                                    loc.location,
                                     push!(),
                                 );
                             }
@@ -1855,7 +1864,7 @@ impl<W: LayoutElement> Monitor<W> {
                     RescaleRenderElement::from_element(elem, Point::from((0, 0)), overview_zoom);
                 let elem = RelocateRenderElement::from_element(
                     elem,
-                    geo.loc.as_logical().to_physical_precise_round(scale),
+                    geo.loc.to_physical_precise_round(scale),
                     Relocate::Relative,
                 );
                 push(elem);
@@ -2240,10 +2249,7 @@ impl<W: LayoutElement> Monitor<W> {
         let iter = self.workspaces_with_render_geo();
         for (_ws, ws_geo) in iter {
             let pos = ws_geo.loc;
-            let rounded_pos = pos
-                .as_logical()
-                .to_physical_precise_round(scale)
-                .to_logical(scale);
+            let rounded_pos = pos.to_physical_precise_round(scale).to_logical(scale);
 
             // Workspace positions must be rounded to physical pixels.
             assert_abs_diff_eq!(pos.x, rounded_pos.x, epsilon = 1e-5);

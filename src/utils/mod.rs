@@ -206,8 +206,10 @@ pub fn output_size(output: &Output) -> Size<f64, Logical> {
     let output_scale = output.current_scale().fractional_scale();
     let output_transform = output.current_transform();
     let output_mode = output.current_mode().unwrap();
-    let logical_size = output_mode.size.to_f64().to_logical(output_scale);
-    output_transform.transform_size(logical_size)
+    // Transform first and then Scaling to logical since the inverse is only valid because
+    // fractional_scale is scalar and commutes with the axis-swap.
+    let transformed_size = output_transform.transform_size(output_mode.size);
+    transformed_size.to_f64().to_logical(output_scale)
 }
 
 pub fn logical_output(output: &Output) -> niri_ipc::LogicalOutput {
@@ -525,8 +527,8 @@ pub fn ensure_min_max_size_maybe_zero(x: i32, min_size: i32, max_size: i32) -> i
 }
 
 pub fn clamp_preferring_top_left_in_area(
-    area: Rectangle<f64, Logical>,
-    rect: &mut Rectangle<f64, Logical>,
+    area: Rectangle<f64, Local>,
+    rect: &mut Rectangle<f64, Local>,
 ) {
     rect.loc.x = f64::min(rect.loc.x, area.loc.x + area.size.w - rect.size.w);
     rect.loc.y = f64::min(rect.loc.y, area.loc.y + area.size.h - rect.size.h);
@@ -537,9 +539,9 @@ pub fn clamp_preferring_top_left_in_area(
 }
 
 pub fn center_preferring_top_left_in_area(
-    area: Rectangle<f64, Logical>,
-    size: Size<f64, Logical>,
-) -> Point<f64, Logical> {
+    area: Rectangle<f64, Local>,
+    size: Size<f64, Local>,
+) -> Point<f64, Local> {
     let area_size = area.size.to_point();
     let size = size.to_point();
     let mut offset = (area_size - size).downscale(2.);

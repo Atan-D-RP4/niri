@@ -16,6 +16,7 @@ use crate::niri_render_elements;
 use crate::render_helpers::offscreen::{OffscreenBuffer, OffscreenData, OffscreenRenderElement};
 use crate::render_helpers::shader_element::ShaderRenderElement;
 use crate::render_helpers::shaders::{mat3_uniform, ProgramType, Shaders};
+use crate::utils::geometry::{PointExt, SizeExt};
 
 #[derive(Debug)]
 pub struct OpenAnimation {
@@ -99,7 +100,7 @@ impl OpenAnimation {
 
             let elem = ShaderRenderElement::new(
                 ProgramType::Open,
-                area.size,
+                area.size.assume_local(),
                 None,
                 scale.x as f32,
                 alpha,
@@ -114,7 +115,7 @@ impl OpenAnimation {
                 HashMap::from([(String::from("niri_tex"), texture.clone())]),
                 Kind::Unspecified,
             )
-            .with_location(area.loc);
+            .with_location(area.loc.assume_local());
 
             // We're drawing the shader, not the offscreen itself.
             data.id = elem.id().clone();

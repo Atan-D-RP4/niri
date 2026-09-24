@@ -53,7 +53,7 @@ impl MoveGrab {
         enable_view_offset: bool,
         move_icon: Option<CursorIcon>,
     ) -> Option<Self> {
-        let location = start_data.global_location();
+        let location = start_data.location();
         let (output, pos_within_output) = state.niri.output_under(location)?;
 
         Some(Self {
@@ -188,7 +188,7 @@ impl MoveGrab {
             }
 
             // Check if the gesture moved far enough to decide.
-            let c = (self.new_location - self.start_data.global_location()).as_logical();
+            let c = (self.new_location - self.start_data.location()).as_logical();
             if c.x * c.x + c.y * c.y >= 8. * 8. {
                 let is_floating = data
                     .niri
@@ -280,7 +280,7 @@ impl MoveGrab {
             // Apply the delta accumulated during recognizing.
             let ongoing = data.niri.layout.interactive_move_update(
                 &self.window,
-                (self.last_location - self.start_data.global_location()).as_logical(),
+                (self.last_location - self.start_data.location()).as_logical(),
                 output,
                 pos_within_output,
             );
@@ -510,7 +510,11 @@ impl TouchGrab<State> for MoveGrab {
             return;
         }
 
-        self.new_location = event.location.assume_global();
+        // Touch grabs mirror the pointer grabs and live in screen space;
+        // the Wayland event carries content space, so invert it back.
+        self.new_location = data
+            .niri
+            .touch_content_to_screen(event.location.assume_global());
         self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 

@@ -17,7 +17,7 @@ use smithay::backend::renderer::{
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shm;
 use solid_color::{SolidColorBuffer, SolidColorRenderElement};
 
@@ -25,6 +25,7 @@ use self::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use self::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::xray::Xray;
+use crate::utils::geometry::{Local, PointLocalExt, RectLocalExt, SizeExt};
 
 pub mod background_effect;
 pub mod blur;
@@ -50,6 +51,7 @@ pub mod solid_color;
 pub mod surface;
 pub mod texture;
 pub mod xray;
+pub mod zoom;
 
 /// A rendering context.
 ///
@@ -97,9 +99,9 @@ pub enum RenderTarget {
 #[derive(Debug)]
 pub struct BakedBuffer<B> {
     pub buffer: B,
-    pub location: Point<f64, Logical>,
-    pub src: Option<Rectangle<f64, Logical>>,
-    pub dst: Option<Size<i32, Logical>>,
+    pub location: Point<f64, Local>,
+    pub src: Option<Rectangle<f64, Local>>,
+    pub dst: Option<Size<i32, Local>>,
 }
 
 pub trait ToRenderElement {
@@ -107,7 +109,7 @@ pub trait ToRenderElement {
 
     fn to_render_element(
         &self,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         scale: Scale<f64>,
         alpha: f32,
         kind: Kind,
@@ -131,17 +133,17 @@ impl ToRenderElement for BakedBuffer<TextureBuffer<GlesTexture>> {
 
     fn to_render_element(
         &self,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         _scale: Scale<f64>,
         alpha: f32,
         kind: Kind,
     ) -> Self::RenderElement {
         let elem = TextureRenderElement::from_texture_buffer(
             self.buffer.clone(),
-            location + self.location,
+            (location + self.location).as_logical(),
             alpha,
-            self.src,
-            self.dst.map(|dst| dst.to_f64()),
+            self.src.map(|src| src.as_logical()),
+            self.dst.map(|dst| dst.to_f64().as_logical()),
             kind,
         );
         PrimaryGpuTextureRenderElement(elem)
@@ -153,7 +155,7 @@ impl ToRenderElement for BakedBuffer<SolidColorBuffer> {
 
     fn to_render_element(
         &self,
-        location: Point<f64, Logical>,
+        location: Point<f64, Local>,
         _scale: Scale<f64>,
         alpha: f32,
         kind: Kind,

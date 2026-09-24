@@ -1,12 +1,10 @@
-use glam::{Mat3, Vec2};
+use glam::{DMat3, DVec2};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::Space;
 use smithay::output::Output;
 use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Transform};
 
-use crate::utils::geometry::{
-    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
-};
+use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt};
 
 /// Immutable, sampled transformation of output-local logical geometry.
 ///
@@ -41,15 +39,14 @@ impl ViewportTransform {
 
     /// Applies this transform to a local point.
     pub fn apply(&self, point: Point<f64, Local>) -> Point<f64, Local> {
-        let transformed = self.to_matrix() * Vec2::new(point.x as f32, point.y as f32).extend(1.);
-        Point::new(transformed.x as f64, transformed.y as f64).assume_local()
+        let transformed = self.to_matrix() * DVec2::new(point.x, point.y).extend(1.);
+        Point::new(transformed.x, transformed.y)
     }
 
     /// Applies the inverse transform to a local point.
     pub fn apply_inverse(&self, point: Point<f64, Local>) -> Point<f64, Local> {
-        let transformed =
-            self.to_matrix().inverse() * Vec2::new(point.x as f32, point.y as f32).extend(1.);
-        Point::new(transformed.x as f64, transformed.y as f64).assume_local()
+        let transformed = self.to_matrix().inverse() * DVec2::new(point.x, point.y).extend(1.);
+        Point::new(transformed.x, transformed.y)
     }
 
     /// Tip-glued cursor placement shared by the live pointer and the preview.
@@ -86,12 +83,12 @@ impl ViewportTransform {
     }
 
     /// Returns the equivalent 2D affine matrix.
-    pub fn to_matrix(&self) -> Mat3 {
-        let scale = Vec2::splat(self.factor as f32);
+    pub fn to_matrix(&self) -> DMat3 {
+        let scale = DVec2::splat(self.factor);
         let focal = self.focal;
-        let focal = Vec2::new(focal.x as f32, focal.y as f32);
+        let focal = DVec2::new(focal.x, focal.y);
 
-        Mat3::from_translation(focal) * Mat3::from_scale(scale) * Mat3::from_translation(-focal)
+        DMat3::from_translation(focal) * DMat3::from_scale(scale) * DMat3::from_translation(-focal)
     }
 
     fn bounding_rect(
@@ -114,60 +111,6 @@ impl ViewportTransform {
 }
 
 impl OutputViewCtx {
-    /// The output's position in global logical space.
-    ///
-    /// This is the translation offset for Global ↔ Local conversion via the
-    /// geometry extension traits (`PointLocalExt::to_global`,
-    /// `PointGlobalExt::to_local`). Use this instead of separately computing
-    /// output geometry from `global_space.output_geometry()`.
-    pub fn output_origin(&self) -> Point<f64, Logical> {
-        self.global_geo.loc.as_logical()
-    }
-
-    /// Physical → Local: divide by [`Self::scale`] only.
-    ///
-    /// [`Self::output_transform`] is intentionally ignored: element geometry
-    /// is already in presented orientation, and rotation composes after the
-    /// viewport, keeping it axis-aligned.
-    #[inline]
-    pub(crate) fn physical_rect_to_local(
-        &self,
-        rect: Rectangle<f64, Physical>,
-    ) -> Rectangle<f64, Local> {
-        rect.to_logical(self.scale).assume_local()
-    }
-    /// Local → Physical: inverse of [`Self::physical_rect_to_local`], scale only.
-    #[inline]
-    pub(crate) fn local_rect_to_physical(
-        &self,
-        rect: Rectangle<f64, Local>,
-    ) -> Rectangle<f64, Physical> {
-        rect.to_physical(self.scale)
-    }
-
-    /// Converts a Local logical point into output-local Physical coordinates.
-    ///
-    /// Point-level counterpart of [`Self::local_rect_to_physical`]: exact
-    /// unit conversion only, no pixel snapping. Use
-    /// [`Self::local_point_to_physical_precise_round`] for render placement.
-    #[inline]
-    pub(crate) fn local_point_to_physical(&self, point: Point<f64, Local>) -> Point<f64, Physical> {
-        point.to_physical(self.scale)
-    }
-
-    /// Converts a Local logical point into Physical pixels with rounding.
-    ///
-    /// Point-level counterpart of the `as_logical().to_physical_precise_round()`
-    /// chains at render boundaries. Like Smithay's method of the same name,
-    /// but sourced from the output scale with the frame carried in the types.
-    #[inline]
-    pub(crate) fn to_physical_precise_round<N: Coordinate>(
-        self,
-        point: Point<f64, Local>,
-    ) -> Point<N, Physical> {
-        point.to_physical_precise_round(self.scale)
-    }
-
     /// Creates a minimal context from an output origin point.
     ///
     /// Only the origin is meaningful for Global ↔ Local translation;
@@ -196,6 +139,15 @@ impl OutputViewCtx {
             output_transform,
             scale,
         }
+    }
+
+    /// Converts a content-space global point to physical pixels.
+    ///
+    /// Mirrors [`PointExt::to_local`]: Global → Local via the output origin,
+    /// then Local → Physical via the output scale. Generic over the result
+    /// coordinate so call sites keep their existing rounding behavior.
+    pub fn to_physical<R: Coordinate>(&self, pos: Point<f64, Global>) -> Point<R, Physical> {
+        pos.to_local(self).to_physical_precise_round(self.scale)
     }
 
     pub fn for_output<W: SpaceElement + PartialEq>(
@@ -227,11 +179,13 @@ impl OutputViewCtx {
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use glam::Vec3;
-    use smithay::utils::{Point, Rectangle};
+    use glam::DVec3;
+    use smithay::utils::{Point, Rectangle, Scale, Transform};
 
-    use super::ViewportTransform;
-    use crate::utils::geometry::Local;
+    use super::{OutputViewCtx, ViewportTransform};
+    use crate::utils::geometry::{
+        Global, Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt,
+    };
 
     fn transform() -> ViewportTransform {
         ViewportTransform::new((100., 80.).into(), 2.)
@@ -270,10 +224,10 @@ mod tests {
         let point: Point<f64, Local> = (350., 275.).into();
         let sequential = outer.apply(inner.apply(point));
         let matrix = outer.to_matrix() * inner.to_matrix();
-        let composed = matrix * Vec3::new(point.x as f32, point.y as f32, 1.0);
+        let composed = matrix * DVec3::new(point.x, point.y, 1.0);
 
-        assert_relative_eq!(composed.x as f64, sequential.x, epsilon = 1e-4);
-        assert_relative_eq!(composed.y as f64, sequential.y, epsilon = 1e-4);
+        assert_relative_eq!(composed.x, sequential.x, epsilon = 1e-4);
+        assert_relative_eq!(composed.y, sequential.y, epsilon = 1e-4);
     }
 
     #[test]
@@ -298,5 +252,46 @@ mod tests {
 
         assert_eq!(identity.apply_rect(rect), rect);
         assert_eq!(identity.apply_inverse_rect(rect), rect);
+    }
+
+    #[test]
+    fn global_local_viewport_round_trip() {
+        // Cross-abstraction: Global → Local → Viewport → inverse Viewport → Global,
+        // with nonzero and negative output origins.
+        let viewport = ViewportTransform::new((100., 80.).into(), 2.);
+        let cases = [
+            // (origin, global point)
+            ((40., 25.), (120., 90.)),
+            ((-200., -100.), (-80., -30.)),
+        ];
+
+        for ((ox, oy), (gx, gy)) in cases {
+            let ctx = OutputViewCtx::new(
+                Rectangle::new((ox, oy).into(), (1920., 1080.).into()).assume_global(),
+                Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
+                Transform::Normal,
+                Scale::from(1.),
+            );
+            let global: Point<f64, Global> = (gx, gy).into();
+
+            let local = global.to_local(&ctx);
+            let round_trip = viewport
+                .apply_inverse(viewport.apply(local))
+                .to_global(&ctx);
+            assert_relative_eq!(round_trip.x, global.x, epsilon = 1e-6);
+            assert_relative_eq!(round_trip.y, global.y, epsilon = 1e-6);
+
+            // Rectangle variant: translate loc, preserve size across the pipeline.
+            let global_rect: Rectangle<f64, Global> =
+                Rectangle::new((gx, gy).into(), (800., 600.).into()).assume_global();
+            let local_rect = global_rect.to_local(&ctx);
+            let rt_rect = viewport
+                .apply_inverse_rect(viewport.apply_rect(local_rect))
+                .to_global(&ctx);
+            assert_relative_eq!(rt_rect.loc.x, global_rect.loc.x, epsilon = 1e-6);
+            assert_relative_eq!(rt_rect.loc.y, global_rect.loc.y, epsilon = 1e-6);
+            assert_relative_eq!(rt_rect.size.w, global_rect.size.w, epsilon = 1e-6);
+            assert_relative_eq!(rt_rect.size.h, global_rect.size.h, epsilon = 1e-6);
+        }
     }
 }

@@ -7,8 +7,9 @@ use calloop::timer::{TimeoutAction, Timer};
 use input::event::gesture::GestureEventCoordinates as _;
 use niri_config::{
     Action, Bind, Binds, Config, Key, ModKey, Modifiers, MruDirection, SwitchBinds, Trigger,
+    ZoomIncrementType, ZoomMovementMode,
 };
-use niri_ipc::LayoutSwitchTarget;
+use niri_ipc::{LayoutSwitchTarget, ZoomLevelChange};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, DeviceCapability, Event,
     GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _,
@@ -35,7 +36,7 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Physical, Point, Rectangle, Scale, Size, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use touch_overview_grab::TouchOverviewGrab;
@@ -49,15 +50,16 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::dbus::freedesktop_a11y::KbMonBlock;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
-use crate::niri::{CastTarget, PointerVisibility, State};
+use crate::niri::{CastTarget, PointerVisibility, State, TouchPinchState};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::geometry::{
-    Global, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt, RectLocalExt,
-    SizeExt,
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt,
+    RectLocalExt, SizeExt,
 };
 use crate::utils::spawning::{spawn, spawn_sh};
-use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
+use crate::utils::view::OutputViewCtx;
+use crate::utils::{center_f64, get_monotonic_time, CastSessionId, ResizeEdge};
 
 pub mod backend_ext;
 pub mod click_grab;
@@ -87,16 +89,12 @@ pub enum AnyStartData<D: SeatHandler + TabletSeatHandler> {
 }
 
 impl<D: SeatHandler + TabletSeatHandler> AnyStartData<D> {
-    pub fn location(&self) -> Point<f64, Logical> {
+    pub fn location(&self) -> Point<f64, Global> {
         match self {
-            AnyStartData::Pointer(x) => x.location,
-            AnyStartData::Touch(x) => x.location,
-            AnyStartData::TabletTool(x) => x.location,
+            AnyStartData::Pointer(x) => x.location.assume_global(),
+            AnyStartData::Touch(x) => x.location.assume_global(),
+            AnyStartData::TabletTool(x) => x.location.assume_global(),
         }
-    }
-
-    pub fn global_location(&self) -> Point<f64, Global> {
-        self.location().assume_global()
     }
 
     pub fn unwrap_pointer(&self) -> &PointerGrabStartData<D> {
@@ -292,8 +290,16 @@ impl State {
                 tablet_seat.clear_tools();
             }
         }
-        if device.has_capability(DeviceCapability::Touch) && self.niri.touch.is_empty() {
-            self.niri.seat.remove_touch();
+        if device.has_capability(DeviceCapability::Touch) {
+            // Clear any in-flight touch pinch state — a disconnected device
+            // mid-gesture leaves stale state that would corrupt subsequent
+            // gestures on a new touch device.
+            self.niri.touch_points.clear();
+            self.cancel_touch_pinch(true);
+
+            if self.niri.touch.is_empty() {
+                self.niri.seat.remove_touch();
+            }
         }
     }
 
@@ -302,10 +308,11 @@ impl State {
         self.niri.global_space.outputs().fold(
             None,
             |acc: Option<Rectangle<i32, Global>>, output| {
-                self.niri.global_space.output_geometry(output).map(|geo| {
-                    let geo = geo.assume_global();
-                    acc.map(|acc| acc.merge(geo)).unwrap_or(geo)
-                })
+                self.niri
+                    .global_space
+                    .output_geometry(output)
+                    .map(|geo| geo.assume_global())
+                    .map(|geo| acc.map(|acc| acc.merge(geo)).unwrap_or(geo))
             },
         )
     }
@@ -336,10 +343,8 @@ impl State {
             output.and_then(|output| {
                 let monitor = self.niri.layout.monitor_for_output(output)?;
                 let rect = monitor.active_window_visual_rectangle()?;
-                let output_geo = self.niri.global_space.output_geometry(output)?;
-                let mut rect = rect.as_logical();
-                rect.loc += output_geo.loc.to_f64();
-                Some((rect.assume_global(), output))
+                let ctx = &self.niri.output_state[output].view_ctx;
+                Some((rect.to_global(ctx), output))
             })
         } else {
             None
@@ -353,14 +358,9 @@ impl State {
                 output.current_transform(),
             )
         } else if let Some(output) = mapped_output {
-            let geo = self
-                .niri
-                .global_space
-                .output_geometry(output)
-                .unwrap()
-                .assume_global();
+            let geo = self.niri.output_state[output].view_ctx.global_geo;
             (
-                geo.to_f64(),
+                geo,
                 true,
                 1. / output.current_scale().fractional_scale(),
                 output.current_transform(),
@@ -378,9 +378,12 @@ impl State {
         };
 
         let mut pos = {
-            let size = transform
-                .invert()
-                .transform_size(target_geo.size.as_logical());
+            // NOTE: `invert()` is intentionally not used here. For sizes,
+            // `transform_size` is identical with or without inversion (only the
+            // 90°/270° swap class matters), and device positions map with the
+            // forward transform. See `inverse_transform_point` docs for why
+            // `invert()` must not be used on points.
+            let size = transform.transform_size(target_geo.size.as_logical());
             transform.transform_point_in(event.position_transformed(size.to_i32_round()), &size)
         };
 
@@ -392,7 +395,7 @@ impl State {
             if let Some(device) = (&device as &dyn Any).downcast_ref::<input::Device>() {
                 if let Some(data) = self.niri.tablets.get(device) {
                     // This code does the same thing as mutter with "keep aspect ratio" enabled.
-                    let size = transform.invert().transform_size(target_geo.size);
+                    let size = transform.transform_size(target_geo.size.as_logical());
                     let output_aspect_ratio = size.w / size.h;
                     let ratio = data.aspect_ratio / output_aspect_ratio;
 
@@ -716,6 +719,8 @@ impl State {
 
         if let Some(touch) = self.niri.seat.get_touch() {
             touch.cancel(self);
+            self.niri.touch_points.clear();
+            self.cancel_touch_pinch(true);
         }
 
         match action {
@@ -2450,11 +2455,108 @@ impl State {
                     self.niri.test_action_count += 1;
                 }
             }
-            Action::SetZoomLevel(_level, _output) => {
-                todo!()
+            Action::SetZoomLevel(level, output_name) => {
+                if let Some(output) = self.resolve_zoom_output(&output_name) {
+                    // Scope the config borrow so it drops before queue_redraw.
+                    let target_level = {
+                        let config = self.niri.config.borrow();
+                        let zoom_state = self.niri.layout.zoom_state_for_output(&output);
+                        let current_level = zoom_state
+                            .map_or(1.0, |s| s.viewport_transform(self.niri.clock.now()).factor);
+                        match level {
+                            ZoomLevelChange::Set(level) => level,
+                            ZoomLevelChange::Adjust(delta) => match config.zoom.increment_type {
+                                ZoomIncrementType::Linear => current_level + delta,
+                                ZoomIncrementType::Exponential => {
+                                    (current_level.ln() + delta).exp()
+                                }
+                            },
+                        }
+                    };
+
+                    let movement_mode = self.niri.config.borrow().zoom.movement_mode;
+                    let ctx = self.niri.output_state[&output].view_ctx;
+                    let cursor_local = self.niri.seat.get_pointer().map_or_else(
+                        || {
+                            // No pointer (e.g. touch-only seat): use output center.
+                            Point::from((ctx.local_geo.size.w / 2.0, ctx.local_geo.size.h / 2.0))
+                        },
+                        |ptr| {
+                            let pos = ptr.current_location().assume_global();
+                            pos.to_local(&ctx)
+                        },
+                    );
+
+                    if let Some(zoom_state) = self.niri.layout.zoom_state_for_output(&output) {
+                        let locked = zoom_state.locked;
+                        self.niri.layout.zoom_set_level(
+                            &output,
+                            target_level,
+                            cursor_local,
+                            movement_mode,
+                            locked,
+                        );
+                    }
+                    self.niri.queue_redraw(&output);
+                }
             }
-            Action::ToggleZoomLock(_output) => {
-                todo!()
+            Action::ToggleZoomLock(output) => {
+                if let Some(output) = self.resolve_zoom_output(&output) {
+                    let was_locked = self
+                        .niri
+                        .layout
+                        .zoom_state_for_output(&output)
+                        .is_some_and(|s| s.locked);
+                    self.niri.layout.set_zoom_lock(&output, !was_locked);
+
+                    if was_locked {
+                        // Unlocking: animate focal to cursor position.
+                        let movement_mode = self.niri.config.borrow().zoom.movement_mode;
+                        if !matches!(movement_mode, ZoomMovementMode::OnEdge) {
+                            if let Some(ptr) = self.niri.seat.get_pointer() {
+                                let cursor_pos = ptr.current_location().assume_global();
+                                let ctx = self.niri.output_state[&output].view_ctx;
+                                let cursor_local = cursor_pos.to_local(&ctx);
+                                self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
+                                self.niri.layout.update_cursor_zoom_focal(
+                                    &output,
+                                    cursor_local,
+                                    true,
+                                );
+                            }
+                        }
+                    }
+                    self.niri.queue_redraw(&output);
+                }
+            }
+            Action::ToggleZoomLock(output) => {
+                if let Some(output) = self.resolve_zoom_output(&output) {
+                    let was_locked = self
+                        .niri
+                        .layout
+                        .zoom_state_for_output(&output)
+                        .is_some_and(|s| s.locked);
+                    self.niri.layout.set_zoom_lock(&output, !was_locked);
+
+                    if was_locked {
+                        // Unlocking: animate focal to cursor position.
+                        let movement_mode = self.niri.config.borrow().zoom.movement_mode;
+                        if !matches!(movement_mode, ZoomMovementMode::OnEdge) {
+                            if let Some(ptr) = self.niri.seat.get_pointer() {
+                                let cursor_pos = ptr.current_location().assume_global();
+                                let ctx = self.niri.output_state[&output].view_ctx;
+                                let cursor_local = cursor_pos.to_local(&ctx);
+                                self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
+                                self.niri.layout.update_cursor_zoom_focal(
+                                    &output,
+                                    cursor_local,
+                                    true,
+                                );
+                            }
+                        }
+                    }
+                    self.niri.queue_redraw(&output);
+                }
             }
         }
     }
@@ -2473,10 +2575,28 @@ impl State {
 
         let pointer = self.niri.seat.get_pointer().unwrap();
 
-        let pos = pointer.current_location();
+        let pos = pointer.current_location().assume_global();
+
+        // Apply per-output zoom-aware delta scaling: at higher zoom levels, reduce pointer deltas
+        // proportionally to maintain consistent visual cursor velocity.
+        let (delta, delta_unaccel) = if let Some((output, _)) = self.niri.output_under(pos) {
+            let level = self
+                .niri
+                .layout
+                .zoom_state_for_output(output)
+                .map_or(1.0, |state| {
+                    state.viewport_transform(self.niri.clock.now()).factor
+                });
+            (
+                event.delta().downscale(Scale::from(level.max(1.0))),
+                event.delta_unaccel().downscale(Scale::from(level.max(1.0))),
+            )
+        } else {
+            (event.delta(), event.delta_unaccel())
+        };
 
         // We have an output, so we can compute the new location and focus.
-        let mut new_pos = pos + event.delta();
+        let mut new_pos = pos + delta.assume_global();
 
         // We received an event for the regular pointer, so show it now.
         self.niri.pointer_visibility = PointerVisibility::Visible;
@@ -2490,7 +2610,7 @@ impl State {
             // No need to check if the pointer focus surface matches, because here we're checking
             // for an already-active constraint, and the constraint is deactivated when the focused
             // surface changes.
-            let pos_within_surface = pos.assume_global().surface_offset(under.1);
+            let pos_within_surface = pos.surface_offset(under.1);
 
             let mut pointer_locked = false;
             with_pointer_constraint(&under.0, &pointer, |constraint| {
@@ -2522,8 +2642,8 @@ impl State {
                     self,
                     Some((under.0.clone(), under.1.as_logical())),
                     &RelativeMotionEvent {
-                        delta: event.delta(),
-                        delta_unaccel: event.delta_unaccel(),
+                        delta,
+                        delta_unaccel,
                         time: event.time(),
                     },
                 );
@@ -2553,59 +2673,75 @@ impl State {
             None
         });
         if let Some((output, horizontal)) = spatial_grab.flatten() {
-            if let Some(geo) = self.niri.global_space.output_geometry(&output) {
-                let geo = geo.to_f64();
-                let geo_extent = geo.loc + geo.size.to_f64();
+            if let Some(ctx) = self.niri.output_state.get(&output).map(|s| s.view_ctx) {
+                let mut local = new_pos.to_local(&ctx);
+                let size = ctx.local_geo.size;
                 if horizontal {
-                    new_pos.x = (new_pos.x - geo.loc.x).rem_euclid(geo.size.w) + geo.loc.x;
-                    new_pos.y = new_pos.y.clamp(geo.loc.y, geo_extent.y - 1.);
+                    local.x = local.x.rem_euclid(size.w);
+                    local.y = local.y.clamp(0., size.h - 1.);
                 } else {
-                    new_pos.x = new_pos.x.clamp(geo.loc.x, geo_extent.x - 1.);
-                    new_pos.y = (new_pos.y - geo.loc.y).rem_euclid(geo.size.h) + geo.loc.y;
+                    local.x = local.x.clamp(0., size.w - 1.);
+                    local.y = local.y.rem_euclid(size.h);
                 }
+                new_pos = local.to_global(&ctx);
             }
         }
 
-        if self
-            .niri
-            .global_space
-            .output_under(new_pos)
-            .next()
-            .is_none()
-        {
+        if self.niri.output_under(new_pos).is_none() {
             // We ended up outside the outputs and need to clip the movement.
-            if let Some(output) = self.niri.global_space.output_under(pos).next() {
+            if let Some((output, _)) = self.niri.output_under(pos) {
                 // The pointer was previously on some output. Clip the movement against its
                 // boundaries.
-                let geom = self.niri.global_space.output_geometry(output).unwrap();
-                new_pos.x = new_pos
-                    .x
-                    .clamp(geom.loc.x as f64, (geom.loc.x + geom.size.w - 1) as f64);
-                new_pos.y = new_pos
-                    .y
-                    .clamp(geom.loc.y as f64, (geom.loc.y + geom.size.h - 1) as f64);
+                let ctx = self.niri.output_state[output].view_ctx;
+                let mut local = new_pos.to_local(&ctx);
+                let size = ctx.local_geo.size;
+                local.x = local.x.clamp(0., size.w - 1.);
+                local.y = local.y.clamp(0., size.h - 1.);
+                new_pos = local.to_global(&ctx);
             } else {
                 // The pointer was not on any output in the first place. Find one for it.
                 // Let's do the simple thing and just put it on the first output.
                 let output = self.niri.global_space.outputs().next().unwrap();
-                let geom = self.niri.global_space.output_geometry(output).unwrap();
-                new_pos = center(geom).to_f64();
+                let ctx = self.niri.output_state[output].view_ctx;
+                new_pos = center_f64(ctx.global_geo);
             }
         }
 
-        self.update_screenshot_ui(new_pos.assume_global(), None);
+        // Clamp to the zoomed viewport when zoom is locked, so the pointer cannot escape the
+        // visible (magnified) region.
+        let zoom_output = self
+            .niri
+            .output_under(new_pos)
+            .map(|(output, _)| output.clone());
+        let zoom_ctx = zoom_output
+            .as_ref()
+            .and_then(|o| self.niri.output_state.get(o).map(|s| s.view_ctx));
+        if let (Some(output), Some(ctx)) = (&zoom_output, &zoom_ctx) {
+            if let Some(state) = self.niri.layout.zoom_state_for_output(output) {
+                if state.locked {
+                    let new_pos_local = new_pos.to_local(ctx);
+                    if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
+                        output,
+                        new_pos_local,
+                        ctx.local_geo.size,
+                    ) {
+                        new_pos = clamped.to_global(ctx);
+                    }
+                }
+            }
+        }
+
+        self.update_screenshot_from_content(new_pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
-            if let Some((output, pos_within_output)) =
-                self.niri.output_under(new_pos.assume_global())
-            {
+            if let Some((output, pos_within_output)) = self.niri.output_under(new_pos) {
                 if mru_output == output {
                     self.niri.window_mru_ui.pointer_motion(pos_within_output);
                 }
             }
         }
 
-        let under = self.niri.contents_under(new_pos.assume_global());
+        let under = self.niri.contents_under(new_pos);
 
         // Handle confined pointer.
         if let Some((focus_surface, region)) = pointer_confined {
@@ -2618,8 +2754,7 @@ impl State {
 
             // Prevent the pointer from leaving the confine region, if any.
             if let Some(region) = region {
-                let new_pos_within_surface =
-                    new_pos.assume_global().surface_offset(focus_surface.1);
+                let new_pos_within_surface = new_pos.surface_offset(focus_surface.1);
                 if !region.contains(new_pos_within_surface.as_logical().to_i32_round()) {
                     prevent = true;
                 }
@@ -2630,8 +2765,8 @@ impl State {
                     self,
                     Some((focus_surface.0, focus_surface.1.as_logical())),
                     &RelativeMotionEvent {
-                        delta: event.delta(),
-                        delta_unaccel: event.delta_unaccel(),
+                        delta,
+                        delta_unaccel,
                         time: event.time(),
                     },
                 );
@@ -2653,7 +2788,7 @@ impl State {
                 .clone()
                 .map(|(surface, location)| (surface, location.as_logical())),
             &MotionEvent {
-                location: new_pos,
+                location: new_pos.as_logical(),
                 serial,
                 time: event.time(),
             },
@@ -2665,8 +2800,8 @@ impl State {
                 .surface
                 .map(|(surface, location)| (surface, location.as_logical())),
             &RelativeMotionEvent {
-                delta: event.delta(),
-                delta_unaccel: event.delta_unaccel(),
+                delta,
+                delta_unaccel,
                 time: event.time(),
             },
         );
@@ -2694,12 +2829,26 @@ impl State {
             .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
             .unwrap_or(false);
         if is_dnd_grab {
-            if let Some((output, pos_within_output)) =
-                self.niri.output_under(new_pos.assume_global())
-            {
+            if let Some((output, screen_pos_within_output)) = self.niri.output_under(new_pos) {
                 let output = output.clone();
-                self.niri.layout.dnd_update(output, pos_within_output);
+                // DnD targeting resolves against scene geometry.
+                let content_pos_within_output = self
+                    .niri
+                    .screen_to_content(&output, screen_pos_within_output);
+                self.niri
+                    .layout
+                    .dnd_update(output, content_pos_within_output);
             }
+        }
+
+        // Keep the zoom focal tracking the cursor (CursorFollow mode) or update its stored cursor
+        // position for OnEdge mode. No-op during active transitions (they drive the focal).
+        if let (Some(output), Some(ctx)) = (&zoom_output, &zoom_ctx) {
+            let cursor_local = new_pos.to_local(ctx);
+            self.niri.layout.set_zoom_cursor_pos(output, cursor_local);
+            self.niri
+                .layout
+                .update_cursor_zoom_focal(output, cursor_local, false);
         }
 
         // Notify a11y.
@@ -2736,7 +2885,7 @@ impl State {
 
         let pointer = self.niri.seat.get_pointer().unwrap();
 
-        self.update_screenshot_ui(pos, None);
+        self.update_screenshot_from_screen(pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
@@ -2792,9 +2941,57 @@ impl State {
             .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
             .unwrap_or(false);
         if is_dnd_grab {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
+            if let Some((output, screen_pos_within_output)) = self.niri.output_under(pos) {
                 let output = output.clone();
-                self.niri.layout.dnd_update(output, pos_within_output);
+                // DnD targeting resolves against scene geometry.
+                let content_pos_within_output = self
+                    .niri
+                    .screen_to_content(&output, screen_pos_within_output);
+                self.niri
+                    .layout
+                    .dnd_update(output, content_pos_within_output);
+            }
+        }
+
+        // Clamp to the zoomed viewport when zoom is locked, and keep the focal tracking the cursor.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            let output = output.clone();
+            let ctx = self.niri.output_state.get(&output).map(|s| s.view_ctx);
+            if let Some(ctx) = &ctx {
+                if let Some(state) = self.niri.layout.zoom_state_for_output(&output) {
+                    if state.locked {
+                        let pos_local = pos.to_local(ctx);
+                        if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
+                            &output,
+                            pos_local,
+                            ctx.local_geo.size,
+                        ) {
+                            let new_pos = clamped.to_global(ctx);
+                            // Re-run the motion with the clamped position.
+                            let under = self.niri.contents_under(new_pos);
+                            let surface = under.surface.clone().map(|(s, l)| (s, l.as_logical()));
+                            self.niri.pointer_contents = under;
+                            pointer.motion(
+                                self,
+                                surface,
+                                &MotionEvent {
+                                    location: new_pos.as_logical(),
+                                    serial: SERIAL_COUNTER.next_serial(),
+                                    time: event.time(),
+                                },
+                            );
+                            pointer.frame(self);
+                        }
+                    }
+                }
+            }
+
+            if let Some(ctx) = &ctx {
+                let cursor_local = pos.to_local(ctx);
+                self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
+                self.niri
+                    .layout
+                    .update_cursor_zoom_focal(&output, cursor_local, false);
             }
         }
 
@@ -2989,12 +3186,16 @@ impl State {
                 // Check if we need to start an interactive resize.
                 else if button == Some(MouseButton::Right) && !pointer.is_grabbed() && mod_down {
                     let location = pointer.current_location();
-                    let (output, pos_within_output) =
+                    let (output, screen_pos_within_output) =
                         self.niri.output_under(location.assume_global()).unwrap();
+                    // Resize edges are scene geometry: hit-test in content space.
+                    let content_pos_within_output = self
+                        .niri
+                        .screen_to_content(output, screen_pos_within_output);
                     let edges = self
                         .niri
                         .layout
-                        .resize_edges_under(output, pos_within_output)
+                        .resize_edges_under(output, content_pos_within_output)
                         .unwrap_or(ResizeEdge::empty());
 
                     if !edges.is_empty() {
@@ -3102,7 +3303,9 @@ impl State {
                 };
 
                 if let Some(output) = output.cloned() {
-                    let point = self.screenshot_ui_point(&output, pos.assume_global());
+                    // The regular pointer tracks content-space coords under
+                    // zoom, so no inverse mapping here.
+                    let point = self.screenshot_point_from_content(&output, pos.assume_global());
 
                     if self
                         .niri
@@ -3633,7 +3836,7 @@ impl State {
             return;
         };
 
-        self.update_screenshot_ui(pos, None);
+        self.update_screenshot_from_screen(pos, None);
 
         if let Some(mru_output) = self.niri.window_mru_ui.output() {
             if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
@@ -3713,6 +3916,52 @@ impl State {
                 if let Some(pos) = self.niri.tablet_cursor_location {
                     let under = self.niri.contents_under(pos);
 
+                    // Clamp to the zoomed viewport when zoom is locked, and keep the focal tracking
+                    // the cursor.
+                    if let Some((output, _)) = self.niri.output_under(pos) {
+                        let output = output.clone();
+                        let ctx = self.niri.output_state.get(&output).map(|s| s.view_ctx);
+                        if let Some(ctx) = &ctx {
+                            if let Some(state) = self.niri.layout.zoom_state_for_output(&output) {
+                                if state.locked {
+                                    let pos_local = pos.to_local(ctx);
+                                    if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
+                                        &output,
+                                        pos_local,
+                                        ctx.local_geo.size,
+                                    ) {
+                                        let new_pos = clamped.to_global(ctx);
+                                        // Re-run the motion with the clamped position.
+                                        let under = self.niri.contents_under(new_pos);
+                                        let surface =
+                                            under.surface.clone().map(|(s, l)| (s, l.as_logical()));
+                                        self.niri.pointer_contents = under;
+                                        tool.motion(
+                                            self,
+                                            surface,
+                                            &tablet::tool::MotionEvent {
+                                                location: new_pos.as_logical(),
+                                                serial: SERIAL_COUNTER.next_serial(),
+                                                time: event.time(),
+                                            },
+                                        );
+                                        tool.frame(self, event.time());
+                                        self.niri.tablet_cursor_location = Some(new_pos);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(ctx) = &ctx {
+                            let cursor_local = pos.to_local(ctx);
+                            self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
+                            self.niri
+                                .layout
+                                .update_cursor_zoom_focal(&output, cursor_local, false);
+                        }
+                    }
+
                     let mod_key = self.backend.mod_key(&self.niri.config.borrow());
                     let mods = self.niri.seat.get_keyboard().unwrap().modifier_state();
                     let modifiers = modifiers_from_state(mods);
@@ -3727,7 +3976,8 @@ impl State {
                         };
 
                         if let Some(output) = output.cloned() {
-                            let point = self.screenshot_ui_point(&output, pos);
+                            // Tablet positions are screen-space.
+                            let point = self.screenshot_point_from_screen(&output, pos);
 
                             if self
                                 .niri
@@ -4182,6 +4432,175 @@ impl State {
         );
     }
 
+    fn cancel_touch_pinch(&mut self, cancelled: bool) {
+        if let Some(pinch) = self.niri.touch_pinch_state.take() {
+            self.niri.layout.zoom_gesture_end(&pinch.output, cancelled);
+            self.niri.queue_redraw(&pinch.output);
+        }
+    }
+
+    /// Resolve the target output for a zoom action.
+    ///
+    /// If a name is provided, matches by output name. Otherwise falls back to
+    /// the screenshot UI selection, then the active output.
+    fn resolve_zoom_output(&self, name: &Option<String>) -> Option<Output> {
+        match name {
+            Some(name) => self.niri.output_by_name_match(name).cloned(),
+            None => self
+                .niri
+                .screenshot_ui
+                .selection_output()
+                .cloned()
+                .or_else(|| self.niri.layout.active_output().cloned()),
+        }
+    }
+
+    fn pinch_config(&self) -> (f64, niri_config::ZoomMovementMode) {
+        let zoom = &self.niri.config.borrow().zoom;
+        (zoom.pinch_sensitivity, zoom.movement_mode)
+    }
+
+    /// Clamp a touch position to the visible viewport when zoom is locked.
+    ///
+    /// When zoom is locked, touch events should not pan beyond the visible
+    /// area. This clamps the position to the zoomed viewport boundaries.
+    fn clamp_position_to_zoom(
+        &self,
+        output: &Output,
+        pos: Point<f64, Global>,
+    ) -> Point<f64, Global> {
+        if self
+            .niri
+            .layout
+            .zoom_state_for_output(output)
+            .is_none_or(|s| !s.locked)
+        {
+            return pos;
+        }
+        let ctx = self.niri.output_state[output].view_ctx;
+        let pos_local = pos.to_local(&ctx);
+        if let Some(clamped) =
+            self.niri
+                .layout
+                .zoom_clamp_to_viewport(output, pos_local, ctx.local_geo.size)
+        {
+            clamped.to_global(&ctx)
+        } else {
+            pos
+        }
+    }
+
+    fn pinch_output_geometry(
+        &self,
+        output: &Output,
+        focal_point: Point<f64, Global>,
+    ) -> (Point<f64, Local>, Size<f64, Local>) {
+        let ctx = self.niri.output_state[output].view_ctx;
+        let cursor_local = focal_point.to_local(&ctx);
+        let output_size = ctx.local_geo.size;
+
+        (cursor_local, output_size)
+    }
+
+    /// Returns `true` if a zoom gesture was active and was updated.
+    fn pinch_update(
+        &mut self,
+        output: &Output,
+        scale: f64,
+        focal_pos: Point<f64, Global>,
+        timestamp: Duration,
+    ) -> bool {
+        let (sensitivity, _) = self.pinch_config();
+        let (cursor_local, output_size) = self.pinch_output_geometry(output, focal_pos);
+        if self
+            .niri
+            .layout
+            .zoom_gesture_update(
+                output,
+                scale,
+                sensitivity,
+                timestamp,
+                Some(cursor_local),
+                Some(output_size),
+            )
+            .is_some()
+        {
+            self.niri.queue_redraw(output);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle touchscreen pinch-to-zoom via raw `wl_touch` two-finger distance.
+    ///
+    /// On each touch point change, computes the distance between two touch
+    /// points and feeds the cumulative ratio (`current / initial`) into
+    /// `zoom_gesture_update`.
+    fn handle_touch_pinch(&mut self, timestamp: Duration) {
+        let touch_count = self.niri.touch_points.len();
+
+        // Cancel pinch if 3+ fingers — computing distance from an arbitrary
+        // pair of points against the initial 2-finger distance would produce
+        // a nonsensical scale ratio and an abrupt zoom jump.
+        if touch_count > 2 {
+            self.cancel_touch_pinch(true);
+            return;
+        }
+
+        if touch_count == 2 {
+            let mut positions = self.niri.touch_points.values().copied();
+            let p1 = positions.next().unwrap();
+            let p2 = positions.next().unwrap();
+            let dx = p1.x - p2.x;
+            let dy = p1.y - p2.y;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let midpoint = Point::from(((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0));
+
+            // Touch positions are already Global logical.
+            let Some((output, _)) = self.niri.output_under(midpoint) else {
+                self.cancel_touch_pinch(true);
+                return;
+            };
+            let output = output.clone();
+
+            if self
+                .niri
+                .layout
+                .zoom_state_for_output(&output)
+                .is_some_and(|state| state.locked)
+            {
+                return;
+            }
+
+            if self.niri.touch_pinch_state.is_none() {
+                // First 2-finger touch: begin gesture.
+                let movement_mode = Some(self.pinch_config().1);
+                let (cursor_local, output_size) = self.pinch_output_geometry(&output, midpoint);
+                self.niri.layout.zoom_gesture_begin(
+                    &output,
+                    Some(cursor_local),
+                    Some(output_size),
+                    movement_mode,
+                );
+                self.niri.touch_pinch_state = Some(TouchPinchState {
+                    output: output.clone(),
+                    initial_distance: distance.max(1.0), // clamp to avoid div-by-zero
+                });
+                self.niri.queue_redraw(&output);
+            } else if let Some(ref pinch) = self.niri.touch_pinch_state {
+                if pinch.output == output {
+                    // Subsequent updates: scale = current_distance / initial_distance.
+                    let scale = distance / pinch.initial_distance;
+                    self.pinch_update(&output, scale, midpoint, timestamp);
+                }
+            }
+        } else if touch_count < 2 {
+            // 0 or 1 fingers: end gesture (not cancelled).
+            self.cancel_touch_pinch(false);
+        }
+    }
+
     fn on_gesture_pinch_begin<I: InputBackend>(&mut self, event: I::GesturePinchBeginEvent) {
         let serial = SERIAL_COUNTER.next_serial();
         let pointer = self.niri.seat.get_pointer().unwrap();
@@ -4190,6 +4609,45 @@ impl State {
             pointer.frame(self);
         }
 
+        // NOTE; Libinput provides cumulative `scale` (1.0 = unchanged) directly. We route 2-finger
+        // pinch to zoom; non-zoom pinches forward to Wayland clients.
+
+        // FIXME: make pinch-finger count configurable.
+        // See: https://github.com/niri-wm/niri/pull/3771
+        if event.fingers() == 2 {
+            if let Some(output) = self.niri.output_under_cursor() {
+                if self
+                    .niri
+                    .layout
+                    .zoom_state_for_output(&output)
+                    .is_some_and(|state| state.locked)
+                {
+                    // Zoom is locked — don't start a gesture, but still forward
+                    // the pinch to the Wayland client so apps can handle it.
+                } else {
+                    let cursor_global = self
+                        .niri
+                        .seat
+                        .get_pointer()
+                        .unwrap()
+                        .current_location()
+                        .assume_global();
+                    let (cursor_local, output_size) =
+                        self.pinch_output_geometry(&output, cursor_global);
+                    let movement_mode = Some(self.pinch_config().1);
+                    self.niri.layout.zoom_gesture_begin(
+                        &output,
+                        Some(cursor_local),
+                        Some(output_size),
+                        movement_mode,
+                    );
+                    self.niri.pinch_gesture_output = Some(output);
+                    return;
+                }
+            }
+        }
+
+        // Not a zoom pinch — forward to Wayland client.
         pointer.gesture_pinch_begin(
             self,
             &GesturePinchBeginEvent {
@@ -4223,13 +4681,34 @@ impl State {
             .and_then(|window| window.rules().pinch_sensitivity)
             .unwrap_or(1.);
         let sensitivity = input_sensitivity * window_sensitivity;
+        let scale = event.scale().powf(sensitivity);
+
+        if let Some(output) = self
+            .niri
+            .pinch_gesture_output
+            .clone()
+            .or_else(|| self.niri.output_under_cursor())
+        {
+            let timestamp = Duration::from_millis(event.time().millis() as u64);
+            let cursor_global = self
+                .niri
+                .seat
+                .get_pointer()
+                .unwrap()
+                .current_location()
+                .assume_global();
+
+            if self.pinch_update(&output, scale, cursor_global, timestamp) {
+                return;
+            }
+        }
 
         pointer.gesture_pinch_update(
             self,
             &GesturePinchUpdateEvent {
                 time: event.time(),
                 delta: event.delta(),
-                scale: event.scale().powf(sensitivity),
+                scale,
                 rotation: event.rotation(),
             },
         );
@@ -4242,6 +4721,27 @@ impl State {
         if self.update_pointer_contents() {
             pointer.frame(self);
         }
+
+        if let Some(output) = self
+            .niri
+            .pinch_gesture_output
+            .clone()
+            .or_else(|| self.niri.output_under_cursor())
+        {
+            let cancelled = event.cancelled();
+            if self
+                .niri
+                .layout
+                .zoom_gesture_end(&output, cancelled)
+                .unwrap_or(false)
+            {
+                self.niri.pinch_gesture_output = None;
+                self.niri.queue_redraw(&output);
+                return;
+            }
+        }
+
+        self.niri.pinch_gesture_output = None;
 
         pointer.gesture_pinch_end(
             self,
@@ -4299,9 +4799,14 @@ impl State {
         let output = output.as_ref().or(fallback_output)?;
         let output_geo = self.niri.global_space.output_geometry(output).unwrap();
         let transform = output.current_transform();
-        let size = transform.invert().transform_size(output_geo.size);
+        // Same note as in `compute_tablet_position`: `invert()` is a no-op for
+        // sizes, and device positions use the forward transform.
+        let size = transform.transform_size(output_geo.size);
         let pos = transform.transform_point_in(evt.position_transformed(size), &size.to_f64());
-        Some(pos.assume_local().to_global(output_geo.loc.to_f64()))
+        Some(
+            pos.assume_local()
+                .to_global(&self.niri.output_state[output].view_ctx),
+        )
     }
 
     /// Computes the cursor position for the touch event.
@@ -4323,7 +4828,25 @@ impl State {
         };
         let slot = evt.slot();
 
+        // Clamp to viewport when zoom is locked.
+        let pos_g = if let Some(output) = self.niri.output_for_touch() {
+            self.clamp_position_to_zoom(output, pos)
+        } else {
+            pos
+        };
+
+        // Track touch point for pinch-to-zoom recognition (global logical).
+        self.niri.touch_points.insert(slot, pos_g);
+
         let serial = SERIAL_COUNTER.next_serial();
+
+        // Transform to content space for the Wayland event (contents_under applies the
+        // transform internally for hit-testing).
+        let zoomed_pos = self.niri.output_for_touch().map_or(pos_g, |output| {
+            let ctx = self.niri.output_state[output].view_ctx;
+            let content_local = self.niri.screen_to_content(output, pos_g.to_local(&ctx));
+            content_local.to_global(&ctx)
+        });
 
         let under = self.niri.contents_under(pos);
 
@@ -4341,7 +4864,8 @@ impl State {
             };
 
             if let Some(output) = output.cloned() {
-                let point = self.screenshot_ui_point(&output, pos);
+                // Touch positions are screen-space.
+                let point = self.screenshot_point_from_screen(&output, pos);
 
                 if self
                     .niri
@@ -4436,7 +4960,7 @@ impl State {
                 .map(|(surface, location)| (surface, location.as_logical())),
             &DownEvent {
                 slot,
-                location: pos.as_logical(),
+                location: zoomed_pos.as_logical(),
                 serial,
                 time: evt.time(),
             },
@@ -4444,6 +4968,9 @@ impl State {
 
         // We're using touch, hide the pointer.
         self.niri.pointer_visibility = PointerVisibility::Disabled;
+
+        // Drive touchscreen pinch-to-zoom recognition.
+        self.handle_touch_pinch(Duration::from_millis(evt.time().millis() as u64));
     }
 
     fn on_touch_up<I: InputBackend>(&mut self, evt: I::TouchUpEvent) {
@@ -4451,6 +4978,10 @@ impl State {
             return;
         };
         let slot = evt.slot();
+
+        // Remove touch point and drive pinch-to-zoom recognition.
+        self.niri.touch_points.remove(&slot);
+        self.handle_touch_pinch(Duration::from_millis(evt.time().millis() as u64));
 
         if let Some(capture) = self.niri.screenshot_ui.pointer_up(Some(slot)) {
             if capture {
@@ -4468,7 +4999,7 @@ impl State {
                 serial,
                 time: evt.time(),
             },
-        )
+        );
     }
     fn on_touch_motion<I: InputBackend>(&mut self, evt: I::TouchMotionEvent) {
         let Some(handle) = self.niri.seat.get_touch() else {
@@ -4479,10 +5010,28 @@ impl State {
         };
         let slot = evt.slot();
 
+        // Clamp to viewport when zoom is locked.
+        let pos_g = if let Some(output) = self.niri.output_for_touch() {
+            self.clamp_position_to_zoom(output, pos)
+        } else {
+            pos
+        };
+
+        // Track touch point for pinch-to-zoom recognition (global logical).
+        self.niri.touch_points.insert(slot, pos_g);
+
         if let Some(output) = self.niri.screenshot_ui.selection_output().cloned() {
-            self.update_screenshot_ui(pos, Some(slot));
+            self.update_screenshot_from_screen(pos, Some(slot));
             self.niri.queue_redraw(&output);
         }
+
+        // Transform to content space for the Wayland event (contents_under applies the
+        // transform internally for hit-testing).
+        let zoomed_pos = self.niri.output_for_touch().map_or(pos_g, |output| {
+            let ctx = self.niri.output_state[output].view_ctx;
+            let content_local = self.niri.screen_to_content(output, pos_g.to_local(&ctx));
+            content_local.to_global(&ctx)
+        });
 
         let under = self.niri.contents_under(pos);
         handle.motion(
@@ -4492,7 +5041,7 @@ impl State {
                 .map(|(surface, location)| (surface, location.as_logical())),
             &TouchMotionEvent {
                 slot,
-                location: pos.as_logical(),
+                location: zoomed_pos.as_logical(),
                 time: evt.time(),
             },
         );
@@ -4502,11 +5051,20 @@ impl State {
             .with_grab(|_, grab| Self::is_dnd_grab(grab.as_any()))
             .unwrap_or(false);
         if is_dnd_grab {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
+            if let Some((output, screen_pos_within_output)) = self.niri.output_under(pos_g) {
                 let output = output.clone();
-                self.niri.layout.dnd_update(output, pos_within_output);
+                // DnD targeting resolves against scene geometry.
+                let content_pos_within_output = self
+                    .niri
+                    .screen_to_content(&output, screen_pos_within_output);
+                self.niri
+                    .layout
+                    .dnd_update(output, content_pos_within_output);
             }
         }
+
+        // Drive touchscreen pinch-to-zoom recognition.
+        self.handle_touch_pinch(Duration::from_millis(evt.time().millis() as u64));
     }
 
     fn on_touch_frame<I: InputBackend>(&mut self, _evt: I::TouchFrameEvent) {
@@ -4517,6 +5075,9 @@ impl State {
     }
 
     fn on_touch_cancel<I: InputBackend>(&mut self, _evt: I::TouchCancelEvent) {
+        self.niri.touch_points.clear();
+        self.cancel_touch_pinch(true);
+
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
         };
@@ -4557,34 +5118,64 @@ impl State {
         grab.is::<PickWindowGrab>() || grab.is::<PickColorGrab>() || Self::is_dnd_grab(grab)
     }
 
-    /// Converts a global logical position to screenshot UI physical coords
-    /// for the given output.
-    /// TODO(cursor-zoom): constrain against captured texture size, not output, when zoom is
-    /// integrated
-    fn screenshot_ui_point(
+    /// Content-space position to UI physical coords.
+    ///
+    /// The regular pointer already tracks content space (deltas scaled by
+    /// 1/level), so it converts directly. Captures are full-output, so the
+    /// output size is the texture size.
+    fn screenshot_point_from_content(
         &self,
         output: &Output,
         pos: Point<f64, Global>,
     ) -> Point<i32, Physical> {
-        let geom = self.niri.global_space.output_geometry(output).unwrap();
-        let point = pos.to_local(geom.loc.to_f64()).as_logical();
-        let scale = output.current_scale().fractional_scale();
-        let point = point.to_physical_precise_round(scale);
-
-        let size = output.current_mode().unwrap().size;
-        let transform = output.current_transform();
-        let size = transform.transform_size(size);
-
-        point.constrain(Rectangle::from_size(size))
+        let ctx = self.niri.output_state[output].view_ctx;
+        screenshot_point_in_content(&ctx, output, pos)
     }
 
-    /// Routes pointer or touch motion to the screenshot UI.
-    fn update_screenshot_ui(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
+    /// Screen-space position to UI coords via the inverse viewport.
+    /// Absolute, tablet and touch events report screen space.
+    fn screenshot_point_from_screen(
+        &self,
+        output: &Output,
+        pos: Point<f64, Global>,
+    ) -> Point<i32, Physical> {
+        // Identity when no zoom state.
+        let ctx = self.niri.output_state[output].view_ctx;
+        let content = self
+            .niri
+            .screen_to_content(output, pos.to_local(&ctx))
+            .to_global(&ctx);
+        screenshot_point_in_content(&ctx, output, content)
+    }
+
+    /// Routes relative-pointer motion to the screenshot UI.
+    fn update_screenshot_from_content(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
         if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let point = self.screenshot_ui_point(output, pos);
+            let point = self.screenshot_point_from_content(output, pos);
             self.niri.screenshot_ui.pointer_motion(point, slot);
         }
     }
+
+    /// Routes absolute-pointer, tablet, or touch motion to the screenshot UI.
+    fn update_screenshot_from_screen(&mut self, pos: Point<f64, Global>, slot: Option<TouchSlot>) {
+        if let Some(output) = self.niri.screenshot_ui.selection_output() {
+            let point = self.screenshot_point_from_screen(output, pos);
+            self.niri.screenshot_ui.pointer_motion(point, slot);
+        }
+    }
+}
+
+/// Shared tail: content-space position to output pixels, constrained to the output size.
+fn screenshot_point_in_content(
+    ctx: &OutputViewCtx,
+    output: &Output,
+    pos: Point<f64, Global>,
+) -> Point<i32, Physical> {
+    let size = output.current_mode().unwrap().size;
+    let transform = output.current_transform();
+    let size = transform.transform_size(size);
+
+    ctx.to_physical(pos).constrain(Rectangle::from_size(size))
 }
 
 /// Check whether the key should be intercepted and mark intercepted

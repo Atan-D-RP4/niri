@@ -22,6 +22,7 @@ use crate::render_helpers::shaders::{mat3_uniform, ProgramType, Shaders};
 use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::{render_to_encompassing_texture, RenderCtx, RenderTarget};
+use crate::utils::geometry::SizeExt;
 use crate::utils::transaction::TransactionBlocker;
 
 #[derive(Debug)]
@@ -252,7 +253,7 @@ impl ClosingWindow {
 
             return ShaderRenderElement::new(
                 ProgramType::Close,
-                view_rect.size,
+                view_rect.size.assume_local(),
                 None,
                 scale.x as f32,
                 1.,

@@ -39,7 +39,7 @@ use crate::render_helpers::surface::{
 };
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::{background_effect, BakedBuffer, RenderCtx, RenderTarget};
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, PointSurfaceLocalExt, RectExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, PointSurfaceLocalExt, SizeExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -414,7 +414,7 @@ impl Mapped {
         let size = self.size().to_f64();
 
         let mut buffer = self.block_out_buffer.borrow_mut();
-        buffer.resize(size);
+        buffer.resize(size.assume_local());
         let blocked_out_contents = vec![BakedBuffer {
             buffer: buffer.clone(),
             location: Point::from((0., 0.)),
@@ -512,7 +512,8 @@ impl Mapped {
             .to_physical_precise_round(scale)
             .to_logical(scale);
         let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
-        let location = self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale);
+        let location =
+            (self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale)).assume_local();
 
         let use_border = |elem| {
             if let LayoutElementRenderElement::SolidColor(elem) = &elem {
@@ -550,8 +551,7 @@ impl Mapped {
                 target: RenderTarget::Screencast,
                 xray: None,
             },
-            // Window-capture space plays the output-Local role for this render.
-            location.assume_local(),
+            location,
             scale,
             1.,
             XrayPos::default(),
@@ -636,12 +636,12 @@ impl LayoutElement for Mapped {
         self.window.geometry().size
     }
 
-    fn buf_loc(&self) -> Point<i32, Logical> {
-        Point::from((0, 0)) - self.window.geometry().loc
+    fn buf_loc(&self) -> Point<i32, Local> {
+        Point::from((0, 0)) - self.window.geometry().loc.assume_local()
     }
 
-    fn is_in_input_region(&self, point: Point<f64, Logical>) -> bool {
-        let surface_local = point + self.window.geometry().loc.to_f64();
+    fn is_in_input_region(&self, point: Point<f64, Local>) -> bool {
+        let surface_local = point.as_logical() + self.window.geometry().loc.to_f64();
         self.window.is_in_input_region(&surface_local)
     }
 
@@ -655,13 +655,9 @@ impl LayoutElement for Mapped {
     ) {
         if ctx.target.should_block_out(self.rules.block_out_from) {
             let mut buffer = self.block_out_buffer.borrow_mut();
-            buffer.resize(self.window.geometry().size.to_f64());
-            let elem = SolidColorRenderElement::from_buffer(
-                &buffer,
-                location.as_logical(),
-                alpha,
-                Kind::Unspecified,
-            );
+            buffer.resize(self.window.geometry().size.to_f64().assume_local());
+            let elem =
+                SolidColorRenderElement::from_buffer(&buffer, location, alpha, Kind::Unspecified);
             push(elem.into());
         } else {
             let buf_pos = location.as_logical() - self.window.geometry().loc.to_f64();
@@ -702,9 +698,10 @@ impl LayoutElement for Mapped {
             let alpha = alpha * popup_rules.opacity.unwrap_or(1.).clamp(0., 1.);
 
             let surface = popup.wl_surface();
-            let popup_geo = popup.geometry();
+            let popup_geo = popup.geometry().to_f64();
+            let offset = offset.to_f64();
+
             let surface_loc = (offset - popup_geo.loc)
-                .to_f64()
                 .assume_surface_local()
                 .to_local(location);
 
@@ -719,11 +716,17 @@ impl LayoutElement for Mapped {
             );
 
             let geometry = Rectangle::new(
-                location.as_logical() + offset.to_f64(),
-                popup_geo.size.to_f64(),
+                offset.assume_surface_local().to_local(location),
+                popup_geo.size.assume_local(),
             );
-            let surface_off = popup_geo.loc.upscale(-1).to_f64();
+            let surface_off = popup_geo
+                .loc
+                .upscale(-1.)
+                .assume_surface_local()
+                .as_logical()
+                .assume_local();
             let surface_anim_scale = Scale::from(1.);
+
             let mut effect = popup_rules.background_effect;
             // Default xray to false for pop-ups since they're always on top of something.
             if effect.xray.is_none() {
@@ -731,17 +734,15 @@ impl LayoutElement for Mapped {
             }
             // Surface-space offset placed through the surface origin; coincides with
             // output-Local units as asserted on `geometry` below.
-            let xray_pos =
-                xray_pos.offset(offset.to_f64().assume_surface_local().to_local(location));
+            let xray_pos = xray_pos.offset(offset.assume_local());
             background_effect::render_for_tile(
                 ctx.as_gles(),
                 None,
-                geometry.assume_local(),
+                geometry,
                 scale.x,
                 false,
                 surface,
-                // Surface-relative offset in output units, like the xray_pos above.
-                surface_off.assume_local(),
+                surface_off,
                 surface_anim_scale,
                 self.blur_config,
                 popup_rules.geometry_corner_radius.unwrap_or_default(),
@@ -756,7 +757,7 @@ impl LayoutElement for Mapped {
     fn render_background_effect(
         &self,
         ctx: RenderCtx<GlesRenderer>,
-        geometry: Rectangle<f64, Logical>,
+        geometry: Rectangle<f64, Local>,
         scale: f64,
         clip_to_geometry: bool,
         surface_anim_scale: Scale<f64>,
@@ -768,12 +769,12 @@ impl LayoutElement for Mapped {
         background_effect::render_for_tile(
             ctx,
             None,
-            geometry.assume_local(),
+            geometry,
             scale,
             clip_to_geometry,
             self.toplevel().wl_surface(),
             // Buffer-derived offset in output units.
-            self.buf_loc().to_f64().assume_local(),
+            self.buf_loc().to_f64(),
             surface_anim_scale,
             self.blur_config,
             radius,

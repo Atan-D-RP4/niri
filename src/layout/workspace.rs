@@ -35,7 +35,9 @@ use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::RenderCtx;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, RectLocalExt, SizeExt};
+#[cfg(test)]
+use crate::utils::geometry::PointLocalExt;
+use crate::utils::geometry::{Local, PointExt, RectExt, SizeExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::{
@@ -269,10 +271,7 @@ impl<W: LayoutElement> Workspace<W> {
             view_size,
             working_area,
             shadow: Shadow::new(shadow_config),
-            background_buffer: SolidColorBuffer::new(
-                view_size.as_logical(),
-                options.layout.background_color,
-            ),
+            background_buffer: SolidColorBuffer::new(view_size, options.layout.background_color),
             output: Some(output),
             clock,
             base_options,
@@ -335,10 +334,7 @@ impl<W: LayoutElement> Workspace<W> {
             view_size,
             working_area,
             shadow: Shadow::new(shadow_config),
-            background_buffer: SolidColorBuffer::new(
-                view_size.as_logical(),
-                options.layout.background_color,
-            ),
+            background_buffer: SolidColorBuffer::new(view_size, options.layout.background_color),
             clock,
             base_options,
             options,
@@ -389,7 +385,7 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling
             .update_render_elements(is_active && !self.floating_is_active.get(), layer);
 
-        let view_rect = Rectangle::from_size(self.view_size.as_logical());
+        let view_rect = Rectangle::from_size(self.view_size);
         self.floating.update_render_elements(
             is_active && self.floating_is_active.get(),
             view_rect,
@@ -398,7 +394,7 @@ impl<W: LayoutElement> Workspace<W> {
 
         if layer.is_normal() {
             self.shadow.update_render_elements(
-                self.view_size.as_logical(),
+                self.view_size,
                 true,
                 CornerRadius::default(),
                 self.scale.fractional_scale(),
@@ -569,28 +565,20 @@ impl<W: LayoutElement> Workspace<W> {
         let transform = output.current_transform();
         let view_size = output_size(output).assume_local();
         let working_area = compute_working_area(output);
-        self.set_view_size(
-            scale,
-            transform,
-            view_size.as_logical(),
-            working_area.as_logical(),
-        );
+        self.set_view_size(scale, transform, view_size, working_area);
     }
 
     fn set_view_size(
         &mut self,
         scale: smithay::output::Scale,
         transform: Transform,
-        size: Size<f64, Logical>,
-        working_area: Rectangle<f64, Logical>,
+        size: Size<f64, Local>,
+        working_area: Rectangle<f64, Local>,
     ) {
         let scale_transform_changed = self.transform != transform
             || self.scale.integer_scale() != scale.integer_scale()
             || self.scale.fractional_scale() != scale.fractional_scale();
-        if !scale_transform_changed
-            && self.view_size == size.assume_local()
-            && self.working_area == working_area.assume_local()
-        {
+        if !scale_transform_changed && self.view_size == size && self.working_area == working_area {
             return;
         }
 
@@ -598,8 +586,8 @@ impl<W: LayoutElement> Workspace<W> {
 
         self.scale = scale;
         self.transform = transform;
-        self.view_size = size.assume_local();
-        self.working_area = working_area.assume_local();
+        self.view_size = size;
+        self.working_area = working_area;
 
         if fractional_scale_changed {
             // Options need to be recomputed for the new scale.
@@ -607,14 +595,14 @@ impl<W: LayoutElement> Workspace<W> {
         } else {
             // Pass our existing options as is.
             self.scrolling.update_config(
-                size.assume_local(),
-                working_area.assume_local(),
+                size,
+                working_area,
                 scale.fractional_scale(),
                 self.options.clone(),
             );
             self.floating.update_config(
-                size.assume_local(),
-                working_area.assume_local(),
+                size,
+                working_area,
                 scale.fractional_scale(),
                 self.options.clone(),
             );
@@ -713,11 +701,14 @@ impl<W: LayoutElement> Workspace<W> {
                         // Position the new tile in the center above the next_to tile. Think a
                         // dialog opening on top of a window.
                         let tile_size = tile.tile_size();
-                        let pos = render_pos.as_logical()
+                        let pos = render_pos
                             + (next_to_tile.tile_size().to_point() - tile_size.to_point())
-                                .downscale(2.);
-                        let pos = self.floating.clamp_within_working_area(pos, tile_size);
-                        let pos = self.floating.logical_to_size_frac(pos.assume_local());
+                                .downscale(2.)
+                                .assume_local();
+                        let pos = self
+                            .floating
+                            .clamp_within_working_area(pos, tile_size.assume_local());
+                        let pos = self.floating.logical_to_size_frac(pos);
                         tile.floating_pos = Some(pos);
 
                         self.floating.add_tile(tile, activate);
@@ -1476,8 +1467,8 @@ impl<W: LayoutElement> Workspace<W> {
                 // Working-area helpers stay Logical.
                 let pos = self
                     .floating
-                    .clamp_within_working_area(pos.as_logical(), size);
-                let pos = self.floating.logical_to_size_frac(pos.assume_local());
+                    .clamp_within_working_area(pos, size.assume_local());
+                let pos = self.floating.logical_to_size_frac(pos);
                 removed.tile.floating_pos = Some(pos);
             }
 
@@ -1493,7 +1484,7 @@ impl<W: LayoutElement> Workspace<W> {
             .unwrap();
 
         // Move-animation data stays Logical.
-        tile.animate_move_from((render_pos - new_render_pos).as_logical());
+        tile.animate_move_from(render_pos - new_render_pos);
     }
 
     pub fn set_window_floating(&mut self, id: Option<&W::Id>, floating: bool) {
@@ -1756,7 +1747,7 @@ impl<W: LayoutElement> Workspace<W> {
         for (tile, tile_pos) in self.tiles_with_render_positions_mut(false) {
             if tile.window().id() == window {
                 let view_pos = Point::from((-tile_pos.x, -tile_pos.y));
-                let view_rect = Rectangle::new(view_pos, view_size.as_logical());
+                let view_rect = Rectangle::new(view_pos, view_size);
                 tile.update_render_elements(false, view_rect);
                 let xray_pos = xray_pos.offset(tile_pos);
                 tile.store_unmap_snapshot_if_empty(
@@ -1813,12 +1804,10 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn window_under(&self, pos: Point<f64, Local>) -> Option<(&W, HitType)> {
         // This logic is consistent with tiles_with_render_positions().
         if self.is_floating_visible() {
-            if let Some(rv) =
-                self.floating
-                    .tiles_with_render_positions()
-                    .find_map(|(tile, tile_pos)| {
-                        HitType::hit_tile(tile, tile_pos.as_logical(), pos.as_logical())
-                    })
+            if let Some(rv) = self
+                .floating
+                .tiles_with_render_positions()
+                .find_map(|(tile, tile_pos)| HitType::hit_tile(tile, tile_pos, pos))
             {
                 return Some(rv);
             }
@@ -1838,8 +1827,8 @@ impl<W: LayoutElement> Workspace<W> {
 
                 let pos_within_tile = pos - tile_pos;
 
-                if tile.hit(pos_within_tile.as_logical()).is_some() {
-                    let size = tile.tile_size().to_f64();
+                if tile.hit(pos_within_tile).is_some() {
+                    let size = tile.tile_size();
 
                     let mut edges = ResizeEdge::empty();
                     if pos_within_tile.x < size.w / 3. {
@@ -2067,7 +2056,7 @@ impl<W: LayoutElement> Workspace<W> {
         assert!(self.view_size.w > 0.);
         assert!(self.view_size.h > 0.);
 
-        assert_eq!(self.background_buffer.size(), self.view_size.as_logical());
+        assert_eq!(self.background_buffer.size(), self.view_size);
         assert_eq!(
             self.background_buffer.color().components(),
             options.layout.background_color.to_array_unpremul(),

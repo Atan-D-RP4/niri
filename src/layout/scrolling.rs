@@ -23,7 +23,7 @@ use crate::niri_render_elements;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::RenderCtx;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, SizeExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::ResizeEdge;
@@ -440,7 +440,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let is_active = is_active && col_idx == active_idx;
             let col_off = Point::from((col_x, 0.));
             let col_pos = view_pos - col_off - col.render_offset();
-            let view_rect = Rectangle::new(col_pos, view_size.as_logical());
+            let view_rect = Rectangle::new(col_pos, view_size);
             col.update_render_elements(is_active, view_rect);
         }
     }
@@ -2413,7 +2413,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn columns_with_render_positions(
         &self,
-    ) -> impl Iterator<Item = (&Column<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&Column<W>, Point<f64, Local>)> {
         let view_off = Point::from((-self.view_pos(), 0.));
         self.columns_in_render_order().map(move |(col, col_x)| {
             let col_off = Point::from((col_x, 0.));
@@ -2425,7 +2425,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn columns_with_render_positions_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&mut Column<W>, Point<f64, Logical>)> {
+    ) -> impl Iterator<Item = (&mut Column<W>, Point<f64, Local>)> {
         let view_off = Point::from((-self.view_pos(), 0.));
         self.columns_in_render_order_mut().map(move |(col, col_x)| {
             let col_off = Point::from((col_x, 0.));
@@ -2445,9 +2445,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     .map(move |(tile, tile_off, visible)| {
                         let pos = col_pos + tile_off + tile.render_offset();
                         // Round to physical pixels.
-                        let pos = pos.to_physical_precise_round(scale).to_logical(scale);
+                        let pos = pos
+                            .to_physical_precise_round(scale)
+                            .to_logical(scale)
+                            .assume_local();
                         // Output-relative render position; layout data stays Logical upstream.
-                        (tile, pos.assume_local(), visible)
+                        (tile, pos, visible)
                     })
             })
     }
@@ -2464,10 +2467,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         let mut pos = col_pos + tile_off + tile.render_offset();
                         // Round to physical pixels.
                         if round {
-                            pos = pos.to_physical_precise_round(scale).to_logical(scale);
+                            pos = pos
+                                .to_physical_precise_round(scale)
+                                .to_logical(scale)
+                                .assume_local();
                         }
                         // Output-relative render position; layout data stays Logical upstream.
-                        (tile, pos.assume_local())
+                        (tile, pos)
                     })
             })
     }
@@ -2608,10 +2614,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         let window_pos = view_off + tile_off + tile.window_loc();
         let window_size = tile.window_size();
-        let window_rect = Rectangle::new(window_pos, window_size);
+        let window_rect = Rectangle::new(window_pos, window_size.assume_local());
 
         let view = Rectangle::from_size(self.view_size);
-        view.intersection(window_rect.assume_local())
+        view.intersection(window_rect)
     }
 
     pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Local>> {
@@ -2991,7 +2997,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
             // Draw the tab indicator on top.
             {
-                let pos = col_pos.to_physical_precise_round(scale).to_logical(scale);
+                let pos = col_pos
+                    .to_physical_precise_round(scale)
+                    .to_logical(scale)
+                    .assume_local();
                 col.tab_indicator
                     .render(ctx.renderer, pos, &mut |elem| push(elem.into()));
             }
@@ -3036,13 +3045,16 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         for (col, col_pos) in self.columns_with_render_positions() {
             // Hit the tab indicator.
             if col.display_mode == ColumnDisplay::Tabbed && col.sizing_mode().is_normal() {
-                let col_pos = col_pos.to_physical_precise_round(scale).to_logical(scale);
+                let col_pos = col_pos
+                    .to_physical_precise_round(scale)
+                    .to_logical(scale)
+                    .assume_local();
 
                 if let Some(idx) = col.tab_indicator.hit(
                     col.tab_indicator_area(),
                     col.tiles.len(),
                     scale,
-                    pos.as_logical() - col_pos,
+                    pos - col_pos,
                 ) {
                     let hit = HitType::Activate {
                         is_tab_indicator: true,
@@ -3058,9 +3070,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
                 let tile_pos = col_pos + tile_off + tile.render_offset();
                 // Round to physical pixels.
-                let tile_pos = tile_pos.to_physical_precise_round(scale).to_logical(scale);
+                let tile_pos = tile_pos
+                    .to_physical_precise_round(scale)
+                    .to_logical(scale)
+                    .assume_local();
 
-                if let Some(rv) = HitType::hit_tile(tile, tile_pos, pos.as_logical()) {
+                if let Some(rv) = HitType::hit_tile(tile, tile_pos, pos) {
                     return Some(rv);
                 }
             }
@@ -4198,7 +4213,7 @@ impl<W: LayoutElement> Column<W> {
                 .any(|tile| tile.is_moving_between_workspaces())
     }
 
-    pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+    pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Local>) {
         let active_idx = self.active_tile_idx;
         for (tile_idx, (tile, tile_off)) in self.tiles_mut().enumerate() {
             let is_active = is_active && tile_idx == active_idx;
@@ -4254,7 +4269,7 @@ impl<W: LayoutElement> Column<W> {
         }
     }
 
-    pub fn render_offset(&self) -> Point<f64, Logical> {
+    pub fn render_offset(&self) -> Point<f64, Local> {
         let mut offset = Point::from((0., 0.));
 
         if let Some(move_) = &self.move_x_animation {
@@ -4264,16 +4279,16 @@ impl<W: LayoutElement> Column<W> {
             offset.y += move_.from * move_.anim.value();
         }
 
-        offset
+        offset.assume_local()
     }
 
-    pub fn animate_move_from(&mut self, from: Point<f64, Logical>) {
+    pub fn animate_move_from(&mut self, from: Point<f64, Local>) {
         self.animate_move_from_with_config(from, self.options.animations.window_movement.0);
     }
 
     pub fn animate_move_from_with_config(
         &mut self,
-        from: Point<f64, Logical>,
+        from: Point<f64, Local>,
         config: niri_config::Animation,
     ) {
         self.animate_move_x_from_with_config(from.x, config);
@@ -5323,7 +5338,7 @@ impl<W: LayoutElement> Column<W> {
         self.update_tile_sizes(true);
     }
 
-    fn tiles_origin(&self) -> Point<f64, Logical> {
+    fn tiles_origin(&self) -> Point<f64, Local> {
         let mut origin = Point::from((0., 0.));
 
         match self.sizing_mode() {
@@ -5351,7 +5366,7 @@ impl<W: LayoutElement> Column<W> {
     fn tile_offsets_iter(
         &self,
         data: impl Iterator<Item = TileData>,
-    ) -> impl Iterator<Item = Point<f64, Logical>> {
+    ) -> impl Iterator<Item = Point<f64, Local>> {
         // FIXME: this should take into account always-center-single-column, which means that
         // Column should somehow know when it is being centered due to being the single column on
         // the workspace or some other reason.
@@ -5395,18 +5410,18 @@ impl<W: LayoutElement> Column<W> {
         })
     }
 
-    fn tile_offsets(&self) -> impl Iterator<Item = Point<f64, Logical>> + '_ {
+    fn tile_offsets(&self) -> impl Iterator<Item = Point<f64, Local>> + '_ {
         self.tile_offsets_iter(self.data.iter().copied())
     }
 
-    fn tile_offset(&self, tile_idx: usize) -> Point<f64, Logical> {
+    fn tile_offset(&self, tile_idx: usize) -> Point<f64, Local> {
         self.tile_offsets().nth(tile_idx).unwrap()
     }
 
     fn tile_offsets_in_render_order(
         &self,
         data: impl Iterator<Item = TileData>,
-    ) -> impl Iterator<Item = Point<f64, Logical>> {
+    ) -> impl Iterator<Item = Point<f64, Local>> {
         let active_idx = self.active_tile_idx;
         let active_pos = self.tile_offset(active_idx);
         let offsets = self
@@ -5416,19 +5431,19 @@ impl<W: LayoutElement> Column<W> {
         iter::once(active_pos).chain(offsets)
     }
 
-    pub fn tiles(&self) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>)> + '_ {
+    pub fn tiles(&self) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>)> + '_ {
         let offsets = self.tile_offsets_iter(self.data.iter().copied());
         zip(&self.tiles, offsets)
     }
 
-    fn tiles_mut(&mut self) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> + '_ {
+    fn tiles_mut(&mut self) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> + '_ {
         let offsets = self.tile_offsets_iter(self.data.iter().copied());
         zip(&mut self.tiles, offsets)
     }
 
     fn tiles_in_render_order(
         &self,
-    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>, bool)> + '_ {
+    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Local>, bool)> + '_ {
         let offsets = self.tile_offsets_in_render_order(self.data.iter().copied());
 
         let (first, rest) = self.tiles.split_at(self.active_tile_idx);
@@ -5446,7 +5461,7 @@ impl<W: LayoutElement> Column<W> {
 
     fn tiles_in_render_order_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> + '_ {
+    ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Local>)> + '_ {
         let offsets = self.tile_offsets_in_render_order(self.data.iter().copied());
 
         let (first, rest) = self.tiles.split_at_mut(self.active_tile_idx);
@@ -5456,7 +5471,7 @@ impl<W: LayoutElement> Column<W> {
         zip(tiles, offsets)
     }
 
-    fn tab_indicator_area(&self) -> Rectangle<f64, Logical> {
+    fn tab_indicator_area(&self) -> Rectangle<f64, Local> {
         // We'd like to use the active tile's animated size for the tab indicator, however we need
         // to be mindful of the case where the active tile is smaller than some other tile in the
         // column. The column assumes the size of the largest tile.
@@ -5479,9 +5494,9 @@ impl<W: LayoutElement> Column<W> {
         }
 
         let tile = &self.tiles[self.active_tile_idx];
-        let area_size = Size::from((tile.animated_tile_size().w, max_height));
+        let area_size: Size<f64, Logical> = Size::from((tile.animated_tile_size().w, max_height));
 
-        Rectangle::new(self.tiles_origin(), area_size)
+        Rectangle::new(self.tiles_origin(), area_size.assume_local())
     }
 
     pub fn start_open_animation(&mut self, id: &W::Id) -> bool {
@@ -5549,7 +5564,7 @@ impl<W: LayoutElement> Column<W> {
                 self.pending_sizing_mode(),
                 tile.window().pending_sizing_mode()
             );
-            assert_eq!(self.view_size, tile.view_size().assume_local());
+            assert_eq!(self.view_size.as_logical(), tile.view_size());
             tile.verify_invariants();
 
             let mut data2 = *data;

@@ -37,7 +37,7 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::RenderCtx;
-use crate::utils::geometry::{Local, RectExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{Local, PointLocalExt, RectExt, SizeExt};
 use crate::utils::{
     baba_is_float_offset, output_size, round_logical_in_physical, to_physical_precise_round,
     with_toplevel_role,
@@ -303,7 +303,7 @@ impl Thumbnail {
         self.size = mapped.size();
     }
 
-    fn preview_size(&self, output_size: Size<f64, Logical>, scale: f64) -> Size<f64, Logical> {
+    fn preview_size(&self, output_size: Size<f64, Logical>, scale: f64) -> Size<f64, Local> {
         let max_height = f64::max(1., self.config.max_height);
         let max_scale = f64::max(0.001, self.config.max_scale);
 
@@ -317,10 +317,12 @@ impl Thumbnail {
         let thumb_scale = f64::min(max_width / size.w, max_height / size.h);
         let thumb_scale = f64::min(max_scale, thumb_scale);
         let thumb_scale = f64::max(min_scale, thumb_scale);
-        let size = size.to_f64().upscale(thumb_scale);
+        let size = size.upscale(thumb_scale);
 
         // Round to physical pixels.
-        size.to_physical_precise_round(scale).to_logical(scale)
+        size.to_physical_precise_round(scale)
+            .to_logical(scale)
+            .assume_local()
     }
 
     fn title_texture(
@@ -342,7 +344,7 @@ impl Thumbnail {
         mut ctx: RenderCtx<R>,
         config: &niri_config::RecentWindows,
         mapped: &Mapped,
-        preview_geo: Rectangle<f64, Logical>,
+        preview_geo: Rectangle<f64, Local>,
         scale: f64,
         is_active: bool,
         bob_y: f64,
@@ -406,13 +408,13 @@ impl Thumbnail {
                 if radius != CornerRadius::default() && has_border_shader {
                     return BorderRenderElement::new(
                         // Border shader takes element-local geometry (relative uniforms).
-                        geo.size.as_logical(),
-                        Rectangle::from_size(geo.size.as_logical()),
+                        geo.size,
+                        Rectangle::from_size(geo.size),
                         GradientInterpolation::default(),
                         Color::from_color32f(elem.color()),
                         Color::from_color32f(elem.color()),
                         0.,
-                        Rectangle::from_size(geo.size.as_logical()),
+                        Rectangle::from_size(geo.size),
                         0.,
                         radius,
                         scale as f32,
@@ -1123,7 +1125,7 @@ impl WindowMruUi {
         // Put a backdrop above the current desktop view to contrast the thumbnails.
         let mut buffers = inner.backdrop_buffers.borrow_mut();
         let buffer = buffers.entry(output.clone()).or_default();
-        buffer.resize(output_size(output));
+        buffer.resize(output_size(output).assume_local());
         buffer.set_color(BACKDROP_COLOR);
         let render_backdrop = |alpha| {
             SolidColorRenderElement::from_buffer(
@@ -1501,11 +1503,11 @@ impl Inner {
             let size = thumbnail.preview_size(output_size, scale);
             let y = round((output_size.h - size.h) / 2.);
 
-            let loc = Point::new(x, y);
+            let loc: Point<f64, Local> = Point::new(x, y);
             x += size.w + gap;
 
             let geo = Rectangle::new(loc, size);
-            (thumbnail, geo.assume_local())
+            (thumbnail, geo)
         })
     }
 
@@ -1600,16 +1602,7 @@ impl Inner {
             let config = &config.recent_windows;
 
             let is_active = Some(id) == current_id;
-            thumbnail.render(
-                ctx.r(),
-                config,
-                mapped,
-                geo.as_logical(),
-                scale,
-                is_active,
-                bob_y,
-                push,
-            );
+            thumbnail.render(ctx.r(), config, mapped, geo, scale, is_active, bob_y, push);
         }
     }
 
