@@ -2539,7 +2539,7 @@ impl State {
         if let Some((output, horizontal)) = spatial_grab.flatten() {
             if let Some(geo) = self.niri.global_space.output_geometry(&output) {
                 let geo = geo.to_f64();
-                let geo_extent = geo.loc + geo.size.to_f64();
+                let geo_extent = geo.loc + geo.size;
                 if horizontal {
                     new_pos.x = (new_pos.x - geo.loc.x).rem_euclid(geo.size.w) + geo.loc.x;
                     new_pos.y = new_pos.y.clamp(geo.loc.y, geo_extent.y - 1.);

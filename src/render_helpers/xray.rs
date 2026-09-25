@@ -38,7 +38,7 @@ pub struct XrayPos {
     /// Should be upscaled by `zoom` to get position in backdrop coordinates.
     pub pos_in_backdrop: Point<f64, Logical>,
 
-    /// Zoom factor between backdrop coordinates and geometry.
+    /// Scale factor between backdrop coordinates and geometry.
     pub backdrop_scale: f64,
 }
 
