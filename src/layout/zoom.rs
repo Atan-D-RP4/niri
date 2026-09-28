@@ -6,8 +6,8 @@ use smithay::utils::{Point, Rectangle, Size};
 
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
-use crate::utils::geometry::{Global, Local, PointLocalExt, SizeExt};
-use crate::utils::view::{OutputViewCtx, ViewportTransform};
+use crate::utils::geometry::Local;
+use crate::utils::view::ViewportTransform;
 
 /// Per-output zoom state. Layout writes these every animation tick;
 /// external consumers read via `Layout`'s public API.
@@ -154,27 +154,6 @@ impl OutputZoomState {
         let focal = self.current_focal(now);
         let level = self.current_level(now);
         ViewportTransform::new(focal, level)
-    }
-
-    /// Viewport rectangle in the global coordinate frame for the current
-    /// animated zoom state.
-    ///
-    /// Computes the viewport in Local space via [`ViewportTransform`], then
-    /// translates to Global by adding the output origin. This does NOT apply
-    /// the output transform (rotation/reflection) — that is a render-stage
-    /// concern per the geometry pipeline.
-    pub fn viewport_global(
-        &self,
-        view_ctx: &OutputViewCtx,
-        now: Duration,
-    ) -> Rectangle<f64, Global> {
-        let vt = self.viewport_transform(now);
-        let output_local = Rectangle::from_size(view_ctx.local_geo.size);
-        let viewport_local = vt.apply_inverse_rect(output_local);
-        // Local→Global is a pure translation of location by the output origin.
-        // Intentionally not part of the viewport rectangle calculation.
-        let global_loc = viewport_local.loc.to_global(view_ctx);
-        Rectangle::new(global_loc, viewport_local.size.assume_global())
     }
 }
 
@@ -554,7 +533,7 @@ mod tests {
     use niri_config::animations::{Animation as AnimationConfig, Curve, EasingParams, Kind};
     use niri_config::ZoomMovementMode;
     use smithay::output::{Mode, PhysicalProperties, Subpixel};
-    use smithay::utils::{Point, Rectangle, Scale, Size, Transform};
+    use smithay::utils::{Point, Size};
 
     use super::*;
     use crate::utils::geometry::Local;
@@ -782,21 +761,5 @@ mod tests {
         assert_eq!(state.level, 3.0);
         assert_eq!(state.focal, (300.0, 200.0).into());
         assert!(!state.transitioning());
-    }
-
-    #[test]
-    fn viewport_global_adds_origin() {
-        let state = state(2.0, (960.0, 540.0).into());
-        let ctx = OutputViewCtx::new(
-            Rectangle::new((100.0, 200.0).into(), (1920.0, 1080.0).into()),
-            Rectangle::from_size((1920.0, 1080.0).into()),
-            Transform::Normal,
-            Scale::from(1.0),
-        );
-
-        let viewport = state.viewport_global(&ctx, Duration::ZERO);
-
-        assert_eq!(viewport.loc, (580.0, 470.0).into());
-        assert_eq!(viewport.size, (960.0, 540.0).into());
     }
 }

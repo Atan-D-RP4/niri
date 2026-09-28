@@ -63,7 +63,7 @@ impl PickColorGrab {
                 // screen space, so the render must apply the live viewport.
                 let elements =
                     data.niri
-                        .render_to_vec(ctx, &output, false, data.niri.live_viewport(&output));
+                        .render_to_vec(ctx, &output, false, data.niri.live_view(&output));
 
                 let mapping = match render_and_download(
                     renderer,

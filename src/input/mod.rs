@@ -59,7 +59,7 @@ use crate::utils::geometry::{
 };
 use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::view::OutputViewCtx;
-use crate::utils::{center_f64, get_monotonic_time, CastSessionId, ResizeEdge};
+use crate::utils::{center_f64, get_monotonic_time, output_size, CastSessionId, ResizeEdge};
 
 pub mod backend_ext;
 pub mod click_grab;
@@ -2479,7 +2479,8 @@ impl State {
                     let cursor_local = self.niri.seat.get_pointer().map_or_else(
                         || {
                             // No pointer (e.g. touch-only seat): use output center.
-                            Point::from((ctx.local_geo.size.w / 2.0, ctx.local_geo.size.h / 2.0))
+                            let size = output_size(&output);
+                            Point::from((size.w / 2.0, size.h / 2.0))
                         },
                         |ptr| {
                             let pos = ptr.current_location().assume_global();
@@ -2643,7 +2644,7 @@ impl State {
         if let Some((output, horizontal)) = spatial_grab.flatten() {
             if let Some(ctx) = self.niri.output_state.get(&output).map(|s| s.view_ctx) {
                 let mut local = new_pos.to_local(&ctx);
-                let size = ctx.local_geo.size;
+                let size = ctx.global_geo.size.assume_local();
                 if horizontal {
                     local.x = local.x.rem_euclid(size.w);
                     local.y = local.y.clamp(0., size.h - 1.);
@@ -2662,7 +2663,7 @@ impl State {
                 // boundaries.
                 let ctx = self.niri.output_state[output].view_ctx;
                 let mut local = new_pos.to_local(&ctx);
-                let size = ctx.local_geo.size;
+                let size = ctx.global_geo.size.assume_local();
                 local.x = local.x.clamp(0., size.w - 1.);
                 local.y = local.y.clamp(0., size.h - 1.);
                 new_pos = local.to_global(&ctx);
@@ -2691,7 +2692,7 @@ impl State {
                     if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
                         output,
                         new_pos_local,
-                        ctx.local_geo.size,
+                        output_size(output).assume_local(),
                     ) {
                         new_pos = clamped.to_global(ctx);
                     }
@@ -2862,7 +2863,7 @@ impl State {
                         if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
                             &output,
                             pos_local,
-                            ctx.local_geo.size,
+                            output_size(&output).assume_local(),
                         ) {
                             pos = clamped.to_global(&ctx);
                         }
@@ -3878,7 +3879,7 @@ impl State {
                                     if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
                                         &output,
                                         pos_local,
-                                        ctx.local_geo.size,
+                                        output_size(&output).assume_local(),
                                     ) {
                                         let new_pos = clamped.to_global(ctx);
                                         // Re-run the motion with the clamped position.
@@ -4429,11 +4430,11 @@ impl State {
         }
         let ctx = self.niri.output_state[output].view_ctx;
         let pos_local = pos.to_local(&ctx);
-        if let Some(clamped) =
-            self.niri
-                .layout
-                .zoom_clamp_to_viewport(output, pos_local, ctx.local_geo.size)
-        {
+        if let Some(clamped) = self.niri.layout.zoom_clamp_to_viewport(
+            output,
+            pos_local,
+            output_size(output).assume_local(),
+        ) {
             clamped.to_global(&ctx)
         } else {
             pos
@@ -4447,9 +4448,8 @@ impl State {
     ) -> (Point<f64, Local>, Size<f64, Local>) {
         let ctx = self.niri.output_state[output].view_ctx;
         let cursor_local = focal_point.to_local(&ctx);
-        let output_size = ctx.local_geo.size;
 
-        (cursor_local, output_size)
+        (cursor_local, output_size(output).assume_local())
     }
 
     /// Returns `true` if a zoom gesture was active and was updated.
@@ -5125,7 +5125,9 @@ fn screenshot_point_in_content(
     let transform = output.current_transform();
     let size = transform.transform_size(size);
 
-    ctx.to_physical(pos).constrain(Rectangle::from_size(size))
+    let scale = Scale::from(output.current_scale().fractional_scale());
+    ctx.to_physical(pos, scale)
+        .constrain(Rectangle::from_size(size))
 }
 
 /// Check whether the key should be intercepted and mark intercepted

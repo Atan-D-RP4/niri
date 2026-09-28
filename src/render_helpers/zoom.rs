@@ -9,7 +9,7 @@ use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame;
 use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, RectLocalExt};
-use crate::utils::view::{OutputViewCtx, ViewportTransform};
+use crate::utils::view::{round_rect, transform_rect, ViewportTransform};
 
 /// Runs a draw/capture call with the texture filter set, restoring `Linear` after.
 ///
@@ -98,7 +98,6 @@ pub fn threshold_flips_filter(factor: f64, old_threshold: f64, new_threshold: f6
 pub struct ZoomElement<E> {
     element: E,
     viewport: ViewportTransform,
-    view_ctx: OutputViewCtx,
     location: Point<f64, Physical>,
     relocate: Relocate,
     filter: Option<TextureFilter>,
@@ -129,18 +128,18 @@ impl<E: Element> ZoomElement<E> {
     pub fn from_element(
         element: E,
         viewport: ViewportTransform,
-        view_ctx: OutputViewCtx,
         location: Point<f64, Physical>,
         relocate: Relocate,
+        filter: Option<TextureFilter>,
+        filter_changed: bool,
     ) -> Self {
         Self {
             element,
             viewport,
-            view_ctx,
             location,
             relocate,
-            filter: None,
-            filter_changed: false,
+            filter,
+            filter_changed,
         }
     }
 
@@ -149,37 +148,27 @@ impl<E: Element> ZoomElement<E> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn cursor(
         elem: E,
+        viewport: ViewportTransform,
         focal: Point<f64, Physical>,
         display: Point<f64, Local>,
         hotspot: Point<i32, Physical>,
-        viewport: ViewportTransform,
         graphic_scale: f64,
-        view_ctx: OutputViewCtx,
         scale: Scale<f64>,
+        filter: Option<TextureFilter>,
+        filter_changed: bool,
     ) -> Self {
         let (final_pos, wrapper) =
             place_cursor(viewport, focal, display, hotspot, graphic_scale, scale);
-        Self::from_element(elem, wrapper, view_ctx, final_pos, Relocate::Absolute)
-    }
-
-    pub fn with_filter(mut self, filter: Option<TextureFilter>) -> Self {
-        self.filter = filter;
-        self
-    }
-
-    pub fn with_filter_changed(mut self, changed: bool) -> Self {
-        self.filter_changed = changed;
-        self
-    }
-
-    /// Viewport math in Local, unit crossings at the Physical boundary.
-    fn transform_rect(&self, rect: Rectangle<f64, Physical>) -> Rectangle<f64, Physical> {
-        let local = rect.to_logical(self.view_ctx.scale).assume_local();
-        let transformed = self.viewport.apply_rect(local);
-        transformed.to_physical(self.view_ctx.scale)
+        Self::from_element(
+            elem,
+            wrapper,
+            final_pos,
+            Relocate::Absolute,
+            filter,
+            filter_changed,
+        )
     }
 }
-
 impl<E: Element> Element for ZoomElement<E> {
     fn id(&self) -> &Id {
         self.element.id()
@@ -196,8 +185,8 @@ impl<E: Element> Element for ZoomElement<E> {
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        debug_assert_eq!(self.view_ctx.scale, scale);
-        let mut geometry = self.transform_rect(self.element.geometry(scale).to_f64());
+        let mut geometry =
+            transform_rect(&self.viewport, self.element.geometry(scale).to_f64(), scale);
 
         match self.relocate {
             Relocate::Absolute => geometry.loc = self.location,
@@ -206,9 +195,7 @@ impl<E: Element> Element for ZoomElement<E> {
 
         // NOTE: to_i32_up() would avoid 1-pixel jitter here but breaks
         // the screenshot selection region by oversizing geometry.
-        let loc = geometry.loc.to_i32_round();
-        let bottom_right = (geometry.loc + geometry.size).to_i32_round();
-        Rectangle::new(loc, (bottom_right - loc).to_size())
+        round_rect(geometry)
     }
 
     fn transform(&self) -> Transform {
@@ -220,7 +207,6 @@ impl<E: Element> Element for ZoomElement<E> {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        debug_assert_eq!(self.view_ctx.scale, scale);
         if self.filter_changed {
             // Same geometry and commit, new filter: damage the whole element
             // (element-relative, hence zeroed location).
@@ -239,15 +225,14 @@ impl<E: Element> Element for ZoomElement<E> {
             .map(|rect| {
                 let rect = rect.to_f64();
                 let absolute = Rectangle::new(inner_geometry.loc + rect.loc, rect.size);
-                let mut transformed = self.transform_rect(absolute);
-                transformed.loc -= self.transform_rect(inner_geometry).loc;
+                let mut transformed = transform_rect(&self.viewport, absolute, scale);
+                transformed.loc -= transform_rect(&self.viewport, inner_geometry, scale).loc;
                 transformed.to_i32_up()
             })
             .collect()
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        debug_assert_eq!(self.view_ctx.scale, scale);
         let inner_geometry = self.element.geometry(scale).to_f64();
         self.element
             .opaque_regions(scale)
@@ -255,8 +240,8 @@ impl<E: Element> Element for ZoomElement<E> {
             .map(|rect| {
                 let rect = rect.to_f64();
                 let absolute = Rectangle::new(inner_geometry.loc + rect.loc, rect.size);
-                let mut transformed = self.transform_rect(absolute);
-                transformed.loc -= self.transform_rect(inner_geometry).loc;
+                let mut transformed = transform_rect(&self.viewport, absolute, scale);
+                transformed.loc -= transform_rect(&self.viewport, inner_geometry, scale).loc;
                 // NOTE: to_i32_round() here to avoid oversizing the opaque region.
                 transformed.to_i32_round()
             })
@@ -358,7 +343,6 @@ impl<'render, E: RenderElement<TtyRenderer<'render>>> RenderElement<TtyRenderer<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::geometry::RectExt;
 
     #[derive(Debug, Clone)]
     struct StaticElement {
@@ -404,13 +388,6 @@ mod tests {
         ];
 
         for (scale, geometry) in cases {
-            let view_ctx = OutputViewCtx::new(
-                Rectangle::new((0., 0.).into(), (150., 150.).into()).assume_global(),
-                Rectangle::new((0., 0.).into(), (100., 100.).into()).assume_local(),
-                Transform::Normal,
-                scale,
-            );
-
             // Relative with a zero offset leaves geometry untouched.
             let wrapped = ZoomElement::from_element(
                 StaticElement {
@@ -418,9 +395,10 @@ mod tests {
                     geometry,
                 },
                 ViewportTransform::identity(),
-                view_ctx,
                 Point::from((0., 0.)),
                 Relocate::Relative,
+                None,
+                false,
             );
             assert_eq!(wrapped.geometry(scale), geometry);
 
@@ -431,9 +409,10 @@ mod tests {
                     geometry,
                 },
                 ViewportTransform::identity(),
-                view_ctx,
                 geometry.loc.to_f64(),
                 Relocate::Absolute,
+                None,
+                false,
             );
             assert_eq!(wrapped.geometry(scale), geometry);
         }
@@ -594,12 +573,6 @@ mod tests {
     #[test]
     fn filter_change_damages_full_geometry() {
         let scale = Scale::from(1.);
-        let view_ctx = OutputViewCtx::new(
-            Rectangle::new((0., 0.).into(), (100., 100.).into()).assume_global(),
-            Rectangle::new((0., 0.).into(), (100., 100.).into()).assume_local(),
-            Transform::Normal,
-            scale,
-        );
         let geometry = Rectangle::new((7, 5).into(), (24, 24).into());
         let current = CommitCounter::default();
         let element = |filter_changed: bool| {
@@ -609,11 +582,11 @@ mod tests {
                     geometry,
                 },
                 ViewportTransform::identity(),
-                view_ctx,
                 Point::from((0., 0.)),
                 Relocate::Relative,
+                None,
+                filter_changed,
             )
-            .with_filter_changed(filter_changed)
         };
 
         // Inner commit matches: no damage without a filter change.

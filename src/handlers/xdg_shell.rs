@@ -41,10 +41,11 @@ use crate::input::resize_grab::ResizeGrab;
 use crate::input::{AnyStartData, DOUBLE_CLICK_TIME};
 use crate::layout::ActivateWindow;
 use crate::niri::{CastTarget, PopupGrabState, State};
-use crate::utils::geometry::{Local, PointExt, RectExt, RectLocalExt};
+use crate::utils::geometry::{Local, PointExt, RectExt, RectLocalExt, SizeExt};
 use crate::utils::transaction::Transaction;
 use crate::utils::{
-    get_monotonic_time, output_matches_name, send_scale_transform, update_tiled_state, ResizeEdge,
+    get_monotonic_time, output_matches_name, output_size, send_scale_transform, update_tiled_state,
+    ResizeEdge,
 };
 use crate::window::{InitialConfigureState, ResolvedWindowRules, Unmapped, WindowRef};
 
@@ -1325,9 +1326,8 @@ impl State {
         };
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
-        // compute it here, sourced from the cached local size.
-        let output_size = self.niri.output_state[output].view_ctx.local_geo.size;
-        let mut target = Rectangle::from_size(output_size);
+        // compute it here, in the output's logical (scaled) size.
+        let mut target = Rectangle::from_size(output_size(output).assume_local());
 
         // Background and bottom layer popups render below the top and the overlay layer, so let's
         // put them into the non-exclusive zone.

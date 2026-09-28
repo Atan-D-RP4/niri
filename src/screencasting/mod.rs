@@ -579,8 +579,8 @@ impl Niri {
             }
 
             if cursor_data.is_none() {
-                // Output screencasts show the output as seen: live viewport.
-                let viewport = self.live_viewport(output);
+                // Output screencasts show the output as seen: live view.
+                let view = self.live_view(output);
                 let mut pointer_pos = Point::default();
                 if self.pointer_visibility.is_visible() {
                     let view_ctx = self.output_state[output].view_ctx;
@@ -595,16 +595,14 @@ impl Niri {
                     // happily appear anywhere outside the output video source in OBS.
                     if view_ctx.global_geo.contains(pointer_loc) {
                         // Metadata tracks the displayed tip; the graphic wraps below.
-                        if let Some((_, display)) = self.pointer_geometry(output, viewport) {
-                            pointer_pos = viewport.apply(display).as_logical();
+                        if let Some((_, display)) = self.pointer_geometry(output, view.viewport) {
+                            pointer_pos = view.viewport.apply(display).as_logical();
                         } else {
                             pointer_pos = pointer_loc.to_local(&view_ctx).as_logical();
                         }
                         self.render_pointer(renderer, output, &mut |elem, cursor_hotspot| {
-                            elements.push(
-                                self.zoom_pointer(elem, output, viewport, cursor_hotspot)
-                                    .into(),
-                            )
+                            elements
+                                .push(self.zoom_pointer(elem, output, view, cursor_hotspot).into())
                         });
                     }
                 }
@@ -615,14 +613,9 @@ impl Niri {
                     target: RenderTarget::Screencast,
                     xray: None,
                 };
-                // Output screencasts show the output as seen: live viewport.
-                self.render(
-                    ctx,
-                    output,
-                    false,
-                    self.live_viewport(output),
-                    &mut |elem| elements.push(elem.into()),
-                );
+                self.render(ctx, output, false, view, &mut |elem| {
+                    elements.push(elem.into())
+                });
 
                 cursor_data = Some(CursorData::compute(
                     &elements,

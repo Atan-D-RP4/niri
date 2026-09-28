@@ -15,22 +15,23 @@ use smithay::backend::input::TouchSlot;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
-use smithay::backend::renderer::{Texture as _, TextureFilter};
+use smithay::backend::renderer::Texture as _;
 use smithay::input::keyboard::{Keysym, ModifiersState};
 use smithay::output::{Output, WeakOutput};
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::animation::{Animation, Clock};
 use crate::layout::floating::DIRECTIONAL_MOVE_PX;
+use crate::niri::{magnify, OutputRenderElements};
 use crate::niri_render_elements;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::zoom::ZoomElement;
 use crate::render_helpers::{render_to_vec, RenderTarget};
-use crate::utils::geometry::{PointExt, RectExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{PointExt, RectExt, SizeExt};
 use crate::utils::to_physical_precise_round;
-use crate::utils::view::{OutputViewCtx, ViewportTransform};
+use crate::utils::view::{map_rect, OutputViewCtx};
 
 const SELECTION_BORDER: i32 = 2;
 
@@ -94,63 +95,34 @@ pub struct OutputData {
     transform: Transform,
     // Output, screencast, screen capture.
     screenshot: [OutputScreenshot; 3],
-    // Chrome colors/ids/commits; layout derives at render time (see
-    // render_output). Only index 4 (fullscreen dim for other outputs) is
-    // sized in update_buffers.
     buffers: [SolidColorBuffer; 8],
     panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
 }
 
 pub struct OutputScreenshot {
     buffer: PrimaryGpuTextureRenderElement,
-    pointer: Option<FrozenPointer>,
-    /// Live zoom factor at capture time: baseline for relative scaling.
-    ///
-    /// The texture itself is always unzoomed — this is NOT baked zoom.
+    pointer: Option<ScreenshotPointer>,
     capture_level: f64,
 }
 
-/// A frozen pointer graphic: element plus capture-time hotspot and tip.
-///
-/// Tip is stored, not re-derived, so fractional scales can't shift it.
 #[derive(Debug, Clone)]
-struct FrozenPointer {
-    element: PrimaryGpuTextureRenderElement,
-    hotspot: Point<i32, Physical>,
-    tip: Point<i32, Physical>,
-}
-
-/// Captured pointer texture, placement, hotspot and tip.
-///
-/// Hotspot and tip are resolved once at capture time.
-pub(crate) struct CapturedPointer {
-    pub(crate) texture: GlesTexture,
-    pub(crate) geo: Rectangle<i32, Physical>,
+pub(crate) struct ScreenshotPointer {
+    pub(crate) element: PrimaryGpuTextureRenderElement,
     pub(crate) hotspot: Point<i32, Physical>,
     pub(crate) tip: Point<i32, Physical>,
 }
 
-/// Live-zoom parameters for the screenshot UI preview.
-///
-/// The captured scene is static and unzoomed; the preview re-applies these
-/// each frame so the UI acts as a magnifier while selecting.
-#[derive(Clone, Copy)]
-pub struct ScreenshotPreviewZoom {
-    pub viewport: ViewportTransform,
-    pub view_ctx: OutputViewCtx,
-    pub filter: Option<TextureFilter>,
-    /// The filter band flipped since the last materialized frame; forwarded
-    /// to the preview wrapper so its damage covers the whole texture.
-    pub filter_changed: bool,
-    /// Hotspot-centered construction like the live pointer; otherwise the
-    /// graphic scales relative to the capture baseline.
-    pub scale_with_zoom: bool,
+niri_render_elements! {
+    ScreenshotChrome => {
+        Texture = PrimaryGpuTextureRenderElement
+    }
 }
 
 niri_render_elements! {
     ScreenshotUiRenderElement => {
         Screenshot = PrimaryGpuTextureRenderElement,
         SolidColor = SolidColorRenderElement,
+        Chrome = ScreenshotChrome,
         Zoomed = ZoomElement<PrimaryGpuTextureRenderElement>,
     }
 }
@@ -615,23 +587,19 @@ impl ScreenshotUi {
                     *a = rect.loc;
                     *b = rect.loc + rect.size - Size::from((1, 1));
                 }
-                // Chrome layout happens at render time from the live viewport
-                // (see render_output); buffers only carry color/id/commit.
+                // Chrome layout happens at render time from the live viewport ; buffers only carry
+                // color/id/commit.
             } else {
                 buffers[4].resize(size.to_f64().to_logical(data.scale).assume_local());
             }
         }
     }
 
-    /// Renders the screenshot UI, magnifying captured-content layers through
-    /// the live viewport (loupe). Panel stays screen-fixed; at 1x everything
-    /// passes through. Selection stays in content pixels; export renders
-    /// these same layers into the selection's screen image.
     pub fn render_output(
         &self,
         output: &Output,
         target: RenderTarget,
-        zoom: ScreenshotPreviewZoom,
+        view: OutputViewCtx,
         push: &mut dyn FnMut(ScreenshotUiRenderElement),
     ) {
         let _span = tracy_client::span!("ScreenshotUi::render_output");
@@ -675,16 +643,15 @@ impl ScreenshotUi {
                 None,
                 Kind::Unspecified,
             ));
-            push(ScreenshotUiRenderElement::Screenshot(elem))
+            push(ScreenshotChrome::Texture(elem).into())
         }
 
         // Chrome derives from one rounded screen rect with integer math, so
         // adjacent strips abut exactly: independent viewport rounding per
         // strip would open 1px hairlines as the focal animates.
-        let viewport = zoom.viewport;
         if output == &selection.0 {
             let content = rect_from_corner_points(selection.1, selection.2);
-            let display = export_rect(content, viewport, &zoom.view_ctx)
+            let display = map_rect(&view.viewport, content, Scale::from(scale))
                 .intersection(Rectangle::from_size(output_data.size))
                 .unwrap_or_default();
             let border = to_physical_precise_round(scale, SELECTION_BORDER);
@@ -724,13 +691,14 @@ impl ScreenshotUi {
         };
         let screenshot = &output_data.screenshot[index];
 
-        Self::push_content(screenshot, zoom, *show_pointer, push);
+        screenshot.push_content(view, Scale::from(scale), *show_pointer, push);
     }
 
     pub fn capture(
         &self,
         renderer: &mut GlesRenderer,
-        zoom: ScreenshotPreviewZoom,
+        view: OutputViewCtx,
+        output_scale: Scale<f64>,
     ) -> anyhow::Result<(Size<i32, Physical>, Vec<u8>)> {
         let _span = tracy_client::span!("ScreenshotUi::capture");
 
@@ -751,14 +719,21 @@ impl ScreenshotUi {
 
         // WYSIWYG export: re-render the displayed layers into the
         // selection's screen image (never the chrome), then read back.
-        let export = export_rect(content_rect, zoom.viewport, &zoom.view_ctx);
+        let export = map_rect(&view.viewport, content_rect, output_scale);
         if export.size.is_empty() {
             bail!("screenshot selection is empty after zoom mapping");
         }
 
         let mut elements = Vec::new();
-        Self::push_content(screenshot, zoom, *show_pointer, &mut |elem| {
-            elements.push(elem)
+        screenshot.push_content(view, output_scale, *show_pointer, &mut |elem| {
+            // Magnify through the same dispatch the preview uses, so the
+            // saved file can't drift from what's on screen.
+            let magnified =
+                magnify::<GlesRenderer>(&view, OutputRenderElements::ScreenshotUi(elem));
+            let OutputRenderElements::ScreenshotUi(elem) = magnified else {
+                unreachable!("screenshot UI in, screenshot UI out")
+            };
+            elements.push(elem);
         });
 
         // Crop to the selection's screen image. Relocation happens in output
@@ -768,7 +743,7 @@ impl ScreenshotUi {
         let pixels = render_to_vec(
             renderer,
             export.size,
-            zoom.view_ctx.scale,
+            output_scale,
             Transform::Normal,
             Fourcc::Abgr8888,
             elements
@@ -778,74 +753,6 @@ impl ScreenshotUi {
         )?;
 
         Ok((export.size, pixels))
-    }
-
-    /// Previewed content layers (scene + frozen pointer) without chrome.
-    ///
-    /// Shared by preview and WYSIWYG export so the file matches the display.
-    fn push_content(
-        screenshot: &OutputScreenshot,
-        zoom: ScreenshotPreviewZoom,
-        show_pointer: bool,
-        push: &mut dyn FnMut(ScreenshotUiRenderElement),
-    ) {
-        let ScreenshotPreviewZoom {
-            viewport,
-            view_ctx,
-            filter,
-            filter_changed,
-            scale_with_zoom,
-        } = zoom;
-        // Render-path optimization, not an "is zoom active" predicate: the
-        // factor <= 1 skip only avoids needless wrapping.
-        let zoomed = viewport.factor > 1.0;
-
-        if show_pointer {
-            if let Some(frozen) = screenshot.pointer.clone() {
-                if zoomed {
-                    let output_scale = view_ctx.scale;
-                    // A scaling cursor magnifies with the live level. Otherwise
-                    // the frozen graphic scales relative to its capture baseline,
-                    // preserving the open-frame ratio.
-                    let graphic_scale = if scale_with_zoom {
-                        viewport.factor
-                    } else {
-                        pointer_scale(viewport.factor, screenshot.capture_level)
-                    };
-                    let tip = frozen.tip.to_f64();
-                    let elem = ZoomElement::cursor(
-                        frozen.element,
-                        tip,
-                        tip.to_logical(output_scale).assume_local(),
-                        frozen.hotspot,
-                        viewport,
-                        graphic_scale,
-                        view_ctx,
-                        output_scale,
-                    );
-                    push(ScreenshotUiRenderElement::Zoomed(elem));
-                } else {
-                    push(ScreenshotUiRenderElement::Screenshot(frozen.element));
-                }
-            }
-        }
-
-        if zoomed {
-            let elem = ZoomElement::from_element(
-                screenshot.buffer.clone(),
-                viewport,
-                view_ctx,
-                Point::from((0., 0.)),
-                Relocate::Relative,
-            )
-            .with_filter(filter)
-            .with_filter_changed(filter_changed);
-            push(ScreenshotUiRenderElement::Zoomed(elem));
-        } else {
-            push(ScreenshotUiRenderElement::Screenshot(
-                screenshot.buffer.clone(),
-            ));
-        }
     }
 
     pub fn action(&self, raw: Keysym, mods: ModifiersState) -> Option<Action> {
@@ -1106,11 +1013,11 @@ impl ScreenshotUi {
 }
 
 impl OutputScreenshot {
-    pub(crate) fn from_textures(
+    pub(crate) fn new(
         renderer: &mut GlesRenderer,
         scale: Scale<f64>,
         texture: GlesTexture,
-        pointer: Option<CapturedPointer>,
+        pointer: Option<ScreenshotPointer>,
         capture_level: f64,
     ) -> Self {
         let buffer = PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
@@ -1122,48 +1029,51 @@ impl OutputScreenshot {
             Kind::Unspecified,
         ));
 
-        let pointer = pointer.map(
-            |CapturedPointer {
-                 texture,
-                 geo,
-                 hotspot,
-                 tip,
-             }| {
-                let element =
-                    PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
-                        TextureBuffer::from_texture(
-                            renderer,
-                            texture,
-                            scale,
-                            Transform::Normal,
-                            Vec::new(),
-                        ),
-                        geo.to_f64().to_logical(scale).loc,
-                        1.,
-                        None,
-                        None,
-                        Kind::Unspecified,
-                    ));
-                FrozenPointer {
-                    element,
-                    hotspot,
-                    tip,
-                }
-            },
-        );
-
         Self {
             buffer,
             pointer,
             capture_level,
         }
     }
-}
 
-/// Frozen-pointer scale: `live / capture`, unfloored, so the open-frame
-/// appearance ratio holds at every level.
-fn pointer_scale(live_level: f64, capture_level: f64) -> f64 {
-    live_level / capture_level
+    /// Previewed content layers (scene + frozen pointer) without chrome.
+    ///
+    /// The scene is pushed raw; the caller magnifies it.
+    fn push_content(
+        &self,
+        view: OutputViewCtx,
+        output_scale: Scale<f64>,
+        show_pointer: bool,
+        push: &mut dyn FnMut(ScreenshotUiRenderElement),
+    ) {
+        if show_pointer {
+            if let Some(frozen) = self.pointer.clone() {
+                // A scaling cursor magnifies with the live level. Otherwise
+                // the frozen graphic scales relative to its capture baseline,
+                // preserving the open-frame ratio.
+                let graphic_scale = if view.scale_cursor {
+                    view.viewport.factor
+                } else {
+                    view.viewport.factor / self.capture_level
+                };
+                let tip = frozen.tip.to_f64();
+                let elem = ZoomElement::cursor(
+                    frozen.element,
+                    view.viewport,
+                    tip,
+                    tip.to_logical(output_scale).assume_local(),
+                    frozen.hotspot,
+                    graphic_scale,
+                    output_scale,
+                    view.filter,
+                    view.filter_changed,
+                );
+                push(ScreenshotUiRenderElement::Zoomed(elem));
+            }
+        }
+
+        push(ScreenshotUiRenderElement::Screenshot(self.buffer.clone()));
+    }
 }
 
 /// Selection chrome rectangles from one rounded screen rect.
@@ -1190,21 +1100,6 @@ fn selection_chrome(
         strip(0, y, x, h),
         strip(x + w, y, output.w - x - w, h),
     ]
-}
-
-/// Content-space selection to its screen image under the viewport.
-/// Rounds like `ZoomElement::geometry` so the crop aligns with display.
-fn export_rect(
-    content: Rectangle<i32, Physical>,
-    viewport: ViewportTransform,
-    view_ctx: &OutputViewCtx,
-) -> Rectangle<i32, Physical> {
-    let local = content.to_f64().to_logical(view_ctx.scale).assume_local();
-    let mapped = viewport.apply_rect(local);
-    let physical = mapped.to_physical(view_ctx.scale);
-    let loc = physical.loc.to_i32_round();
-    let bottom_right = (physical.loc + physical.size).to_i32_round();
-    Rectangle::new(loc, (bottom_right - loc).to_size())
 }
 
 fn action(raw: Keysym, mods: ModifiersState) -> Option<Action> {
@@ -1372,27 +1267,14 @@ fn render_panel(
 mod tests {
     use super::*;
     use crate::render_helpers::zoom::place_cursor;
-    use crate::utils::geometry::{Local, RectExt};
-
-    #[test]
-    fn scale_tracks_capture_baseline() {
-        // Opened unzoomed, zoomed to 2x: full relative scale.
-        assert_eq!(pointer_scale(2., 1.), 2.);
-        // Opened at 2x, zoomed to 3x: scales from the capture baseline.
-        assert_eq!(pointer_scale(3., 2.), 1.5);
-        // Unchanged level: captured size.
-        assert_eq!(pointer_scale(2., 2.), 1.);
-        // Zoomed back out below capture: shrinks proportionally, keeping the
-        // open-frame appearance ratio instead of looming over the scene.
-        assert_eq!(pointer_scale(1., 2.), 0.5);
-        assert_eq!(pointer_scale(1.5, 2.), 0.75);
-    }
+    use crate::utils::geometry::Local;
+    use crate::utils::view::ViewportTransform;
 
     #[test]
     fn pointer_scales_relative_to_capture() {
         // Opened at 2x, now at 3x: graphic scales 1.5x around its tip.
         let viewport = ViewportTransform::new((0., 0.).into(), 3.);
-        let scale = pointer_scale(viewport.factor, 2.);
+        let scale = viewport.factor / 2.;
         let tip = Point::<f64, Physical>::from((10., 10.));
         let display = Point::<f64, Local>::from((10., 10.));
         let (final_pos, wrapper) = place_cursor(
@@ -1409,18 +1291,9 @@ mod tests {
         assert_eq!(final_pos, Point::<f64, Physical>::from((24., 24.)));
     }
 
-    fn export_view_ctx(scale: f64) -> OutputViewCtx {
-        OutputViewCtx::new(
-            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_global(),
-            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
-            Transform::Normal,
-            Scale::from(scale),
-        )
-    }
-
     #[test]
-    fn export_rect_maps_content_through_viewport() {
-        let ctx = export_view_ctx(1.);
+    fn map_rect_maps_content_through_viewport() {
+        let scale = Scale::from(1.);
         let cases = [
             // Identity viewport preserves content exactly.
             (
@@ -1443,7 +1316,7 @@ mod tests {
         ];
 
         for (content, viewport, expected) in cases {
-            assert_eq!(export_rect(content, viewport, &ctx), expected);
+            assert_eq!(map_rect(&viewport, content, scale), expected);
         }
     }
 

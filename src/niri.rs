@@ -166,7 +166,7 @@ use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
-use crate::render_helpers::texture::TextureBuffer;
+use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::zoom::{
     threshold_flips_filter, zoom_filter, zoom_filter_changed, ZoomElement,
@@ -183,8 +183,7 @@ use crate::ui::hotkey_overlay::HotkeyOverlay;
 use crate::ui::mru::{MruCloseRequest, WindowMruUi, WindowMruUiRenderElement};
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{
-    CapturedPointer, OutputScreenshot, ScreenshotPreviewZoom, ScreenshotUi,
-    ScreenshotUiRenderElement,
+    OutputScreenshot, ScreenshotPointer, ScreenshotUi, ScreenshotUiRenderElement,
 };
 use crate::utils::geometry::{
     Global, Local, PointExt, PointGlobalExt, PointLocalExt, PointSurfaceLocalExt, RectExt,
@@ -541,13 +540,9 @@ pub struct OutputState {
     /// Filter last materialized into zoomed render elements for this output.
     ///
     /// Owned by [`OutputState::zoom_filter_for`]; the render path is `&self`,
-    /// hence the `Cell`. Captures pass `IDENTITY` and early-return before it.
+    /// hence the `Cell`. Only the redraw boundary calls that, so native
+    /// captures (which pass `ViewportTransform::identity`) never reach it.
     pub last_zoom_filter: Cell<Option<TextureFilter>>,
-    /// Band tracker for the screenshot preview, independent of the main scene.
-    ///
-    /// Prevents the preview from stealing the main Cell's changed flag on band
-    /// flips (and vice-versa).
-    pub last_preview_filter: Cell<Option<TextureFilter>>,
 }
 
 impl OutputState {
@@ -561,18 +556,6 @@ impl OutputState {
         let filter = zoom_filter(factor, threshold);
         let changed = zoom_filter_changed(self.last_zoom_filter.get(), filter);
         self.last_zoom_filter.set(filter);
-        (filter, changed)
-    }
-
-    /// Per-frame band sampling for the screenshot preview.
-    ///
-    /// Mirrors [`Self::zoom_filter_for`] but tracks the band independently so
-    /// the preview's transition flag is never clobbered by (or clobbers) the
-    /// main scene's.
-    pub fn preview_filter_for(&self, factor: f64, threshold: f64) -> (Option<TextureFilter>, bool) {
-        let filter = zoom_filter(factor, threshold);
-        let changed = zoom_filter_changed(self.last_preview_filter.get(), filter);
-        self.last_preview_filter.set(filter);
         (filter, changed)
     }
 }
@@ -2288,13 +2271,15 @@ impl State {
         let output = selection.0.clone();
         let path = path.take();
 
-        // WYSIWYG - export uses the live viewport at confirm time, matching the
-        // preview the selection was drawn against.
-        let viewport = self.niri.live_viewport(&output);
-        let zoom = self.niri.preview_zoom(&output, viewport);
+        // WYSIWYG: export at the live view. No damage tracking, so no band-change flag.
+        let view = OutputViewCtx {
+            filter_changed: false,
+            ..self.niri.live_view(&output)
+        };
+        let scale = Scale::from(output.current_scale().fractional_scale());
 
         self.backend.with_primary_renderer(|renderer| {
-            match self.niri.screenshot_ui.capture(renderer, zoom) {
+            match self.niri.screenshot_ui.capture(renderer, view, scale) {
                 Ok((size, pixels)) => {
                     if let Err(err) = self.niri.save_screenshot(size, pixels, write_to_disk, path) {
                         warn!("error saving screenshot: {err:?}");
@@ -2982,9 +2967,11 @@ impl Niri {
     /// `to_local`/`to_global` go stale (wrong origin, size, or scale) if this is skipped.
     fn refresh_view_ctx(&mut self, output: &Output) {
         let view_ctx = OutputViewCtx::for_output(&self.global_space, output);
-        if let Some(view_ctx) = view_ctx {
+        if let Some(fresh) = view_ctx {
             if let Some(state) = self.output_state.get_mut(output) {
-                state.view_ctx = view_ctx;
+                // Geometry is rebuilt from the Output; the per-frame zoom state
+                // is owned by sample_frame_view and must survive a resize.
+                state.view_ctx.global_geo = fresh.global_geo;
             }
         }
 
@@ -2993,25 +2980,27 @@ impl Niri {
         // At 1x zoom the focal is visually irrelevant, so this only fixes
         // the anchor for the next zoom-in.  The `(0, 0)` gate ensures
         // user-set focals are never clobbered.
-        if let Some(view_ctx) = view_ctx {
+        if view_ctx.is_some() {
             if let Some(zoom) = self.layout.zoom_state_for_output_mut(output) {
                 if zoom.level == 1.0 && !zoom.transitioning() && zoom.focal == Point::from((0., 0.))
                 {
-                    zoom.focal = Point::from((
-                        view_ctx.local_geo.loc.x + view_ctx.local_geo.size.w / 2.0,
-                        view_ctx.local_geo.loc.y + view_ctx.local_geo.size.h / 2.0,
-                    ));
+                    let size = output_size(output);
+                    zoom.focal = Point::from((size.w / 2.0, size.h / 2.0));
                 }
             }
         }
 
+        // Compare geometry only: the frame fields are owned by
+        // sample_frame_view, so a fresh context never matches them.
         debug_assert!(
             self.output_state
                 .get(output)
-                .and_then(|s| OutputViewCtx::for_output(&self.global_space, output)
-                    .map(|fresh| s.view_ctx == fresh))
+                .and_then(|s| {
+                    OutputViewCtx::for_output(&self.global_space, output)
+                        .map(|fresh| s.view_ctx.global_geo == fresh.global_geo)
+                })
                 .unwrap_or(true),
-            "stale view_ctx after refresh for output"
+            "stale view_ctx geometry after refresh for output"
         );
     }
 
@@ -3225,7 +3214,6 @@ impl Niri {
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
             view_ctx: OutputViewCtx::from_origin((0., 0.).into()),
             last_zoom_filter: Cell::new(None),
-            last_preview_filter: Cell::new(None),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -3414,8 +3402,7 @@ impl Niri {
             return false;
         }
 
-        // Use the cached local size, matching the content-space clamping elsewhere.
-        let size = self.output_state[output].view_ctx.local_geo.size;
+        let size = output_size(output).assume_local();
 
         let contains = move |corner: Point<f64, Local>| {
             Rectangle::new(corner, Size::new(1., 1.)).contains(pos)
@@ -4638,67 +4625,19 @@ impl Niri {
         }
     }
 
-    fn zoom_element<R: NiriRenderer>(
-        &self,
-        element: OutputRenderElements<R>,
-        output: &Output,
-        vt: ViewportTransform,
-        zoom_filter: Option<TextureFilter>,
-        filter_changed: bool,
-    ) -> OutputRenderElements<R> {
-        if matches!(element, OutputRenderElements::Pointer(_)) {
-            return element;
-        }
-
-        let view_ctx = self.output_state[output].view_ctx;
-
-        macro_rules! apply_zoom {
-            ($($variant:ident), *) => {
-                match element {
-                $(
-                    OutputRenderElements::$variant(elem) => {
-                        let e = ZoomElement::from_element(
-                            elem,
-                            vt,
-                            view_ctx,
-                            Point::from((0.0, 0.0)),
-                            Relocate::Relative,
-                        )
-                        .with_filter(zoom_filter)
-                        .with_filter_changed(filter_changed);
-                        ZoomRenderElement::$variant(e).into()
-                    }
-                )*
-                _ => element,
-                }
-            }
-        }
-
-        apply_zoom!(
-            Monitor,
-            RescaledTile,
-            LayerSurface,
-            Wayland,
-            SolidColor,
-            RelocatedColor,
-            RelocatedLayerSurface
-        )
-    }
-
     /// Applies the zoom transform to the pointer/cursor render element by wrapping it in a
     /// hotspot-centered zoom transform, to keep it aligned with the pointer position.
     pub(crate) fn zoom_pointer<R: NiriRenderer>(
         &self,
         elem: PointerRenderElements<R>,
         output: &Output,
-        vt: ViewportTransform,
+        view: OutputViewCtx,
         cursor_hotspot: Option<Point<i32, Physical>>,
     ) -> OutputRenderElements<R> {
         let output_scale = Scale::from(output.current_scale().fractional_scale());
-        let view_ctx = self.output_state[output].view_ctx;
         let element_kind = elem.kind();
 
-        let (focal, display) = match self.pointer_geometry(output, vt) {
+        let (focal, display) = match self.pointer_geometry(output, view.viewport) {
             Some((focal, display)) => (focal, display),
             None => {
                 return elem.into();
@@ -4714,22 +4653,22 @@ impl Niri {
         };
 
         // Only real cursors scale; DnD icons just follow unscaled.
-        let scale_with_zoom = self.config.borrow().cursor.scale_with_zoom;
-        let graphic_scale = if scale_with_zoom && element_kind == Kind::Cursor {
-            vt.factor
+        let graphic_scale = if view.scale_cursor && element_kind == Kind::Cursor {
+            view.viewport.factor
         } else {
             1.
         };
 
         let elem = ZoomElement::cursor(
             elem,
+            view.viewport,
             focal,
             display,
             hotspot,
-            vt,
             graphic_scale,
-            view_ctx,
             output_scale,
+            view.filter,
+            view.filter_changed,
         );
         ZoomRenderElement::Pointer(elem).into()
     }
@@ -4755,38 +4694,42 @@ impl Niri {
             return None;
         }
 
-        let view_ctx = self.output_state.get(output)?.view_ctx;
-        let output_rect = Rectangle::from_size(view_ctx.local_geo.size);
+        let output_rect = Rectangle::from_size(output_size(output).assume_local());
         let viewport = vt.apply_inverse_rect(output_rect);
 
         let display_cursor = pointer_local.constrain(viewport);
 
-        Some((pointer_local.to_physical(view_ctx.scale), display_cursor))
+        let scale = Scale::from(output.current_scale().fractional_scale());
+        Some((pointer_local.to_physical(scale), display_cursor))
     }
 
-    /// Live viewport for an output, or IDENTITY without zoom state.
+    /// The output's view for the frame being presented.
+    pub fn live_view(&self, output: &Output) -> OutputViewCtx {
+        self.output_state[output].view_ctx
+    }
+
+    /// Samples and stores the view for the frame about to be presented.
     ///
-    /// Display paths and output mirrors pass this; native captures pass IDENTITY.
-    pub fn live_viewport(&self, output: &Output) -> ViewportTransform {
-        self.layout
+    /// Sampling the filter band here, at the redraw boundary, means every render
+    /// path in the frame agrees on `filter_changed` and only one claims a flip.
+    fn sample_frame_view(&mut self, output: &Output) {
+        let viewport = self
+            .layout
             .zoom_state_for_output(output)
             .map(|state| state.viewport_transform(self.clock.now()))
-            .unwrap_or_else(ViewportTransform::identity)
-    }
-
-    /// Live preview/export parameters for the screenshot UI on an output.
-    fn preview_zoom(&self, output: &Output, viewport: ViewportTransform) -> ScreenshotPreviewZoom {
-        let view_ctx = self.output_state[output].view_ctx;
+            .unwrap_or_else(ViewportTransform::identity);
         let config = self.config.borrow();
         let (filter, filter_changed) = self.output_state[output]
-            .preview_filter_for(viewport.factor, config.zoom.filter_threshold);
-        ScreenshotPreviewZoom {
-            viewport,
-            view_ctx,
-            filter,
-            filter_changed,
-            scale_with_zoom: config.cursor.scale_with_zoom,
-        }
+            .zoom_filter_for(viewport.factor, config.zoom.filter_threshold);
+        let cursor_scales_with_zoom = config.cursor.scale_with_zoom;
+        drop(config);
+        let state = self.output_state.get_mut(output).unwrap();
+        // Only the frame fields change; the geometry is owned by resize.
+        let view_ctx = &mut state.view_ctx;
+        view_ctx.viewport = viewport;
+        view_ctx.filter = filter;
+        view_ctx.filter_changed = filter_changed;
+        view_ctx.scale_cursor = cursor_scales_with_zoom;
     }
 
     pub fn render_to_vec<R: NiriRenderer>(
@@ -4794,10 +4737,10 @@ impl Niri {
         ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
-        viewport: ViewportTransform,
+        view: OutputViewCtx,
     ) -> Vec<OutputRenderElements<R>> {
         let mut elements = Vec::new();
-        self.render(ctx, output, include_pointer, viewport, &mut |elem| {
+        self.render(ctx, output, include_pointer, view, &mut |elem| {
             elements.push(elem)
         });
         elements
@@ -4808,7 +4751,7 @@ impl Niri {
         mut ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
-        viewport: ViewportTransform,
+        view: OutputViewCtx,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
         let _span = tracy_client::span!("Niri::render");
@@ -4829,17 +4772,10 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
-        // Sample the filter once per frame for the main scene so every
-        // ZoomElement sees the same changed flag.
-        let (zoom_filter, filter_changed) = self.output_state[output]
-            .zoom_filter_for(viewport.factor, self.config.borrow().zoom.filter_threshold);
-
-        let push = &mut move |elem| {
-            let elem = self.zoom_element(elem, output, viewport, zoom_filter, filter_changed);
-            push(elem);
-        };
-
-        self.render_inner(ctx, output, include_pointer, viewport, push);
+        // Magnify content, then hand the post-zoom element to the debug sink
+        // that render_inner installs.
+        let magnify_push = &mut |elem: OutputRenderElements<R>| push(magnify(&view, elem));
+        self.render_inner(ctx, output, include_pointer, view, magnify_push);
 
         self.clear_xray_elements(output);
     }
@@ -4849,7 +4785,7 @@ impl Niri {
         mut ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
-        viewport: ViewportTransform,
+        view: OutputViewCtx,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
         let state = self.output_state.get(output).unwrap();
@@ -4867,7 +4803,7 @@ impl Niri {
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
             self.render_pointer(ctx.renderer, output, &mut |elem, cursor_hotspot| {
-                push(self.zoom_pointer(elem, output, viewport, cursor_hotspot));
+                push(self.zoom_pointer(elem, output, view, cursor_hotspot));
             });
         }
 
@@ -4926,9 +4862,8 @@ impl Niri {
 
         // If the screenshot UI is open, draw it.
         if self.screenshot_ui.is_open() {
-            let zoom = self.preview_zoom(output, viewport);
             self.screenshot_ui
-                .render_output(output, ctx.target, zoom, &mut |elem| push(elem.into()));
+                .render_output(output, ctx.target, view, &mut |elem| push(elem.into()));
 
             // Add the backdrop for outputs that were connected while the screenshot UI was open.
             push(backdrop);
@@ -5252,6 +5187,9 @@ impl Niri {
         self.clock.set_unadjusted(target_presentation_time);
 
         self.update_render_elements(Some(output));
+
+        // Sample this output's view once, at the presentation boundary.
+        self.sample_frame_view(output);
 
         let mut res = RenderResult::Skipped;
         if self.monitors_active {
@@ -5942,7 +5880,7 @@ impl Niri {
                         ctx,
                         output,
                         screencopy.overlay_cursor(),
-                        self.live_viewport(output),
+                        self.live_view(output),
                         &mut |elem| {
                             let elem = RelocateRenderElement::from_element(
                                 elem,
@@ -6030,7 +5968,7 @@ impl Niri {
             ctx,
             output,
             screencopy.overlay_cursor(),
-            self.live_viewport(output),
+            self.live_view(output),
             &mut |elem| {
                 let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
                 elements.push(elem);
@@ -6122,7 +6060,7 @@ impl Niri {
                     ctx,
                     output,
                     draw_cursor,
-                    self.live_viewport(output),
+                    self.live_view(output),
                     &mut |elem| {
                         elements.push(elem);
                     },
@@ -6423,11 +6361,15 @@ impl Niri {
             let hotspot = image_copy_capture_impl::cursor_capture_hotspot(self, &output);
             s.session.set_cursor_hotspot((hotspot.x, hotspot.y));
 
-            // Unlike frame damage, the position is in transformed buffer coordinates, i.e. the
-            // displayed orientation, so the output transform is not undone here. This matches
-            // wlroots.
-            let pos: Point<i32, Physical> =
-                (pointer_pos - geo.loc.to_f64()).to_physical_precise_round(scale);
+            // Report the displayed tip, so it lines up with the zoomed content that
+            // render_for_image_copy_capture produces. Mirrors the screencast path. The
+            // cursor graphic is fixed-size, so only the position is mapped.
+            let viewport = self.live_view(&output).viewport;
+            let pos: Point<i32, Physical> = match self.pointer_geometry(&output, viewport) {
+                Some((_, display)) => viewport.apply(display).to_physical_precise_round(scale),
+                // Pointer is on another output: the overlap check below drops it.
+                None => (pointer_pos - geo.loc.to_f64()).to_physical_precise_round(scale),
+            };
 
             // Cursors are considered to have entered if any part of the image
             // intersects the output, not just the hotspot, so the position may
@@ -6572,8 +6514,14 @@ impl Niri {
                 };
                 // Static unzoomed scene for the UI; the preview re-applies
                 // the live viewport on top each frame.
-                let elements =
-                    self.render_to_vec(ctx, &output, false, ViewportTransform::identity());
+                // Native capture: the texture is unzoomed; the preview applies
+                // the live viewport on top each frame.
+                let elements = self.render_to_vec(
+                    ctx,
+                    &output,
+                    false,
+                    self.output_state[&output].view_ctx.unzoomed(),
+                );
                 let elements = elements.iter().rev();
 
                 let res = render_to_texture(
@@ -6627,22 +6575,30 @@ impl Niri {
                         let view_ctx = self.output_state[&output].view_ctx;
                         let tip = cursor_pos
                             .to_local(&view_ctx)
-                            .to_physical_precise_round(view_ctx.scale);
+                            .to_physical_precise_round(scale);
                         let hotspot = tip - geo.loc;
-                        CapturedPointer {
-                            texture,
-                            geo,
+                        ScreenshotPointer {
+                            element: PrimaryGpuTextureRenderElement(
+                                TextureRenderElement::from_texture_buffer(
+                                    TextureBuffer::from_texture(
+                                        renderer,
+                                        texture,
+                                        scale,
+                                        Transform::Normal,
+                                        Vec::new(),
+                                    ),
+                                    geo.to_f64().to_logical(scale).loc,
+                                    1.,
+                                    None,
+                                    None,
+                                    Kind::Unspecified,
+                                ),
+                            ),
                             hotspot,
                             tip,
                         }
                     });
-                    OutputScreenshot::from_textures(
-                        renderer,
-                        scale,
-                        texture,
-                        pointer,
-                        capture_level,
-                    )
+                    OutputScreenshot::new(renderer, scale, texture, pointer, capture_level)
                 })
             });
 
@@ -6677,8 +6633,13 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
         };
-        let elements =
-            self.render_to_vec(ctx, output, include_pointer, ViewportTransform::identity());
+        // Native capture, so identity.
+        let elements = self.render_to_vec(
+            ctx,
+            output,
+            include_pointer,
+            self.output_state[output].view_ctx.unzoomed(),
+        );
         let elements = elements.iter().rev();
         let pixels = render_to_vec(
             renderer,
@@ -6912,8 +6873,13 @@ impl Niri {
                 target: RenderTarget::ScreenCapture,
                 xray: None,
             };
-            let elements =
-                self.render_to_vec(ctx, output, include_pointer, ViewportTransform::identity());
+            // Native capture, so identity.
+            let elements = self.render_to_vec(
+                ctx,
+                output,
+                include_pointer,
+                self.output_state[output].view_ctx.unzoomed(),
+            );
 
             let (texture, _sync) = render_to_texture(
                 renderer,
@@ -7437,8 +7403,7 @@ impl Niri {
                         target,
                         xray: None,
                     };
-                    let elements =
-                        self.render_to_vec(ctx, &output, false, self.live_viewport(&output));
+                    let elements = self.render_to_vec(ctx, &output, false, self.live_view(&output));
                     let elements = elements.iter().rev();
 
                     let res = render_to_texture(
@@ -7672,6 +7637,63 @@ fn scale_relocate_crop<E: Element>(
     let elem = RescaleRenderElement::from_element(elem, Point::from((0, 0)), zoom);
     let elem = RelocateRenderElement::from_element(elem, ws_geo.loc, Relocate::Relative);
     CropRenderElement::from_element(elem, output_scale, ws_geo)
+}
+
+/// Applies the frame's zoom to one output render element.
+///
+/// Only content-space elements are magnified. `Pointer`/`Zoomed` arrive
+/// pre-placed (tip-anchored, which a generic wrap cannot express), and overlays
+/// (`Texture`, `WindowMruUi`, `ExitConfirmDialog`, `RelocatedMemoryBuffer`) stay
+/// screen-fixed.
+pub(crate) fn magnify<R: NiriRenderer>(
+    view: &OutputViewCtx,
+    element: OutputRenderElements<R>,
+) -> OutputRenderElements<R> {
+    // The one place a content-space element is wrapped: magnified about the
+    // viewport focal, in place, with this frame's magnification filter.
+    fn wrap<E: Element>(view: &OutputViewCtx, elem: E) -> ZoomElement<E> {
+        ZoomElement::from_element(
+            elem,
+            view.viewport,
+            Point::from((0., 0.)),
+            Relocate::Relative,
+            view.filter,
+            view.filter_changed,
+        )
+    }
+
+    macro_rules! magnify_variants {
+        ($($variant:ident), *) => {
+            match element {
+                // The screenshot UI magnifies its own content; chrome passes through.
+                OutputRenderElements::ScreenshotUi(elem) => {
+                    let zoomed = match elem {
+                        ScreenshotUiRenderElement::Screenshot(raw) => {
+                            ScreenshotUiRenderElement::Zoomed(wrap(view, raw))
+                        }
+                        elem => elem,
+                    };
+                    return OutputRenderElements::ScreenshotUi(zoomed);
+                }
+                $(
+                    OutputRenderElements::$variant(elem) => {
+                        ZoomRenderElement::$variant(wrap(view, elem)).into()
+                    }
+                )*
+                _ => element,
+            }
+        }
+    }
+
+    magnify_variants!(
+        Monitor,
+        RescaledTile,
+        LayerSurface,
+        RelocatedLayerSurface,
+        RelocatedColor,
+        Wayland,
+        SolidColor
+    )
 }
 
 niri_render_elements! {

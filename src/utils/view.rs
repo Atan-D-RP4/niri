@@ -1,10 +1,13 @@
 use glam::{DMat3, DVec2};
+use smithay::backend::renderer::TextureFilter;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::Space;
 use smithay::output::Output;
-use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale};
 
-use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt};
+use crate::utils::geometry::{
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
+};
 
 /// Immutable, sampled transformation of output-local logical geometry.
 ///
@@ -17,12 +20,20 @@ pub struct ViewportTransform {
     pub factor: f64,
 }
 
+/// An output's geometry, plus how the current frame is presented for it.
+///
+/// The geometry fields are rebuilt on resize; the frame fields are sampled
+/// once per presented frame (see `Niri::sample_frame_view`), so every render
+/// path for a frame agrees on the viewport and the magnification filter band.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OutputViewCtx {
     pub global_geo: Rectangle<f64, Global>,
-    pub local_geo: Rectangle<f64, Local>,
-    pub output_transform: Transform,
-    pub scale: Scale<f64>,
+    pub viewport: ViewportTransform,
+    pub filter: Option<TextureFilter>,
+    /// The filter band flipped since the last materialized frame; forces full
+    /// damage. Cleared on the next frame sample.
+    pub filter_changed: bool,
+    pub scale_cursor: bool,
 }
 
 impl ViewportTransform {
@@ -89,41 +100,47 @@ impl ViewportTransform {
 impl OutputViewCtx {
     /// Creates a minimal context from an output origin point.
     ///
-    /// Only the origin is meaningful for Global ↔ Local translation;
-    /// transform and scale are set to defaults (Normal, 1.0).
+    /// Only the origin is meaningful for Global ↔ Local translation, and the
+    /// frame is unzoomed.
     pub fn from_origin(origin: Point<f64, Logical>) -> Self {
-        Self::new(
-            Rectangle::new(origin.assume_global(), (0., 0.).into()),
-            Rectangle::new((0., 0.).into(), (0., 0.).into()).assume_local(),
-            Transform::Normal,
-            Scale::from(1.0),
-        )
+        Self::new(Rectangle::new(origin.assume_global(), (0., 0.).into()))
     }
 
-    /// Converts output-local logical coordinates into compositor-global logical coordinates.
+    /// Creates a context with unzoomed frame state.
     ///
-    /// The output transform is applied before output scale and global placement.
-    pub fn new(
-        global_geo: Rectangle<f64, Global>,
-        local_geo: Rectangle<f64, Local>,
-        output_transform: Transform,
-        scale: Scale<f64>,
-    ) -> Self {
+    /// The frame fields are overwritten once per presented frame.
+    pub fn new(global_geo: Rectangle<f64, Global>) -> Self {
         Self {
             global_geo,
-            local_geo,
-            output_transform,
-            scale,
+            viewport: ViewportTransform::identity(),
+            filter: None,
+            filter_changed: false,
+            scale_cursor: true,
+        }
+    }
+
+    /// This output's view with the frame state cleared, for native captures.
+    pub fn unzoomed(&self) -> Self {
+        Self {
+            viewport: ViewportTransform::identity(),
+            filter: None,
+            filter_changed: false,
+            scale_cursor: true,
+            ..*self
         }
     }
 
     /// Converts a content-space global point to physical pixels.
     ///
     /// Mirrors [`PointExt::to_local`]: Global → Local via the output origin,
-    /// then Local → Physical via the output scale. Generic over the result
+    /// then Local -> Physical via the caller's output scale. Generic over the
     /// coordinate so call sites keep their existing rounding behavior.
-    pub fn to_physical<R: Coordinate>(&self, pos: Point<f64, Global>) -> Point<R, Physical> {
-        pos.to_local(self).to_physical_precise_round(self.scale)
+    pub fn to_physical<R: Coordinate>(
+        &self,
+        pos: Point<f64, Global>,
+        scale: Scale<f64>,
+    ) -> Point<R, Physical> {
+        pos.to_local(self).to_physical_precise_round(scale)
     }
 
     pub fn for_output<W: SpaceElement + PartialEq>(
@@ -134,29 +151,42 @@ impl OutputViewCtx {
             .output_geometry(output)?
             .to_f64()
             .assume_global();
-        let mode = output.current_mode()?;
-        let scale = output.current_scale().fractional_scale();
-        // Local size is in the presented orientation: apply the output
-        // transform before the scale conversion, matching
-        // `Layout::output_size_for_focal`.
-        let mode_size = output.current_transform().transform_size(mode.size);
-        let logical_size = mode_size.to_f64().to_logical(scale);
-        let local_geo = Rectangle::from_size(logical_size).assume_local();
-        let transform = output.current_transform();
-        Some(Self::new(
-            global_geo,
-            local_geo,
-            transform,
-            Scale::from(scale),
-        ))
+        Some(Self::new(global_geo))
     }
+}
+
+/// Rounding convention shared by `ZoomElement::geometry` and screenshot export, so
+/// the export crop aligns with the displayed geometry. Damage rounds looser.
+pub(crate) fn round_rect(rect: Rectangle<f64, Physical>) -> Rectangle<i32, Physical> {
+    let loc = rect.loc.to_i32_round();
+    let bottom_right = (rect.loc + rect.size).to_i32_round();
+    Rectangle::new(loc, (bottom_right - loc).to_size())
+}
+
+/// Maps a content-space physical rect through the viewport, unrounded.
+pub fn transform_rect(
+    viewport: &ViewportTransform,
+    rect: Rectangle<f64, Physical>,
+    scale: Scale<f64>,
+) -> Rectangle<f64, Physical> {
+    let local = rect.to_logical(scale).assume_local();
+    viewport.apply_rect(local).to_physical(scale)
+}
+
+/// Content-space physical rect to its screen image, rounded for display.
+pub fn map_rect(
+    viewport: &ViewportTransform,
+    content: Rectangle<i32, Physical>,
+    scale: Scale<f64>,
+) -> Rectangle<i32, Physical> {
+    round_rect(transform_rect(viewport, content.to_f64(), scale))
 }
 
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
     use glam::DVec3;
-    use smithay::utils::{Point, Rectangle, Scale, Transform};
+    use smithay::utils::{Point, Rectangle};
 
     use super::{OutputViewCtx, ViewportTransform};
     use crate::utils::geometry::{
@@ -242,12 +272,7 @@ mod tests {
         ];
 
         for ((ox, oy), (gx, gy)) in cases {
-            let ctx = OutputViewCtx::new(
-                Rectangle::new((ox, oy).into(), (1920., 1080.).into()).assume_global(),
-                Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
-                Transform::Normal,
-                Scale::from(1.),
-            );
+            let ctx = OutputViewCtx::new(Rectangle::new((ox, oy).into(), (1920., 1080.).into()));
             let global: Point<f64, Global> = (gx, gy).into();
 
             let local = global.to_local(&ctx);

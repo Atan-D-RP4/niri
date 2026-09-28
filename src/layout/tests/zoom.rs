@@ -3,12 +3,12 @@ use std::time::Duration;
 use niri_config::animations::{Animation, Curve, EasingParams, Kind};
 use niri_config::{Config, ZoomIncrementType, ZoomMovementMode};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale as OutputScale, Subpixel};
-use smithay::utils::{Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Point, Rectangle, Size, Transform};
 
 use super::*;
 use crate::layout::zoom::{FocalTrackingContext, ZoomFocalAnimation, ZoomLevelAnimation};
 use crate::layout::{Layout, LayoutElement};
-use crate::utils::view::{OutputViewCtx, ViewportTransform};
+use crate::utils::view::ViewportTransform;
 
 impl<W: LayoutElement> Layout<W> {
     pub fn toggle_zoom_lock(&mut self, output: &Output) {
@@ -610,45 +610,6 @@ fn gesture_cancel_restores_level() {
     assert!(!state_after.transitioning());
     assert!((state_after.focal.x - 500.0).abs() < 1e-6);
     assert!((state_after.focal.y - 400.0).abs() < 1e-6);
-}
-
-proptest! {
-    /// Invariant: viewport_global output is within valid bounds for various
-    /// zoom levels and focal points.
-    #[test]
-    fn zoom_state_viewport_bounds(
-        level in 1.0f64..=5.0f64,
-        focal_x in 0.0f64..1920.0f64,
-        focal_y in 0.0f64..1080.0f64,
-    ) {
-        let state = crate::layout::zoom::OutputZoomState {
-            level,
-            focal: Point::from((focal_x, focal_y)),
-            locked: false,
-            level_transition: ZoomLevelTransition::Idle,
-            focal_animation: None,
-        };
-        let output_view_ctx = OutputViewCtx {
-            global_geo: Rectangle::from_size(Size::from((1920.0f64, 1080.0f64))),
-            local_geo: Rectangle::from_size(Size::from((1920.0f64, 1080.0f64))),
-            output_transform: Transform::Normal,
-            scale: Scale::from(1.0f64),
-        };
-        let viewport = state.viewport_global(&output_view_ctx, Duration::ZERO);
-
-        prop_assert!(viewport.size.w > 0.0, "viewport width must be positive");
-        prop_assert!(viewport.size.h > 0.0, "viewport height must be positive");
-        prop_assert!(
-            viewport.size.w <= 1920.0 + 1e-9,
-            "viewport width {} exceeds output width 1920",
-            viewport.size.w,
-        );
-        prop_assert!(
-            viewport.size.h <= 1080.0 + 1e-9,
-            "viewport height {} exceeds output height 1080",
-            viewport.size.h,
-        );
-    }
 }
 
 #[test]

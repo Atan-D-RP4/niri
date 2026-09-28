@@ -401,12 +401,7 @@ mod tests {
 
     #[test]
     fn global_local_point_conversion_round_trips() {
-        let ctx = OutputViewCtx::new(
-            Rectangle::new((40., 25.).into(), (1920., 1080.).into()),
-            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
-            Default::default(),
-            (1., 1.).into(),
-        );
+        let ctx = OutputViewCtx::new(Rectangle::new((40., 25.).into(), (1920., 1080.).into()));
         let point: Point<f64, Global> = (120., 90.).into();
 
         let local: Point<f64, Local> = point.to_local(&ctx);
@@ -415,12 +410,7 @@ mod tests {
 
     #[test]
     fn global_local_rectangle_conversion_round_trips() {
-        let ctx = OutputViewCtx::new(
-            Rectangle::new((40., 25.).into(), (1920., 1080.).into()),
-            Rectangle::new((0., 0.).into(), (1920., 1080.).into()).assume_local(),
-            Default::default(),
-            (1., 1.).into(),
-        );
+        let ctx = OutputViewCtx::new(Rectangle::new((40., 25.).into(), (1920., 1080.).into()));
         let logical = Rectangle::new((120., 90.).into(), (800., 600.).into());
         let global = logical.assume_global();
 
