@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::f64::consts::TAU;
-use std::iter::zip;
 use std::rc::Rc;
 
 use anyhow::Context;
@@ -93,7 +92,6 @@ pub struct OutputData {
     // Output, screencast, screen capture.
     screenshot: [OutputScreenshot; 3],
     buffers: [SolidColorBuffer; 8],
-    locations: [Point<i32, Physical>; 8],
     panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
 }
 
@@ -104,9 +102,16 @@ pub struct OutputScreenshot {
 }
 
 niri_render_elements! {
+    ScreenshotChrome => {
+        Texture = PrimaryGpuTextureRenderElement,
+    }
+}
+
+niri_render_elements! {
     ScreenshotUiRenderElement => {
         Screenshot = PrimaryGpuTextureRenderElement,
         SolidColor = SolidColorRenderElement,
+        Chrome = ScreenshotChrome,
     }
 }
 
@@ -200,7 +205,6 @@ impl ScreenshotUi {
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                 ];
-                let locations = [Default::default(); 8];
 
                 let mut render_panel_ = |text| {
                     render_panel(renderer, scale, text)
@@ -217,7 +221,6 @@ impl ScreenshotUi {
                     transform,
                     screenshot,
                     buffers,
-                    locations,
                     panel,
                 };
                 (output, data)
@@ -561,7 +564,6 @@ impl ScreenshotUi {
 
         for (output, data) in output_data {
             let buffers = &mut data.buffers;
-            let locations = &mut data.locations;
             let size = data.size;
             let scale = data.scale;
 
@@ -576,35 +578,13 @@ impl ScreenshotUi {
                     *b = rect.loc + rect.size - Size::from((1, 1));
                 }
 
-                let border = to_physical_precise_round(scale, SELECTION_BORDER);
+                let border_px = to_physical_precise_round(scale, SELECTION_BORDER);
+                let border = Rectangle::from_size(Size::from((border_px, border_px)));
+                let layout = selection_layout(rect, border, size);
 
-                let resize = move |buffer: &mut SolidColorBuffer, w: i32, h: i32| {
-                    let size = Size::<_, Physical>::from((w, h));
-                    buffer.resize(size.to_f64().to_logical(scale));
-                };
-
-                resize(&mut buffers[0], rect.size.w + border * 2, border);
-                resize(&mut buffers[1], rect.size.w + border * 2, border);
-                resize(&mut buffers[2], border, rect.size.h);
-                resize(&mut buffers[3], border, rect.size.h);
-
-                resize(&mut buffers[4], size.w, rect.loc.y);
-                resize(&mut buffers[5], size.w, size.h - rect.loc.y - rect.size.h);
-                resize(&mut buffers[6], rect.loc.x, rect.size.h);
-                resize(
-                    &mut buffers[7],
-                    size.w - rect.loc.x - rect.size.w,
-                    rect.size.h,
-                );
-
-                locations[0] = Point::from((rect.loc.x - border, rect.loc.y - border));
-                locations[1] = Point::from((rect.loc.x - border, rect.loc.y + rect.size.h));
-                locations[2] = Point::from((rect.loc.x - border, rect.loc.y));
-                locations[3] = Point::from((rect.loc.x + rect.size.w, rect.loc.y));
-
-                locations[5] = Point::from((0, rect.loc.y + rect.size.h));
-                locations[6] = Point::from((0, rect.loc.y));
-                locations[7] = Point::from((rect.loc.x + rect.size.w, rect.loc.y));
+                for (buffer, layout_rect) in buffers.iter_mut().zip(layout.iter()) {
+                    buffer.resize(layout_rect.size.to_f64().to_logical(scale));
+                }
             } else {
                 buffers[0].resize((0., 0.));
                 buffers[1].resize((0., 0.));
@@ -628,6 +608,7 @@ impl ScreenshotUi {
         let _span = tracy_client::span!("ScreenshotUi::render_output");
 
         let Self::Open {
+            selection,
             output_data,
             show_pointer,
             button,
@@ -657,24 +638,38 @@ impl ScreenshotUi {
                 .to_f64()
                 .to_logical(scale);
 
-            let elem = PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
-                buffer.clone(),
-                location,
-                alpha * progress,
-                None,
-                None,
-                Kind::Unspecified,
+            let elem = ScreenshotChrome::Texture(PrimaryGpuTextureRenderElement(
+                TextureRenderElement::from_texture_buffer(
+                    buffer.clone(),
+                    location,
+                    alpha * progress,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                ),
             ));
             push(elem.into());
         }
 
-        for (buffer, loc) in zip(&output_data.buffers, &output_data.locations) {
-            let elem = SolidColorRenderElement::from_buffer(
-                buffer,
-                loc.to_f64().to_logical(scale),
-                progress,
-                Kind::Unspecified,
-            );
+        let layout = if output == &selection.0 {
+            let size = output_data.size;
+            let rect = rect_from_corner_points(selection.1, selection.2);
+            let border_px = to_physical_precise_round(scale, SELECTION_BORDER);
+            let border = Rectangle::from_size(Size::from((border_px, border_px)));
+            Some(selection_layout(rect, border, size))
+        } else {
+            None
+        };
+
+        for (index, buffer) in output_data.buffers.iter().enumerate() {
+            let location = if let Some(layout) = &layout {
+                layout[index].to_f64().to_logical(scale).loc
+            } else {
+                (0., 0.).into()
+            };
+            let elem =
+                SolidColorRenderElement::from_buffer(buffer, location, progress, Kind::Unspecified);
+
             push(elem.into());
         }
 
@@ -1140,6 +1135,55 @@ pub fn rect_from_corner_points(
     // We're adding + 1 because the pointer is clamped to output size - 1, so to get the full
     // screen worth of selection we must add back that + 1.
     Rectangle::from_extremities((x1, y1), (x2 + 1, y2 + 1))
+}
+
+fn selection_layout(
+    rect: Rectangle<i32, Physical>,
+    border: Rectangle<i32, Physical>,
+    size: Size<i32, Physical>,
+) -> [Rectangle<i32, Physical>; 8] {
+    let mut layout = [Default::default(); 8];
+
+    // Top border
+    layout[0] = Rectangle::new(
+        Point::from((rect.loc.x - border.size.w, rect.loc.y - border.size.h)),
+        Size::from((rect.size.w + border.size.w * 2, border.size.h)),
+    );
+    // Bottom border
+    layout[1] = Rectangle::new(
+        Point::from((rect.loc.x - border.size.w, rect.loc.y + rect.size.h)),
+        Size::from((rect.size.w + border.size.w * 2, border.size.h)),
+    );
+    // Left border
+    layout[2] = Rectangle::new(
+        Point::from((rect.loc.x - border.size.w, rect.loc.y)),
+        Size::from((border.size.w, rect.size.h)),
+    );
+    // Right border
+    layout[3] = Rectangle::new(
+        Point::from((rect.loc.x + rect.size.w, rect.loc.y)),
+        Size::from((border.size.w, rect.size.h)),
+    );
+
+    // Top overlay
+    layout[4] = Rectangle::new(Point::from((0, 0)), Size::from((size.w, rect.loc.y)));
+    // Bottom overlay
+    layout[5] = Rectangle::new(
+        Point::from((0, rect.loc.y + rect.size.h)),
+        Size::from((size.w, size.h - (rect.loc.y + rect.size.h))),
+    );
+    // Left overlay
+    layout[6] = Rectangle::new(
+        Point::from((0, rect.loc.y)),
+        Size::from((rect.loc.x, rect.size.h)),
+    );
+    // Right overlay
+    layout[7] = Rectangle::new(
+        Point::from((rect.loc.x + rect.size.w, rect.loc.y)),
+        Size::from((size.w - (rect.loc.x + rect.size.w), rect.size.h)),
+    );
+
+    layout
 }
 
 fn panel_location(output_data: &OutputData, panel_size: Size<i32, Buffer>) -> Point<i32, Physical> {
