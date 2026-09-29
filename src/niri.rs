@@ -167,6 +167,7 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
+use crate::render_helpers::view::ViewElement;
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{
     encompassing_geo, render_to_dmabuf, render_to_encompassing_texture, render_to_shm,
@@ -183,6 +184,7 @@ use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRende
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::{CHILD_DISPLAY, CHILD_ENV};
 use crate::utils::vblank_throttle::VBlankThrottle;
+use crate::utils::view::OutputViewport;
 use crate::utils::watcher::Watcher;
 use crate::utils::xwayland::satellite::Satellite;
 use crate::utils::{
@@ -1227,7 +1229,10 @@ impl State {
 
     pub fn move_cursor_to_output(&mut self, output: &Output) {
         let geo = self.niri.global_space.output_geometry(output).unwrap();
-        self.move_cursor(center(geo).to_f64());
+        self.move_cursor(
+            self.niri
+                .screen_to_content_global(output, center(geo).to_f64()),
+        );
     }
 
     pub fn refresh_popup_grab(&mut self) {
@@ -3232,6 +3237,8 @@ impl Niri {
         // motion clamping.
         let geom = self.global_space.output_geometry(output).unwrap();
         let size = geom.size.to_f64();
+        // `pos` is output-local content; the corner rects below are output-local screen space.
+        let pos = self.output_view(output).content_to_screen(pos);
 
         let contains = move |corner: Point<f64, Logical>| {
             Rectangle::new(corner, Size::new(1., 1.)).contains(pos)
@@ -3848,10 +3855,14 @@ impl Niri {
         &self,
         renderer: &mut R,
         output: &Output,
+        view: OutputViewport,
         push: &mut dyn FnMut(PointerRenderElements<R>),
     ) {
         let _span = tracy_client::span!("Niri::render_pointer");
-        let output_scale = output.current_scale();
+
+        let cursor_scale = output.current_scale().integer_scale();
+        let output_scale = Scale::from(output.current_scale().fractional_scale());
+
         let output_pos = self.global_space.output_geometry(output).unwrap().loc;
 
         // Check whether we need to draw the tablet cursor or the regular cursor.
@@ -3861,25 +3872,43 @@ impl Niri {
         let pointer_pos = pointer_pos - output_pos.to_f64();
 
         // Get the render cursor to draw.
-        let cursor_scale = output_scale.integer_scale();
         let render_cursor = self.cursor_manager.get_render_cursor(cursor_scale);
 
-        let output_scale = Scale::from(output.current_scale().fractional_scale());
+        let anchor = pointer_pos;
+        let anchor_physical = anchor.to_physical_precise_round(output_scale);
+
+        // Where the view draws the content point the cursor is anchored to.
+        let anchor_screen = view
+            .content_to_screen(anchor)
+            .to_physical_precise_round(output_scale);
+
+        let graphic_scale = 1.0;
 
         match render_cursor {
             RenderCursor::Hidden => (),
             RenderCursor::Surface { surface, hotspot } => {
-                let pointer_pos =
-                    (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
+                let offset = hotspot
+                    .to_f64()
+                    .upscale(graphic_scale)
+                    .to_physical_precise_round(output_scale);
 
                 push_elements_from_surface_tree(
                     renderer,
                     &surface,
-                    pointer_pos,
+                    anchor_physical,
                     output_scale,
                     1.,
                     Kind::Cursor,
-                    &mut |elem| push(elem.into()),
+                    &mut |elem| {
+                        push(
+                            RelocateRenderElement::from_element(
+                                elem,
+                                anchor_screen - offset,
+                                Relocate::Absolute,
+                            )
+                            .into(),
+                        )
+                    },
                 );
             }
             RenderCursor::Named {
@@ -3889,20 +3918,29 @@ impl Niri {
             } => {
                 let (idx, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
                 let hotspot = XCursor::hotspot(frame).to_logical(scale);
-                let pointer_pos =
-                    (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
-
+                let offset = hotspot
+                    .to_f64()
+                    .upscale(graphic_scale)
+                    .to_physical_precise_round(output_scale);
                 let texture = self.cursor_texture_cache.get(icon, scale, &cursor, idx);
+
                 match MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
-                    pointer_pos,
+                    anchor_physical.to_f64(),
                     &texture,
                     None,
                     None,
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => push(element.into()),
+                    Ok(element) => push(
+                        RelocateRenderElement::from_element(
+                            element,
+                            anchor_screen - offset,
+                            Relocate::Absolute,
+                        )
+                        .into(),
+                    ),
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -3911,16 +3949,28 @@ impl Niri {
         }
 
         if let Some(dnd_icon) = self.dnd_icon.as_ref() {
-            let pointer_pos =
-                (pointer_pos + dnd_icon.offset.to_f64()).to_physical_precise_round(output_scale);
+            let offset = dnd_icon
+                .offset
+                .to_f64()
+                .upscale(-1.)
+                .to_physical_precise_round(output_scale);
             push_elements_from_surface_tree(
                 renderer,
                 &dnd_icon.surface,
-                pointer_pos,
+                anchor_physical,
                 output_scale,
                 1.,
                 Kind::ScanoutCandidate,
-                &mut |elem| push(elem.into()),
+                &mut |elem| {
+                    push(
+                        RelocateRenderElement::from_element(
+                            elem,
+                            anchor_screen - offset,
+                            Relocate::Absolute,
+                        )
+                        .into(),
+                    )
+                },
             );
         }
     }
@@ -4307,14 +4357,48 @@ impl Niri {
         }
     }
 
+    pub fn output_view(&self, _output: &Output) -> OutputViewport {
+        // FIXME: Should use focal and factor from the zoom state once that is implemented.
+        OutputViewport::identity()
+    }
+
+    pub fn screen_to_content_global(
+        &self,
+        output: &Output,
+        pos: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
+        let origin = self
+            .global_space
+            .output_geometry(output)
+            .unwrap()
+            .loc
+            .to_f64();
+        self.output_view(output).screen_to_content(pos - origin) + origin
+    }
+
+    pub fn content_to_screen_global(
+        &self,
+        output: &Output,
+        pos: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
+        let origin = self
+            .global_space
+            .output_geometry(output)
+            .unwrap()
+            .loc
+            .to_f64();
+        self.output_view(output).content_to_screen(pos - origin) + origin
+    }
+
     pub fn render_to_vec<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
+        view: OutputViewport,
     ) -> Vec<OutputRenderElements<R>> {
         let mut elements = Vec::new();
-        self.render(ctx, output, include_pointer, &mut |elem| {
+        self.render(ctx, output, include_pointer, view, &mut |elem| {
             elements.push(elem)
         });
         elements
@@ -4325,6 +4409,7 @@ impl Niri {
         mut ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
+        view: OutputViewport,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
         let _span = tracy_client::span!("Niri::render");
@@ -4345,7 +4430,11 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
-        self.render_inner(ctx, output, include_pointer, push);
+        let push = &mut move |elem| {
+            let elem = view_elements(elem, output, view);
+            push(elem);
+        };
+        self.render_inner(ctx, output, include_pointer, view, push);
 
         self.clear_xray_elements(output);
     }
@@ -4355,6 +4444,7 @@ impl Niri {
         mut ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
+        view: OutputViewport,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
         let state = self.output_state.get(output).unwrap();
@@ -4371,7 +4461,7 @@ impl Niri {
 
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
-            self.render_pointer(ctx.renderer, output, &mut |elem| push(elem.into()));
+            self.render_pointer(ctx.renderer, output, view, &mut |elem| push(elem.into()));
         }
 
         // Next, the screen transition texture.
@@ -5439,11 +5529,20 @@ impl Niri {
                     };
                     let offset = screencopy.region_loc().upscale(-1);
                     let mut elements = Vec::new();
-                    self.render(ctx, output, screencopy.overlay_cursor(), &mut |elem| {
-                        let elem =
-                            RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
-                        elements.push(elem);
-                    });
+                    self.render(
+                        ctx,
+                        output,
+                        screencopy.overlay_cursor(),
+                        self.output_view(output),
+                        &mut |elem| {
+                            let elem = RelocateRenderElement::from_element(
+                                elem,
+                                offset,
+                                Relocate::Relative,
+                            );
+                            elements.push(elem);
+                        },
+                    );
 
                     let (damages, states) = Self::damage_screencopy_internal(
                         output,
@@ -5517,10 +5616,16 @@ impl Niri {
         };
         let offset = screencopy.region_loc().upscale(-1);
         let mut elements = Vec::new();
-        self.render(ctx, output, screencopy.overlay_cursor(), &mut |elem| {
-            let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
-            elements.push(elem);
-        });
+        self.render(
+            ctx,
+            output,
+            screencopy.overlay_cursor(),
+            self.output_view(output),
+            &mut |elem| {
+                let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
+                elements.push(elem);
+            },
+        );
 
         let Some(damage_tracker) = self.screencopy_state.damage_tracker(manager) else {
             error!("screencopy queue must not be deleted as long as frames exist");
@@ -5603,9 +5708,15 @@ impl Niri {
                     xray: None,
                 };
                 let mut elements = Vec::new();
-                self.render(ctx, output, draw_cursor, &mut |elem| {
-                    elements.push(elem);
-                });
+                self.render(
+                    ctx,
+                    output,
+                    draw_cursor,
+                    self.output_view(output),
+                    &mut |elem| {
+                        elements.push(elem);
+                    },
+                );
                 elements
             });
 
@@ -5814,7 +5925,17 @@ impl Niri {
                     output_scale,
                     1.,
                     Kind::Cursor,
-                    &mut |elem| elements.push(elem.into()),
+                    &mut |elem| {
+                        // The elements are already shifted to the origin, so apply only an identity relocation.
+                        elements.push(
+                            RelocateRenderElement::from_element(
+                                elem,
+                                Point::default(),
+                                Relocate::Relative,
+                            )
+                            .into(),
+                        )
+                    },
                 );
             }
             RenderCursor::Named {
@@ -5833,7 +5954,15 @@ impl Niri {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => elements.push(element.into()),
+                    Ok(element) => elements.push(
+                        // The elements are already shifted to the origin, so apply only an identity relocation.
+                        RelocateRenderElement::from_element(
+                            element,
+                            Point::default(),
+                            Relocate::Relative,
+                        )
+                        .into(),
+                    ),
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -6034,7 +6163,7 @@ impl Niri {
                     target,
                     xray: None,
                 };
-                let elements = self.render_to_vec(ctx, &output, false);
+                let elements = self.render_to_vec(ctx, &output, false, self.output_view(&output));
                 let elements = elements.iter().rev();
 
                 let res = render_to_texture(
@@ -6056,7 +6185,12 @@ impl Niri {
                 // show the pointer even when it's hidden through cursor {} options. The user can
                 // then toggle it in the screenshot UI as needed.
                 if self.pointer_visibility != PointerVisibility::Disabled {
-                    self.render_pointer(renderer, &output, &mut |elem| pointer.push(elem));
+                    self.render_pointer(
+                        renderer,
+                        &output,
+                        self.output_view(&output),
+                        &mut |elem| pointer.push(elem),
+                    );
                 }
 
                 let res_pointer = if pointer.is_empty() {
@@ -6116,7 +6250,7 @@ impl Niri {
             target: RenderTarget::ScreenCapture,
             xray: None,
         };
-        let elements = self.render_to_vec(ctx, output, include_pointer);
+        let elements = self.render_to_vec(ctx, output, include_pointer, self.output_view(output));
         let elements = elements.iter().rev();
         let pixels = render_to_vec(
             renderer,
@@ -6158,7 +6292,8 @@ impl Niri {
                 // Pointer elements are at output-local physical coords.
                 // Relocate by -win_pos to make them window-relative.
                 let pos = win_pos.to_physical_precise_round(scale).upscale(-1);
-                self.render_pointer(renderer, output, &mut |elem| {
+                // The captured window draws 1:1, so anchor the cursor at identity, not through the view.
+                self.render_pointer(renderer, output, OutputViewport::identity(), &mut |elem| {
                     let elem = RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                     elements.push(elem.into());
                 });
@@ -6349,7 +6484,8 @@ impl Niri {
                 target: RenderTarget::ScreenCapture,
                 xray: None,
             };
-            let elements = self.render_to_vec(ctx, output, include_pointer);
+            let elements =
+                self.render_to_vec(ctx, output, include_pointer, self.output_view(output));
 
             let (texture, _sync) = render_to_texture(
                 renderer,
@@ -6873,7 +7009,8 @@ impl Niri {
                         target,
                         xray: None,
                     };
-                    let elements = self.render_to_vec(ctx, &output, false);
+                    let elements =
+                        self.render_to_vec(ctx, &output, false, self.output_view(&output));
                     let elements = elements.iter().rev();
 
                     let res = render_to_texture(
@@ -7109,10 +7246,45 @@ fn scale_relocate_crop<E: Element>(
     CropRenderElement::from_element(elem, output_scale, ws_geo)
 }
 
+fn view_elements<R: NiriRenderer>(
+    element: OutputRenderElements<R>,
+    output: &Output,
+    view: OutputViewport,
+) -> OutputRenderElements<R> {
+    let scale = output.current_scale().fractional_scale();
+    macro_rules! view_variants {
+        ($($variant:ident), *) => {
+            match element {
+            $(
+                OutputRenderElements::$variant(elem) => {
+                    let e = ViewElement::from_element(
+                        elem,
+                        view,
+                        Scale::from(scale),
+                    );
+                    ViewportRenderElements::$variant(e).into()
+                }
+            )*
+            _ => element,
+            }
+        }
+    }
+
+    view_variants!(
+        Monitor,
+        RescaledTile,
+        LayerSurface,
+        RelocatedLayerSurface,
+        RelocatedColor,
+        Wayland,
+        SolidColor
+    )
+}
+
 niri_render_elements! {
     PointerRenderElements<R> => {
-        Wayland = WaylandSurfaceRenderElement<R>,
-        NamedPointer = MemoryRenderBufferRenderElement<R>,
+        Wayland = RelocateRenderElement<WaylandSurfaceRenderElement<R>>,
+        NamedPointer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
     }
 }
 
@@ -7120,6 +7292,22 @@ niri_render_elements! {
     WindowScreenshotRenderElement<R> => {
         Layout = LayoutElementRenderElement<R>,
         Pointer = RelocateRenderElement<PointerRenderElements<R>>,
+    }
+}
+
+niri_render_elements! {
+    ViewportRenderElements<R> => {
+        Monitor = ViewElement<MonitorRenderElement<R>>,
+        RescaledTile = ViewElement<RescaleRenderElement<TileRenderElement<R>>>,
+        LayerSurface = ViewElement<LayerSurfaceRenderElement<R>>,
+        RelocatedLayerSurface = ViewElement<CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<LayerSurfaceRenderElement<R>>>
+        >>,
+        RelocatedColor = ViewElement<CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<SolidColorRenderElement>>
+        >>,
+        Wayland = ViewElement<WaylandSurfaceRenderElement<R>>,
+        SolidColor = ViewElement<SolidColorRenderElement>,
     }
 }
 
@@ -7141,6 +7329,7 @@ niri_render_elements! {
         WindowMruUi = WindowMruUiRenderElement<R>,
         ExitConfirmDialog = ExitConfirmDialogRenderElement,
         Texture = PrimaryGpuTextureRenderElement,
+        Viewport = ViewportRenderElements<R>,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
     }

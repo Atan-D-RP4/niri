@@ -2688,13 +2688,20 @@ impl State {
         // Any of the early returns here mean that the pointer is not inside the hot corner.
         self.niri.pointer_inside_hot_corner = false;
 
-        let Some(pos) = self.compute_absolute_location(&event, None).or_else(|| {
+        let Some(mut pos) = self.compute_absolute_location(&event, None).or_else(|| {
             self.global_bounding_rectangle().map(|output_geo| {
                 event.position_transformed(output_geo.size) + output_geo.loc.to_f64()
             })
         }) else {
             return;
         };
+
+        // Device positions are screen; everything below speaks content.
+        // Convert once, here, using the output resolved from this same screen
+        // point. A position outside every output stays screen space.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            pos = self.niri.screen_to_content_global(output, pos);
+        }
 
         let serial = SERIAL_COUNTER.next_serial();
 
@@ -3575,9 +3582,16 @@ impl State {
     ) where
         I::Device: 'static,
     {
-        let Some(pos) = self.compute_tablet_position(event) else {
+        let Some(mut pos) = self.compute_tablet_position(event) else {
             return;
         };
+
+        // Device positions are screen; everything below speaks content.
+        // Convert once, here, using the output resolved from this same screen
+        // point. A position outside every output stays screen space.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            pos = self.niri.screen_to_content_global(output, pos);
+        }
 
         self.update_screenshot_ui(pos, None);
 
@@ -4249,10 +4263,17 @@ impl State {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
         };
-        let Some(pos) = self.compute_touch_location(&evt) else {
+        let Some(mut pos) = self.compute_touch_location(&evt) else {
             return;
         };
         let slot = evt.slot();
+
+        // Device positions are screen; everything below speaks content.
+        // Convert once, here, using the output resolved from this same screen
+        // point. A position outside every output stays screen space.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            pos = self.niri.screen_to_content_global(output, pos);
+        }
 
         let serial = SERIAL_COUNTER.next_serial();
 
@@ -4396,10 +4417,17 @@ impl State {
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
         };
-        let Some(pos) = self.compute_touch_location(&evt) else {
+        let Some(mut pos) = self.compute_touch_location(&evt) else {
             return;
         };
         let slot = evt.slot();
+
+        // Device positions are screen; everything below speaks content.
+        // Convert once, here, using the output resolved from this same screen
+        // point. A position outside every output stays screen space.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            pos = self.niri.screen_to_content_global(output, pos);
+        }
 
         if let Some(output) = self.niri.screenshot_ui.selection_output().cloned() {
             self.update_screenshot_ui(pos, Some(slot));
@@ -4477,8 +4505,8 @@ impl State {
         grab.is::<PickWindowGrab>() || grab.is::<PickColorGrab>() || Self::is_dnd_grab(grab)
     }
 
-    /// Converts a global logical position to screenshot UI physical coords
-    /// for the given output.
+    /// Converts a content-space global logical position to screenshot UI
+    /// physical coords for the given output.
     fn screenshot_ui_point(
         &self,
         output: &Output,
@@ -4488,7 +4516,7 @@ impl State {
         let scale = output.current_scale().fractional_scale();
         let logical_size = output_size(output);
 
-        let point = pos - geom.loc.to_f64();
+        let point = self.niri.content_to_screen_global(output, pos) - geom.loc.to_f64();
         point
             .constrain(Rectangle::from_size(logical_size))
             .to_physical_precise_round(scale)
@@ -4502,7 +4530,8 @@ impl State {
         }
     }
 
-    /// Routes pointer or touch motion to the MRU UI, if the motion is within the MRU output.
+    /// Routes a content-space position from the pointer or touch motion to the screen-fixed MRU UI,
+    /// if the motion is within the MRU output.
     fn mru_pointer_motion(&mut self, pos: Point<f64, Logical>) -> Option<MappedId> {
         let mru_output = self.niri.window_mru_ui.output()?;
         let (output, pos_within_output) = self.niri.output_under(pos)?;
@@ -4510,7 +4539,11 @@ impl State {
             return None;
         }
 
-        self.niri.window_mru_ui.pointer_motion(pos_within_output)
+        let screen = self
+            .niri
+            .output_view(output)
+            .content_to_screen(pos_within_output);
+        self.niri.window_mru_ui.pointer_motion(screen)
     }
 }
 

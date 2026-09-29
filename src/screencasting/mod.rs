@@ -19,6 +19,7 @@ use crate::dbus::mutter_screen_cast::{self, CursorMode, ScreenCastToNiri, Stream
 use crate::niri::{CastTarget, Niri, OutputRenderElements, PointerRenderElements, State};
 use crate::niri_render_elements;
 use crate::render_helpers::{RenderCtx, RenderTarget};
+use crate::utils::view::OutputViewport;
 use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
 use crate::window::mapped::{MappedId, WindowCastRenderElements};
 
@@ -220,11 +221,19 @@ impl State {
                         pointer_location = pointer_pos - output_pos.to_f64() - buf_pos;
 
                         let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                        self.niri.render_pointer(renderer, output, &mut |elem| {
-                            let elem =
-                                RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
-                            elements.push(CastRenderElement::from(elem));
-                        });
+                        self.niri.render_pointer(
+                            renderer,
+                            output,
+                            self.niri.output_view(output),
+                            &mut |elem| {
+                                let elem = RelocateRenderElement::from_element(
+                                    elem,
+                                    pos,
+                                    Relocate::Relative,
+                                );
+                                elements.push(CastRenderElement::from(elem));
+                            },
+                        );
                     }
                 }
 
@@ -586,10 +595,16 @@ impl Niri {
                     // Only render when the pointer is within the output. Otherwise, it will
                     // happily appear anywhere outside the output video source in OBS.
                     if output_geo.contains(pointer_loc) {
-                        pointer_pos = pointer_loc - output_geo.loc;
-                        self.render_pointer(renderer, output, &mut |elem| {
-                            elements.push(elem.into())
-                        });
+                        // The cursor position reported to the client must be screen-space, since the buffer is rendered through the view.
+                        pointer_pos = self
+                            .output_view(output)
+                            .content_to_screen(pointer_loc - output_geo.loc);
+                        self.render_pointer(
+                            renderer,
+                            output,
+                            self.output_view(output),
+                            &mut |elem| elements.push(elem.into()),
+                        );
                     }
                 }
 
@@ -599,7 +614,9 @@ impl Niri {
                     target: RenderTarget::Screencast,
                     xray: None,
                 };
-                self.render(ctx, output, false, &mut |elem| elements.push(elem.into()));
+                self.render(ctx, output, false, self.output_view(output), &mut |elem| {
+                    elements.push(elem.into())
+                });
 
                 cursor_data = Some(CursorData::compute(
                     &elements,
@@ -680,7 +697,8 @@ impl Niri {
                     pointer_location = pointer_pos - output_pos.to_f64() - buf_pos;
 
                     let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                    self.render_pointer(renderer, output, &mut |elem| {
+                    // The window renders 1:1, so the cursor must be anchored at identity, not through the view.
+                    self.render_pointer(renderer, output, OutputViewport::identity(), &mut |elem| {
                         let elem =
                             RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                         elements.push(CastRenderElement::from(elem));
