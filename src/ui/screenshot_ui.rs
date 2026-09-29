@@ -104,9 +104,16 @@ pub struct OutputScreenshot {
 }
 
 niri_render_elements! {
+    ScreenshotChrome => {
+        Texture = PrimaryGpuTextureRenderElement,
+    }
+}
+
+niri_render_elements! {
     ScreenshotUiRenderElement => {
         Screenshot = PrimaryGpuTextureRenderElement,
         SolidColor = SolidColorRenderElement,
+        Chrome = ScreenshotChrome,
     }
 }
 
