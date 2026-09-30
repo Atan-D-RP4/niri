@@ -9,11 +9,8 @@ use crate::input::swipe_tracker::SwipeTracker;
 use crate::utils::geometry::Local;
 use crate::utils::view::ViewportTransform;
 
-/// Per-output zoom state. Layout writes these every animation tick;
-/// external consumers read via `Layout`'s public API.
-///
-/// Level and focal transitions are stored independently — they share a clock
-/// and config for synchronization but have separate lifecycles.
+/// Per-output zoom state, written every animation tick.
+/// Level and focal transitions are independent but share a clock.
 #[derive(Debug, Clone)]
 pub struct OutputZoomState {
     pub level: f64,
@@ -51,18 +48,14 @@ impl OutputZoomState {
             || self.focal_animation.is_some()
     }
 
-    /// Returns true when any `Animating` transition is active (not `Gesturing`).
-    ///
-    /// Used by `are_animations_ongoing()` to avoid driving the render loop
-    /// during gestures — gesture updates already call `queue_redraw()`
-    /// explicitly, so the VBlank-driven redraw loop is unnecessary and
-    /// creates a render storm that can starve input processing.
+    /// True when a level animation is running, not a gesture.
+    /// Gestures already queue redraws explicitly, so they skip the VBlank loop.
     pub fn is_animating(&self) -> bool {
         matches!(self.level_transition, ZoomLevelTransition::Animating(_))
             || self.focal_animation.is_some()
     }
 
-    /// Compute the current level from the active animation state.
+    /// Current level from the active transition.
     fn current_level(&self, now: Duration) -> f64 {
         match &self.level_transition {
             ZoomLevelTransition::Animating(a) => a.value_at(now),
@@ -71,34 +64,22 @@ impl OutputZoomState {
         }
     }
 
-    /// Compute the current focal point from the active animation state.
+    /// Current focal point from the active transition.
     fn current_focal(&self, now: Duration) -> Point<f64, Local> {
         let level = self.current_level(now);
 
         match &self.focal_animation {
             Some(a) => a.value_at(now),
-            None => {
-                // When no focal animation is active, compute focal from the
-                // active level transition's tracking context.
-                match &self.level_transition {
-                    ZoomLevelTransition::Animating(a) => {
-                        a.tracking.compute_focal(level, self.focal)
-                    }
-                    ZoomLevelTransition::Gesturing(g) => g.compute_focal_or(level, g.current_focal),
-                    ZoomLevelTransition::Idle => self.focal,
-                }
-            }
+            None => match &self.level_transition {
+                ZoomLevelTransition::Animating(a) => a.tracking.compute_focal(level, self.focal),
+                ZoomLevelTransition::Gesturing(g) => g.compute_focal_or(level, g.current_focal),
+                ZoomLevelTransition::Idle => self.focal,
+            },
         }
     }
 
-    /// Sweep completed transitions and write the current animated level/focal
-    /// to resting state.
-    ///
-    /// Called from `Layout::advance_animations` on the same tick as all other
-    /// animation sweeps. Both the in-progress and the completed values are
-    /// written every tick; when an animation completes it is additionally
-    /// swept back to the `Idle` variant, leaving the last written values as
-    /// the resting state.
+    /// Write the animated level and focal to resting state.
+    /// Completed transitions sweep back to `Idle`.
     pub fn advance_animations(&mut self, now: Duration) {
         self.level = self.current_level(now);
         self.focal = self.current_focal(now);
@@ -110,7 +91,7 @@ impl OutputZoomState {
         }
     }
 
-    /// Update cursor position on active transitions for focal tracking.
+    /// Update the cursor position for focal tracking.
     pub fn set_cursor_pos(&mut self, pos: Point<f64, Local>) {
         match &mut self.level_transition {
             ZoomLevelTransition::Animating(a) => a.set_cursor_pos(pos),
@@ -119,19 +100,13 @@ impl OutputZoomState {
         }
     }
 
-    /// Update the movement mode on the active level transition's tracking
-    /// context. The OnEdge anchor is recomputed for the new mode so that
-    /// subsequent focal computations use the correct mode.
-    ///
-    /// Does nothing when no level transition is active — the movement mode
-    /// is read fresh from config by `update_cursor_zoom_focal` in that case.
+    /// Update the movement mode on the active transition.
+    /// Recomputes the OnEdge anchor; no-op when idle.
     pub fn update_movement_mode(&mut self, mode: ZoomMovementMode) {
         match &mut self.level_transition {
             ZoomLevelTransition::Animating(a) => {
                 let level = a.anim.value();
-                // Compute focal from the tracking context rather than
-                // using self.focal directly — self.focal may be stale
-                // (it's not updated until advance_animations).
+                // self.focal is stale until advance_animations, recompute from tracking.
                 let focal = a.tracking.compute_focal(level, self.focal);
                 a.set_movement_mode(mode, level, focal);
             }
@@ -142,10 +117,8 @@ impl OutputZoomState {
         }
     }
 
-    /// Canonical viewport transform for the current animated zoom state.
-    ///
-    /// This is the single construction path for [`ViewportTransform`]. No
-    /// consumer should reconstruct the transform from raw animation fields.
+    /// Canonical viewport transform for the current zoom state.
+    /// Single construction path, do not rebuild from raw fields.
     pub fn viewport_transform(&self, now: Duration) -> ViewportTransform {
         let focal = self.current_focal(now);
         let level = self.current_level(now);
@@ -180,8 +153,7 @@ impl FocalTrackingContext {
         Self::focal_for_cursor(cursor, level, size, mode)
     }
 
-    /// Computes the focal point that places `cursor` within the viewport at
-    /// the given zoom level and movement mode.
+    /// Focal point placing `cursor` in the viewport for the given mode.
     pub(crate) fn focal_for_cursor(
         cursor: Point<f64, Local>,
         level: f64,
@@ -190,22 +162,14 @@ impl FocalTrackingContext {
     ) -> Point<f64, Local> {
         match mode {
             ZoomMovementMode::CursorFollow => cursor,
-            // Centered keeps the cursor at the viewport center; OnEdge uses
-            // the same static focal and only differs in how it updates the
-            // focal as the cursor moves relative to the viewport. The output
-            // clamp parks the viewport at the bounds near edges, letting the
-            // cursor roam free inside until it moves back inward.
+            // Centered and OnEdge share the static focal; OnEdge only differs in updates.
             ZoomMovementMode::Centered | ZoomMovementMode::OnEdge => {
                 Self::focal_for_anchor(cursor, level, output_size, Point::from((0.5, 0.5)))
             }
         }
     }
 
-    /// Computes the focal point from a viewport anchor, restoring the
-    /// anchor's relative viewport position at the given zoom level.
-    ///
-    /// This holds the single copy of the focal arithmetic; `focal_for_cursor`
-    /// dispatches here with a centered anchor.
+    /// Focal point restoring the anchor's viewport position at this level.
     fn focal_for_anchor(
         cursor: Point<f64, Local>,
         level: f64,
@@ -216,8 +180,6 @@ impl FocalTrackingContext {
             return cursor;
         }
 
-        // Viewport size is the inverse image of the output under the zoom,
-        // matching `focal_for_cursor`; only the anchor placement differs.
         let viewport_size = ViewportTransform::new(cursor, level)
             .screen_to_content_rect(Rectangle::from_size(output_size))
             .size;
@@ -245,7 +207,7 @@ impl FocalTrackingContext {
             return None;
         }
 
-        // Compute cursor anchor ratio within the viewport via ViewportTransform.
+        // Cursor anchor within the viewport.
         let vt = ViewportTransform::new(current_focal, current_level);
         let output_rect = Rectangle::from_size(output_size);
         let viewport = vt.screen_to_content_rect(output_rect);
@@ -275,12 +237,7 @@ impl FocalTrackingContext {
         self.output_size = Some(size);
     }
 
-    /// Update the movement mode. If the new mode is OnEdge, the cursor anchor
-    /// is recomputed from the current cursor/level/focal so subsequent
-    /// `compute_focal()` calls use the new mode's logic.
-    ///
-    /// `current_level` and `current_focal` are the zoom state at the time of
-    /// the mode change — used to compute the OnEdge anchor.
+    /// Update the movement mode, recomputing the OnEdge anchor.
     pub fn set_movement_mode(
         &mut self,
         mode: ZoomMovementMode,

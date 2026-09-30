@@ -96,9 +96,7 @@ pub struct CastsState {
     pub casts: HashMap<u64, Cast>,
 }
 
-/// Transient per-output zoom flags tracked in the event stream.
-///
-/// Not part of the IPC; only used to decide when to emit [`Event::ZoomChanged`].
+/// Transient per-output zoom flags; decides when to emit [`Event::ZoomChanged`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ZoomFlags {
     /// Whether the output was in a zoom transition at the last sample.
@@ -112,17 +110,14 @@ pub struct ZoomFlags {
 pub struct ZoomChangedState {
     /// Last zoom state sent to event-stream clients, keyed by output name.
     pub outputs: HashMap<String, Zoom>,
-    /// Previous transient flags per output (transient, not IPC).
+    /// Previous flags per output.
     pub previous_flags: HashMap<String, ZoomFlags>,
 }
 
 impl ZoomChangedState {
     const EVENT_EPSILON: f64 = 1e-6;
 
-    /// Returns whether a sampled zoom state should be pushed to event-stream clients.
-    ///
-    /// Intermediate animation samples are intentionally suppressed. Transition and gesture
-    /// boundaries, lock changes, and settled state changes are emitted instead.
+    /// Emits on gesture/transition boundaries and settled changes, not per animation frame.
     pub fn should_emit_zoom_event(
         &self,
         output: &str,

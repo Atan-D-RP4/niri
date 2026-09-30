@@ -2812,15 +2812,9 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    /// Begin a continuous pinch-to-zoom gesture on the given output.
+    /// Begin a continuous pinch gesture on the output.
     ///
-    /// Creates a `ZoomLevelGesture` that tracks cumulative scale changes in
-    /// log-space. Subsequent calls to `zoom_gesture_update` feed scale deltas
-    /// into the gesture's `SwipeTracker`.
-    ///
-    /// When PR #3771 lands, this becomes the stable zoom gesture API — input
-    /// handlers (touchpad/touchscreen) call this, and the consumer side
-    /// (zoom_gesture_update/end) stays unchanged regardless of input source.
+    /// Tracks cumulative scale changes in log-space.
     pub fn zoom_gesture_begin(
         &mut self,
         output: &Output,
@@ -2849,15 +2843,9 @@ impl<W: LayoutElement> Layout<W> {
         state.focal_animation = None;
     }
 
-    /// Update an active pinch-to-zoom gesture with a new cumulative scale.
+    /// Update the active pinch gesture with a cumulative scale.
     ///
-    /// `scale` is the cumulative scale factor (1.0 = no change) from the input
-    /// device. For touchpad this comes from libinput's `event.scale()`. For
-    /// touchscreen this is `current_distance / initial_distance`.
-    ///
-    /// The scale is converted to log-space and pushed into the gesture's
-    /// `SwipeTracker`, which accumulates position with velocity-based smoothing.
-    /// The resulting zoom level is rubber-banded at `[1.0, max_zoom]`.
+    /// `scale` is 1.0 = no change (libinput, or distance ratio); rubber-banded.
     pub fn zoom_gesture_update(
         &mut self,
         output: &Output,
@@ -2873,9 +2861,7 @@ impl<W: LayoutElement> Layout<W> {
 
         if let Some(cursor_local) = cursor_local {
             gesture.set_cursor_pos(cursor_local);
-            // NOTE: on_edge_cursor_anchor is set once at gesture start and kept
-            // fixed. Recomputing it here with the old focal causes teleporting
-            // because the anchor shifts when the cursor pushes against edges.
+            // Anchor stays fixed from gesture start; recomputing teleports.
         }
         if let Some(output_size) = output_size {
             gesture.set_output_size(output_size);
@@ -2892,31 +2878,25 @@ impl<W: LayoutElement> Layout<W> {
             0.0
         };
 
-        // Push the sensitivity-scaled log-delta into the SwipeTracker.
         gesture.tracker.push(log_delta, timestamp);
 
-        // Compute position in log-space.
         let log_pos = gesture.tracker.pos();
         let new_level = compute_gesture_zoom_level(gesture.start_level, log_pos, 1.0, max_zoom);
 
         gesture.current_level = new_level;
-
-        // Recompute focal based on current cursor position and movement mode.
         gesture.current_focal = gesture.compute_focal_or(new_level, gesture.current_focal);
 
         Some(())
     }
 
-    /// End an active pinch-to-zoom gesture.
+    /// End the active pinch gesture.
     ///
-    /// When `cancelled`, animates back to `start_level`. Otherwise commits
-    /// the current level (clamped to minimum 1.0) and recomputes the focal.
+    /// Cancelled returns to `start_level`; otherwise commits the level.
     pub fn zoom_gesture_end(&mut self, output: &Output, cancelled: bool) -> Option<bool> {
         let state = self.zoom_states.get_mut(output)?;
         let gesture = state.level_transition.take_gesture()?;
 
         if cancelled {
-            // Animate back to start level.
             let level_anim = ZoomLevelAnimation::new(
                 self.clock.clone(),
                 gesture.current_level,
@@ -2936,7 +2916,6 @@ impl<W: LayoutElement> Layout<W> {
             return Some(true);
         }
 
-        // Normal end: commit current level and focal, no animation.
         let now = self.clock.now_unadjusted();
         let mut gesture = gesture; // make mutable
         gesture.tracker.push(0., now);
@@ -2947,10 +2926,7 @@ impl<W: LayoutElement> Layout<W> {
         Some(true)
     }
 
-    /// Read-only access to the zoom state for an output.
-    ///
-    /// Consumers call `state.viewport_transform(now)` to get the current
-    /// `ViewportTransform`, rather than going through thin wrappers.
+    /// Zoom state for an output.
     pub fn zoom_state_for_output(&self, output: &Output) -> Option<&OutputZoomState> {
         self.zoom_states.get(output)
     }
@@ -2960,11 +2936,10 @@ impl<W: LayoutElement> Layout<W> {
         self.zoom_states.get_mut(output)
     }
 
-    /// Set the zoom lock on an output.
-    ///
-    /// Returns the previous lock state, or `false` if the output has no zoom
-    /// state.
+    /// Set the zoom lock on an output, committing any gesture.
+    /// Returns the previous lock state.
     pub fn set_zoom_lock(&mut self, output: &Output, locked: bool) -> bool {
+        self.zoom_gesture_end(output, false);
         let Some(state) = self.zoom_states.get_mut(output) else {
             return false;
         };
@@ -2973,11 +2948,9 @@ impl<W: LayoutElement> Layout<W> {
         was
     }
 
-    /// Set the zoom level on an output, animating the transition.
+    /// Set the zoom level on an output, animating the change.
     ///
-    /// Creates a [`ZoomLevelAnimation`] for the level change and optionally a
-    /// [`ZoomFocalAnimation`] for focal point adjustment. When `locked`, the
-    /// focal point does not track the cursor.
+    /// Focal stays fixed when locked.
     pub fn zoom_set_level(
         &mut self,
         output: &Output,
@@ -2999,7 +2972,6 @@ impl<W: LayoutElement> Layout<W> {
         let current_focal = vt.focal;
         let level_changed = (target_level - current_level).abs() > ZOOM_CHANGE_EPSILON;
 
-        // Compute target focal: track cursor unless locked, at 1.0, or unchanged.
         let target_focal = if locked || target_level <= 1.0 || !level_changed {
             current_focal
         } else {
@@ -3049,19 +3021,14 @@ impl<W: LayoutElement> Layout<W> {
 
     /// Track cursor position for zoom state.
     pub fn set_zoom_cursor_pos(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
-        self.zoom_states.get_mut(output).map(|state| {
+        if let Some(state) = self.zoom_states.get_mut(output) {
             state.set_cursor_pos(cursor_local);
-        });
+        }
     }
 
-    /// Recompute focal point from the given cursor position and movement mode.
+    /// Recompute the focal from the cursor position.
     ///
-    /// When idle and unlocked, computes the target focal and either sets it
-    /// immediately or animates. This handles all three movement modes:
-    /// - **CursorFollow**: focal ← cursor (content under cursor stays pinned)
-    /// - **Centered**: viewport follows cursor keeping it centered (parks at output bounds near
-    ///   edges, cursor roams free inside until back inward)
-    /// - **OnEdge**: focal stays fixed unless cursor reaches the edge
+    /// No-op while gesturing, animating, or locked.
     pub fn update_cursor_zoom_focal(
         &mut self,
         output: &Output,
@@ -3073,17 +3040,15 @@ impl<W: LayoutElement> Layout<W> {
             return;
         };
 
-        // If a transition is active, it handles focal tracking internally.
+        // Transition handles focal tracking.
         if state.transitioning() {
             return;
         }
 
-        // If locked, focal is fixed.
         if state.locked {
             return;
         }
 
-        // Compute target focal from cursor position and current level.
         let vt = state.viewport_transform(now);
         let current_level = vt.factor;
         let current_focal = vt.focal;
@@ -3126,8 +3091,7 @@ impl<W: LayoutElement> Layout<W> {
 
     /// Clamp a position to the visible viewport when zoomed.
     ///
-    /// Uses `ViewportTransform` directly — when level is 1.0 the viewport
-    /// equals the output rect and constraining is a no-op.
+    /// No-op at 1.0.
     pub fn zoom_clamp_to_viewport(
         &self,
         output: &Output,
@@ -3138,10 +3102,7 @@ impl<W: LayoutElement> Layout<W> {
         let now = self.clock.now();
         let vt = state.viewport_transform(now);
 
-        // Compute the "zoom viewport" in output-local coordinates: the output rect
-        // scaled down by the zoom factor around the focal point. At factor 2.0 the
-        // viewport is the central quarter of the output; at factor 1.0 (IDENTITY)
-        // it is the full output.
+        // Viewport is the output rect scaled about the focal.
         let factor = vt.factor;
         let focal = vt.focal;
         let viewport_size = Size::from((output_size.w / factor, output_size.h / factor));
@@ -3195,9 +3156,7 @@ impl<W: LayoutElement> Layout<W> {
             }
         }
 
-        // Keep the render loop alive while a zoom level/focal animation is
-        // sampling. Gestures are excluded: `is_animating()` covers `Animating`
-        // only, gesture updates drive frames explicitly via `queue_redraw()`.
+        // Keep rendering while a zoom animation is sampling; gestures queue frames.
         for (out, state) in &self.zoom_states {
             if output.is_some_and(|output| *out != *output) {
                 continue;
@@ -4237,8 +4196,7 @@ impl<W: LayoutElement> Layout<W> {
         true
     }
 
-    /// Starts an interactive move. Takes a content-space position: convert the
-    /// `output_under()` screen position with `screen_to_content()` first, like DnD.
+    /// Start an interactive move; takes a content-space position.
     pub fn interactive_move_begin(
         &mut self,
         window_id: W::Id,
@@ -4301,9 +4259,7 @@ impl<W: LayoutElement> Layout<W> {
         true
     }
 
-    /// Updates an ongoing interactive move. Takes a content-space position (convert with
-    /// `screen_to_content()` first) and a content-space delta; the delta is still downscaled
-    /// by the overview zoom below, a separate layout-space transform.
+    /// Update an interactive move; takes a content-space position and delta.
     pub fn interactive_move_update(
         &mut self,
         window: &W::Id,

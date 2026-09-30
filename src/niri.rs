@@ -210,13 +210,26 @@ const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 // should be ~1.995 seconds.
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
 
-/// State tracking for an active touchscreen pinch-to-zoom gesture.
+/// Input source of an in-progress pinch gesture.
+///
+/// Touchscreen derives scale from finger distance; touchpad gets it from libinput.
 #[derive(Debug, Clone)]
-pub struct TouchPinchState {
+pub enum PinchSource {
+    /// Touchpad: libinput supplies a cumulative scale factor directly.
+    Touchpad,
+    /// Touchscreen: scale is derived from the distance between two fingers.
+    Touchscreen { initial_distance: f64 },
+}
+
+/// The single active pinch gesture, if any.
+///
+/// At most one globally; a second source must not clobber it.
+#[derive(Debug, Clone)]
+pub struct PinchSession {
     /// Output where the pinch started.
     pub output: Output,
-    /// Distance between the two touch points at gesture start.
-    pub initial_distance: f64,
+    /// Which input source owns this session.
+    pub source: PinchSource,
 }
 
 pub struct Niri {
@@ -409,12 +422,10 @@ pub struct Niri {
     pub pointer_constraint_position_hint: Option<Point<f64, Global>>,
     pub tablet_cursor_location: Option<Point<f64, Global>>,
     pub gesture_swipe_3f_cumulative: Option<(f64, f64)>,
-    /// Output currently receiving a touchpad pinch-to-zoom gesture.
-    pub pinch_gesture_output: Option<Output>,
+    /// The single active pinch-to-zoom gesture, if any.
+    pub pinch_session: Option<PinchSession>,
     /// Active touch points for touchscreen pinch-to-zoom (slot → global position).
     pub touch_points: HashMap<TouchSlot, Point<f64, Global>>,
-    /// Active touchscreen pinch state, if any.
-    pub touch_pinch_state: Option<TouchPinchState>,
     pub overview_scroll_swipe_gesture: ScrollSwipeGesture,
     pub vertical_wheel_tracker: ScrollTracker,
     pub horizontal_wheel_tracker: ScrollTracker,
@@ -537,21 +548,16 @@ pub struct OutputState {
     pub debug_damage_tracker: OutputDamageTracker,
     /// Cached output view context (global↔local conversion), rebuilt on resize.
     pub view_ctx: OutputViewCtx,
-    /// Filter last materialized into zoomed render elements for this output.
+    /// Filter last materialized into zoomed elements.
     ///
-    /// Owned by [`OutputState::zoom_filter_for`]; the render path is `&self`,
-    /// hence the `Cell`. Only the redraw boundary calls that, so native
-    /// captures (which pass `ViewportTransform::identity`) never reach it.
+    /// `Cell` as the render path is `&self`; sampled once per frame at redraw.
     pub last_zoom_filter: Cell<Option<TextureFilter>>,
 }
 
 impl OutputState {
-    /// Samples the texture filter for `factor`, reporting band changes.
+    /// Sample the texture filter for `factor`, reporting band changes.
     ///
-    /// Compares against the materialized band and records the new one in a
-    /// single step. The caller must sample this **once per frame per output**
-    /// and clone the result into every `ZoomElement` it produces — never call
-    /// it per-element, or only the first caller sees `changed == true`.
+    /// Sample once per frame per output; only the first caller sees `changed`.
     pub fn zoom_filter_for(&self, factor: f64, threshold: f64) -> (Option<TextureFilter>, bool) {
         let filter = zoom_filter(factor, threshold);
         let changed = zoom_filter_changed(self.last_zoom_filter.get(), filter);
@@ -2854,9 +2860,8 @@ impl Niri {
             pointer_constraint_position_hint: None,
             tablet_cursor_location: None,
             gesture_swipe_3f_cumulative: None,
-            pinch_gesture_output: None,
+            pinch_session: None,
             touch_points: HashMap::new(),
-            touch_pinch_state: None,
             overview_scroll_swipe_gesture: ScrollSwipeGesture::new(),
             vertical_wheel_tracker: ScrollTracker::new(120),
             horizontal_wheel_tracker: ScrollTracker::new(120),
@@ -2959,27 +2964,19 @@ impl Niri {
         Ok(())
     }
 
-    /// Repositions all outputs, optionally adding a new output.
-    /// Refreshes the cached [`OutputViewCtx`] for one output.
+    /// Refresh the cached [`OutputViewCtx`] for one output.
     ///
-    /// Central helper for the `output geometry ↔ cached OutputViewCtx` invariant:
-    /// call after any `map_output`, scale/transform change, or mode change.
-    /// `to_local`/`to_global` go stale (wrong origin, size, or scale) if this is skipped.
+    /// Call after map, scale/transform, or mode change; conversions go stale otherwise.
     fn refresh_view_ctx(&mut self, output: &Output) {
         let view_ctx = OutputViewCtx::for_output(&self.global_space, output);
         if let Some(fresh) = view_ctx {
             if let Some(state) = self.output_state.get_mut(output) {
-                // Geometry is rebuilt from the Output; the per-frame zoom state
-                // is owned by sample_frame_view and must survive a resize.
+                // Zoom frame state survives a resize.
                 state.view_ctx.global_geo = fresh.global_geo;
             }
         }
 
-        // Recenter the focal point sentinel left by `new_for_output`'s
-        // hot-plug fallback when `current_mode()` was still `None`.
-        // At 1x zoom the focal is visually irrelevant, so this only fixes
-        // the anchor for the next zoom-in.  The `(0, 0)` gate ensures
-        // user-set focals are never clobbered.
+        // Recenter the (0, 0) hot-plug sentinel at 1x; never clobber user focals.
         if view_ctx.is_some() {
             if let Some(zoom) = self.layout.zoom_state_for_output_mut(output) {
                 if zoom.level == 1.0 && !zoom.transitioning() && zoom.focal == Point::from((0., 0.))
@@ -2990,8 +2987,7 @@ impl Niri {
             }
         }
 
-        // Compare geometry only: the frame fields are owned by
-        // sample_frame_view, so a fresh context never matches them.
+        // Compare geometry only; frame fields are per-frame.
         debug_assert!(
             self.output_state
                 .get(output)
@@ -3437,9 +3433,7 @@ impl Niri {
         // The ordering here must be consistent with the ordering in render() so that input is
         // consistent with the visuals.
 
-        // Layer surfaces render through the live viewport (see `zoom_element`),
-        // so occlusion is tested in content space. The hot corner below stays
-        // in screen space: it is a screen-fixed affordance.
+        // Layers render zoomed, test in content space; hot corner stays screen-fixed.
         let content_pos_within_output =
             self.output_state
                 .get(output)
@@ -3458,8 +3452,7 @@ impl Niri {
                 .find_map(|layer| {
                     let mapped = self.mapped_layer_surfaces.get(layer)?;
 
-                    // Layer geometry is screen-space; convert to content space
-                    // so the hit-test below is Local − Local.
+                    // Layer geometry is screen-space; convert for the hit-test.
                     let layer_screen_pos = layers
                         .layer_geometry(layer)
                         .unwrap()
@@ -3517,8 +3510,7 @@ impl Niri {
             return false;
         }
 
-        // Same space split as `is_sticky_obscured_under`: layers and workspace
-        // geometry live in content space.
+        // Same space split as above.
         let content_pos_within_output =
             self.output_state
                 .get(output)
@@ -3540,8 +3532,7 @@ impl Niri {
                         return None;
                     }
 
-                    // Layer geometry is screen-space; convert to content space
-                    // (the workspace offset below is content-Local).
+                    // Layer geometry is screen-space; convert for the hit-test.
                     let layer_screen_pos = layers
                         .layer_geometry(layer_surface)
                         .unwrap()
@@ -3682,9 +3673,7 @@ impl Niri {
         self.window_under(pos)
     }
 
-    /// Converts each endpoint with its own output, then differences them: dividing a
-    /// screen delta by zoom is wrong for focal-tracking modes. Returns zero across
-    /// outputs; the caller still advances its baseline to rebase.
+    /// Difference endpoints in content space; zero across outputs.
     pub fn content_delta(
         &self,
         prev: Point<f64, Global>,
@@ -3707,8 +3696,7 @@ impl Niri {
         (now_content - prev_content).as_logical()
     }
 
-    /// Maps a content-space touch location (as sent in the Wayland touch event)
-    /// back to screen space.
+    /// Map a content-space touch location back to screen space.
     pub fn touch_content_to_screen(&self, content: Point<f64, Global>) -> Point<f64, Global> {
         self.output_for_touch().map_or(content, |output| {
             let ctx = self.output_state[output].view_ctx;
@@ -3789,8 +3777,7 @@ impl Niri {
                         return None;
                     }
 
-                    // Layer geometry is screen-space; convert to content space
-                    // (the workspace offset below is content-Local).
+                    // Layer geometry is screen-space; convert for the hit-test.
                     let layer_screen_pos = layers
                         .layer_geometry(layer_surface)
                         .unwrap()
@@ -4638,8 +4625,7 @@ impl Niri {
         }
     }
 
-    /// Applies the zoom transform to the pointer/cursor render element by wrapping it in a
-    /// hotspot-centered zoom transform, to keep it aligned with the pointer position.
+    /// Zoom the cursor element, keeping it aligned with the pointer.
     pub(crate) fn zoom_pointer<R: NiriRenderer>(
         &self,
         elem: PointerRenderElements<R>,
@@ -4686,9 +4672,8 @@ impl Niri {
         ZoomRenderElement::Pointer(elem).into()
     }
 
-    /// Live-cursor focal anchor (raw position) and viewport-clamped display.
-    /// None when the pointer isn't on `output` (off-output or on another output),
-    /// or its state is missing. Epsilon shrink keeps edge points inside.
+    /// Cursor anchor and viewport-clamped display for `output`.
+    /// None when the pointer is off-output or state is missing.
     pub(crate) fn pointer_geometry(
         &self,
         output: &Output,
@@ -4721,10 +4706,9 @@ impl Niri {
         self.output_state[output].view_ctx
     }
 
-    /// Samples and stores the view for the frame about to be presented.
+    /// Sample the view for the frame being presented.
     ///
-    /// Sampling the filter band here, at the redraw boundary, means every render
-    /// path in the frame agrees on `filter_changed` and only one claims a flip.
+    /// One sample per frame so render and hit-testing agree; only one claims a flip.
     fn sample_frame_view(&mut self, output: &Output) {
         let viewport = self
             .layout
@@ -6374,9 +6358,7 @@ impl Niri {
             let hotspot = image_copy_capture_impl::cursor_capture_hotspot(self, &output);
             s.session.set_cursor_hotspot((hotspot.x, hotspot.y));
 
-            // Report the displayed tip, so it lines up with the zoomed content that
-            // render_for_image_copy_capture produces. Mirrors the screencast path. The
-            // cursor graphic is fixed-size, so only the position is mapped.
+            // Report the displayed tip to match zoomed content; only position maps.
             let viewport = self.live_view(&output).viewport;
             let pos: Point<i32, Physical> = match self.pointer_geometry(&output, viewport) {
                 Some((_, display)) => viewport
@@ -6509,8 +6491,7 @@ impl Niri {
             let size = transform.transform_size(size);
 
             let scale = Scale::from(output.current_scale().fractional_scale());
-            // Baseline for capture-relative pointer scaling; the texture
-            // itself is unzoomed.
+            // Baseline for pointer scaling; the texture itself is unzoomed.
             let capture_level = self
                 .layout
                 .zoom_state_for_output(&output)
@@ -6527,10 +6508,7 @@ impl Niri {
                     target,
                     xray: None,
                 };
-                // Static unzoomed scene for the UI; the preview re-applies
-                // the live viewport on top each frame.
-                // Native capture: the texture is unzoomed; the preview applies
-                // the live viewport on top each frame.
+                // Unzoomed scene; the preview re-applies the live viewport.
                 let elements = self.render_to_vec(
                     ctx,
                     &output,
@@ -7654,18 +7632,14 @@ fn scale_relocate_crop<E: Element>(
     CropRenderElement::from_element(elem, output_scale, ws_geo)
 }
 
-/// Applies the frame's zoom to one output render element.
+/// Apply the frame zoom to one render element.
 ///
-/// Only content-space elements are magnified. `Pointer`/`Zoomed` arrive
-/// pre-placed (tip-anchored, which a generic wrap cannot express), and overlays
-/// (`Texture`, `WindowMruUi`, `ExitConfirmDialog`, `RelocatedMemoryBuffer`) stay
-/// screen-fixed.
+/// Only content elements magnify; cursor arrives placed, overlays stay fixed.
 pub(crate) fn magnify<R: NiriRenderer>(
     view: &OutputViewCtx,
     element: OutputRenderElements<R>,
 ) -> OutputRenderElements<R> {
-    // The one place a content-space element is wrapped: magnified about the
-    // viewport focal, in place, with this frame's magnification filter.
+    // Wrap content about the focal with this frame's filter.
     fn wrap<E: Element>(view: &OutputViewCtx, elem: E) -> ZoomElement<E> {
         ZoomElement::from_element(
             elem,

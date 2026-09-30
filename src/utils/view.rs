@@ -9,29 +9,22 @@ use crate::utils::geometry::{
     Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
 };
 
-/// Immutable, sampled transformation of output-local logical geometry.
-///
-/// This is a view operation, not a coordinate-frame conversion. Both input and
-/// output remain [`Local`]. Policy such as focal-point clamping and animation
-/// belongs to the owner that constructs this value.
+/// Sampled transform of output-local geometry, still [`Local`].
+/// Clamping and animation policy belong to the constructor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewportTransform {
     pub focal: Point<f64, Local>,
     pub factor: f64,
 }
 
-/// An output's geometry, plus how the current frame is presented for it.
-///
-/// The geometry fields are rebuilt on resize; the frame fields are sampled
-/// once per presented frame (see `Niri::sample_frame_view`), so every render
-/// path for a frame agrees on the viewport and the magnification filter band.
+/// Output geometry plus its presentation for the current frame.
+/// Frame fields are sampled once per frame so all render paths agree.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OutputViewCtx {
     pub global_geo: Rectangle<f64, Global>,
     pub viewport: ViewportTransform,
     pub filter: Option<TextureFilter>,
-    /// The filter band flipped since the last materialized frame; forces full
-    /// damage. Cleared on the next frame sample.
+    /// Filter band flipped since last frame; forces full damage.
     pub filter_changed: bool,
     pub scale_cursor: bool,
 }
@@ -47,18 +40,14 @@ impl ViewportTransform {
         Self { focal, factor }
     }
 
-    /// Maps a content-space local point to its screen-space image.
-    ///
-    /// Content space is where layout and hit-testing live; screen space is what
-    /// the frame presents.
+    /// Content-space local point to its screen-space image.
+    /// Content space is layout; screen space is the presented frame.
     pub fn content_to_screen(&self, point: Point<f64, Local>) -> Point<f64, Local> {
         let transformed = self.to_matrix() * DVec2::new(point.x, point.y).extend(1.);
         Point::new(transformed.x, transformed.y)
     }
 
-    /// Maps a screen-space local point back to content space.
-    ///
-    /// Inverse of [`content_to_screen`](Self::content_to_screen).
+    /// Screen-space local point back to content space.
     pub fn screen_to_content(&self, point: Point<f64, Local>) -> Point<f64, Local> {
         let transformed = self.to_matrix().inverse() * DVec2::new(point.x, point.y).extend(1.);
         Point::new(transformed.x, transformed.y)
@@ -103,17 +92,12 @@ impl ViewportTransform {
 }
 
 impl OutputViewCtx {
-    /// Creates a minimal context from an output origin point.
-    ///
-    /// Only the origin is meaningful for Global ↔ Local translation, and the
-    /// frame is unzoomed.
+    /// Minimal context from an output origin, unzoomed.
     pub fn from_origin(origin: Point<f64, Logical>) -> Self {
         Self::new(Rectangle::new(origin.assume_global(), (0., 0.).into()))
     }
 
-    /// Creates a context with unzoomed frame state.
-    ///
-    /// The frame fields are overwritten once per presented frame.
+    /// Context with unzoomed frame state.
     pub fn new(global_geo: Rectangle<f64, Global>) -> Self {
         Self {
             global_geo,
@@ -135,11 +119,7 @@ impl OutputViewCtx {
         }
     }
 
-    /// Converts a content-space global point to physical pixels.
-    ///
-    /// Mirrors [`PointExt::to_local`]: Global → Local via the output origin,
-    /// then Local -> Physical via the caller's output scale. Generic over the
-    /// coordinate so call sites keep their existing rounding behavior.
+    /// Content-space global point to physical pixels.
     pub fn to_physical<R: Coordinate>(
         &self,
         pos: Point<f64, Global>,
@@ -160,8 +140,7 @@ impl OutputViewCtx {
     }
 }
 
-/// Rounding convention shared by `ZoomElement::geometry` and screenshot export, so
-/// the export crop aligns with the displayed geometry. Damage rounds looser.
+/// Shared rounding for geometry and screenshot export; damage rounds looser.
 pub(crate) fn round_rect(rect: Rectangle<f64, Physical>) -> Rectangle<i32, Physical> {
     let loc = rect.loc.to_i32_round();
     let bottom_right = (rect.loc + rect.size).to_i32_round();
@@ -273,8 +252,7 @@ mod tests {
 
     #[test]
     fn global_local_viewport_round_trip() {
-        // Cross-abstraction: Global → Local → Viewport → inverse Viewport → Global,
-        // with nonzero and negative output origins.
+        // Global to Local through the viewport and back.
         let viewport = ViewportTransform::new((100., 80.).into(), 2.);
         let cases = [
             // (origin, global point)
@@ -293,7 +271,7 @@ mod tests {
             assert_relative_eq!(round_trip.x, global.x, epsilon = 1e-6);
             assert_relative_eq!(round_trip.y, global.y, epsilon = 1e-6);
 
-            // Rectangle variant: translate loc, preserve size across the pipeline.
+            // Rectangle variant of the same round trip.
             let global_rect: Rectangle<f64, Global> =
                 Rectangle::new((gx, gy).into(), (800., 600.).into()).assume_global();
             let local_rect = global_rect.to_local(&ctx);

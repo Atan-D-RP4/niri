@@ -11,10 +11,7 @@ use crate::render_helpers::renderer::AsGlesFrame;
 use crate::utils::geometry::{Local, PointExt, PointLocalExt};
 use crate::utils::view::{round_rect, transform_rect, ViewportTransform};
 
-/// Runs a draw/capture call with the texture filter set, restoring `Linear` after.
-///
-/// Restoration runs even if the body errors, so the filter never leaks into
-/// later draws on the same renderer.
+/// Runs a draw with the filter set, restoring `Linear` after, even on error.
 macro_rules! with_filter {
     ($get_guard:expr, $filter:expr, $body:expr $(,)?) => {{
         if let Some(filter) = $filter {
@@ -36,7 +33,6 @@ macro_rules! with_filter {
                 return Err(err.into());
             }
 
-            // Capture result first so restoration always runs.
             let result = $body;
 
             let restore_result = {
@@ -58,8 +54,6 @@ macro_rules! with_filter {
 }
 
 /// Linear below threshold, Nearest at or above, `None` at or below 1x.
-///
-/// The switch is abrupt: crossing the threshold changes quality in one frame.
 pub fn zoom_filter(zoom_factor: f64, threshold: f64) -> Option<TextureFilter> {
     debug_assert!(
         !zoom_factor.is_nan() && !threshold.is_nan(),
@@ -71,11 +65,7 @@ pub fn zoom_filter(zoom_factor: f64, threshold: f64) -> Option<TextureFilter> {
     })
 }
 
-/// Whether two sampled states use different texture-filter bands.
-///
-/// Pure comparison behind `OutputState::zoom_filter_for`, which owns the
-/// per-output transition. A flip changes pixels without changing geometry,
-/// so the damage path must invalidate when this returns `true`.
+/// True when the filter band changed; a flip needs damage despite same geometry.
 pub fn zoom_filter_changed(
     previous: Option<TextureFilter>,
     current: Option<TextureFilter>,
@@ -83,10 +73,7 @@ pub fn zoom_filter_changed(
     previous != current
 }
 
-/// Whether a threshold change flips the materialized filter at `factor`.
-///
-/// Config-reload path: geometry is unchanged, so `true` must also queue a
-/// redraw, otherwise no frame runs and stale pixels stay on screen.
+/// True when a threshold change flips the filter at `factor`; needs a redraw.
 pub fn threshold_flips_filter(factor: f64, old_threshold: f64, new_threshold: f64) -> bool {
     zoom_filter_changed(
         zoom_filter(factor, old_threshold),
@@ -144,8 +131,7 @@ impl<E: Element> ZoomElement<E> {
         }
     }
 
-    /// Cursor element with tip-glued placement, shared by the live pointer
-    /// and the screenshot preview.
+    /// Cursor element with tip-glued placement.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn cursor(
         elem: E,
@@ -176,8 +162,7 @@ impl<E: Element> Element for ZoomElement<E> {
     }
 
     fn current_commit(&self) -> CommitCounter {
-        // The tracker compares derived geometry itself; a CommitCounter is a
-        // monotonic damage history, not a value fingerprint — don't fake one.
+        // Damage history, not a fingerprint; don't fake one.
         self.element.current_commit()
     }
 
@@ -194,8 +179,7 @@ impl<E: Element> Element for ZoomElement<E> {
             Relocate::Relative => geometry.loc += self.location,
         }
 
-        // NOTE: to_i32_up() would avoid 1-pixel jitter here but breaks
-        // the screenshot selection region by oversizing geometry.
+        // NOTE: to_i32_up() avoids jitter but oversizes the screenshot selection.
         round_rect(geometry)
     }
 
@@ -209,15 +193,13 @@ impl<E: Element> Element for ZoomElement<E> {
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
         if self.filter_changed {
-            // Same geometry and commit, new filter: damage the whole element
-            // (element-relative, hence zeroed location).
+            // New filter, same geometry: damage the whole element.
             return DamageSet::from_slice(&[Rectangle::new(
                 Point::from((0, 0)),
                 self.geometry(scale).size,
             )]);
         }
-        // Damage is element-relative; the tracker adds the location itself,
-        // so neither the viewport origin nor the relocation belongs here.
+        // Damage is element-relative; the tracker adds the location.
         let inner_geometry = self.element.geometry(scale).to_f64();
 
         self.element
@@ -369,7 +351,7 @@ mod tests {
         }
     }
 
-    /// IDENTITY wrapper preserves geometry: repositioning only, no scaling.
+    /// Identity wrapper preserves geometry.
     #[test]
     fn identity_viewport_preserves_geometry() {
         let cases = [
@@ -425,8 +407,7 @@ mod tests {
 
     #[test]
     fn tip_glued_when_scaling() {
-        // Graphic top-left (10, 10), hotspot (2, 3): tip (12, 13) goes
-        // through the viewport, not the top-left.
+        // Tip (12, 13) goes through the viewport, not the top-left.
         let tip = Point::<f64, Physical>::from((12., 13.));
         let display = Point::<f64, Local>::from((12., 13.));
         let (final_pos, wrapper) = place_cursor(
@@ -440,15 +421,13 @@ mod tests {
 
         // Tip displays at focal + (p - focal) * 2; top-left lands at (16, 16).
         assert_eq!(final_pos, Point::<f64, Physical>::from((16., 16.)));
-        // The wrapper scales around the tip itself.
         assert_eq!(wrapper.focal, Point::<f64, Local>::from((12., 13.)));
         assert_eq!(wrapper.factor, 2.);
     }
 
     #[test]
     fn placement_matches_rigid_transform() {
-        // Focal at the origin is a pure scale: hotspot-centered placement
-        // must agree with wrapping the whole graphic.
+        // Focal at the origin is a pure scale.
         let viewport = ViewportTransform::new((0., 0.).into(), 2.);
         let tip = Point::<f64, Physical>::from((10., 10.));
         let display = Point::<f64, Local>::from((10., 10.));
@@ -479,8 +458,7 @@ mod tests {
 
     #[test]
     fn placement_splits_focal_and_display() {
-        // Live path: raw tip anchors the wrapper, constrained display maps
-        // the target.
+        // Live path: raw tip anchors the wrapper.
         let focal = Point::<f64, Physical>::from((0., 0.));
         let display = Point::<f64, Local>::from((10., 10.));
         let (final_pos, wrapper) = place_cursor(
@@ -498,8 +476,7 @@ mod tests {
 
     #[test]
     fn zoom_filter_selects_by_band() {
-        // (factor, threshold) -> filter. Bands: <= 1.0 is None (unzoomed),
-        // (1.0, threshold) is Linear, [threshold, ..) is Nearest.
+        // Bands: 1x or below is None, below threshold Linear, above Nearest.
         let cases = [
             ((1.0, 2.0), None),
             ((0.5, 2.0), None),
@@ -511,8 +488,7 @@ mod tests {
             ((2.0, 2.0), Some(TextureFilter::Nearest)),
             ((3.0, 2.0), Some(TextureFilter::Nearest)),
             ((100.0, 2.0), Some(TextureFilter::Nearest)),
-            // Extreme thresholds: Nearest kicks in immediately above 1x,
-            // or Linear holds for any sane factor.
+            // Nearest right above 1x, or Linear for any sane factor.
             ((1.001, 1.001), Some(TextureFilter::Nearest)),
             ((100.0, 1e9), Some(TextureFilter::Linear)),
         ];
@@ -549,8 +525,7 @@ mod tests {
             zoom_filter(1.0, 2.0),
             zoom_filter(1.0, 2.0)
         ));
-        // Zooming out into the unfiltered band invalidates too: None is a
-        // band value here, not "unchanged".
+        // None is a band value too, so zooming out invalidates.
         assert!(zoom_filter_changed(
             zoom_filter(1.2, 2.0),
             zoom_filter(1.0, 2.0),
@@ -594,8 +569,7 @@ mod tests {
         let unchanged = element(false);
         assert!(unchanged.damage_since(scale, Some(current)).is_empty());
 
-        // Same commit, but the filter band flipped: full element damage,
-        // element-relative, so a zeroed location with the wrapped size.
+        // Same commit, flipped band: full element damage at zeroed location.
         let damage = element(true).damage_since(scale, Some(current));
         assert_eq!(damage.len(), 1);
         assert_eq!(
