@@ -8,7 +8,7 @@ use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectExt, RectLocalExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt};
 use crate::utils::view::{round_rect, transform_rect, ViewportTransform};
 
 /// Runs a draw/capture call with the texture filter set, restoring `Linear` after.

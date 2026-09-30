@@ -1797,10 +1797,9 @@ pub enum Event {
     ZoomChanged {
         /// Name of the output.
         output: String,
-        /// Current zoom level.
-        level: f64,
-        /// Whether zoom is locked.
-        is_locked: bool,
+        /// Current zoom state.
+        #[serde(flatten)]
+        state: Zoom,
     },
 }
 

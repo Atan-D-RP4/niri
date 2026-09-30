@@ -442,7 +442,8 @@ Takes a zoom level and an optional output name. The zoom level can be:
 - An absolute value: `"2.0"` sets zoom to 2×.
 - A relative value: `"+0.5"` increases zoom by 0.5; `"-0.5"` decreases it.
   Relative steps follow the [`increment-type`](./Configuration:-Miscellaneous.md#increment-type)
-  zoom setting (`"linear"` adds the delta, `"exponential"` scales by it).
+  zoom setting (`"linear"` adds the delta, `"exponential"` multiplies the level
+  by `e` raised to the delta, so `"+0.5"` means ×`e^0.5` ≈ ×1.65).
 
 ```kdl
 binds {

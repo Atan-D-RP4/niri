@@ -40,7 +40,7 @@ use monitor::{InsertHint, InsertPosition, InsertWorkspace, MonitorAddWindowTarge
 use niri_config::utils::MergeWith as _;
 use niri_config::{
     Config, CornerRadius, LayoutPart, PresetSize, Workspace as WorkspaceConfig, WorkspaceReference,
-    ZoomIncrementType, ZoomMovementMode,
+    ZoomMovementMode,
 };
 use niri_ipc::{ColumnDisplay, PositionChange, SizeChange, WindowLayout};
 use scrolling::{Column, ColumnWidth};
@@ -2973,48 +2973,6 @@ impl<W: LayoutElement> Layout<W> {
         was
     }
 
-    /// Zoom in by one step on the given output.
-    ///
-    /// Step size depends on `increment_type`: `Linear` adds 1.0,
-    /// `Exponential` doubles.
-    pub fn zoom_in(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
-        let now = self.clock.now();
-        let max_zoom = self.options.zoom.max_zoom;
-        let Some(state) = self.zoom_states.get(output) else {
-            return;
-        };
-
-        let current_level = state.viewport_transform(now).factor;
-        let target_level = match self.options.zoom.increment_type {
-            ZoomIncrementType::Linear => (current_level + 1.0).min(max_zoom),
-            ZoomIncrementType::Exponential => (current_level * 2.0).min(max_zoom),
-        };
-
-        let movement_mode = self.options.zoom.movement_mode;
-        let locked = state.locked;
-        self.zoom_set_level(output, target_level, cursor_local, movement_mode, locked);
-    }
-
-    /// Zoom out by one step on the given output.
-    ///
-    /// Returns to level 1.0 (unzoomed) if the step would go below it.
-    pub fn zoom_out(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
-        let now = self.clock.now();
-        let Some(state) = self.zoom_states.get(output) else {
-            return;
-        };
-
-        let current_level = state.viewport_transform(now).factor;
-        let target_level = match self.options.zoom.increment_type {
-            ZoomIncrementType::Linear => (current_level - 1.0).max(1.0),
-            ZoomIncrementType::Exponential => (current_level / 2.0).max(1.0),
-        };
-
-        let movement_mode = self.options.zoom.movement_mode;
-        let locked = state.locked;
-        self.zoom_set_level(output, target_level, cursor_local, movement_mode, locked);
-    }
-
     /// Set the zoom level on an output, animating the transition.
     ///
     /// Creates a [`ZoomLevelAnimation`] for the level change and optionally a
@@ -3045,7 +3003,7 @@ impl<W: LayoutElement> Layout<W> {
         let target_focal = if locked || target_level <= 1.0 || !level_changed {
             current_focal
         } else {
-            let output_size = Self::output_size_for_focal(output);
+            let output_size = output_size(output).assume_local();
             let mut tracking = zoom::FocalTrackingContext::default();
             tracking.set_cursor_pos(cursor_local);
             tracking.set_output_size(output_size);
@@ -3061,7 +3019,7 @@ impl<W: LayoutElement> Layout<W> {
         }
 
         if level_changed {
-            let output_size = Self::output_size_for_focal(output);
+            let output_size = output_size(output).assume_local();
             let level_anim = ZoomLevelAnimation::new(
                 self.clock.clone(),
                 current_level,
@@ -3076,22 +3034,7 @@ impl<W: LayoutElement> Layout<W> {
                 current_focal,
             );
 
-            let use_dynamic_tracking =
-                level_anim.should_use_dynamic_focal_tracking(target_level, locked, level_changed);
-
             state.level_transition = ZoomLevelTransition::Animating(level_anim);
-
-            // Synchronized level+focal animation using the level config so
-            // both share duration/curve.
-            if focal_changed && !use_dynamic_tracking {
-                let focal_anim = ZoomFocalAnimation::new(
-                    self.clock.clone(),
-                    current_focal,
-                    target_focal,
-                    self.options.animations.zoom_level_change.0,
-                );
-                state.focal_animation = Some(focal_anim);
-            }
         } else if focal_changed {
             // Focal-only change: uses its own animation config.
             let focal_anim = ZoomFocalAnimation::new(
@@ -3105,20 +3048,10 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     /// Track cursor position for zoom state.
-    ///
-    /// Always updates the cursor position on state, which is needed for:
-    /// - Focal policy recomputation (OnEdge reads cursor from state)
-    /// - Per-frame tracking during active transitions (animation/gesture)
-    /// - Edge detection in `FocalTrackingContext`
-    ///
-    /// This is a pure state mutation — it does not recompute focal.
-    /// Call [`update_cursor_zoom_focal`](Self::update_cursor_zoom_focal)
-    /// separately when the focal point should track the cursor.
     pub fn set_zoom_cursor_pos(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
-        let Some(state) = self.zoom_states.get_mut(output) else {
-            return;
-        };
-        state.set_cursor_pos(cursor_local);
+        self.zoom_states.get_mut(output).map(|state| {
+            state.set_cursor_pos(cursor_local);
+        });
     }
 
     /// Recompute focal point from the given cursor position and movement mode.
@@ -3155,7 +3088,7 @@ impl<W: LayoutElement> Layout<W> {
         let current_level = vt.factor;
         let current_focal = vt.focal;
 
-        let output_size = Self::output_size_for_focal(output);
+        let output_size = output_size(output).assume_local();
         let movement_mode = self.options.zoom.movement_mode;
         let mut tracking = zoom::FocalTrackingContext::default();
         tracking.set_cursor_pos(cursor_local);
@@ -3221,18 +3154,6 @@ impl<W: LayoutElement> Layout<W> {
             viewport_loc,
             viewport_size - Size::from((f64::EPSILON, f64::EPSILON)),
         )))
-    }
-
-    /// Compute the output's logical size in Local frame for focal tracking.
-    fn output_size_for_focal(output: &Output) -> Size<f64, Local> {
-        let mode_size = output.current_mode().map_or((0, 0).into(), |m| {
-            output.current_transform().transform_size(m.size)
-        });
-        let scale = output.current_scale().fractional_scale();
-        Size::from((
-            f64::from(mode_size.w) / scale,
-            f64::from(mode_size.h) / scale,
-        ))
     }
 
     pub fn are_animations_ongoing(&self, output: Option<&Output>) -> bool {

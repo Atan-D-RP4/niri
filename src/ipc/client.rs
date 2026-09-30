@@ -525,12 +525,11 @@ pub fn handle_msg(mut msg: Msg, json: bool, print_request: bool) -> anyhow::Resu
                     Event::CastStopped { stream_id } => {
                         println!("Cast stopped: stream id {stream_id}");
                     }
-                    Event::ZoomChanged {
-                        output,
-                        level,
-                        is_locked,
-                    } => {
-                        println!("Zoom on {output}: level={level} locked={is_locked}");
+                    Event::ZoomChanged { output, state } => {
+                        println!(
+                            "Zoom on {output}: level={} locked={}",
+                            state.level, state.is_locked
+                        );
                     }
                 }
             }
@@ -569,8 +568,6 @@ pub fn handle_msg(mut msg: Msg, json: bool, print_request: bool) -> anyhow::Resu
             if let Some(output) = output {
                 if let Some(state) = response.get(&output) {
                     println!("Zoom state for output \"{output}\": {state:?}");
-                } else {
-                    println!("Output \"{output}\" is not connected.");
                 }
             } else {
                 println!("Zoom state for all outputs:");

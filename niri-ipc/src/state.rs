@@ -96,26 +96,24 @@ pub struct CastsState {
     pub casts: HashMap<u64, Cast>,
 }
 
-/// Zoom state for a single output tracked in the event stream.
-#[derive(Debug, Clone)]
-pub struct ZoomOutputState {
-    /// Current zoom level.
-    pub level: f64,
-    /// Whether zoom is locked.
-    pub is_locked: bool,
+/// Transient per-output zoom flags tracked in the event stream.
+///
+/// Not part of the IPC; only used to decide when to emit [`Event::ZoomChanged`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ZoomFlags {
+    /// Whether the output was in a zoom transition at the last sample.
+    pub transitioning: bool,
+    /// Whether the output was in a zoom gesture at the last sample.
+    pub gesturing: bool,
 }
 
 /// The zoom state communicated over the event stream.
 #[derive(Debug, Default)]
 pub struct ZoomChangedState {
-    /// Map from output name to zoom state.
-    pub outputs: HashMap<String, ZoomOutputState>,
-    /// Previous snapshot `transitioning` flag per output (transient, not IPC).
-    pub was_transitioning: HashMap<String, bool>,
-    /// Previous snapshot `is_gesture` flag per output (transient, not IPC).
-    pub was_gesturing: HashMap<String, bool>,
-    /// Last zoom state sent to event-stream clients (transient, not IPC).
-    pub last_emitted_state: HashMap<String, ZoomOutputState>,
+    /// Last zoom state sent to event-stream clients, keyed by output name.
+    pub outputs: HashMap<String, Zoom>,
+    /// Previous transient flags per output (transient, not IPC).
+    pub previous_flags: HashMap<String, ZoomFlags>,
 }
 
 impl ZoomChangedState {
@@ -132,19 +130,17 @@ impl ZoomChangedState {
         transitioning: bool,
         gesturing: bool,
     ) -> bool {
-        let Some(previous) = self.last_emitted_state.get(output) else {
+        let Some(previous) = self.outputs.get(output) else {
             return true;
         };
 
         let state_changed = (previous.level - current.level).abs() > Self::EVENT_EPSILON
             || previous.is_locked != current.is_locked;
-        let was_transitioning = self.was_transitioning.get(output).copied().unwrap_or(false);
-        let was_gesturing = self.was_gesturing.get(output).copied().unwrap_or(false);
+        let previous_flags = self.previous_flags.get(output).copied().unwrap_or_default();
 
         previous.is_locked != current.is_locked
-            || was_gesturing != gesturing
+            || previous_flags.gesturing != gesturing
             || (!transitioning && state_changed)
-            || (was_transitioning && !transitioning && state_changed)
     }
 }
 
@@ -385,21 +381,15 @@ impl EventStreamStatePart for ZoomChangedState {
             .iter()
             .map(|(output, state)| Event::ZoomChanged {
                 output: output.clone(),
-                level: state.level,
-                is_locked: state.is_locked,
+                state: state.clone(),
             })
             .collect()
     }
 
     fn apply(&mut self, event: Event) -> Option<Event> {
         match event {
-            Event::ZoomChanged {
-                output,
-                level,
-                is_locked,
-            } => {
-                self.outputs
-                    .insert(output, ZoomOutputState { level, is_locked });
+            Event::ZoomChanged { output, state } => {
+                self.outputs.insert(output, state);
             }
             event => return Some(event),
         }

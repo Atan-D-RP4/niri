@@ -659,41 +659,23 @@ impl State {
             if state.should_emit_zoom_event(&output_name, &ipc_zoom, transitioning, gesturing) {
                 events.push(Event::ZoomChanged {
                     output: output_name.clone(),
-                    level: ipc_zoom.level,
-                    is_locked: ipc_zoom.is_locked,
+                    state: ipc_zoom.clone(),
                 });
             }
 
-            state
-                .was_transitioning
-                .insert(output_name.clone(), transitioning);
-            state.was_gesturing.insert(output_name, gesturing);
+            state.previous_flags.insert(
+                output_name.clone(),
+                niri_ipc::state::ZoomFlags {
+                    transitioning,
+                    gesturing,
+                },
+            );
         }
 
-        state
-            .was_transitioning
-            .retain(|name, _| seen.contains(name));
-        state.was_gesturing.retain(|name, _| seen.contains(name));
-        state
-            .last_emitted_state
-            .retain(|name, _| seen.contains(name));
         state.outputs.retain(|name, _| seen.contains(name));
+        state.previous_flags.retain(|name, _| seen.contains(name));
 
         for event in events {
-            if let Event::ZoomChanged {
-                output,
-                level,
-                is_locked,
-            } = &event
-            {
-                state.last_emitted_state.insert(
-                    output.clone(),
-                    niri_ipc::state::ZoomOutputState {
-                        level: *level,
-                        is_locked: *is_locked,
-                    },
-                );
-            }
             state.apply(event.clone());
             server.send_event(event);
         }
@@ -1099,18 +1081,18 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use niri_ipc::state::{ZoomChangedState, ZoomOutputState};
+    use niri_ipc::state::{ZoomChangedState, ZoomFlags};
 
     fn zoom(level: f64, is_locked: bool) -> niri_ipc::Zoom {
         niri_ipc::Zoom { level, is_locked }
     }
 
-    fn emitted(level: f64, is_locked: bool) -> niri_ipc::state::ZoomOutputState {
-        niri_ipc::state::ZoomOutputState { level, is_locked }
+    fn emitted(level: f64, is_locked: bool) -> niri_ipc::Zoom {
+        niri_ipc::Zoom { level, is_locked }
     }
 
     fn should_emit_zoom_event(
-        previous: Option<&ZoomOutputState>,
+        previous: Option<&niri_ipc::Zoom>,
         current: &niri_ipc::Zoom,
         was_transitioning: bool,
         transitioning: bool,
@@ -1120,15 +1102,16 @@ mod tests {
         let mut state = ZoomChangedState::default();
         if let Some(previous) = previous {
             state
-                .last_emitted_state
+                .outputs
                 .insert(String::from("output"), previous.clone());
         }
-        state
-            .was_transitioning
-            .insert(String::from("output"), was_transitioning);
-        state
-            .was_gesturing
-            .insert(String::from("output"), was_gesturing);
+        state.previous_flags.insert(
+            String::from("output"),
+            ZoomFlags {
+                transitioning: was_transitioning,
+                gesturing: was_gesturing,
+            },
+        );
         state.should_emit_zoom_event("output", current, transitioning, gesturing)
     }
 

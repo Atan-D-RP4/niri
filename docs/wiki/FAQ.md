@@ -163,7 +163,7 @@ If you don't like this, set the [`clip-to-geometry true` window rule](./Configur
 ### How do I magnify the screen / zoom in?
 
 <sup>Since: next release</sup> Use the built-in [screen zoom](./Configuration:-Zoom.md):
-pinch with three fingers on a touchpad (two fingers on a touchscreen), or bind
+pinch with two fingers on a touchpad or touchscreen, or bind
 `set-zoom-level` / `toggle-zoom-lock` keys.
 Tune it in the [`zoom {}` block](./Configuration:-Miscellaneous.md#zoom).
 

@@ -8,6 +8,7 @@ use smithay::utils::{Point, Rectangle, Size, Transform};
 use super::*;
 use crate::layout::zoom::{FocalTrackingContext, ZoomFocalAnimation, ZoomLevelAnimation};
 use crate::layout::{Layout, LayoutElement};
+use crate::utils::output_size;
 use crate::utils::view::ViewportTransform;
 
 impl<W: LayoutElement> Layout<W> {
@@ -620,24 +621,18 @@ fn focal_output_size_applies_output_transform() {
     let flipped = make_transformed_output("flipped", 1920, 1080, Transform::Flipped, 1.0);
     let rotate_scaled = make_transformed_output("rotate-scaled", 1920, 1080, Transform::_90, 1.5);
 
+    assert_eq!(output_size(&normal).assume_local(), (1920., 1080.).into());
     assert_eq!(
-        Layout::<TestWindow>::output_size_for_focal(&normal),
-        (1920., 1080.).into()
-    );
-    assert_eq!(
-        Layout::<TestWindow>::output_size_for_focal(&rotate_90),
+        output_size(&rotate_90).assume_local(),
         (1080., 1920.).into()
     );
     assert_eq!(
-        Layout::<TestWindow>::output_size_for_focal(&rotate_180),
+        output_size(&rotate_180).assume_local(),
         (1920., 1080.).into()
     );
+    assert_eq!(output_size(&flipped).assume_local(), (1920., 1080.).into());
     assert_eq!(
-        Layout::<TestWindow>::output_size_for_focal(&flipped),
-        (1920., 1080.).into()
-    );
-    assert_eq!(
-        Layout::<TestWindow>::output_size_for_focal(&rotate_scaled),
+        output_size(&rotate_scaled).assume_local(),
         (720., 1280.).into(),
     );
 }
@@ -645,7 +640,7 @@ fn focal_output_size_applies_output_transform() {
 #[test]
 fn rotated_tracking_stays_in_bounds() {
     let output = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
-    let size = Layout::<TestWindow>::output_size_for_focal(&output);
+    let size = output_size(&output).assume_local();
     let mut tracking = FocalTrackingContext::default();
     tracking.set_cursor_pos((0., 0.).into());
     tracking.set_output_size(size);
@@ -659,7 +654,7 @@ fn rotated_tracking_stays_in_bounds() {
 #[test]
 fn on_edge_rotated_corners_in_bounds() {
     let output = make_transformed_output("rotate-90", 1920, 1080, Transform::_90, 1.0);
-    let size = Layout::<TestWindow>::output_size_for_focal(&output);
+    let size = output_size(&output).assume_local();
     let corners = [(0.0, 0.0), (size.w, 0.0), (0.0, size.h), (size.w, size.h)];
 
     for cursor in corners {
@@ -1068,7 +1063,7 @@ fn set_zoom_lock_returns_previous_state() {
 }
 
 #[test]
-fn zoom_in_and_out_follow_increment_type() {
+fn set_level_follows_increment_type_semantics() {
     let cursor = Point::from((500.0, 400.0));
 
     // Linear (default config): 1.0 -> 2.0 -> 1.0.
@@ -1076,15 +1071,28 @@ fn zoom_in_and_out_follow_increment_type() {
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
 
-    layout.zoom_in(&output, cursor);
+    layout.zoom_set_level(
+        &output,
+        1.0 + 1.0,
+        cursor,
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
     complete_animations(&mut layout);
     assert_eq!(layout.zoom_state_for_output(&output).unwrap().level, 2.0);
 
-    layout.zoom_out(&output, cursor);
+    layout.zoom_set_level(
+        &output,
+        2.0 - 1.0,
+        cursor,
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
     complete_animations(&mut layout);
     assert_eq!(layout.zoom_state_for_output(&output).unwrap().level, 1.0);
 
-    // Exponential: 2.0 -> 4.0 -> 2.0.
+    // Exponential: 2.0 -> 4.0 -> 2.0, with targets computed in log space
+    // like the live Adjust path (`(ln(current) + delta).exp()`).
     let mut config = Config::default();
     config.zoom.increment_type = ZoomIncrementType::Exponential;
     let mut layout = Layout::<TestWindow>::new(Clock::with_time(Duration::ZERO), &config);
@@ -1093,32 +1101,67 @@ fn zoom_in_and_out_follow_increment_type() {
 
     layout.zoom_set_level(&output, 2.0, cursor, ZoomMovementMode::CursorFollow, false);
     complete_animations(&mut layout);
-    layout.zoom_in(&output, cursor);
+    let current = layout.zoom_state_for_output(&output).unwrap().level;
+    layout.zoom_set_level(
+        &output,
+        (current.ln() + 2.0f64.ln()).exp(),
+        cursor,
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
     complete_animations(&mut layout);
-    assert_eq!(layout.zoom_state_for_output(&output).unwrap().level, 4.0);
+    let level = layout.zoom_state_for_output(&output).unwrap().level;
+    assert!(
+        (level - 4.0).abs() < 1e-9,
+        "log-space doubling of 2.0 should reach 4.0, got {level}"
+    );
 
-    layout.zoom_out(&output, cursor);
+    let current = layout.zoom_state_for_output(&output).unwrap().level;
+    layout.zoom_set_level(
+        &output,
+        (current.ln() + (-2.0f64.ln())).exp(),
+        cursor,
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
     complete_animations(&mut layout);
-    assert_eq!(layout.zoom_state_for_output(&output).unwrap().level, 2.0);
+    let level = layout.zoom_state_for_output(&output).unwrap().level;
+    assert!(
+        (level - 2.0).abs() < 1e-9,
+        "log-space halving of 4.0 should reach 2.0, got {level}"
+    );
 }
 
 #[test]
-fn zoom_at_limits_is_a_noop() {
+fn set_level_at_limits_is_a_noop() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("o1", 1920, 1080);
     layout.add_output(output.clone(), None);
     let cursor = Point::from((500.0, 400.0));
 
-    // zoom_out at the 1.0 minimum changes nothing and starts no transition.
-    layout.zoom_out(&output, cursor);
+    // set_level-equivalent of zooming out at the 1.0 minimum changes nothing
+    // and starts no transition.
+    layout.zoom_set_level(
+        &output,
+        (1.0 - 1.0f64).max(1.0),
+        cursor,
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
     let state = layout.zoom_state_for_output(&output).unwrap();
     assert_eq!(state.level, 1.0);
     assert!(!state.transitioning());
 
-    // zoom_in at the 10.0 maximum likewise does nothing.
+    // set_level-equivalent of zooming in at the 10.0 maximum likewise does nothing.
     layout.zoom_set_level(&output, 10.0, cursor, ZoomMovementMode::CursorFollow, false);
     complete_animations(&mut layout);
-    layout.zoom_in(&output, cursor);
+    layout.zoom_set_level(
+        &output,
+        (10.0 + 1.0f64).min(10.0),
+        cursor,
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
 
     let state = layout.zoom_state_for_output(&output).unwrap();
     assert_eq!(state.level, 10.0);
@@ -1147,8 +1190,20 @@ fn zoom_controls_ignore_unknown_output() {
     let mut layout = Layout::<TestWindow>::default();
     let output = make_output("unknown", 1920, 1080);
 
-    layout.zoom_in(&output, Point::from((1.0, 1.0)));
-    layout.zoom_out(&output, Point::from((1.0, 1.0)));
+    layout.zoom_set_level(
+        &output,
+        2.0,
+        Point::from((1.0, 1.0)),
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
+    layout.zoom_set_level(
+        &output,
+        1.0,
+        Point::from((1.0, 1.0)),
+        ZoomMovementMode::CursorFollow,
+        false,
+    );
     layout.zoom_set_level(
         &output,
         2.0,

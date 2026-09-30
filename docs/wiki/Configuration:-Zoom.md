@@ -35,7 +35,7 @@ Notes:
 
 - Key-bind zoom still adjusts the level while locked; only focal tracking is
   frozen.
-- The touchpad finger count is fixed at three for now.
+- The touchpad finger count is fixed at two for now.
 - The lock is per output: pinch gestures act on the output under the cursor
   (touch midpoint on touchscreens), while `set-zoom-level` / `toggle-zoom-lock`
   act on the focused output, or the named output if given (the screenshot

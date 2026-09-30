@@ -26,8 +26,6 @@ pub struct OutputZoomState {
 impl OutputZoomState {
     pub fn new_for_output(output: &Output) -> Self {
         let scale = output.current_scale().fractional_scale();
-        // Presented size: apply the output transform before the scale conversion,
-        // matching `OutputViewCtx::for_output` and `output_size()`.
         let logical_size = output
             .current_mode()
             .map(|m| {
@@ -65,9 +63,6 @@ impl OutputZoomState {
     }
 
     /// Compute the current level from the active animation state.
-    // `now` is threaded through for the gesture-driven paths that
-    // Integrating Zoom 1 wires up; the idle check reads the clock directly.
-    #[allow(clippy::let_and_return)]
     fn current_level(&self, now: Duration) -> f64 {
         match &self.level_transition {
             ZoomLevelTransition::Animating(a) => a.value_at(now),
@@ -77,8 +72,6 @@ impl OutputZoomState {
     }
 
     /// Compute the current focal point from the active animation state.
-    // See `current_level`: `now` is consumed by Integrating Zoom 1.
-    #[allow(clippy::let_and_return)]
     fn current_focal(&self, now: Duration) -> Point<f64, Local> {
         let level = self.current_level(now);
 
@@ -98,15 +91,18 @@ impl OutputZoomState {
         }
     }
 
-    /// Sweep completed transitions and commit final values to resting state.
+    /// Sweep completed transitions and write the current animated level/focal
+    /// to resting state.
     ///
     /// Called from `Layout::advance_animations` on the same tick as all other
-    /// animation sweeps. When an animation completes, its final level/focal
-    /// are stored as the resting state for the `Idle` variant.
+    /// animation sweeps. Both the in-progress and the completed values are
+    /// written every tick; when an animation completes it is additionally
+    /// swept back to the `Idle` variant, leaving the last written values as
+    /// the resting state.
     pub fn advance_animations(&mut self, now: Duration) {
         self.level = self.current_level(now);
         self.focal = self.current_focal(now);
-        self.level_transition.sweep_at(now);
+        self.level_transition.sweep_at();
         if let Some(a) = &self.focal_animation {
             if a.x_anim.is_done() && a.y_anim.is_done() {
                 self.focal_animation = None;
@@ -166,20 +162,6 @@ pub struct FocalTrackingContext {
 }
 
 impl FocalTrackingContext {
-    pub fn should_use_dynamic_focal_tracking(
-        &self,
-        target_level: f64,
-        locked: bool,
-        level_changed: bool,
-    ) -> bool {
-        level_changed
-            && !locked
-            && target_level > 1.0
-            && self.cursor_pos.is_some()
-            && self.output_size.is_some()
-            && self.movement_mode.is_some()
-    }
-
     pub fn compute_focal(&self, level: f64, fallback: Point<f64, Local>) -> Point<f64, Local> {
         let (Some(cursor), Some(size), Some(mode)) = (
             self.cursor_pos,
@@ -191,7 +173,7 @@ impl FocalTrackingContext {
 
         if matches!(mode, ZoomMovementMode::OnEdge) {
             if let Some(anchor) = self.on_edge_cursor_anchor {
-                return Self::focal_for_on_edge_anchor(cursor, level, size, anchor);
+                return Self::focal_for_anchor(cursor, level, size, anchor);
             }
         }
 
@@ -200,17 +182,12 @@ impl FocalTrackingContext {
 
     /// Computes the focal point that places `cursor` within the viewport at
     /// the given zoom level and movement mode.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn focal_for_cursor(
         cursor: Point<f64, Local>,
         level: f64,
         output_size: Size<f64, Local>,
         mode: &ZoomMovementMode,
     ) -> Point<f64, Local> {
-        if level <= 1.0 {
-            return cursor;
-        }
-
         match mode {
             ZoomMovementMode::CursorFollow => cursor,
             // Centered keeps the cursor at the viewport center; OnEdge uses
@@ -219,25 +196,17 @@ impl FocalTrackingContext {
             // clamp parks the viewport at the bounds near edges, letting the
             // cursor roam free inside until it moves back inward.
             ZoomMovementMode::Centered | ZoomMovementMode::OnEdge => {
-                let vt = ViewportTransform::new(cursor, level);
-                let output_rect = Rectangle::from_size(output_size);
-                let viewport = vt.apply_inverse_rect(output_rect);
-                let centered_loc =
-                    cursor - Point::from((viewport.size.w / 2.0, viewport.size.h / 2.0));
-                let scale_factor = level / (level - 1.0).max(0.001);
-
-                centered_loc
-                    .upscale(scale_factor)
-                    .constrain(Rectangle::from_size(
-                        output_size - Size::from((f64::EPSILON, f64::EPSILON)),
-                    ))
+                Self::focal_for_anchor(cursor, level, output_size, Point::from((0.5, 0.5)))
             }
         }
     }
 
-    /// Computes the focal point from an OnEdge cursor anchor, restoring the
-    /// cursor's relative viewport position after a zoom level change.
-    fn focal_for_on_edge_anchor(
+    /// Computes the focal point from a viewport anchor, restoring the
+    /// anchor's relative viewport position at the given zoom level.
+    ///
+    /// This holds the single copy of the focal arithmetic; `focal_for_cursor`
+    /// dispatches here with a centered anchor.
+    fn focal_for_anchor(
         cursor: Point<f64, Local>,
         level: f64,
         output_size: Size<f64, Local>,
@@ -368,16 +337,6 @@ impl ZoomLevelAnimation {
             .set_movement_mode(mode, current_level, current_focal);
     }
 
-    pub fn should_use_dynamic_focal_tracking(
-        &self,
-        target_level: f64,
-        locked: bool,
-        level_changed: bool,
-    ) -> bool {
-        self.tracking
-            .should_use_dynamic_focal_tracking(target_level, locked, level_changed)
-    }
-
     pub fn value_at(&self, now: Duration) -> f64 {
         self.anim.value_at(now)
     }
@@ -453,16 +412,6 @@ impl ZoomLevelGesture {
         self.tracking
             .set_movement_mode(mode, current_level, current_focal);
     }
-
-    pub fn should_use_dynamic_focal_tracking(
-        &self,
-        target_level: f64,
-        locked: bool,
-        level_changed: bool,
-    ) -> bool {
-        self.tracking
-            .should_use_dynamic_focal_tracking(target_level, locked, level_changed)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -500,7 +449,7 @@ pub enum ZoomLevelTransition {
 
 impl ZoomLevelTransition {
     /// Clear completed `Animating` transitions.
-    pub fn sweep_at(&mut self, _now: Duration) {
+    pub fn sweep_at(&mut self) {
         if let Self::Animating(a) = self {
             if a.anim.is_done() {
                 *self = Self::Idle;
@@ -642,22 +591,6 @@ mod tests {
     }
 
     #[test]
-    fn focal_tracking_requires_complete_context() {
-        let mut tracking = FocalTrackingContext::default();
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, false, true));
-
-        tracking.set_cursor_pos((100.0, 100.0).into());
-        tracking.set_output_size((1920.0, 1080.0).into());
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, false, true));
-
-        tracking.set_movement_mode(ZoomMovementMode::CursorFollow, 1.0, (960.0, 540.0).into());
-        assert!(tracking.should_use_dynamic_focal_tracking(2.0, false, true));
-        assert!(!tracking.should_use_dynamic_focal_tracking(1.0, false, true));
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, true, true));
-        assert!(!tracking.should_use_dynamic_focal_tracking(2.0, false, false));
-    }
-
-    #[test]
     fn focal_tracking_falls_back_without_cursor_context() {
         let tracking = FocalTrackingContext::default();
         let fallback: Point<f64, Local> = (321.0, 123.0).into();
@@ -731,7 +664,7 @@ mod tests {
         let animation = ZoomLevelAnimation::new(clock, 1.0, 3.0, animation_config());
         let mut transition = ZoomLevelTransition::Animating(animation);
 
-        transition.sweep_at(Duration::ZERO);
+        transition.sweep_at();
 
         assert!(matches!(transition, ZoomLevelTransition::Idle));
     }

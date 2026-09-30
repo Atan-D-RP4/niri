@@ -866,6 +866,7 @@ mod tests {
             prefer-no-csd
 
             cursor {
+                scale-with-zoom
                 xcursor-theme "breeze_cursors"
                 xcursor-size 16
                 hide-when-typing
@@ -955,6 +956,7 @@ mod tests {
             }
 
             binds {
+                Mod+Plus { set-zoom-level "+0.5" "eDP-1"; }
                 Mod+Escape hotkey-overlay-title="Inhibit" { toggle-keyboard-shortcuts-inhibit; }
                 Mod+Shift+Escape allow-inhibiting=true { toggle-keyboard-shortcuts-inhibit; }
                 Mod+T allow-when-locked=true { spawn "alacritty"; }
@@ -1007,6 +1009,14 @@ mod tests {
                     Alt+grave { next-window filter="app-id"; }
                     Super+Tab { next-window scope="output"; }
                 }
+            }
+
+            zoom {
+                movement-mode "on-edge"
+                increment-type "exponential"
+                gesture-sensitivity 0.8
+                max-zoom 5.0
+                filter-threshold 3.0
             }
             "##,
         );
@@ -1538,7 +1548,7 @@ mod tests {
                 hide_after_inactive_ms: Some(
                     3000,
                 ),
-                scale_with_zoom: false,
+                scale_with_zoom: true,
             },
             screenshot_path: ScreenshotPath(
                 Some(
@@ -2040,6 +2050,29 @@ mod tests {
                     Bind {
                         key: Key {
                             trigger: Keysym(
+                                XK_plus,
+                            ),
+                            modifiers: Modifiers(
+                                COMPOSITOR,
+                            ),
+                        },
+                        action: SetZoomLevel(
+                            Adjust(
+                                0.5,
+                            ),
+                            Some(
+                                "eDP-1",
+                            ),
+                        ),
+                        repeat: true,
+                        cooldown: None,
+                        allow_when_locked: false,
+                        allow_inhibiting: true,
+                        hotkey_overlay_title: None,
+                    },
+                    Bind {
+                        key: Key {
+                            trigger: Keysym(
                                 XK_Escape,
                             ),
                             modifiers: Modifiers(
@@ -2480,11 +2513,11 @@ mod tests {
                 ],
             },
             zoom: Zoom {
-                movement_mode: CursorFollow,
-                increment_type: Linear,
-                gesture_sensitivity: 1.0,
-                max_zoom: 10.0,
-                filter_threshold: 2.0,
+                movement_mode: OnEdge,
+                increment_type: Exponential,
+                gesture_sensitivity: 0.8,
+                max_zoom: 5.0,
+                filter_threshold: 3.0,
             },
         }
         "#);

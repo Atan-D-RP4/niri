@@ -456,11 +456,11 @@ zoom {
 `gesture-sensitivity` controls how much the zoom level changes in response to
 pinch gestures. Higher values make zooming faster and more responsive, while
 lower values make it slower and more precise.
-Must be `> 0`. Invalid values are rejected with a config error and the reload
-is refused.
+Must be `> 0`. Invalid values are clamped to the default (`1.0`) with a
+config error reported, and the reload continues.
 
 `max-zoom` sets the maximum zoom level that can be reached. Must be `>= 1.0`
-(invalid values are likewise rejected).
+(invalid values are likewise clamped to the default of `10.0`).
 There is no upper limit — the value you set is used directly as the clamp.
 Default is `10.0`, which should be enough for most use cases, but you can set it
 higher if you want to be able to zoom in further.
@@ -479,9 +479,10 @@ values like `"+0.5"`.
 
 - `"linear"` (default): the delta is added to the current level as-is, so a
   fixed step feels smaller relative to the current zoom at high levels.
-- `"exponential"`: the delta is applied in log space (the level is multiplied),
-  so each step feels proportional to the current zoom. This makes zooming in
-  and out feel consistent at all levels.
+- `"exponential"`: the delta is added to the natural logarithm of the current
+  level, i.e. the level is multiplied by `e` raised to the delta, so each step
+  feels proportional to the current zoom. For example, `"+0.5"` multiplies the
+  level by `e^0.5` (≈ 1.65).
 
 ```kdl
 zoom {
@@ -516,8 +517,8 @@ Controls the texture filtering mode used when rendering zoomed content.
 - At or above this zoom level: **Nearest** (nearest-neighbour) filtering is
   used, which keeps individual pixels crisp and sharp.
 
-Default is `2.0`. Must be `> 0` (invalid values are rejected with a config
-error and the reload is refused).
+Default is `2.0`. Must be `> 0` (invalid values are clamped to the default
+with a config error reported, and the reload continues).
 
 ```kdl
 zoom {
