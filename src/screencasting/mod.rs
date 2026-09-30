@@ -596,7 +596,7 @@ impl Niri {
                     if view_ctx.global_geo.contains(pointer_loc) {
                         // Metadata tracks the displayed tip; the graphic wraps below.
                         if let Some((_, display)) = self.pointer_geometry(output, view.viewport) {
-                            pointer_pos = view.viewport.apply(display).as_logical();
+                            pointer_pos = view.viewport.content_to_screen(display).as_logical();
                         } else {
                             pointer_pos = pointer_loc.to_local(&view_ctx).as_logical();
                         }

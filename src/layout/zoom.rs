@@ -219,7 +219,7 @@ impl FocalTrackingContext {
         // Viewport size is the inverse image of the output under the zoom,
         // matching `focal_for_cursor`; only the anchor placement differs.
         let viewport_size = ViewportTransform::new(cursor, level)
-            .apply_inverse_rect(Rectangle::from_size(output_size))
+            .screen_to_content_rect(Rectangle::from_size(output_size))
             .size;
         let anchor_offset = Point::from((viewport_size.w * anchor.x, viewport_size.h * anchor.y));
         let viewport_loc: Point<f64, Local> = cursor - anchor_offset;
@@ -248,7 +248,7 @@ impl FocalTrackingContext {
         // Compute cursor anchor ratio within the viewport via ViewportTransform.
         let vt = ViewportTransform::new(current_focal, current_level);
         let output_rect = Rectangle::from_size(output_size);
-        let viewport = vt.apply_inverse_rect(output_rect);
+        let viewport = vt.screen_to_content_rect(output_rect);
         let constrained = cursor.constrain(Rectangle::new(
             viewport.loc,
             viewport.size - Size::from((f64::EPSILON, f64::EPSILON)),

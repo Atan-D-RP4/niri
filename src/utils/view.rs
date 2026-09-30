@@ -47,26 +47,31 @@ impl ViewportTransform {
         Self { focal, factor }
     }
 
-    /// Applies this transform to a local point.
-    pub fn apply(&self, point: Point<f64, Local>) -> Point<f64, Local> {
+    /// Maps a content-space local point to its screen-space image.
+    ///
+    /// Content space is where layout and hit-testing live; screen space is what
+    /// the frame presents.
+    pub fn content_to_screen(&self, point: Point<f64, Local>) -> Point<f64, Local> {
         let transformed = self.to_matrix() * DVec2::new(point.x, point.y).extend(1.);
         Point::new(transformed.x, transformed.y)
     }
 
-    /// Applies the inverse transform to a local point.
-    pub fn apply_inverse(&self, point: Point<f64, Local>) -> Point<f64, Local> {
+    /// Maps a screen-space local point back to content space.
+    ///
+    /// Inverse of [`content_to_screen`](Self::content_to_screen).
+    pub fn screen_to_content(&self, point: Point<f64, Local>) -> Point<f64, Local> {
         let transformed = self.to_matrix().inverse() * DVec2::new(point.x, point.y).extend(1.);
         Point::new(transformed.x, transformed.y)
     }
 
     /// Returns the axis-aligned bounding box of the transformed rectangle.
-    pub fn apply_rect(&self, rect: Rectangle<f64, Local>) -> Rectangle<f64, Local> {
-        self.bounding_rect(rect, |point| self.apply(point))
+    pub fn content_to_screen_rect(&self, rect: Rectangle<f64, Local>) -> Rectangle<f64, Local> {
+        self.bounding_rect(rect, |point| self.content_to_screen(point))
     }
 
-    /// Returns the axis-aligned bounding box of the inverse image of `rect`.
-    pub fn apply_inverse_rect(&self, rect: Rectangle<f64, Local>) -> Rectangle<f64, Local> {
-        self.bounding_rect(rect, |point| self.apply_inverse(point))
+    /// Returns the axis-aligned bounding box of the rectangle transformed back into content space.
+    pub fn screen_to_content_rect(&self, rect: Rectangle<f64, Local>) -> Rectangle<f64, Local> {
+        self.bounding_rect(rect, |point| self.screen_to_content(point))
     }
 
     /// Returns the equivalent 2D affine matrix.
@@ -170,7 +175,7 @@ pub fn transform_rect(
     scale: Scale<f64>,
 ) -> Rectangle<f64, Physical> {
     let local = rect.to_logical(scale).assume_local();
-    viewport.apply_rect(local).to_physical(scale)
+    viewport.content_to_screen_rect(local).to_physical(scale)
 }
 
 /// Content-space physical rect to its screen image, rounded for display.
@@ -200,15 +205,21 @@ mod tests {
     #[test]
     fn identity_is_identity() {
         let point = (20., 30.).into();
-        assert_eq!(ViewportTransform::identity().apply(point), point);
-        assert_eq!(ViewportTransform::identity().apply_inverse(point), point);
+        assert_eq!(
+            ViewportTransform::identity().content_to_screen(point),
+            point
+        );
+        assert_eq!(
+            ViewportTransform::identity().screen_to_content(point),
+            point
+        );
     }
 
     #[test]
     fn point_round_trip() {
         let transform = transform();
         let point = (140., 125.).into();
-        let round_trip = transform.apply_inverse(transform.apply(point));
+        let round_trip = transform.screen_to_content(transform.content_to_screen(point));
         assert_relative_eq!(round_trip.x, point.x);
         assert_relative_eq!(round_trip.y, point.y);
     }
@@ -218,7 +229,7 @@ mod tests {
         let transform = transform();
         let rect: Rectangle<f64, Local> = Rectangle::new((50., 40.).into(), (100., 80.).into());
         assert_eq!(
-            transform.apply_inverse_rect(transform.apply_rect(rect)),
+            transform.screen_to_content_rect(transform.content_to_screen_rect(rect)),
             rect
         );
     }
@@ -228,7 +239,7 @@ mod tests {
         let inner = ViewportTransform::new((100., 80.).into(), 1.5);
         let outer = ViewportTransform::new((700., 500.).into(), 2.25);
         let point: Point<f64, Local> = (350., 275.).into();
-        let sequential = outer.apply(inner.apply(point));
+        let sequential = outer.content_to_screen(inner.content_to_screen(point));
         let matrix = outer.to_matrix() * inner.to_matrix();
         let composed = matrix * DVec3::new(point.x, point.y, 1.0);
 
@@ -242,11 +253,11 @@ mod tests {
         let rect: Rectangle<f64, Local> = Rectangle::new((90., 70.).into(), (20., 30.).into());
 
         assert_eq!(
-            transform.apply_rect(rect),
+            transform.content_to_screen_rect(rect),
             Rectangle::new((80., 60.).into(), (40., 60.).into())
         );
         assert_eq!(
-            transform.apply_inverse_rect(rect),
+            transform.screen_to_content_rect(rect),
             Rectangle::new((95., 75.).into(), (10., 15.).into())
         );
     }
@@ -256,8 +267,8 @@ mod tests {
         let rect: Rectangle<f64, Local> = Rectangle::new((-10., 20.).into(), (33.5, 44.25).into());
         let identity = ViewportTransform::identity();
 
-        assert_eq!(identity.apply_rect(rect), rect);
-        assert_eq!(identity.apply_inverse_rect(rect), rect);
+        assert_eq!(identity.content_to_screen_rect(rect), rect);
+        assert_eq!(identity.screen_to_content_rect(rect), rect);
     }
 
     #[test]
@@ -277,7 +288,7 @@ mod tests {
 
             let local = global.to_local(&ctx);
             let round_trip = viewport
-                .apply_inverse(viewport.apply(local))
+                .screen_to_content(viewport.content_to_screen(local))
                 .to_global(&ctx);
             assert_relative_eq!(round_trip.x, global.x, epsilon = 1e-6);
             assert_relative_eq!(round_trip.y, global.y, epsilon = 1e-6);
@@ -287,7 +298,7 @@ mod tests {
                 Rectangle::new((gx, gy).into(), (800., 600.).into()).assume_global();
             let local_rect = global_rect.to_local(&ctx);
             let rt_rect = viewport
-                .apply_inverse_rect(viewport.apply_rect(local_rect))
+                .screen_to_content_rect(viewport.content_to_screen_rect(local_rect))
                 .to_global(&ctx);
             assert_relative_eq!(rt_rect.loc.x, global_rect.loc.x, epsilon = 1e-6);
             assert_relative_eq!(rt_rect.loc.y, global_rect.loc.y, epsilon = 1e-6);

@@ -2810,9 +2810,15 @@ impl State {
             if let Some((output, screen_pos_within_output)) = self.niri.output_under(new_pos) {
                 let output = output.clone();
                 // DnD targeting resolves against scene geometry.
-                let content_pos_within_output = self
-                    .niri
-                    .screen_to_content(&output, screen_pos_within_output);
+                let content_pos_within_output =
+                    self.niri
+                        .output_state
+                        .get(&output)
+                        .map_or(screen_pos_within_output, |s| {
+                            s.view_ctx
+                                .viewport
+                                .screen_to_content(screen_pos_within_output)
+                        });
                 self.niri
                     .layout
                     .dnd_update(output, content_pos_within_output);
@@ -2937,9 +2943,15 @@ impl State {
             if let Some((output, screen_pos_within_output)) = self.niri.output_under(pos) {
                 let output = output.clone();
                 // DnD targeting resolves against scene geometry.
-                let content_pos_within_output = self
-                    .niri
-                    .screen_to_content(&output, screen_pos_within_output);
+                let content_pos_within_output =
+                    self.niri
+                        .output_state
+                        .get(&output)
+                        .map_or(screen_pos_within_output, |s| {
+                            s.view_ctx
+                                .viewport
+                                .screen_to_content(screen_pos_within_output)
+                        });
                 self.niri
                     .layout
                     .dnd_update(output, content_pos_within_output);
@@ -3140,9 +3152,15 @@ impl State {
                     let (output, screen_pos_within_output) =
                         self.niri.output_under(location.assume_global()).unwrap();
                     // Resize edges are scene geometry: hit-test in content space.
-                    let content_pos_within_output = self
-                        .niri
-                        .screen_to_content(output, screen_pos_within_output);
+                    let content_pos_within_output =
+                        self.niri
+                            .output_state
+                            .get(output)
+                            .map_or(screen_pos_within_output, |s| {
+                                s.view_ctx
+                                    .viewport
+                                    .screen_to_content(screen_pos_within_output)
+                            });
                     let edges = self
                         .niri
                         .layout
@@ -4457,10 +4475,10 @@ impl State {
         &mut self,
         output: &Output,
         scale: f64,
+        sensitivity: f64,
         focal_pos: Point<f64, Global>,
         timestamp: Duration,
     ) -> bool {
-        let (sensitivity, _) = self.pinch_config();
         let (cursor_local, output_size) = self.pinch_output_geometry(output, focal_pos);
         if self
             .niri
@@ -4542,7 +4560,8 @@ impl State {
                 if pinch.output == output {
                     // Subsequent updates: scale = current_distance / initial_distance.
                     let scale = distance / pinch.initial_distance;
-                    self.pinch_update(&output, scale, midpoint, timestamp);
+                    let sensitivity = self.pinch_config().0;
+                    self.pinch_update(&output, scale, sensitivity, midpoint, timestamp);
                 }
             }
         } else if touch_count < 2 {
@@ -4630,8 +4649,8 @@ impl State {
             .and_then(|root| self.niri.layout.find_window_and_output(&root).unzip().0)
             .and_then(|window| window.rules().pinch_sensitivity)
             .unwrap_or(1.);
-        let sensitivity = input_sensitivity * window_sensitivity;
-        let scale = event.scale().powf(sensitivity);
+        let zoom_sensitivity = self.pinch_config().0 * input_sensitivity;
+        let raw_scale = event.scale();
 
         if let Some(output) = self
             .niri
@@ -4648,17 +4667,24 @@ impl State {
                 .current_location()
                 .assume_global();
 
-            if self.pinch_update(&output, scale, cursor_global, timestamp) {
+            if self.pinch_update(
+                &output,
+                raw_scale,
+                zoom_sensitivity,
+                cursor_global,
+                timestamp,
+            ) {
                 return;
             }
         }
 
+        let client_scale = event.scale().powf(input_sensitivity * window_sensitivity);
         pointer.gesture_pinch_update(
             self,
             &GesturePinchUpdateEvent {
                 time: event.time(),
                 delta: event.delta(),
-                scale,
+                scale: client_scale,
                 rotation: event.rotation(),
             },
         );
@@ -4794,7 +4820,7 @@ impl State {
         // transform internally for hit-testing).
         let zoomed_pos = self.niri.output_for_touch().map_or(pos_g, |output| {
             let ctx = self.niri.output_state[output].view_ctx;
-            let content_local = self.niri.screen_to_content(output, pos_g.to_local(&ctx));
+            let content_local = ctx.viewport.screen_to_content(pos_g.to_local(&ctx));
             content_local.to_global(&ctx)
         });
 
@@ -4979,7 +5005,7 @@ impl State {
         // transform internally for hit-testing).
         let zoomed_pos = self.niri.output_for_touch().map_or(pos_g, |output| {
             let ctx = self.niri.output_state[output].view_ctx;
-            let content_local = self.niri.screen_to_content(output, pos_g.to_local(&ctx));
+            let content_local = ctx.viewport.screen_to_content(pos_g.to_local(&ctx));
             content_local.to_global(&ctx)
         });
 
@@ -5004,9 +5030,15 @@ impl State {
             if let Some((output, screen_pos_within_output)) = self.niri.output_under(pos_g) {
                 let output = output.clone();
                 // DnD targeting resolves against scene geometry.
-                let content_pos_within_output = self
-                    .niri
-                    .screen_to_content(&output, screen_pos_within_output);
+                let content_pos_within_output =
+                    self.niri
+                        .output_state
+                        .get(&output)
+                        .map_or(screen_pos_within_output, |s| {
+                            s.view_ctx
+                                .viewport
+                                .screen_to_content(screen_pos_within_output)
+                        });
                 self.niri
                     .layout
                     .dnd_update(output, content_pos_within_output);
@@ -5091,9 +5123,9 @@ impl State {
     ) -> Point<i32, Physical> {
         // Identity when no zoom state.
         let ctx = self.niri.output_state[output].view_ctx;
-        let content = self
-            .niri
-            .screen_to_content(output, pos.to_local(&ctx))
+        let content = ctx
+            .viewport
+            .screen_to_content(pos.to_local(&ctx))
             .to_global(&ctx);
         screenshot_point_in_content(&ctx, output, content)
     }

@@ -456,6 +456,9 @@ zoom {
 `gesture-sensitivity` controls how much the zoom level changes in response to
 pinch gestures. Higher values make zooming faster and more responsive, while
 lower values make it slower and more precise.
+For touchpad pinch gestures it composes with
+[`input.touchpad.pinch-sensitivity`](./Configuration:-Input.md#pointing-devices)
+(the two are multiplied together).
 Must be `> 0`. Invalid values are clamped to the default (`1.0`) with a
 config error reported, and the reload continues.
 

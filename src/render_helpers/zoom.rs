@@ -115,8 +115,9 @@ pub(crate) fn place_cursor(
     scale: Scale<f64>,
 ) -> (Point<f64, Physical>, ViewportTransform) {
     let focal_local: Point<f64, Local> = focal.to_logical(scale).assume_local();
-    let target_rounded: Point<i32, Physical> =
-        viewport.apply(display).to_physical_precise_round(scale);
+    let target_rounded: Point<i32, Physical> = viewport
+        .content_to_screen(display)
+        .to_physical_precise_round(scale);
     let hotspot_scaled = hotspot.to_f64().upscale(graphic_scale).to_i32_round();
     (
         (target_rounded - hotspot_scaled).to_f64(),

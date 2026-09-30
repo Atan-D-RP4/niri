@@ -692,7 +692,7 @@ fn centered_focal_centers_cursor_in_viewport() {
 
     // The viewport derived from that focal centers the cursor.
     let viewport =
-        ViewportTransform::new(focal, 2.0).apply_inverse_rect(Rectangle::from_size(output_size));
+        ViewportTransform::new(focal, 2.0).screen_to_content_rect(Rectangle::from_size(output_size));
     let center: Point<f64, Local> = Point::from((
         viewport.loc.x + viewport.size.w / 2.0,
         viewport.loc.y + viewport.size.h / 2.0,
@@ -1243,9 +1243,9 @@ fn interactive_move_rubber_band_uses_content_deltas_at_zoom() {
     assert_eq!(vt.focal, focal);
 
     // Ground truth as literals.
-    let c0 = vt.apply_inverse((800.0, 600.0).into());
+    let c0 = vt.screen_to_content((800.0, 600.0).into());
     assert_eq!(c0, Point::from((500.0, 400.0)));
-    let c1 = vt.apply_inverse((1000.0, 600.0).into());
+    let c1 = vt.screen_to_content((1000.0, 600.0).into());
     assert_eq!(c1, Point::from((600.0, 400.0)));
     let content_delta = Point::from((c1.x - c0.x, c1.y - c0.y));
     assert_eq!(content_delta, Point::from((100.0, 0.0)));
@@ -1365,9 +1365,9 @@ fn interactive_resize_applies_content_delta_at_zoom() {
     let vt = current_viewport(&layout, &output);
 
     // Ground truth as literals.
-    let c0 = vt.apply_inverse((800.0, 600.0).into());
+    let c0 = vt.screen_to_content((800.0, 600.0).into());
     assert_eq!(c0, Point::from((500.0, 400.0)));
-    let c1 = vt.apply_inverse((1000.0, 600.0).into());
+    let c1 = vt.screen_to_content((1000.0, 600.0).into());
     assert_eq!(c1, Point::from((600.0, 400.0)));
     let content_delta = Point::from((c1.x - c0.x, c1.y - c0.y));
     assert_eq!(content_delta, Point::from((100.0, 0.0)));

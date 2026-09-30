@@ -3440,7 +3440,14 @@ impl Niri {
         // Layer surfaces render through the live viewport (see `zoom_element`),
         // so occlusion is tested in content space. The hot corner below stays
         // in screen space: it is a screen-fixed affordance.
-        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
+        let content_pos_within_output =
+            self.output_state
+                .get(output)
+                .map_or(screen_pos_within_output, |s| {
+                    s.view_ctx
+                        .viewport
+                        .screen_to_content(screen_pos_within_output)
+                });
 
         // Check if some layer-shell surface is on top.
         let layers = layer_map_for_output(output);
@@ -3453,16 +3460,17 @@ impl Niri {
 
                     // Layer geometry is screen-space; convert to content space
                     // so the hit-test below is Local − Local.
-                    let layer_pos_within_output = self.screen_to_content(
-                        output,
-                        layers
-                            .layer_geometry(layer)
-                            .unwrap()
-                            .loc
-                            .to_f64()
-                            .assume_local()
-                            + mapped.bob_offset(),
-                    );
+                    let layer_screen_pos = layers
+                        .layer_geometry(layer)
+                        .unwrap()
+                        .loc
+                        .to_f64()
+                        .assume_local()
+                        + mapped.bob_offset();
+                    let layer_pos_within_output =
+                        self.output_state.get(output).map_or(layer_screen_pos, |s| {
+                            s.view_ctx.viewport.screen_to_content(layer_screen_pos)
+                        });
 
                     let surface_type = if popup {
                         WindowSurfaceType::POPUP
@@ -3511,7 +3519,14 @@ impl Niri {
 
         // Same space split as `is_sticky_obscured_under`: layers and workspace
         // geometry live in content space.
-        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
+        let content_pos_within_output =
+            self.output_state
+                .get(output)
+                .map_or(screen_pos_within_output, |s| {
+                    s.view_ctx
+                        .viewport
+                        .screen_to_content(screen_pos_within_output)
+                });
 
         // Check if some layer-shell surface is on top.
         let layers = layer_map_for_output(output);
@@ -3527,16 +3542,17 @@ impl Niri {
 
                     // Layer geometry is screen-space; convert to content space
                     // (the workspace offset below is content-Local).
-                    let mut layer_pos_within_output = self.screen_to_content(
-                        output,
-                        layers
-                            .layer_geometry(layer_surface)
-                            .unwrap()
-                            .loc
-                            .to_f64()
-                            .assume_local()
-                            + mapped.bob_offset(),
-                    );
+                    let layer_screen_pos = layers
+                        .layer_geometry(layer_surface)
+                        .unwrap()
+                        .loc
+                        .to_f64()
+                        .assume_local()
+                        + mapped.bob_offset();
+                    let mut layer_pos_within_output =
+                        self.output_state.get(output).map_or(layer_screen_pos, |s| {
+                            s.view_ctx.viewport.screen_to_content(layer_screen_pos)
+                        });
 
                     // Background and bottom layers move together with the workspaces.
                     let mon = self.layout.monitor_for_output(output)?;
@@ -3580,7 +3596,14 @@ impl Niri {
             return None;
         }
 
-        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
+        let content_pos_within_output =
+            self.output_state
+                .get(output)
+                .map_or(screen_pos_within_output, |s| {
+                    s.view_ctx
+                        .viewport
+                        .screen_to_content(screen_pos_within_output)
+                });
 
         let ws = self
             .layout
@@ -3619,7 +3642,14 @@ impl Niri {
             return None;
         }
 
-        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
+        let content_pos_within_output =
+            self.output_state
+                .get(output)
+                .map_or(screen_pos_within_output, |s| {
+                    s.view_ctx
+                        .viewport
+                        .screen_to_content(screen_pos_within_output)
+                });
 
         if let Some((window, _loc)) = self
             .layout
@@ -3652,36 +3682,6 @@ impl Niri {
         self.window_under(pos)
     }
 
-    /// Transforms an output-local screen position into output-local content space.
-    pub fn screen_to_content(
-        &self,
-        output: &Output,
-        screen_local: Point<f64, Local>,
-    ) -> Point<f64, Local> {
-        let Some(state) = self.layout.zoom_state_for_output(output) else {
-            return screen_local;
-        };
-
-        let vt = state.viewport_transform(self.clock.now());
-        vt.apply_inverse(screen_local)
-    }
-
-    /// Transforms an output-local content position back into output-local screen space.
-    pub fn content_to_screen(
-        &self,
-        output: &Output,
-        content_local: Point<f64, Local>,
-    ) -> Point<f64, Local> {
-        let Some(state) = self.layout.zoom_state_for_output(output) else {
-            return content_local;
-        };
-
-        let vt = state.viewport_transform(self.clock.now());
-        vt.apply(content_local)
-    }
-
-    /// Content-space movement between two screen-space pointer positions.
-    ///
     /// Converts each endpoint with its own output, then differences them: dividing a
     /// screen delta by zoom is wrong for focal-tracking modes. Returns zero across
     /// outputs; the caller still advances its baseline to rebase.
@@ -3698,9 +3698,13 @@ impl Niri {
         if prev_output != now_output {
             return Point::from((0., 0.));
         }
-        (self.screen_to_content(now_output, now_screen)
-            - self.screen_to_content(prev_output, prev_screen))
-        .as_logical()
+        let prev_content = self.output_state.get(prev_output).map_or(prev_screen, |s| {
+            s.view_ctx.viewport.screen_to_content(prev_screen)
+        });
+        let now_content = self.output_state.get(now_output).map_or(now_screen, |s| {
+            s.view_ctx.viewport.screen_to_content(now_screen)
+        });
+        (now_content - prev_content).as_logical()
     }
 
     /// Maps a content-space touch location (as sent in the Wayland touch event)
@@ -3708,7 +3712,7 @@ impl Niri {
     pub fn touch_content_to_screen(&self, content: Point<f64, Global>) -> Point<f64, Global> {
         self.output_for_touch().map_or(content, |output| {
             let ctx = self.output_state[output].view_ctx;
-            let screen_local = self.content_to_screen(output, content.to_local(&ctx));
+            let screen_local = ctx.viewport.content_to_screen(content.to_local(&ctx));
             screen_local.to_global(&ctx)
         })
     }
@@ -3727,7 +3731,15 @@ impl Niri {
         };
         rv.output = Some(output.clone());
 
-        let content_pos_within_output = self.screen_to_content(output, screen_pos_within_output);
+        // Frame viewport conversion; identity when the output has no sampled view.
+        let content_pos_within_output =
+            self.output_state
+                .get(output)
+                .map_or(screen_pos_within_output, |s| {
+                    s.view_ctx
+                        .viewport
+                        .screen_to_content(screen_pos_within_output)
+                });
 
         // The ordering here must be consistent with the ordering in render() so that input is
         // consistent with the visuals.
@@ -3779,16 +3791,17 @@ impl Niri {
 
                     // Layer geometry is screen-space; convert to content space
                     // (the workspace offset below is content-Local).
-                    let mut layer_pos_within_output = self.screen_to_content(
-                        output,
-                        layers
-                            .layer_geometry(layer_surface)
-                            .unwrap()
-                            .loc
-                            .to_f64()
-                            .assume_local()
-                            + mapped.bob_offset(),
-                    );
+                    let layer_screen_pos = layers
+                        .layer_geometry(layer_surface)
+                        .unwrap()
+                        .loc
+                        .to_f64()
+                        .assume_local()
+                        + mapped.bob_offset();
+                    let mut layer_pos_within_output =
+                        self.output_state.get(output).map_or(layer_screen_pos, |s| {
+                            s.view_ctx.viewport.screen_to_content(layer_screen_pos)
+                        });
 
                     // Background and bottom layers move together with the workspaces.
                     if matches!(layer, Layer::Background | Layer::Bottom) {
@@ -4695,7 +4708,7 @@ impl Niri {
         }
 
         let output_rect = Rectangle::from_size(output_size(output).assume_local());
-        let viewport = vt.apply_inverse_rect(output_rect);
+        let viewport = vt.screen_to_content_rect(output_rect);
 
         let display_cursor = pointer_local.constrain(viewport);
 
@@ -6366,7 +6379,9 @@ impl Niri {
             // cursor graphic is fixed-size, so only the position is mapped.
             let viewport = self.live_view(&output).viewport;
             let pos: Point<i32, Physical> = match self.pointer_geometry(&output, viewport) {
-                Some((_, display)) => viewport.apply(display).to_physical_precise_round(scale),
+                Some((_, display)) => viewport
+                    .content_to_screen(display)
+                    .to_physical_precise_round(scale),
                 // Pointer is on another output: the overlap check below drops it.
                 None => (pointer_pos - geo.loc.to_f64()).to_physical_precise_round(scale),
             };

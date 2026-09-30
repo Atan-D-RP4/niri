@@ -763,7 +763,7 @@ window-rule {
 
 <sup>Since: next release</sup>
 
-Set the sensitivity of pinch gestures sent to a window.
+Set the sensitivity of pinch gestures sent to a window. It does not change zoom speed.
 
 This will be multiplied with the pinch sensitivity set for your touchpad in the [input section](./Configuration:-Input.md#pointing-devices).
 

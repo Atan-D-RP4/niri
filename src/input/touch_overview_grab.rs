@@ -78,9 +78,15 @@ impl TouchOverviewGrab {
             return true;
         };
 
-        let start_content_pos_within_output = data
-            .niri
-            .screen_to_content(&self.output, self.start_pos_within_output);
+        let start_content_pos_within_output =
+            data.niri
+                .output_state
+                .get(&self.output)
+                .map_or(self.start_pos_within_output, |s| {
+                    s.view_ctx
+                        .viewport
+                        .screen_to_content(self.start_pos_within_output)
+                });
 
         let layout = &mut data.niri.layout;
 
@@ -174,9 +180,15 @@ impl TouchOverviewGrab {
                 {
                     let output = output.clone();
                     // Interactive move consumes content-space positions.
-                    let content_pos_within_output = data
-                        .niri
-                        .screen_to_content(&output, screen_pos_within_output);
+                    let content_pos_within_output =
+                        data.niri
+                            .output_state
+                            .get(&output)
+                            .map_or(screen_pos_within_output, |s| {
+                                s.view_ctx
+                                    .viewport
+                                    .screen_to_content(screen_pos_within_output)
+                            });
                     data.niri.layout.interactive_move_update(
                         window,
                         content_delta,

@@ -126,7 +126,13 @@ impl MoveGrab {
         // content-space positions.
         let start_content_pos_within_output = data
             .niri
-            .screen_to_content(&self.start_output, self.start_pos_within_output);
+            .output_state
+            .get(&self.start_output)
+            .map_or(self.start_pos_within_output, |s| {
+                s.view_ctx
+                    .viewport
+                    .screen_to_content(self.start_pos_within_output)
+            });
         if !data.niri.layout.interactive_move_begin(
             self.window.clone(),
             &self.start_output,
@@ -249,9 +255,15 @@ impl MoveGrab {
                 let output = output.clone();
                 // Interactive move consumes content-space positions; raw screen/global pointer
                 // tracking above is intentionally untouched.
-                let content_pos_within_output = data
-                    .niri
-                    .screen_to_content(&output, screen_pos_within_output);
+                let content_pos_within_output =
+                    data.niri
+                        .output_state
+                        .get(&output)
+                        .map_or(screen_pos_within_output, |s| {
+                            s.view_ctx
+                                .viewport
+                                .screen_to_content(screen_pos_within_output)
+                        });
 
                 // Interactive move always uses absolute delta since the window must remain pinned
                 // to the cursor even when it's clamped to monitor bounds.
@@ -299,9 +311,15 @@ impl MoveGrab {
             };
             let output = output.clone();
             // Interactive move consumes content-space positions.
-            let content_pos_within_output = data
-                .niri
-                .screen_to_content(&output, screen_pos_within_output);
+            let content_pos_within_output =
+                data.niri
+                    .output_state
+                    .get(&output)
+                    .map_or(screen_pos_within_output, |s| {
+                        s.view_ctx
+                            .viewport
+                            .screen_to_content(screen_pos_within_output)
+                    });
 
             if !self.begin_move(data) {
                 return false;

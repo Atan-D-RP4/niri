@@ -44,6 +44,7 @@ Notes:
 ### Configuration
 
 All zoom settings are configured in the [`zoom {}` config block](./Configuration:-Miscellaneous.md#zoom):
+Touchpad pinch zoom speed is `zoom.gesture-sensitivity` multiplied by `input.touchpad.pinch-sensitivity`; touchscreen pinch uses only `zoom.gesture-sensitivity`.
 Zoom can also be animated. See the [`animations {}` settings](./Configuration:-Animations.md)
 
 The cursor can optionally scale with zoom via the [`scale-with-zoom`](./Configuration:-Miscellaneous.md#scale-with-zoom) cursor setting.
