@@ -72,7 +72,9 @@ impl OutputZoomState {
             Some(a) => a.value_at(now),
             None => match &self.level_transition {
                 ZoomLevelTransition::Animating(a) => a.tracking.compute_focal(level, self.focal),
-                ZoomLevelTransition::Gesturing(g) => g.compute_focal_or(level, g.current_focal),
+                ZoomLevelTransition::Gesturing(g) => {
+                    g.tracking.compute_focal(level, g.current_focal)
+                }
                 ZoomLevelTransition::Idle => self.focal,
             },
         }
@@ -94,8 +96,8 @@ impl OutputZoomState {
     /// Update the cursor position for focal tracking.
     pub fn set_cursor_pos(&mut self, pos: Point<f64, Local>) {
         match &mut self.level_transition {
-            ZoomLevelTransition::Animating(a) => a.set_cursor_pos(pos),
-            ZoomLevelTransition::Gesturing(g) => g.set_cursor_pos(pos),
+            ZoomLevelTransition::Animating(a) => a.tracking.set_cursor_pos(pos),
+            ZoomLevelTransition::Gesturing(g) => g.tracking.set_cursor_pos(pos),
             ZoomLevelTransition::Idle => {}
         }
     }
@@ -108,10 +110,11 @@ impl OutputZoomState {
                 let level = a.anim.value();
                 // self.focal is stale until advance_animations, recompute from tracking.
                 let focal = a.tracking.compute_focal(level, self.focal);
-                a.set_movement_mode(mode, level, focal);
+                a.tracking.set_movement_mode(mode, level, focal);
             }
             ZoomLevelTransition::Gesturing(g) => {
-                g.set_movement_mode(mode, g.current_level, g.current_focal);
+                g.tracking
+                    .set_movement_mode(mode, g.current_level, g.current_focal);
             }
             ZoomLevelTransition::Idle => {}
         }
@@ -128,13 +131,31 @@ impl OutputZoomState {
 
 #[derive(Debug, Clone, Default)]
 pub struct FocalTrackingContext {
-    cursor_pos: Option<Point<f64, Local>>,
-    output_size: Option<Size<f64, Local>>,
-    movement_mode: Option<ZoomMovementMode>,
+    pub(super) cursor_pos: Option<Point<f64, Local>>,
+    pub(super) output_size: Option<Size<f64, Local>>,
+    pub(super) movement_mode: Option<ZoomMovementMode>,
     on_edge_cursor_anchor: Option<Point<f64, Local>>,
 }
 
 impl FocalTrackingContext {
+    /// Single construction path; derives the OnEdge anchor eagerly.
+    /// `None` inputs (gesture started without cursor context) keep the `compute_focal` fallback.
+    pub fn new(
+        cursor_pos: Option<Point<f64, Local>>,
+        output_size: Option<Size<f64, Local>>,
+        movement_mode: Option<ZoomMovementMode>,
+        current_level: f64,
+        current_focal: Point<f64, Local>,
+    ) -> Self {
+        let mut ctx = Self {
+            cursor_pos,
+            output_size,
+            movement_mode,
+            on_edge_cursor_anchor: None,
+        };
+        ctx.on_edge_cursor_anchor = ctx.compute_on_edge_anchor(current_level, current_focal);
+        ctx
+    }
     pub fn compute_focal(&self, level: f64, fallback: Point<f64, Local>) -> Point<f64, Local> {
         let (Some(cursor), Some(size), Some(mode)) = (
             self.cursor_pos,
@@ -209,12 +230,8 @@ impl FocalTrackingContext {
 
         // Cursor anchor within the viewport.
         let vt = ViewportTransform::new(current_focal, current_level);
-        let output_rect = Rectangle::from_size(output_size);
-        let viewport = vt.screen_to_content_rect(output_rect);
-        let constrained = cursor.constrain(Rectangle::new(
-            viewport.loc,
-            viewport.size - Size::from((f64::EPSILON, f64::EPSILON)),
-        ));
+        let viewport = vt.visible_viewport(output_size);
+        let constrained = vt.constrain_to_visible_viewport(cursor, output_size);
         let delta = constrained - viewport.loc;
         let anchor_x = if viewport.size.w.abs() < f64::EPSILON {
             0.5
@@ -271,27 +288,14 @@ impl ZoomLevelAnimation {
         current_level: f64,
         current_focal: Point<f64, Local>,
     ) -> Self {
-        self.tracking.cursor_pos = cursor_pos;
-        self.tracking.output_size = output_size;
-        self.tracking.movement_mode = movement_mode;
-        self.tracking.on_edge_cursor_anchor = self
-            .tracking
-            .compute_on_edge_anchor(current_level, current_focal);
+        self.tracking = FocalTrackingContext::new(
+            cursor_pos,
+            output_size,
+            movement_mode,
+            current_level,
+            current_focal,
+        );
         self
-    }
-
-    pub fn set_cursor_pos(&mut self, pos: Point<f64, Local>) {
-        self.tracking.set_cursor_pos(pos);
-    }
-
-    pub fn set_movement_mode(
-        &mut self,
-        mode: ZoomMovementMode,
-        current_level: f64,
-        current_focal: Point<f64, Local>,
-    ) {
-        self.tracking
-            .set_movement_mode(mode, current_level, current_focal);
     }
 
     pub fn value_at(&self, now: Duration) -> f64 {
@@ -306,7 +310,7 @@ pub struct ZoomLevelGesture {
     pub current_level: f64,
     pub current_focal: Point<f64, Local>,
     pub last_log_scale: Option<f64>,
-    tracking: FocalTrackingContext,
+    pub(super) tracking: FocalTrackingContext,
 }
 
 impl ZoomLevelGesture {
@@ -317,57 +321,20 @@ impl ZoomLevelGesture {
         output_size: Option<Size<f64, Local>>,
         movement_mode: Option<ZoomMovementMode>,
     ) -> Self {
-        let mut result = Self {
+        Self {
             tracker: SwipeTracker::new(),
             start_level,
             current_level: start_level,
             current_focal,
             last_log_scale: None,
-            tracking: FocalTrackingContext {
+            tracking: FocalTrackingContext::new(
                 cursor_pos,
                 output_size,
                 movement_mode,
-                on_edge_cursor_anchor: None,
-            },
-        };
-        result.tracking.on_edge_cursor_anchor = result
-            .tracking
-            .compute_on_edge_anchor(start_level, current_focal);
-        result
-    }
-
-    pub fn compute_focal_or(&self, level: f64, fallback: Point<f64, Local>) -> Point<f64, Local> {
-        self.tracking.compute_focal(level, fallback)
-    }
-
-    pub fn cursor_pos(&self) -> Option<Point<f64, Local>> {
-        self.tracking.cursor_pos
-    }
-
-    pub fn output_size(&self) -> Option<Size<f64, Local>> {
-        self.tracking.output_size
-    }
-
-    pub fn movement_mode(&self) -> Option<&ZoomMovementMode> {
-        self.tracking.movement_mode.as_ref()
-    }
-
-    pub fn set_cursor_pos(&mut self, pos: Point<f64, Local>) {
-        self.tracking.set_cursor_pos(pos);
-    }
-
-    pub fn set_output_size(&mut self, size: Size<f64, Local>) {
-        self.tracking.output_size = Some(size);
-    }
-
-    pub fn set_movement_mode(
-        &mut self,
-        mode: ZoomMovementMode,
-        current_level: f64,
-        current_focal: Point<f64, Local>,
-    ) {
-        self.tracking
-            .set_movement_mode(mode, current_level, current_focal);
+                start_level,
+                current_focal,
+            ),
+        }
     }
 }
 

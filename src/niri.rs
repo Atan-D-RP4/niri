@@ -1823,7 +1823,6 @@ impl State {
                 {
                     let movement_mode = self.niri.config.borrow().zoom.movement_mode;
 
-                    // Update the mode in any active transition's tracking context.
                     self.niri
                         .layout
                         .update_zoom_movement_mode(&output, movement_mode);
@@ -1831,10 +1830,9 @@ impl State {
                     // Animate focal only when idle; active transitions update it each tick.
                     let cursor_local =
                         global_pointer_pos.to_local(&self.niri.output_state[&output].view_ctx);
-                    self.niri.layout.set_zoom_cursor_pos(&output, cursor_local);
                     self.niri
                         .layout
-                        .update_cursor_zoom_focal(&output, cursor_local, true);
+                        .track_zoom_cursor(&output, cursor_local, true);
 
                     self.niri.queue_redraw(&output);
                 }
@@ -1843,15 +1841,9 @@ impl State {
 
         if zoom_filter_threshold_changed {
             let new_threshold = self.niri.config.borrow().zoom.filter_threshold;
-            let now = self.niri.clock.now();
             let outputs: Vec<Output> = self.niri.output_state.keys().cloned().collect();
             for output in &outputs {
-                let factor = self
-                    .niri
-                    .layout
-                    .zoom_state_for_output(output)
-                    .map(|s| s.viewport_transform(now).factor)
-                    .unwrap_or(1.0);
+                let factor = self.niri.layout.zoom_level(output);
                 if threshold_flips_filter(factor, old_zoom_filter_threshold, new_threshold) {
                     self.niri.queue_redraw(output);
                 }
@@ -2978,13 +2970,7 @@ impl Niri {
 
         // Recenter the (0, 0) hot-plug sentinel at 1x; never clobber user focals.
         if view_ctx.is_some() {
-            if let Some(zoom) = self.layout.zoom_state_for_output_mut(output) {
-                if zoom.level == 1.0 && !zoom.transitioning() && zoom.focal == Point::from((0., 0.))
-                {
-                    let size = output_size(output);
-                    zoom.focal = Point::from((size.w / 2.0, size.h / 2.0));
-                }
-            }
+            self.layout.recenter_focal_sentinel(output);
         }
 
         // Compare geometry only; frame fields are per-frame.
@@ -3122,8 +3108,7 @@ impl Niri {
             }
         }
 
-        // Keep the cached view contexts in sync: any output that moved has a stale
-        // global_geo.loc, which would corrupt to_local/to_global conversions.
+        // Resync cached views; moved outputs have stale origins.
         self.global_space
             .outputs()
             .cloned()
@@ -4660,14 +4645,12 @@ impl Niri {
 
         let elem = ZoomElement::cursor(
             elem,
-            view.viewport,
+            &view,
             focal,
             display,
             hotspot,
             graphic_scale,
             output_scale,
-            view.filter,
-            view.filter_changed,
         );
         ZoomRenderElement::Pointer(elem).into()
     }
@@ -4692,10 +4675,8 @@ impl Niri {
             return None;
         }
 
-        let output_rect = Rectangle::from_size(output_size(output).assume_local());
-        let viewport = vt.screen_to_content_rect(output_rect);
-
-        let display_cursor = pointer_local.constrain(viewport);
+        let display_cursor =
+            vt.constrain_to_visible_viewport(pointer_local, output_size(output).assume_local());
 
         let scale = Scale::from(output.current_scale().fractional_scale());
         Some((pointer_local.to_physical(scale), display_cursor))
@@ -6492,11 +6473,7 @@ impl Niri {
 
             let scale = Scale::from(output.current_scale().fractional_scale());
             // Baseline for pointer scaling; the texture itself is unzoomed.
-            let capture_level = self
-                .layout
-                .zoom_state_for_output(&output)
-                .map(|state| state.viewport_transform(self.clock.now()).factor)
-                .unwrap_or(1.);
+            let capture_level = self.layout.zoom_level(&output);
             let targets = [
                 RenderTarget::Output,
                 RenderTarget::Screencast,

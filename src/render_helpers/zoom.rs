@@ -9,7 +9,7 @@ use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame;
 use crate::utils::geometry::{Local, PointExt, PointLocalExt};
-use crate::utils::view::{round_rect, transform_rect, ViewportTransform};
+use crate::utils::view::{transform_rect, OutputViewCtx, ViewportTransform};
 
 /// Runs a draw with the filter set, restoring `Linear` after, even on error.
 macro_rules! with_filter {
@@ -135,27 +135,26 @@ impl<E: Element> ZoomElement<E> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn cursor(
         elem: E,
-        viewport: ViewportTransform,
+        view: &OutputViewCtx,
         focal: Point<f64, Physical>,
         display: Point<f64, Local>,
         hotspot: Point<i32, Physical>,
         graphic_scale: f64,
         scale: Scale<f64>,
-        filter: Option<TextureFilter>,
-        filter_changed: bool,
     ) -> Self {
         let (final_pos, wrapper) =
-            place_cursor(viewport, focal, display, hotspot, graphic_scale, scale);
+            place_cursor(view.viewport, focal, display, hotspot, graphic_scale, scale);
         Self::from_element(
             elem,
             wrapper,
             final_pos,
             Relocate::Absolute,
-            filter,
-            filter_changed,
+            view.filter,
+            view.filter_changed,
         )
     }
 }
+
 impl<E: Element> Element for ZoomElement<E> {
     fn id(&self) -> &Id {
         self.element.id()
@@ -180,7 +179,7 @@ impl<E: Element> Element for ZoomElement<E> {
         }
 
         // NOTE: to_i32_up() avoids jitter but oversizes the screenshot selection.
-        round_rect(geometry)
+        geometry.to_i32_round()
     }
 
     fn transform(&self) -> Transform {

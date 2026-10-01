@@ -1059,14 +1059,12 @@ impl OutputScreenshot {
                 let tip = frozen.tip.to_f64();
                 let elem = ZoomElement::cursor(
                     frozen.element,
-                    view.viewport,
+                    &view,
                     tip,
                     tip.to_logical(output_scale).assume_local(),
                     frozen.hotspot,
                     graphic_scale,
                     output_scale,
-                    view.filter,
-                    view.filter_changed,
                 );
                 push(ScreenshotUiRenderElement::Zoomed(elem));
             }

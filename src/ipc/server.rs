@@ -460,19 +460,18 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
         Request::ZoomState { output } => {
             let (tx, rx) = async_channel::bounded(1);
             ctx.event_loop.insert_idle(move |state| {
-                let now = state.niri.clock.now();
                 let zooms = state
                     .niri
                     .layout
                     .outputs()
                     .filter_map(|output| {
                         let zoom_state = state.niri.layout.zoom_state_for_output(output)?;
-                        let vt = zoom_state.viewport_transform(now);
+                        let level = state.niri.layout.zoom_level(output);
                         Some((
                             output.name().clone(),
                             niri_ipc::Zoom {
                                 is_locked: zoom_state.locked,
-                                level: vt.factor,
+                                level,
                             },
                         ))
                     })
@@ -634,7 +633,6 @@ impl State {
 
         let mut events = Vec::new();
         let mut seen = HashSet::new();
-        let now = self.niri.clock.now();
 
         for output in self.niri.layout.outputs() {
             let output_name = output.name().clone();
@@ -644,10 +642,9 @@ impl State {
             };
             seen.insert(output_name.clone());
 
-            let vt = zoom_state.viewport_transform(now);
             let ipc_zoom = niri_ipc::Zoom {
                 is_locked: zoom_state.locked,
-                level: vt.factor,
+                level: self.niri.layout.zoom_level(output),
             };
 
             let transitioning = zoom_state.transitioning();

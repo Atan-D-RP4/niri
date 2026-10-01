@@ -3,7 +3,7 @@ use smithay::backend::renderer::TextureFilter;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::Space;
 use smithay::output::Output;
-use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale};
+use smithay::utils::{Coordinate, Logical, Physical, Point, Rectangle, Scale, Size};
 
 use crate::utils::geometry::{
     Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt,
@@ -61,6 +61,25 @@ impl ViewportTransform {
     /// Returns the axis-aligned bounding box of the rectangle transformed back into content space.
     pub fn screen_to_content_rect(&self, rect: Rectangle<f64, Local>) -> Rectangle<f64, Local> {
         self.bounding_rect(rect, |point| self.screen_to_content(point))
+    }
+
+    /// Visible viewport: the output rect mapped back through the zoom.
+    pub fn visible_viewport(&self, output_size: Size<f64, Local>) -> Rectangle<f64, Local> {
+        self.screen_to_content_rect(Rectangle::from_size(output_size))
+    }
+
+    /// Constrain a screen-space point to the visible viewport.
+    /// Shrinks by epsilon so edge points stay strictly inside.
+    pub fn constrain_to_visible_viewport(
+        &self,
+        pos: Point<f64, Local>,
+        output_size: Size<f64, Local>,
+    ) -> Point<f64, Local> {
+        let viewport = self.visible_viewport(output_size);
+        pos.constrain(Rectangle::new(
+            viewport.loc,
+            viewport.size - Size::from((f64::EPSILON, f64::EPSILON)),
+        ))
     }
 
     /// Returns the equivalent 2D affine matrix.
@@ -140,13 +159,6 @@ impl OutputViewCtx {
     }
 }
 
-/// Shared rounding for geometry and screenshot export; damage rounds looser.
-pub(crate) fn round_rect(rect: Rectangle<f64, Physical>) -> Rectangle<i32, Physical> {
-    let loc = rect.loc.to_i32_round();
-    let bottom_right = (rect.loc + rect.size).to_i32_round();
-    Rectangle::new(loc, (bottom_right - loc).to_size())
-}
-
 /// Maps a content-space physical rect through the viewport, unrounded.
 pub fn transform_rect(
     viewport: &ViewportTransform,
@@ -163,7 +175,7 @@ pub fn map_rect(
     content: Rectangle<i32, Physical>,
     scale: Scale<f64>,
 ) -> Rectangle<i32, Physical> {
-    round_rect(transform_rect(viewport, content.to_f64(), scale))
+    transform_rect(viewport, content.to_f64(), scale).to_i32_round()
 }
 
 #[cfg(test)]

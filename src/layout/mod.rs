@@ -2860,11 +2860,11 @@ impl<W: LayoutElement> Layout<W> {
         let gesture = state.level_transition.gesture_mut()?;
 
         if let Some(cursor_local) = cursor_local {
-            gesture.set_cursor_pos(cursor_local);
+            gesture.tracking.set_cursor_pos(cursor_local);
             // Anchor stays fixed from gesture start; recomputing teleports.
         }
         if let Some(output_size) = output_size {
-            gesture.set_output_size(output_size);
+            gesture.tracking.set_output_size(output_size);
         }
 
         // Convert cumulative scale to log-space delta.
@@ -2884,7 +2884,9 @@ impl<W: LayoutElement> Layout<W> {
         let new_level = compute_gesture_zoom_level(gesture.start_level, log_pos, 1.0, max_zoom);
 
         gesture.current_level = new_level;
-        gesture.current_focal = gesture.compute_focal_or(new_level, gesture.current_focal);
+        gesture.current_focal = gesture
+            .tracking
+            .compute_focal(new_level, gesture.current_focal);
 
         Some(())
     }
@@ -2904,9 +2906,9 @@ impl<W: LayoutElement> Layout<W> {
                 self.options.animations.zoom_level_change.0,
             )
             .with_tracking_context(
-                gesture.cursor_pos(),
-                gesture.output_size(),
-                gesture.movement_mode().cloned(),
+                gesture.tracking.cursor_pos,
+                gesture.tracking.output_size,
+                gesture.tracking.movement_mode,
                 gesture.current_level,
                 gesture.current_focal,
             );
@@ -2921,7 +2923,9 @@ impl<W: LayoutElement> Layout<W> {
         gesture.tracker.push(0., now);
 
         state.level = gesture.current_level.max(1.0);
-        state.focal = gesture.compute_focal_or(state.level, gesture.current_focal);
+        state.focal = gesture
+            .tracking
+            .compute_focal(state.level, gesture.current_focal);
 
         Some(true)
     }
@@ -2956,16 +2960,16 @@ impl<W: LayoutElement> Layout<W> {
         output: &Output,
         target_level: f64,
         cursor_local: Point<f64, Local>,
-        movement_mode: ZoomMovementMode,
-        locked: bool,
     ) {
         let max_zoom = self.options.zoom.max_zoom;
+        let movement_mode = self.options.zoom.movement_mode;
         let target_level = target_level.clamp(1.0, max_zoom);
         let now = self.clock.now();
 
         let Some(state) = self.zoom_states.get_mut(output) else {
             return;
         };
+        let locked = state.locked;
 
         let vt = state.viewport_transform(now);
         let current_level = vt.factor;
@@ -2976,10 +2980,13 @@ impl<W: LayoutElement> Layout<W> {
             current_focal
         } else {
             let output_size = output_size(output).assume_local();
-            let mut tracking = zoom::FocalTrackingContext::default();
-            tracking.set_cursor_pos(cursor_local);
-            tracking.set_output_size(output_size);
-            tracking.set_movement_mode(movement_mode, current_level, current_focal);
+            let tracking = zoom::FocalTrackingContext::new(
+                Some(cursor_local),
+                Some(output_size),
+                Some(movement_mode),
+                current_level,
+                current_focal,
+            );
             tracking.compute_focal(target_level, current_focal)
         };
 
@@ -3019,22 +3026,26 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    /// Track cursor position for zoom state.
-    pub fn set_zoom_cursor_pos(&mut self, output: &Output, cursor_local: Point<f64, Local>) {
-        if let Some(state) = self.zoom_states.get_mut(output) {
-            state.set_cursor_pos(cursor_local);
-        }
+    /// Current zoom level for an output; 1.0 without zoom state.
+    pub fn zoom_level(&self, output: &Output) -> f64 {
+        let now = self.clock.now();
+        self.zoom_states
+            .get(output)
+            .map_or(1.0, |s| s.viewport_transform(now).factor)
     }
 
-    /// Recompute the focal from the cursor position.
-    ///
-    /// No-op while gesturing, animating, or locked.
-    pub fn update_cursor_zoom_focal(
+    /// Track the cursor, then follow the focal when idle; neither works alone.
+    /// The focal update early-returns while a transition is active.
+    pub fn track_zoom_cursor(
         &mut self,
         output: &Output,
         cursor_local: Point<f64, Local>,
         animate: bool,
     ) {
+        if let Some(state) = self.zoom_states.get_mut(output) {
+            state.set_cursor_pos(cursor_local);
+        }
+
         let now = self.clock.now();
         let Some(state) = self.zoom_states.get_mut(output) else {
             return;
@@ -3055,10 +3066,13 @@ impl<W: LayoutElement> Layout<W> {
 
         let output_size = output_size(output).assume_local();
         let movement_mode = self.options.zoom.movement_mode;
-        let mut tracking = zoom::FocalTrackingContext::default();
-        tracking.set_cursor_pos(cursor_local);
-        tracking.set_output_size(output_size);
-        tracking.set_movement_mode(movement_mode, current_level, current_focal);
+        let tracking = zoom::FocalTrackingContext::new(
+            Some(cursor_local),
+            Some(output_size),
+            Some(movement_mode),
+            current_level,
+            current_focal,
+        );
         let target_focal = tracking.compute_focal(current_level, current_focal);
 
         let focal_changed = (target_focal - current_focal).x.abs() > ZOOM_CHANGE_EPSILON
@@ -3101,20 +3115,18 @@ impl<W: LayoutElement> Layout<W> {
         let state = self.zoom_states.get(output)?;
         let now = self.clock.now();
         let vt = state.viewport_transform(now);
+        Some(vt.constrain_to_visible_viewport(pos, output_size))
+    }
 
-        // Viewport is the output rect scaled about the focal.
-        let factor = vt.factor;
-        let focal = vt.focal;
-        let viewport_size = Size::from((output_size.w / factor, output_size.h / factor));
-        let viewport_loc = Point::from((
-            focal.x + (0. - focal.x) / factor,
-            focal.y + (0. - focal.y) / factor,
-        ));
-
-        Some(pos.constrain(Rectangle::new(
-            viewport_loc,
-            viewport_size - Size::from((f64::EPSILON, f64::EPSILON)),
-        )))
+    /// Recenter the (0, 0) hot-plug sentinel at 1x; never clobbers user focals.
+    pub fn recenter_focal_sentinel(&mut self, output: &Output) {
+        if let Some(state) = self.zoom_states.get_mut(output) {
+            if state.level == 1.0 && !state.transitioning() && state.focal == Point::from((0., 0.))
+            {
+                let size = output_size(output);
+                state.focal = Point::from((size.w / 2.0, size.h / 2.0));
+            }
+        }
     }
 
     pub fn are_animations_ongoing(&self, output: Option<&Output>) -> bool {
