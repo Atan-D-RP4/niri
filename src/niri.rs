@@ -4630,15 +4630,6 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         let output_scale = Scale::from(output.current_scale().fractional_scale());
 
-        let push = if self.debug_draw_opaque_regions {
-            &mut move |elem| {
-                push_opaque_regions(&elem, output_scale, push);
-                push(elem);
-            }
-        } else {
-            push
-        };
-
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
             self.render_pointer(ctx.renderer, output, view, &mut |elem| push(elem.into()));
