@@ -122,13 +122,7 @@ impl ZoomChangedState {
     const EVENT_EPSILON: f64 = 1e-6;
 
     /// Emits on gesture/transition boundaries and settled changes, not per animation frame.
-    pub fn should_emit_zoom_event(
-        &self,
-        output: &str,
-        current: &Zoom,
-        transitioning: bool,
-        gesturing: bool,
-    ) -> bool {
+    pub fn should_emit_zoom_event(&self, output: &str, current: &Zoom) -> bool {
         let Some(previous) = self.outputs.get(output) else {
             return true;
         };
@@ -137,8 +131,7 @@ impl ZoomChangedState {
             || previous.is_locked != current.is_locked;
 
         previous.is_locked != current.is_locked
-            || previous.gesturing != gesturing
-            || (!transitioning && state_changed)
+            || (!current.transitioning && state_changed)
     }
 }
 

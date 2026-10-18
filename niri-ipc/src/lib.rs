@@ -1626,7 +1626,7 @@ pub struct Zoom {
     /// Whether zoom is locked.
     pub is_locked: bool,
     /// Whether a zoom gesture is active.
-    pub gesturing: bool,
+    pub transitioning: bool,
 }
 
 /// Kind of screencast.
