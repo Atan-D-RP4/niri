@@ -343,6 +343,9 @@ impl State {
         } else {
             None
         };
+        // The map-to-focused-window rect is already in content space; the output-mapping
+        // branches below produce screen points and need the entry conversion.
+        let is_window_target = window_target.is_some();
 
         let (target_geo, keep_ratio, px, transform) = if let Some((rect, output)) = window_target {
             (
@@ -402,7 +405,19 @@ impl State {
 
         pos.x = pos.x.clamp(0.0, target_geo.size.w - px);
         pos.y = pos.y.clamp(0.0, target_geo.size.h - px);
-        Some(pos + target_geo.loc)
+        let pos = pos + target_geo.loc;
+
+        // Device positions are screen; the stored cursor is content. Convert once at entry.
+        // The map-to-focused-window branch already yields a content point, so only the
+        // output-mapping branches need the inverse.
+        if is_window_target {
+            return Some(pos);
+        }
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            Some(self.niri.screen_to_content_global(output, pos))
+        } else {
+            Some(pos)
+        }
     }
 
     fn is_inhibiting_shortcuts(&self) -> bool {
@@ -2740,13 +2755,23 @@ impl State {
         // Any of the early returns here mean that the pointer is not inside the hot corner.
         self.niri.pointer_inside_hot_corner = false;
 
-        let Some(pos) = self.compute_absolute_location(&event, None).or_else(|| {
+        let Some(mut pos) = self.compute_absolute_location(&event, None).or_else(|| {
             self.global_bounding_rectangle().map(|output_geo| {
-                event.position_transformed(output_geo.size) + output_geo.loc.to_f64()
+                let screen = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+                // Same entry conversion as compute_absolute_location above.
+                if let Some((output, _)) = self.niri.output_under(screen) {
+                    self.niri.screen_to_content_global(output, screen)
+                } else {
+                    screen
+                }
             })
         }) else {
             return;
         };
+
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            pos = self.niri.screen_to_content_global(output, pos);
+        }
 
         let serial = SERIAL_COUNTER.next_serial();
 
@@ -3636,9 +3661,13 @@ impl State {
     ) where
         I::Device: 'static,
     {
-        let Some(pos) = self.compute_tablet_position(event) else {
+        let Some(mut pos) = self.compute_tablet_position(event) else {
             return;
         };
+
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            pos = self.niri.screen_to_content_global(output, pos);
+        }
 
         self.update_screenshot_ui(pos, None);
 
@@ -4288,10 +4317,11 @@ impl State {
         let output_geo = self.niri.global_space.output_geometry(output).unwrap();
         let transform = output.current_transform();
         let size = transform.invert().transform_size(output_geo.size);
-        Some(
-            transform.transform_point_in(evt.position_transformed(size), &size.to_f64())
-                + output_geo.loc.to_f64(),
-        )
+        let screen = transform.transform_point_in(evt.position_transformed(size), &size.to_f64())
+            + output_geo.loc.to_f64();
+        // Device positions are screen; the stored cursor is content. Convert once at entry,
+        // so absolute pointer and touch all store content.
+        Some(self.niri.screen_to_content_global(output, screen))
     }
 
     /// Computes the cursor position for the touch event.
@@ -4543,7 +4573,7 @@ impl State {
         let scale = output.current_scale().fractional_scale();
         let logical_size = output_size(output);
 
-        let point = pos - geom.loc.to_f64();
+        let point = self.niri.content_to_screen_global(output, pos) - geom.loc.to_f64();
         point
             .constrain(Rectangle::from_size(logical_size))
             .to_physical_precise_round(scale)
@@ -4566,7 +4596,11 @@ impl State {
         if mru_output != output {
             return None;
         }
-        self.niri.window_mru_ui.pointer_motion(pos_within_output)
+        let screen_within_output = self
+            .niri
+            .output_view(output)
+            .content_to_screen(pos_within_output);
+        self.niri.window_mru_ui.pointer_motion(screen_within_output)
     }
 }
 
