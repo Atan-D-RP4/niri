@@ -4137,10 +4137,17 @@ impl Niri {
         let tip = view.content_to_screen(pointer_pos);
         let anchor = pointer_pos.to_physical_precise_round(output_scale);
 
+        // When cursor view scaling is ignored, use the identity view.
+        let view = if self.config.borrow().cursor.ignore_view_scale {
+            OutputViewport::identity()
+        } else {
+            view
+        };
+
         match render_cursor {
             RenderCursor::Hidden => (),
             RenderCursor::Surface { surface, hotspot } => {
-                let offset = hotspot.to_f64();
+                let offset = hotspot.to_f64().upscale(view.factor);
                 let position = (tip - offset).to_physical_precise_round(output_scale);
 
                 push_elements_from_surface_tree(
@@ -4165,7 +4172,7 @@ impl Niri {
             } => {
                 let (idx, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
                 let hotspot = XCursor::hotspot(frame).to_logical(scale);
-                let offset = hotspot.to_f64();
+                let offset = hotspot.to_f64().upscale(view.factor);
                 let position = (tip - offset).to_physical_precise_round(output_scale);
 
                 let texture = self.cursor_texture_cache.get(icon, scale, &cursor, idx);
@@ -4191,7 +4198,7 @@ impl Niri {
         }
 
         if let Some(dnd_icon) = self.dnd_icon.as_ref() {
-            let offset = dnd_icon.offset.to_f64();
+            let offset = dnd_icon.offset.to_f64().upscale(view.factor);
             let position = (tip + offset).to_physical_precise_round(output_scale);
 
             push_elements_from_surface_tree(
