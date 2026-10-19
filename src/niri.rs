@@ -3590,6 +3590,26 @@ impl Niri {
         self.window_under(pos)
     }
 
+    /// Difference of content-space endpoints, zero across outputs.
+    ///
+    /// Inputs are already content (the content points under the drawn cursor),
+    /// so this is a pass-through difference with no viewport inverse.
+    pub fn content_delta(
+        &self,
+        prev: Point<f64, Logical>,
+        now: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
+        let (Some((prev_output, _)), Some((now_output, _))) =
+            (self.output_under(prev), self.output_under(now))
+        else {
+            return Point::from((0., 0.));
+        };
+        if prev_output != now_output {
+            return Point::from((0., 0.));
+        }
+        now - prev
+    }
+
     /// Returns contents under the given point.
     ///
     /// We don't have a proper global space for all windows, so this function converts window
