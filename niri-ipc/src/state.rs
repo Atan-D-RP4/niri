@@ -130,8 +130,7 @@ impl ZoomChangedState {
         let state_changed = (previous.level - current.level).abs() > Self::EVENT_EPSILON
             || previous.is_locked != current.is_locked;
 
-        previous.is_locked != current.is_locked
-            || (!current.transitioning && state_changed)
+        previous.is_locked != current.is_locked || (!current.transitioning && state_changed)
     }
 }
 

@@ -1038,9 +1038,7 @@ impl State {
             let zoom = niri_ipc::Zoom {
                 is_locked: zoom_state.locked,
                 level: zoom_state.view().factor,
-                // FIXME: Hardcoded `false` for gesturing and transitioning.
-                // update to use checked bools once implemented.
-                transitioning: false,
+                transitioning: zoom_state.are_animations_ongoing(),
             };
 
             // FIXME: Hardcoded `false` for gesturing and transitioning.
