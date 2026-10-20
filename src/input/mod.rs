@@ -2536,7 +2536,9 @@ impl State {
                         target
                     };
 
-                    zoom_state.set_level(target_level);
+                    let anim_config = self.niri.config.borrow().animations.zoom_level_change;
+
+                    zoom_state.set_level(target_level, anim_config);
                     self.niri.queue_redraw(&output);
                 }
             }
