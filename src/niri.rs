@@ -2109,7 +2109,9 @@ impl State {
             let zoom = full_config.zoom;
 
             if let Some(state) = self.niri.output_state.get_mut(output) {
-                let changed = state.zoom.set_config(&zoom);
+                let changed = state
+                    .zoom
+                    .set_config(&zoom, &full_config.animations.zoom_level_change);
                 if changed {
                     recolored_outputs.push(output.clone());
                 }
@@ -3315,7 +3317,7 @@ impl Niri {
             lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
-            zoom: OutputZoomState::new(&output, zoom_config),
+            zoom: OutputZoomState::new(&output, self.clock.clone(), zoom_config),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -4590,6 +4592,7 @@ impl Niri {
                     state.screen_transition = None;
                 }
             }
+            state.zoom.advance_animations();
         }
     }
 
@@ -5190,6 +5193,9 @@ impl Niri {
                     .filter_map(|surface| self.mapped_layer_surfaces.get(surface))
                     .any(|mapped| mapped.are_animations_ongoing());
             }
+
+            // Also check output zoom state for zoom animations
+            state.unfinished_animations_remain |= state.zoom.are_animations_ongoing();
 
             // Render.
             res = backend.render(self, output, target_presentation_time);
