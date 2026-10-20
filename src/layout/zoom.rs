@@ -1,7 +1,9 @@
-use niri_config::ZoomMovementMode;
+use niri_config::animations::ZoomLevelChangeAnim;
+use niri_config::{Zoom, ZoomMovementMode};
 use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
+use crate::animation::{Animation, Clock};
 use crate::utils::output_size;
 use crate::utils::view::OutputViewport;
 
@@ -19,10 +21,13 @@ pub struct OutputZoomState {
     // Content-local cursor anchor, pointer-only: touch never writes zoom state.
     cursor: Point<f64, Logical>,
     output_size: Size<f64, Logical>,
+
+    clock: Clock,
+    level_transition: Option<Animation>,
 }
 
 impl OutputZoomState {
-    pub fn new(output: &Output, zoom: niri_config::Zoom) -> Self {
+    pub fn new(output: &Output, clock: Clock, zoom: Zoom) -> Self {
         let output_size = output_size(output);
         let output_center = Point::from((output_size.w / 2., output_size.h / 2.));
         Self {
@@ -34,10 +39,37 @@ impl OutputZoomState {
             max_level: zoom.max_zoom,
             cursor: output_center,
             output_size,
+            clock,
+            level_transition: None,
         }
     }
 
-    pub fn set_config(&mut self, zoom: &niri_config::Zoom) -> bool {
+    pub fn view(&self) -> OutputViewport {
+        OutputViewport::new(self.focal, self.level)
+    }
+
+    pub fn advance_animations(&mut self) {
+        if let Some(ref anim) = self.level_transition {
+            let new_level = if anim.is_done() {
+                let level = anim.to();
+                self.level_transition = None;
+                level
+            } else {
+                anim.value_at(self.clock.now())
+            };
+            // Compute anchor at old level, then apply new level with the same anchor to avoid
+            // drift.
+            let anchor = self.tracked_anchor(self.focal, self.cursor, self.level);
+            self.level = new_level;
+            self.apply_focal(self.focal_for(self.level, self.cursor, anchor));
+        }
+    }
+
+    pub fn are_animations_ongoing(&self) -> bool {
+        self.level_transition.is_some()
+    }
+
+    pub fn set_config(&mut self, zoom: &Zoom, anim_config: &ZoomLevelChangeAnim) -> bool {
         let old_view = self.view();
 
         self.max_level = zoom.max_zoom;
@@ -50,13 +82,9 @@ impl OutputZoomState {
                 self.tracked_anchor(self.focal, self.cursor, self.level),
             ));
         }
-        self.set_level(self.level);
+        self.set_level(self.level, *anim_config);
 
         old_view != self.view()
-    }
-
-    pub fn view(&self) -> OutputViewport {
-        OutputViewport::new(self.focal, self.level)
     }
 
     pub fn set_output_size(&mut self, size: Size<f64, Logical>) {
@@ -71,14 +99,19 @@ impl OutputZoomState {
         ));
     }
 
-    pub fn set_level(&mut self, level: f64) {
+    pub fn set_level(&mut self, level: f64, config: ZoomLevelChangeAnim) {
         let target_level = level.clamp(1.0, self.max_level);
         if self.locked || (self.level - target_level).abs() <= ZOOM_CHANGE_EPSILON {
             return;
         }
-        let anchor = self.tracked_anchor(self.focal, self.cursor, self.level);
-        self.level = target_level;
-        self.apply_focal(self.focal_for(self.level, self.cursor, anchor));
+
+        self.level_transition = Some(Animation::new(
+            self.clock.clone(),
+            self.level,
+            target_level,
+            0.,
+            config.0,
+        ));
     }
 
     pub fn set_cursor(&mut self, pos: Point<f64, Logical>) {
@@ -153,35 +186,28 @@ impl OutputZoomState {
         } else {
             Point::from((0.5, 0.5))
         };
+        let output_size = self.output_size;
 
         match self.movement_mode {
             ZoomMovementMode::CursorFollow => cursor,
             ZoomMovementMode::Centered | ZoomMovementMode::OnEdge => {
-                Self::focal_for_anchor(level, self.output_size, cursor, anchor)
+                if level <= 1.0 {
+                    return cursor;
+                }
+
+                let viewport = OutputViewport::new(cursor, level);
+                let viewport_size = viewport
+                    .screen_to_content_rect(Rectangle::from_size(output_size))
+                    .size;
+                let anchor_offset =
+                    Point::from((viewport_size.w * anchor.x, viewport_size.h * anchor.y));
+                let viewport_loc = cursor - anchor_offset;
+                let scale_factor = level / (level - 1.0).max(0.0001);
+
+                viewport_loc
+                    .upscale(scale_factor)
+                    .constrain(Rectangle::from_size(output_size))
             }
         }
-    }
-
-    fn focal_for_anchor(
-        level: f64,
-        output_size: Size<f64, Logical>,
-        cursor: Point<f64, Logical>,
-        anchor: Point<f64, Logical>,
-    ) -> Point<f64, Logical> {
-        if level <= 1.0 {
-            return cursor;
-        }
-
-        let viewport = OutputViewport::new(cursor, level);
-        let viewport_size = viewport
-            .screen_to_content_rect(Rectangle::from_size(output_size))
-            .size;
-        let anchor_offset = Point::from((viewport_size.w * anchor.x, viewport_size.h * anchor.y));
-        let viewport_loc = cursor - anchor_offset;
-        let scale_factor = level / (level - 1.0).max(0.0001);
-
-        viewport_loc
-            .upscale(scale_factor)
-            .constrain(Rectangle::from_size(output_size))
     }
 }
