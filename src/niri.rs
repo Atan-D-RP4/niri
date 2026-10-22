@@ -2068,9 +2068,11 @@ impl State {
             }
 
             if let Some(state) = self.niri.output_state.get_mut(output) {
-                let changed = state
-                    .zoom
-                    .set_config(&zoom, &full_config.animations.zoom_level_change);
+                let changed = state.zoom.set_config(
+                    &zoom,
+                    &full_config.animations.zoom_level_change,
+                    &full_config.animations.zoom_focal_pan,
+                );
                 if changed {
                     recolored_outputs.push(output.clone());
                 }
