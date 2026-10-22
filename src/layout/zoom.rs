@@ -247,6 +247,64 @@ impl OutputZoomState {
             }
         }
     }
+
+    #[cfg(test)]
+    fn verify_invariants(&self) {
+        // The level is only ever assigned from set_level() (clamped to [1, max_level]) or
+        // interpolated between those endpoints.
+        assert!(self.level >= 1.0, "level must be at least 1");
+
+        // While a level transition runs, the level stays between its endpoints; otherwise
+        // it keeps its last value. A locked zoom may sit above the max level: a config
+        // change cannot move a frozen level, and unlocking re-clamps it.
+        if let Some(anim) = &self.level_transition {
+            let (from, to) = (anim.from(), anim.to());
+            assert!(
+                (from.min(to)..=from.max(to)).contains(&self.level),
+                "level {} is not between the level transition endpoints [{from}, {to}]",
+                self.level,
+            );
+        } else {
+            assert!(
+                self.level <= self.max_level || self.locked,
+                "level {} exceeds max_level {} while the zoom is unlocked",
+                self.level,
+                self.max_level,
+            );
+        }
+
+        // Starting a level transition cancels a pending focal pan, and a focal pan is not
+        // started while a level transition is running.
+        assert!(
+            !(self.level_transition.is_some() && self.focal_transition.is_some()),
+            "level and focal transitions cannot be active at the same time",
+        );
+
+        // While a focal pan runs, the focal stays on the segment between its endpoints.
+        if let Some(anim) = &self.focal_transition {
+            for (value, from, to) in [
+                (self.focal.x, anim.from.x, anim.to.x),
+                (self.focal.y, anim.from.y, anim.to.y),
+            ] {
+                assert!(
+                    (from.min(to)..=from.max(to)).contains(&value),
+                    "focal coordinate {value} is off the pan segment [{from}, {to}]",
+                );
+            }
+        }
+
+        // The focal point always stays on the output, including at its edge: focal_for()
+        // clamps with constrain(), which allows the edge exactly.
+        assert!(
+            self.focal.x >= 0.
+                && self.focal.x <= self.output_size.w
+                && self.focal.y >= 0.
+                && self.focal.y <= self.output_size.h,
+            "focal {:?} must stay within the output of size {:?}",
+            self.focal,
+            self.output_size,
+        );
+    }
 }
 
 /// Animates between two points via a single normalized 0 -> 1 progress curve,
@@ -284,4 +342,415 @@ impl PointAnimation {
         self.progress.is_done()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use approx::assert_relative_eq;
+    use niri_config::animations::{Curve, EasingParams, Kind};
+    use niri_config::{Zoom, ZoomMovementMode};
+    use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+    use smithay::utils::Size;
+
+    use super::*;
+
+    fn test_output() -> Output {
+        let output = Output::new(
+            "test".into(),
+            PhysicalProperties {
+                size: Size::from((1000, 500)),
+                subpixel: Subpixel::Unknown,
+                make: String::new(),
+                model: String::new(),
+                serial_number: String::new(),
+            },
+        );
+        output.change_current_state(
+            Some(Mode {
+                size: Size::from((1000, 500)),
+                refresh: 60_000,
+            }),
+            None,
+            None,
+            None,
+        );
+        output
+    }
+
+    fn zoom_state(mode: ZoomMovementMode, clock: Clock) -> OutputZoomState {
+        let state = OutputZoomState::new(
+            &test_output(),
+            clock,
+            Zoom {
+                movement_mode: mode,
+                ..Default::default()
+            },
+        );
+        state.verify_invariants();
+        state
+    }
+
+    fn easing(duration_ms: u32) -> niri_config::Animation {
+        niri_config::Animation {
+            off: false,
+            kind: Kind::Easing(EasingParams {
+                duration_ms,
+                curve: Curve::Linear,
+            }),
+        }
+    }
+
+    fn anim_off() -> niri_config::Animation {
+        niri_config::Animation {
+            off: true,
+            kind: Kind::Easing(EasingParams {
+                duration_ms: 0,
+                curve: Curve::Linear,
+            }),
+        }
+    }
+
+    #[test]
+    fn level_transition_derives_focal_from_anchor_at_new_level() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        assert_relative_eq!(state.level, 2.0);
+
+        state.set_cursor(Point::from((600., 250.)));
+        state.verify_invariants();
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        state.verify_invariants();
+        assert!(state.level_transition.is_some());
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        state.verify_invariants();
+
+        assert!(state.level_transition.is_none());
+        assert_relative_eq!(state.level, 3.0);
+        assert_relative_eq!(state.focal.x, 550., epsilon = 1e-6);
+        assert_relative_eq!(state.focal.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn focal_pan_progresses_to_target() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        state.set_cursor(Point::from((700., 350.)));
+        state.verify_invariants();
+        assert_relative_eq!(state.focal.x, 900.);
+        assert_relative_eq!(state.focal.y, 450.);
+
+        state.set_movement_mode(
+            ZoomMovementMode::CursorFollow,
+            ZoomFocalPanAnim(easing(100)),
+        );
+        state.verify_invariants();
+        assert!(state.focal_transition.is_some());
+        assert_relative_eq!(state.focal.x, 900.);
+        assert_relative_eq!(state.focal.y, 450.);
+
+        state.advance_animations();
+        state.verify_invariants();
+        assert!(state.focal_transition.is_some());
+        assert_relative_eq!(state.focal.x, 900.);
+        assert_relative_eq!(state.focal.y, 450.);
+
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        state.verify_invariants();
+        assert!(state.focal_transition.is_some());
+        assert_relative_eq!(state.focal.x, 800., epsilon = 1e-6);
+        assert_relative_eq!(state.focal.y, 400., epsilon = 1e-6);
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        state.verify_invariants();
+        assert!(state.focal_transition.is_none());
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.focal.x, 700., epsilon = f64::EPSILON);
+        assert_relative_eq!(state.focal.y, 350., epsilon = f64::EPSILON);
+    }
+
+    #[test]
+    fn mode_change_with_animations_off_commits_target() {
+        let mut state = zoom_state(ZoomMovementMode::Centered, Clock::with_time(Duration::ZERO));
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        state.set_cursor(Point::from((700., 350.)));
+        state.verify_invariants();
+
+        state.set_movement_mode(ZoomMovementMode::CursorFollow, ZoomFocalPanAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        assert!(state.focal_transition.is_none());
+        assert_relative_eq!(state.focal.x, 700., epsilon = f64::EPSILON);
+        assert_relative_eq!(state.focal.y, 350., epsilon = f64::EPSILON);
+
+        state.set_cursor(Point::from((900., 100.)));
+        state.verify_invariants();
+        state.set_movement_mode(ZoomMovementMode::Centered, ZoomFocalPanAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        assert!(state.focal_transition.is_none());
+        assert_relative_eq!(state.focal.x, 1000., epsilon = 1e-6);
+        assert_relative_eq!(state.focal.y, 0., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn locked_zoom_freezes_during_pan() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        state.set_cursor(Point::from((700., 350.)));
+        state.verify_invariants();
+
+        state.set_movement_mode(
+            ZoomMovementMode::CursorFollow,
+            ZoomFocalPanAnim(easing(100)),
+        );
+        state.verify_invariants();
+        let frozen = state.view();
+
+        state.toggle_lock();
+        state.verify_invariants();
+        assert!(!state.are_animations_ongoing());
+
+        state.set_level(3.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        assert_relative_eq!(state.level, 2.0);
+        assert!(!state.are_animations_ongoing());
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        state.verify_invariants();
+        assert_eq!(state.view(), frozen);
+
+        state.set_cursor(Point::from((200., 100.)));
+        state.verify_invariants();
+        assert_eq!(state.view(), frozen);
+
+        state.set_movement_mode(ZoomMovementMode::Centered, ZoomFocalPanAnim(easing(100)));
+        state.verify_invariants();
+        assert!(state.focal_transition.is_none());
+        assert_eq!(state.view(), frozen);
+    }
+
+    #[test]
+    fn mode_change_during_level_transition_defers_focal_to_level_transition() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        state.set_cursor(Point::from((600., 250.)));
+        state.verify_invariants();
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        state.verify_invariants();
+        let view_before = state.view();
+
+        state.set_movement_mode(ZoomMovementMode::Centered, ZoomFocalPanAnim(easing(100)));
+        state.verify_invariants();
+        assert!(state.level_transition.is_some());
+        assert!(state.focal_transition.is_none());
+        assert_eq!(state.view(), view_before);
+
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        state.verify_invariants();
+
+        assert!(state.level_transition.is_some());
+        assert!(state.focal_transition.is_none());
+        assert_relative_eq!(state.level, 2.5, epsilon = 1e-6);
+        assert_relative_eq!(state.focal.x, 2000. / 3., epsilon = 1e-6);
+        assert_relative_eq!(state.focal.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn level_change_cancels_focal_pan() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        state.set_cursor(Point::from((700., 350.)));
+        state.verify_invariants();
+
+        // CursorFollow starts a real pan: the Centered focal is (900, 450) and the
+        // target is the cursor at (700, 350).
+        state.set_movement_mode(
+            ZoomMovementMode::CursorFollow,
+            ZoomFocalPanAnim(easing(100)),
+        );
+        state.verify_invariants();
+        assert!(state.focal_transition.is_some());
+        assert_relative_eq!(state.focal.x, 900.);
+        assert_relative_eq!(state.focal.y, 450.);
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        state.verify_invariants();
+        assert!(state.level_transition.is_some());
+        assert!(state.focal_transition.is_none());
+        assert_relative_eq!(state.focal.x, 900.);
+        assert_relative_eq!(state.focal.y, 450.);
+
+        // With the pan cancelled, the focal at t=50 is carried by the level transition
+        // anchoring alone; a pending pan would have interpolated to (800, 400) here.
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        state.verify_invariants();
+
+        assert!(state.level_transition.is_some());
+        assert!(state.focal_transition.is_none());
+        assert_relative_eq!(state.level, 2.5, epsilon = 1e-6);
+        assert_relative_eq!(state.focal.x, 700., epsilon = 1e-6);
+        assert_relative_eq!(state.focal.y, 350., epsilon = 1e-6);
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        state.verify_invariants();
+
+        assert!(state.level_transition.is_none());
+        assert!(state.focal_transition.is_none());
+        assert_relative_eq!(state.level, 3.0);
+        assert_relative_eq!(state.focal.x, 700., epsilon = f64::EPSILON);
+        assert_relative_eq!(state.focal.y, 350., epsilon = f64::EPSILON);
+    }
+
+    #[test]
+    fn set_config_reports_scheduled_work() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        state.set_cursor(Point::from((700., 350.)));
+        state.verify_invariants();
+
+        let zoom = Zoom {
+            movement_mode: ZoomMovementMode::CursorFollow,
+            ..Default::default()
+        };
+
+        let changed = state.set_config(
+            &zoom,
+            &ZoomLevelChangeAnim(easing(100)),
+            &ZoomFocalPanAnim(easing(100)),
+        );
+        state.verify_invariants();
+        assert!(changed);
+        assert!(state.focal_transition.is_some());
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        state.verify_invariants();
+        assert!(!state.are_animations_ongoing());
+
+        let changed = state.set_config(
+            &zoom,
+            &ZoomLevelChangeAnim(easing(100)),
+            &ZoomFocalPanAnim(easing(100)),
+        );
+        state.verify_invariants();
+        assert!(!changed);
+    }
+
+    #[test]
+    fn set_level_clamps_to_max_level() {
+        let mut state = OutputZoomState::new(
+            &test_output(),
+            Clock::with_time(Duration::ZERO),
+            Zoom {
+                movement_mode: ZoomMovementMode::Centered,
+                max_zoom: 4.0,
+                ..Default::default()
+            },
+        );
+
+        state.set_level(100.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        assert_relative_eq!(state.level, 4.0);
+
+        state.set_level(0.5, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        assert_relative_eq!(state.level, 1.0);
+    }
+
+    #[test]
+    fn unlock_reclamps_level_after_max_zoom_decrease() {
+        let mut state = OutputZoomState::new(
+            &test_output(),
+            Clock::with_time(Duration::ZERO),
+            Zoom {
+                movement_mode: ZoomMovementMode::Centered,
+                max_zoom: 10.0,
+                ..Default::default()
+            },
+        );
+        state.verify_invariants();
+
+        // Zoom in and lock: the frozen level survives config changes.
+        state.set_level(8.0, ZoomLevelChangeAnim(anim_off()));
+        state.verify_invariants();
+        state.advance_animations();
+        state.verify_invariants();
+        assert_relative_eq!(state.level, 8.0);
+        state.toggle_lock();
+        state.verify_invariants();
+
+        // Lowering the max zoom cannot move the locked level.
+        let zoom = Zoom {
+            movement_mode: ZoomMovementMode::Centered,
+            max_zoom: 5.0,
+            ..Default::default()
+        };
+        let changed = state.set_config(
+            &zoom,
+            &ZoomLevelChangeAnim(anim_off()),
+            &ZoomFocalPanAnim(anim_off()),
+        );
+        state.verify_invariants();
+        assert!(!changed);
+        assert_relative_eq!(state.level, 8.0);
+
+        // Unlocking re-clamps the level to the new max before the zoom resumes.
+        state.toggle_lock();
+        state.verify_invariants();
+        assert_relative_eq!(state.level, 5.0);
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.focal.x, 500., epsilon = 1e-6);
+        assert_relative_eq!(state.focal.y, 250., epsilon = 1e-6);
+    }
 }
