@@ -35,7 +35,7 @@ use smithay::backend::renderer::element::{
     RenderElementStates,
 };
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::Color32F;
+use smithay::backend::renderer::{Color32F, Renderer};
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
@@ -173,7 +173,7 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
-use crate::render_helpers::view::ViewElement;
+use crate::render_helpers::view::{view_filter, ViewElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{
     encompassing_geo, render_to_encompassing_texture, render_to_shm, render_to_texture,
@@ -4725,6 +4725,11 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
+        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+
+        let _ = ctx.renderer.upscale_filter(filter);
+        let _ = ctx.renderer.downscale_filter(filter);
+
         let push = &mut move |elem| {
             let elem = view_elements(elem, output, view);
             if self.debug_draw_opaque_regions {
@@ -6284,6 +6289,13 @@ impl Niri {
                 continue;
             }
 
+            // TODO: Check if this how I want to handle the output-view for image-copy-capture.
+            let view = self.output_view(output);
+            let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+
+            let _ = renderer.upscale_filter(filter);
+            let _ = renderer.downscale_filter(filter);
+
             let res = render_to_shm(renderer, &mut s.damage_tracker, &buffer, elements, states);
             match res {
                 Ok(()) => {
@@ -6322,11 +6334,11 @@ impl Niri {
     ) {
         let output_scale = output.current_scale();
         let scale = Scale::from(output_scale.fractional_scale());
-        // TODO: Check if this how I want to handle the output-view for image-copy-capture.
-        let view = self.output_view(output);
 
         let mut elements = Vec::new();
-        self.render_pointer(renderer, output, view, &mut |elem| elements.push(elem));
+        self.render_pointer(renderer, output, self.output_view(output), &mut |elem| {
+            elements.push(elem)
+        });
 
         // We need the elements at (0, 0) for damage tracking.
         let geo = encompassing_geo(scale, elements.iter());
