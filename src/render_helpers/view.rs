@@ -1,11 +1,28 @@
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+use smithay::backend::renderer::TextureFilter;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Coordinate, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::utils::view::OutputViewport;
+
+/// Linear below threshold, Nearest at or above.
+///
+/// `Linear` is the renderer's resting default, so this is the filter for every frame;
+/// only crossing the threshold changes what the sampler does.
+pub fn view_filter(scale_factor: f64, threshold: f64) -> TextureFilter {
+    debug_assert!(
+        !scale_factor.is_nan() && !threshold.is_nan(),
+        "view_filter called with NaN"
+    );
+    if scale_factor < threshold {
+        TextureFilter::Linear
+    } else {
+        TextureFilter::Nearest
+    }
+}
 
 /// Renders an element through an output view transform.
 ///
@@ -107,10 +124,7 @@ impl<E: Element> Element for ViewElement<E> {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        // The damage is rebased by the element's transformed origin, but the inner rects
-        // are rooted at the raw element geometry.
         let inner_geometry = self.element.geometry(scale);
-
         self.element
             .damage_since(scale, commit)
             .iter()

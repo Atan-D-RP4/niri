@@ -172,7 +172,7 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
-use crate::render_helpers::view::ViewElement;
+use crate::render_helpers::view::{view_filter, ViewElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{
     encompassing_geo, render_to_encompassing_texture, render_to_shm, render_to_texture,
@@ -4670,6 +4670,11 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
+        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+
+        let _ = ctx.renderer.upscale_filter(filter);
+        let _ = ctx.renderer.downscale_filter(filter);
+
         let push = &mut move |elem| {
             let elem = view_elements(elem, output, view);
             if self.debug_draw_opaque_regions {
@@ -6270,6 +6275,7 @@ impl Niri {
                         // The elements are already shifted to the origin, so apply only an identity
                         // relocation.
                         elements.push(
+                            // Identity-mapped capture renders 1:1, so it stays unfiltered.
                             ViewElement::from_element(
                                 elem,
                                 OutputViewport::identity(),
@@ -6299,7 +6305,8 @@ impl Niri {
                 ) {
                     Ok(element) => elements.push(
                         // The elements are already shifted to the origin, so apply only an
-                        // identity view transform.
+                        // identity view transform. Identity-mapped capture renders 1:1, so
+                        // it stays unfiltered.
                         ViewElement::from_element(
                             element,
                             OutputViewport::identity(),
