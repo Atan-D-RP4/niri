@@ -925,3 +925,349 @@ impl PointAnimation {
         self.progress.is_done()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use approx::assert_relative_eq;
+    use niri_config::animations::{Curve, EasingParams, Kind};
+    use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+    use smithay::utils::Size;
+
+    use super::*;
+
+    impl OutputZoomState {
+        fn verify_invariants(&self) {
+            let valid_size = |size: Size<f64, Logical>| {
+                size.w.is_finite() && size.h.is_finite() && size.w >= 0. && size.h >= 0.
+            };
+            let valid_view = |view: OutputViewport, size: Size<f64, Logical>| {
+                valid_size(size)
+                    && view.factor.is_finite()
+                    && view.factor >= 1.
+                    && finite_point(view.focal)
+                    && view.focal.constrain(Rectangle::from_size(size)) == view.focal
+            };
+            let valid_animation =
+                |animation: &Animation| animation.from().is_finite() && animation.to().is_finite();
+
+            assert!(self.max_level.is_finite() && self.max_level >= 1.);
+            assert!(valid_view(self.displayed, self.output_size));
+            let bounds = Rectangle::from_size(self.output_size);
+            assert!(finite_point(self.cursor) && self.cursor.constrain(bounds) == self.cursor);
+
+            match &self.transition {
+                Some(ZoomTransition::Level(level)) => {
+                    assert!(valid_animation(&level.animation));
+                    assert!(finite_point(level.tracking.offset));
+                    assert!((0. ..=1.).contains(&level.tracking.start_progress));
+                }
+                Some(ZoomTransition::Pan(pan)) => {
+                    assert!(finite_point(pan.animation.from) && finite_point(pan.animation.to));
+                }
+                Some(ZoomTransition::Gesture(gesture)) => {
+                    assert!(gesture.start_level.is_finite() && gesture.start_level >= 1.);
+                    assert!(finite_point(gesture.focal.content_anchor));
+                    assert!(finite_point(gesture.focal.screen_midpoint));
+                }
+                Some(ZoomTransition::GestureReturn(gesture)) => {
+                    assert!(valid_animation(&gesture.animation));
+                    assert!(finite_point(gesture.focal.content_anchor));
+                    assert!(finite_point(gesture.focal.screen_midpoint));
+                }
+                None => (),
+            }
+
+            if let Some(pending) = &self.pending_zoom_pointer {
+                assert!(valid_view(pending.old_view, pending.old_size));
+            }
+        }
+    }
+
+    fn test_output() -> Output {
+        let output = Output::new(
+            "test".into(),
+            PhysicalProperties {
+                size: Size::from((1000, 500)),
+                subpixel: Subpixel::Unknown,
+                make: String::new(),
+                model: String::new(),
+                serial_number: String::new(),
+            },
+        );
+        output.change_current_state(
+            Some(Mode {
+                size: Size::from((1000, 500)),
+                refresh: 60_000,
+            }),
+            None,
+            None,
+            None,
+        );
+        output
+    }
+
+    fn zoom_state(mode: ZoomMovementMode, clock: Clock) -> OutputZoomState {
+        OutputZoomState::new(
+            &test_output(),
+            clock,
+            Zoom {
+                movement_mode: mode,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn easing(duration_ms: u32) -> niri_config::Animation {
+        niri_config::Animation {
+            off: false,
+            kind: Kind::Easing(EasingParams {
+                duration_ms,
+                curve: Curve::Linear,
+            }),
+        }
+    }
+
+    fn anim_off() -> niri_config::Animation {
+        niri_config::Animation {
+            off: true,
+            kind: Kind::Easing(EasingParams {
+                duration_ms: 0,
+                curve: Curve::Linear,
+            }),
+        }
+    }
+
+    #[test]
+    fn level_transition_derives_focal_from_anchor_at_new_level() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 2.0);
+        assert_relative_eq!(state.view().focal.x, 500., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+
+        state.set_cursor(Point::from((600., 250.)));
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        assert!(state.is_transitioning());
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 550., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn pan_meets_target_and_level_change_replaces_pan() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        state.set_cursor(Point::from((700., 350.)));
+        assert_relative_eq!(state.view().focal.x, 900.);
+        assert_relative_eq!(state.view().focal.y, 450.);
+
+        // Moving to CursorFollow starts a real pan from (900, 450) to the cursor (700, 350).
+        state.set_movement_mode(
+            ZoomMovementMode::CursorFollow,
+            ZoomFocalPanAnim(easing(100)),
+        );
+
+        state.advance_animations();
+        assert_relative_eq!(state.view().focal.x, 900.);
+        assert_relative_eq!(state.view().focal.y, 450.);
+
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        assert_relative_eq!(state.view().focal.x, 800., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 400., epsilon = 1e-6);
+
+        // Starting a level change cancels the pan and replaces it with a tracked level
+        // animation; a pan would still be running at t=100.
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 2.5, epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.x, 750., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 375., epsilon = 1e-6);
+
+        clock.set_unadjusted(Duration::from_millis(150));
+        state.advance_animations();
+
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 700., epsilon = f64::EPSILON);
+        assert_relative_eq!(state.view().focal.y, 350., epsilon = f64::EPSILON);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn mode_change_during_level_animation_reseeds_without_view_jump() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        state.set_cursor(Point::from((600., 250.)));
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        let view_before = state.view();
+
+        // The level animation owns the mode change; the tracked correction is reseeded
+        // so the displayed view does not jump.
+        state.set_movement_mode(ZoomMovementMode::Centered, ZoomFocalPanAnim(easing(100)));
+        assert!(state.is_transitioning());
+        assert_eq!(state.view(), view_before);
+
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 2.5, epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.x, 1700. / 3., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 650., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn locked_zoom_freezes_and_unlock_reclamps_after_max_level_decrease() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = OutputZoomState::new(
+            &test_output(),
+            clock.clone(),
+            Zoom {
+                movement_mode: ZoomMovementMode::Centered,
+                max_zoom: 10.0,
+                ..Default::default()
+            },
+        );
+
+        state.set_level(8.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 8.0);
+        let frozen = state.view();
+
+        state.toggle_lock(
+            ZoomLevelChangeAnim(anim_off()),
+            ZoomFocalPanAnim(anim_off()),
+        );
+        assert!(state.locked());
+        assert!(!state.are_animations_ongoing());
+
+        // While locked: level requests are ignored, the cursor never moves the view.
+        state.set_level(3.0, ZoomLevelChangeAnim(anim_off()));
+        state.set_cursor(Point::from((200., 100.)));
+        state.advance_animations();
+        assert_eq!(state.view(), frozen);
+
+        // Lowering the max zoom cannot move a locked level above the new max.
+        let zoom = Zoom {
+            movement_mode: ZoomMovementMode::Centered,
+            max_zoom: 5.0,
+            ..Default::default()
+        };
+        let changed = state.set_config(
+            &zoom,
+            &ZoomLevelChangeAnim(anim_off()),
+            &ZoomFocalPanAnim(anim_off()),
+        );
+        assert!(!changed);
+        assert_eq!(state.view(), frozen);
+
+        // Unlocking re-clamps the level to the new max before the zoom resumes.
+        state.toggle_lock(
+            ZoomLevelChangeAnim(anim_off()),
+            ZoomFocalPanAnim(anim_off()),
+        );
+        assert!(state.are_animations_ongoing());
+
+        state.advance_animations();
+        assert!(!state.are_animations_ongoing());
+        assert!(!state.locked());
+        assert_relative_eq!(state.view().factor, 5.0);
+        assert_relative_eq!(state.view().focal.x, 125., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 62.5, epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn gesture_update_commits_pointer_change_and_cancel_returns_to_start_level() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        assert!(state.update(ZoomAction::BeginGesture(Point::from((500., 250.)))));
+        assert!(state.is_gesturing());
+
+        // A gesture update commits the displayed level and records the seat's
+        // reprojection obligation against the old view.
+        assert!(state.update(ZoomAction::UpdateGesture(
+            2.0,
+            1.0,
+            Point::from((500., 250.))
+        )));
+        assert_relative_eq!(state.view().factor, 2.0);
+        assert_relative_eq!(state.view().focal.x, 500., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+        {
+            let pending = state.pending_zoom_pointer.as_ref().unwrap();
+            assert_relative_eq!(pending.old_view.factor, 1.0);
+            assert_eq!(pending.old_view.focal, Point::from((500., 250.)));
+            assert_eq!(pending.old_size, Size::from((1000., 500.)));
+        }
+
+        // A moved screen midpoint is preserved while the touched content anchor tracks;
+        // the earliest pointer change stays pending, later ones coalesce into it.
+        assert!(state.update(ZoomAction::UpdateGesture(
+            3.0,
+            1.0,
+            Point::from((600., 250.))
+        )));
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 450., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+        assert_eq!(state.gesture_midpoint(), Some(Point::from((600., 250.))));
+        {
+            let pending = state.pending_zoom_pointer.as_ref().unwrap();
+            assert_relative_eq!(pending.old_view.factor, 1.0);
+        }
+
+        // Cancellation returns the gesture to its start level through a return animation.
+        assert!(state.update(ZoomAction::EndGesture(
+            true,
+            ZoomLevelChangeAnim(anim_off())
+        )));
+        assert!(!state.is_gesturing());
+        assert!(state.are_animations_ongoing());
+        assert_eq!(state.gesture_midpoint(), Some(Point::from((600., 250.))));
+
+        assert!(state.update(ZoomAction::Advance));
+        assert!(!state.are_animations_ongoing());
+        assert_eq!(state.gesture_midpoint(), None);
+        assert_relative_eq!(state.view().factor, 1.0);
+        assert_relative_eq!(state.view().focal.x, 450., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+
+        // The initial obligation remains pending for the seat to consume.
+        {
+            let pending = state.pending_zoom_pointer.as_ref().unwrap();
+            assert_relative_eq!(pending.old_view.factor, 1.0);
+        }
+        state.verify_invariants();
+    }
+}

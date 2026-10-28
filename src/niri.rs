@@ -3798,9 +3798,7 @@ impl Niri {
             &outputs,
         );
         self.pointer_provenance = provenance;
-        let Some(selected) = selected else {
-            return None;
-        };
+        let selected = selected?;
         if blocked {
             self.output_state
                 .get_mut(&selected.output)
@@ -3808,9 +3806,7 @@ impl Niri {
                 .update_zoom(ZoomAction::Interrupt);
             return None;
         }
-        let Some(movement) = selected.movement else {
-            return None;
-        };
+        let movement = selected.movement?;
         Some(ZoomCursorMovement {
             output: selected.output,
             location: movement.location,
