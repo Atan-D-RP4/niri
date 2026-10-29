@@ -36,7 +36,7 @@ use smithay::backend::renderer::element::{
 };
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::{Color32F, TextureFilter};
+use smithay::backend::renderer::Color32F;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
@@ -4606,7 +4606,7 @@ impl Niri {
         } else {
             OutputViewport::identity()
         };
-        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+        // let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
 
         match render_cursor {
             RenderCursor::Hidden => (),
@@ -4622,16 +4622,12 @@ impl Niri {
                     1.,
                     Kind::Cursor,
                     &mut |elem| {
-                        push(
-                            ViewElement::from_element(
-                                elem,
-                                view,
-                                output_scale,
-                                Some(position),
-                                filter,
-                            )
-                            .into(),
-                        )
+                        let elem = RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(elem, position, Relocate::Absolute),
+                            position,
+                            view.factor,
+                        );
+                        push(elem.into())
                     },
                 );
             }
@@ -4656,16 +4652,18 @@ impl Niri {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => push(
-                        ViewElement::from_element(
-                            element,
-                            view,
-                            output_scale,
-                            Some(position),
-                            filter,
-                        )
-                        .into(),
-                    ),
+                    Ok(element) => {
+                        let element = RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(
+                                element,
+                                position,
+                                Relocate::Absolute,
+                            ),
+                            position,
+                            view.factor,
+                        );
+                        push(element.into())
+                    }
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -4685,10 +4683,12 @@ impl Niri {
                 1.,
                 Kind::ScanoutCandidate,
                 &mut |elem| {
-                    push(
-                        ViewElement::from_element(elem, view, output_scale, Some(position), filter)
-                            .into(),
-                    )
+                    let elem = RescaleRenderElement::from_element(
+                        RelocateRenderElement::from_element(elem, position, Relocate::Absolute),
+                        position,
+                        view.factor,
+                    );
+                    push(elem.into())
                 },
             );
         }
@@ -5169,9 +5169,13 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
+        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+
+        let _ = ctx.renderer.upscale_filter(filter);
+        let _ = ctx.renderer.downscale_filter(filter);
+
         let push = &mut move |elem| {
-            let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
-            let elem = view_elements(elem, output, view, filter);
+            let elem = view_elements(elem, output, view);
             if self.debug_draw_opaque_regions {
                 push_opaque_regions(
                     &elem,
@@ -6685,21 +6689,7 @@ impl Niri {
                     output_scale,
                     1.,
                     Kind::Cursor,
-                    &mut |elem| {
-                        // The elements are already shifted to the origin, so apply only an identity
-                        // relocation.
-                        elements.push(
-                            // Identity-mapped capture renders 1:1, so it stays unfiltered.
-                            ViewElement::from_element(
-                                elem,
-                                OutputViewport::identity(),
-                                output_scale,
-                                None,
-                                TextureFilter::Linear,
-                            )
-                            .into(),
-                        )
-                    },
+                    &mut |elem| elements.push(elem.into()),
                 );
             }
             RenderCursor::Named {
@@ -6718,19 +6708,7 @@ impl Niri {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => elements.push(
-                        // The elements are already shifted to the origin, so apply only an
-                        // identity view transform. Identity-mapped capture renders 1:1, so
-                        // it stays unfiltered.
-                        ViewElement::from_element(
-                            element,
-                            OutputViewport::identity(),
-                            output_scale,
-                            None,
-                            TextureFilter::Linear,
-                        )
-                        .into(),
-                    ),
+                    Ok(element) => elements.push(element.into()),
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -8039,7 +8017,6 @@ fn view_elements<R: NiriRenderer>(
     element: OutputRenderElements<R>,
     output: &Output,
     view: OutputViewport,
-    filter: TextureFilter,
 ) -> OutputRenderElements<R> {
     let scale = Scale::from(output.current_scale().fractional_scale());
     macro_rules! view_variants {
@@ -8052,7 +8029,6 @@ fn view_elements<R: NiriRenderer>(
                             view,
                             Scale::from(scale),
                             None,
-                            filter
                         );
                         ViewportRenderElements::$variant(e).into()
                     }
@@ -8075,8 +8051,10 @@ fn view_elements<R: NiriRenderer>(
 
 niri_render_elements! {
     PointerRenderElements<R> => {
-        Wayland = ViewElement<WaylandSurfaceRenderElement<R>>,
-        NamedPointer = ViewElement<MemoryRenderBufferRenderElement<R>>,
+        Wayland = WaylandSurfaceRenderElement<R>,
+        NamedPointer = MemoryRenderBufferRenderElement<R>,
+        RelocatedWayland = RescaleRenderElement<RelocateRenderElement<WaylandSurfaceRenderElement<R>>>,
+        RelocatedNamedPointer = RescaleRenderElement<RelocateRenderElement<MemoryRenderBufferRenderElement<R>>>,
     }
 }
 
