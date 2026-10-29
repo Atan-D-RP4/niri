@@ -4546,6 +4546,14 @@ impl Niri {
         let mut zoom_pointer_pos = None;
 
         if self.zoom_active {
+            // TODO: Limit zoom effect exclusively to the specific monitor where the cursor
+            // currently resides (e.g., check
+            // `output_geo.to_f64().contains(pointer_pos)`) instead of blitting and
+            // zooming on every connected monitor. This will save significant GPU work on
+            // multi-monitor setups.
+            // TODO: Limit zoom effect exclusively to the specific monitor where the cursor currently
+            // resides (e.g., check `output_geo.to_f64().contains(pointer_pos)`) instead of blitting and
+            // zooming on every connected monitor. This will save significant GPU work on multi-monitor setups.
             if let Some(output_geo) = self.global_space.output_geometry(output) {
                 let pointer_pos = self
                     .tablet_cursor_location

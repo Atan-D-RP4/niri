@@ -12,8 +12,11 @@ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transfo
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame as _;
 
-/// zoom post-process effect.
-/// Composites the output normally, then zooms in cursor-centered region
+/// Fullscreen zoom post-process effect.
+/// Composites the output normally, then blits and zooms the cursor-centered region.
+///
+/// TODO: Optimize multi-monitor setups by restricting the zoom framebuffer effect and intermediate
+/// texture allocation exclusively to the monitor containing the active mouse pointer.
 #[derive(Debug)]
 pub struct Zoom {
     id: Id,

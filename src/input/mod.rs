@@ -946,6 +946,33 @@ impl State {
             Action::DebugToggleDamage => {
                 self.niri.debug_toggle_damage();
             }
+            Action::ZoomIn => {
+                if !self.niri.zoom_active || self.niri.zoom_level <= 1.0 {
+                    self.niri.zoom_active = true;
+                    self.niri.zoom_level = 1.25;
+                } else {
+                    self.niri.zoom_level = (self.niri.zoom_level + 0.25).min(10.0);
+                }
+                self.niri.zoom.damage();
+                self.niri.queue_redraw_all();
+            }
+            Action::ZoomOut => {
+                if self.niri.zoom_active {
+                    self.niri.zoom_level -= 0.25;
+                    if self.niri.zoom_level <= 1.0 {
+                        self.niri.zoom_level = 1.0;
+                        self.niri.zoom_active = false;
+                    }
+                    self.niri.zoom.damage();
+                    self.niri.queue_redraw_all();
+                }
+            }
+            Action::ResetZoom => {
+                self.niri.zoom_level = 1.0;
+                self.niri.zoom_active = false;
+                self.niri.zoom.damage();
+                self.niri.queue_redraw_all();
+            }
             Action::ToggleZoom => {
                 self.niri.zoom_active = !self.niri.zoom_active;
                 if self.niri.zoom_active && self.niri.zoom_level <= 1.0 {
