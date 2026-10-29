@@ -819,6 +819,8 @@ pub enum Action {
     DebugToggleOpaqueRegions {},
     /// Toggle visualization of output damage.
     DebugToggleDamage {},
+    /// Toggle screen zoom magnification.
+    ToggleZoom {},
     /// Toggle the touchpad on/off at runtime.
     ToggleTouchpad {},
     /// Move the focused window between the floating and the tiling layout.

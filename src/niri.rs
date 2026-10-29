@@ -171,6 +171,7 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::xray::{Xray, XrayPos};
+use crate::render_helpers::zoom::{Zoom, ZoomElement};
 use crate::render_helpers::{
     encompassing_geo, render_to_dmabuf, render_to_encompassing_texture, render_to_shm,
     render_to_texture, render_to_vec, shaders, RenderCtx, RenderTarget,
@@ -454,6 +455,10 @@ pub struct Niri {
 
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,
+
+    pub zoom: Zoom,
+    pub zoom_active: bool,
+    pub zoom_level: f64,
 
     #[cfg(feature = "dbus")]
     pub dbus: Option<crate::dbus::DBusServers>,
@@ -2907,6 +2912,9 @@ impl Niri {
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
+            zoom: Zoom::new(),
+            zoom_active: false,
+            zoom_level: 1.0,
 
             #[cfg(feature = "dbus")]
             dbus: None,
@@ -4000,15 +4008,27 @@ impl Niri {
         output: &Output,
         push: &mut dyn FnMut(PointerRenderElements<R>),
     ) {
+        self.render_pointer_at(renderer, output, None, push);
+    }
+
+    pub fn render_pointer_at<R: NiriRenderer>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        pos_override: Option<Point<f64, Logical>>,
+        push: &mut dyn FnMut(PointerRenderElements<R>),
+    ) {
         let _span = tracy_client::span!("Niri::render_pointer");
         let output_scale = output.current_scale();
         let output_pos = self.global_space.output_geometry(output).unwrap().loc;
 
         // Check whether we need to draw the tablet cursor or the regular cursor.
-        let pointer_pos = self
-            .tablet_cursor_location
-            .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
-        let pointer_pos = pointer_pos - output_pos.to_f64();
+        let pointer_pos = pos_override.unwrap_or_else(|| {
+            let pointer_pos = self
+                .tablet_cursor_location
+                .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+            pointer_pos - output_pos.to_f64()
+        });
 
         // Get the render cursor to draw.
         let cursor_scale = output_scale.integer_scale();
@@ -4369,6 +4389,10 @@ impl Niri {
         self.screenshot_ui.advance_animations();
         self.window_mru_ui.advance_animations();
 
+        if self.zoom_active {
+            self.zoom.damage();
+        }
+
         for state in self.output_state.values_mut() {
             if let Some(transition) = &mut state.screen_transition {
                 if transition.is_done() {
@@ -4519,9 +4543,52 @@ impl Niri {
             push
         };
 
+        let mut zoom_pointer_pos = None;
+
+        if self.zoom_active {
+            if let Some(output_geo) = self.global_space.output_geometry(output) {
+                let pointer_pos = self
+                    .tablet_cursor_location
+                    .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+                let pointer_pos_logical = pointer_pos - output_geo.loc.to_f64();
+                let pointer_pos: Point<i32, Physical> =
+                    pointer_pos_logical.to_physical_precise_round(output_scale);
+
+                let output_size = output_geo.size.to_f64();
+                let geometry = Rectangle::from_size(output_size);
+
+                let zoom = self.zoom_level.max(1.);
+                let dst: Rectangle<i32, Physical> =
+                    geometry.to_physical_precise_round(output_scale);
+                let output_size_phys: Size<i32, Physical> =
+                    output_size.to_physical_precise_round(output_scale);
+
+                let src_w = ((dst.size.w as f64) / zoom).round().max(1.) as i32;
+                let src_h = ((dst.size.h as f64) / zoom).round().max(1.) as i32;
+                let max_x = (output_size_phys.w - src_w).max(0);
+                let max_y = (output_size_phys.h - src_h).max(0);
+                let src_x = (pointer_pos.x - src_w / 2).clamp(0, max_x);
+                let src_y = (pointer_pos.y - src_h / 2).clamp(0, max_y);
+
+                let mapped_x = dst.loc.x as f64
+                    + (pointer_pos.x - src_x) as f64 / src_w as f64 * dst.size.w as f64;
+                let mapped_y = dst.loc.y as f64
+                    + (pointer_pos.y - src_y) as f64 / src_h as f64 * dst.size.h as f64;
+                zoom_pointer_pos = Some(Point::from((
+                    mapped_x / output_scale.x,
+                    mapped_y / output_scale.y,
+                )));
+
+                let elem = self.zoom.render(geometry, pointer_pos, self.zoom_level);
+                push(elem.into());
+            }
+        }
+
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
-            self.render_pointer(ctx.renderer, output, &mut |elem| push(elem.into()));
+            self.render_pointer_at(ctx.renderer, output, zoom_pointer_pos, &mut |elem| {
+                push(elem.into())
+            });
         }
 
         // Next, the screen transition texture.
@@ -4913,6 +4980,7 @@ impl Niri {
             state.unfinished_animations_remain |= self.screenshot_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= self.window_mru_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= state.screen_transition.is_some();
+            state.unfinished_animations_remain |= self.zoom_active;
 
             // Also keep redrawing if the current cursor is animated.
             state.unfinished_animations_remain |= self
@@ -7326,5 +7394,6 @@ niri_render_elements! {
         Texture = PrimaryGpuTextureRenderElement,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
+        Zoom = ZoomElement,
     }
 }
