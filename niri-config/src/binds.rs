@@ -231,6 +231,7 @@ pub enum Action {
     ToggleDebugTint,
     DebugToggleOpaqueRegions,
     DebugToggleDamage,
+    ToggleZoom,
     ToggleTouchpad,
     Spawn(#[knuffel(arguments)] Vec<String>),
     SpawnSh(#[knuffel(argument)] String),
@@ -788,6 +789,7 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::ToggleDebugTint {} => Self::ToggleDebugTint,
             niri_ipc::Action::DebugToggleOpaqueRegions {} => Self::DebugToggleOpaqueRegions,
             niri_ipc::Action::DebugToggleDamage {} => Self::DebugToggleDamage,
+            niri_ipc::Action::ToggleZoom {} => Self::ToggleZoom,
             niri_ipc::Action::ToggleTouchpad {} => Self::ToggleTouchpad,
             niri_ipc::Action::ToggleWindowFloating { id: None } => Self::ToggleWindowFloating,
             niri_ipc::Action::ToggleWindowFloating { id: Some(id) } => {

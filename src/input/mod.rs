@@ -946,6 +946,14 @@ impl State {
             Action::DebugToggleDamage => {
                 self.niri.debug_toggle_damage();
             }
+            Action::ToggleZoom => {
+                self.niri.zoom_active = !self.niri.zoom_active;
+                if self.niri.zoom_active && self.niri.zoom_level <= 1.0 {
+                    self.niri.zoom_level = 2.0;
+                }
+                self.niri.zoom.damage();
+                self.niri.queue_redraw_all();
+            }
             Action::ToggleTouchpad => {
                 self.niri.touchpad_disabled_by_toggle = !self.niri.touchpad_disabled_by_toggle;
                 let config = self.niri.config.borrow();
