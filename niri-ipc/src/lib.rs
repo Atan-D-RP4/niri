@@ -819,6 +819,12 @@ pub enum Action {
     DebugToggleOpaqueRegions {},
     /// Toggle visualization of output damage.
     DebugToggleDamage {},
+    /// Increase screen zoom magnification level.
+    ZoomIn {},
+    /// Decrease screen zoom magnification level.
+    ZoomOut {},
+    /// Reset screen zoom magnification level to 1.0x (disabled).
+    ResetZoom {},
     /// Toggle screen zoom magnification.
     ToggleZoom {},
     /// Toggle the touchpad on/off at runtime.
