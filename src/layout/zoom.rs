@@ -1000,3 +1000,597 @@ impl PointAnimation {
         self.progress.is_done()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use approx::assert_relative_eq;
+    use niri_config::animations::{Curve, EasingParams, Kind};
+    use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+    use smithay::utils::Size;
+
+    use super::*;
+
+    impl OutputZoomState {
+        fn verify_invariants(&self) {
+            let valid_size = |size: Size<f64, Logical>| {
+                size.w.is_finite() && size.h.is_finite() && size.w >= 0. && size.h >= 0.
+            };
+            let valid_view = |view: OutputViewport, size: Size<f64, Logical>| {
+                valid_size(size)
+                    && view.factor.is_finite()
+                    && view.factor >= 1.
+                    && finite_point(view.focal)
+                    && view.focal.constrain(Rectangle::from_size(size)) == view.focal
+            };
+            let valid_animation =
+                |animation: &Animation| animation.from().is_finite() && animation.to().is_finite();
+
+            assert!(self.max_level.is_finite() && self.max_level >= 1.);
+            assert!(valid_view(self.displayed, self.output_size));
+            let bounds = Rectangle::from_size(self.output_size);
+            assert!(finite_point(self.cursor) && self.cursor.constrain(bounds) == self.cursor);
+
+            match &self.transition {
+                Some(ZoomTransition::Level(level)) => {
+                    assert!(valid_animation(&level.animation));
+                    assert!(finite_point(level.tracking.offset));
+                    assert!((0. ..=1.).contains(&level.tracking.start_progress));
+                }
+                Some(ZoomTransition::Pan(pan)) => {
+                    assert!(finite_point(pan.animation.from) && finite_point(pan.animation.to));
+                }
+                Some(ZoomTransition::Gesture(gesture)) => {
+                    assert!(gesture.start_level.is_finite() && gesture.start_level >= 1.);
+                    assert!(finite_point(gesture.focal.cursor_anchor));
+                    assert!(finite_point(gesture.focal.continuity_offset));
+                    if let Some(anchor) = gesture.focal.fixed_screen_anchor {
+                        assert!(finite_point(anchor));
+                        assert_eq!(anchor.constrain(bounds), anchor);
+                    }
+                    if let Some(base) = gesture.focal.fixed_pan_base {
+                        assert!(finite_point(base));
+                    }
+                    assert!(finite_point(gesture.focal.screen_pan));
+                }
+                Some(ZoomTransition::GestureReturn(gesture)) => {
+                    assert!(valid_animation(&gesture.animation));
+                    assert!(finite_point(gesture.focal.cursor_anchor));
+                    assert!(finite_point(gesture.focal.continuity_offset));
+                    if let Some(anchor) = gesture.focal.fixed_screen_anchor {
+                        assert!(finite_point(anchor));
+                        assert_eq!(anchor.constrain(bounds), anchor);
+                    }
+                    if let Some(base) = gesture.focal.fixed_pan_base {
+                        assert!(finite_point(base));
+                    }
+                    assert!(finite_point(gesture.focal.screen_pan));
+                }
+                None => (),
+            }
+        }
+    }
+
+    fn test_output() -> Output {
+        let output = Output::new(
+            "test".into(),
+            PhysicalProperties {
+                size: Size::from((1000, 500)),
+                subpixel: Subpixel::Unknown,
+                make: String::new(),
+                model: String::new(),
+                serial_number: String::new(),
+            },
+        );
+        output.change_current_state(
+            Some(Mode {
+                size: Size::from((1000, 500)),
+                refresh: 60_000,
+            }),
+            None,
+            None,
+            None,
+        );
+        output
+    }
+
+    fn zoom_state(mode: ZoomMovementMode, clock: Clock) -> OutputZoomState {
+        OutputZoomState::new(
+            &test_output(),
+            clock,
+            Zoom {
+                movement_mode: mode,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn easing(duration_ms: u32) -> niri_config::Animation {
+        niri_config::Animation {
+            off: false,
+            kind: Kind::Easing(EasingParams {
+                duration_ms,
+                curve: Curve::Linear,
+            }),
+        }
+    }
+
+    fn anim_off() -> niri_config::Animation {
+        niri_config::Animation {
+            off: true,
+            kind: Kind::Easing(EasingParams {
+                duration_ms: 0,
+                curve: Curve::Linear,
+            }),
+        }
+    }
+
+    #[test]
+    fn level_transition_derives_focal_from_anchor_at_new_level() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 2.0);
+        assert_relative_eq!(state.view().focal.x, 500., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+
+        state.set_cursor(Point::from((600., 250.)));
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        assert!(state.is_transitioning());
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 550., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn pan_meets_target_and_level_change_replaces_pan() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        state.set_cursor(Point::from((700., 350.)));
+        assert_relative_eq!(state.view().focal.x, 900.);
+        assert_relative_eq!(state.view().focal.y, 450.);
+
+        // Moving to CursorFollow starts a real pan from (900, 450) to the cursor (700, 350).
+        state.set_movement_mode(
+            ZoomMovementMode::CursorFollow,
+            ZoomFocalPanAnim(easing(100)),
+        );
+
+        state.advance_animations();
+        assert_relative_eq!(state.view().focal.x, 900.);
+        assert_relative_eq!(state.view().focal.y, 450.);
+
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        assert_relative_eq!(state.view().focal.x, 800., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 400., epsilon = 1e-6);
+
+        // Starting a level change cancels the pan and replaces it with a tracked level
+        // animation; a pan would still be running at t=100.
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 2.5, epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.x, 750., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 375., epsilon = 1e-6);
+
+        clock.set_unadjusted(Duration::from_millis(150));
+        state.advance_animations();
+
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 700., epsilon = f64::EPSILON);
+        assert_relative_eq!(state.view().focal.y, 350., epsilon = f64::EPSILON);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn mode_change_during_level_animation_reseeds_without_view_jump() {
+        let mut clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock.clone());
+
+        state.set_level(2.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        state.set_cursor(Point::from((600., 250.)));
+
+        state.set_level(3.0, ZoomLevelChangeAnim(easing(100)));
+        let view_before = state.view();
+
+        // The level animation owns the mode change; the tracked correction is reseeded
+        // so the displayed view does not jump.
+        state.set_movement_mode(ZoomMovementMode::Centered, ZoomFocalPanAnim(easing(100)));
+        assert!(state.is_transitioning());
+        assert_eq!(state.view(), view_before);
+
+        clock.set_unadjusted(Duration::from_millis(50));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 2.5, epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.x, 1700. / 3., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+
+        clock.set_unadjusted(Duration::from_millis(100));
+        state.advance_animations();
+
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 3.0);
+        assert_relative_eq!(state.view().focal.x, 650., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 250., epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn locked_zoom_freezes_and_unlock_reclamps_after_max_level_decrease() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = OutputZoomState::new(
+            &test_output(),
+            clock.clone(),
+            Zoom {
+                movement_mode: ZoomMovementMode::Centered,
+                max_zoom: 10.0,
+                ..Default::default()
+            },
+        );
+
+        state.set_level(8.0, ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        assert_relative_eq!(state.view().factor, 8.0);
+        let frozen = state.view();
+
+        state.toggle_lock(
+            ZoomLevelChangeAnim(anim_off()),
+            ZoomFocalPanAnim(anim_off()),
+        );
+        assert!(state.locked());
+        assert!(!state.are_animations_ongoing());
+
+        // While locked: level requests are ignored, the cursor never moves the view.
+        state.set_level(3.0, ZoomLevelChangeAnim(anim_off()));
+        state.set_cursor(Point::from((200., 100.)));
+        state.advance_animations();
+        assert_eq!(state.view(), frozen);
+
+        // Lowering the max zoom cannot move a locked level above the new max.
+        let zoom = Zoom {
+            movement_mode: ZoomMovementMode::Centered,
+            max_zoom: 5.0,
+            ..Default::default()
+        };
+        let changed = state.set_config(
+            &zoom,
+            &ZoomLevelChangeAnim(anim_off()),
+            &ZoomFocalPanAnim(anim_off()),
+        );
+        assert!(!changed);
+        assert_eq!(state.view(), frozen);
+
+        // Unlocking re-clamps the level to the new max before the zoom resumes.
+        state.toggle_lock(
+            ZoomLevelChangeAnim(anim_off()),
+            ZoomFocalPanAnim(anim_off()),
+        );
+        assert!(state.are_animations_ongoing());
+
+        state.advance_animations();
+        assert!(!state.are_animations_ongoing());
+        assert!(!state.locked());
+        assert_relative_eq!(state.view().factor, 5.0);
+        assert_relative_eq!(state.view().focal.x, 125., epsilon = 1e-6);
+        assert_relative_eq!(state.view().focal.y, 62.5, epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn cursor_follow_gesture_uses_the_cursor_focal() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::CursorFollow, clock);
+        let cursor = Point::from((400., 250.));
+        state.set_cursor(cursor);
+        assert!(state.apply_action(ZoomAction::BeginGesture(None)).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(2.0, 1.0, Point::from((0., 0.))))
+                .0
+        );
+
+        let screen = state.view().content_to_screen(cursor);
+        assert_relative_eq!(screen.x, 400., epsilon = 1e-6);
+        assert_relative_eq!(screen.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn centered_gesture_uses_the_centered_focal() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock);
+        let cursor = Point::from((400., 250.));
+        state.set_cursor(cursor);
+        assert!(state.apply_action(ZoomAction::BeginGesture(None)).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(2.0, 1.0, Point::from((0., 0.))))
+                .0
+        );
+
+        let screen = state.view().content_to_screen(cursor);
+        assert_relative_eq!(screen.x, 500., epsilon = 1e-6);
+        assert_relative_eq!(screen.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn on_edge_gesture_keeps_cursor_at_visible_viewport_edge() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock);
+        let cursor = Point::from((800., 250.));
+        state.set_cursor(cursor);
+        state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        state.set_cursor(Point::from((900., 250.)));
+        let cursor: Point<f64, Logical> = Point::from((900., 250.));
+
+        assert!(state.apply_action(ZoomAction::BeginGesture(None)).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1.5, 1., Point::from((0., 0.))))
+                .0
+        );
+
+        let screen = state.view().content_to_screen(cursor);
+        // The far-edge OnEdge anchor keeps a tiny (1e-4) inset below 1.0 so the anchor never
+        // reaches the visible viewport's far edge; paint the resulting literal explicitly so
+        // a change to ZOOM_ONEDGE_FAR_ANCHOR_INSET fails this test instead of hiding in it.
+        assert_relative_eq!(screen.x, 999.9, epsilon = 1e-6);
+        assert_relative_eq!(screen.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn cancelled_gesture_returns_to_its_start_level() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::CursorFollow, clock);
+        let cursor = Point::from((400., 250.));
+        state.set_cursor(cursor);
+        assert!(state.apply_action(ZoomAction::BeginGesture(None)).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(2., 1., Point::from((0., 0.))))
+                .0
+        );
+        assert!(
+            state
+                .apply_action(ZoomAction::EndGesture(
+                    true,
+                    ZoomLevelChangeAnim(anim_off())
+                ))
+                .0
+        );
+        assert!(state.are_animations_ongoing());
+
+        assert!(state.apply_action(ZoomAction::Advance).0);
+        assert!(!state.are_animations_ongoing());
+        assert_relative_eq!(state.view().factor, 1.);
+        let screen = state.view().content_to_screen(cursor);
+        assert_relative_eq!(screen.x, 400., epsilon = 1e-6);
+        assert_relative_eq!(screen.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn cursor_follow_gesture_pivots_at_the_touchscreen_midpoint() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::CursorFollow, clock);
+        state.set_cursor(Point::from((100., 100.)));
+        let pivot = Point::from((300., 250.));
+        assert!(state.apply_action(ZoomAction::BeginGesture(Some(pivot))).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(2., 1., Point::from((0., 0.))))
+                .0
+        );
+
+        // The pivot replaced the cursor anchor: at level 2 it maps to itself on screen, while
+        // the seeded cursor point moves to (-100, -50), i.e. content = level * p - (level-1) *
+        // pivot.
+        let view = state.view();
+        assert_relative_eq!(view.content_to_screen(pivot).x, 300., epsilon = 1e-6);
+        assert_relative_eq!(view.content_to_screen(pivot).y, 250., epsilon = 1e-6);
+        let screen: Point<f64, Logical> = Point::from((100., 100.));
+        let screen = view.content_to_screen(screen);
+        assert_relative_eq!(screen.x, -100., epsilon = 1e-6);
+        assert_relative_eq!(screen.y, -50., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn touchscreen_gesture_pivots_in_on_edge_mode() {
+        let build = || {
+            let clock = Clock::with_time(Duration::ZERO);
+            let mut state = zoom_state(ZoomMovementMode::OnEdge, clock);
+            state.set_cursor(Point::from((800., 250.)));
+            state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+            state.advance_animations();
+            state.set_cursor(Point::from((900., 250.)));
+            state
+        };
+
+        let mut state = build();
+        assert!(
+            state
+                .apply_action(ZoomAction::BeginGesture(Some(Point::from((300., 250.)))))
+                .0
+        );
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(2., 1., Point::from((0., 0.))))
+                .0
+        );
+        state.verify_invariants();
+
+        // An identical sequence without the pivot keeps the cursor's OnEdge anchor.
+        let mut baseline = build();
+        assert!(baseline.apply_action(ZoomAction::BeginGesture(None)).0);
+        assert!(
+            baseline
+                .apply_action(ZoomAction::UpdateGesture(2., 1., Point::from((0., 0.))))
+                .0
+        );
+        baseline.verify_invariants();
+
+        // Both gestures advance to level 4 (2× the pre-gesture scale of 2), but frame it
+        // differently: the midpoint clamps to the level-2 viewport's near x edge, so its
+        // anchor fraction is (0, 0.5), while the cursor (900, 250) sits at the far x edge
+        // (0.9999, 0.5). At level 4 that yields focal x = 300·4/3 = 400 for the pivot versus
+        // (900 − 1000/4·0.9999)·4/3 = 866.7 for the baseline; y happens to be 250 for both.
+        let pivoted = state.view().focal;
+        let baseline_focal = baseline.view().focal;
+        assert_relative_eq!(pivoted.x, 400., epsilon = 1e-6);
+        assert_relative_eq!(baseline_focal.x, 866.7, epsilon = 1e-6);
+        assert_relative_eq!(pivoted.y, 250., epsilon = 1e-6);
+        assert_relative_eq!(baseline_focal.y, 250., epsilon = 1e-6);
+    }
+
+    #[test]
+    fn zoomed_cursor_follow_touchscreen_pinch_keeps_midpoint_under_fingers() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::CursorFollow, clock);
+        state.set_cursor(Point::from((700., 250.)));
+        state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+
+        let screen_anchor = Point::from((300., 250.));
+        let pivot = state.view().screen_to_content(screen_anchor);
+        assert!(state.apply_action(ZoomAction::BeginGesture(Some(pivot))).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1.5, 1., Point::from((0., 0.))))
+                .0
+        );
+
+        let view = state.view();
+        let screen = view.content_to_screen(pivot);
+        assert_relative_eq!(view.factor, 3., epsilon = 1e-6);
+        assert_relative_eq!(screen.x, screen_anchor.x, epsilon = 1e-6);
+        assert_relative_eq!(screen.y, screen_anchor.y, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn zoomed_centered_touchscreen_pinch_keeps_midpoint_under_fingers() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::Centered, clock);
+        state.set_cursor(Point::from((500., 250.)));
+        state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+
+        let screen_anchor = Point::from((300., 250.));
+        let pivot = state.view().screen_to_content(screen_anchor);
+        assert!(state.apply_action(ZoomAction::BeginGesture(Some(pivot))).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1.5, 1., Point::from((0., 0.))))
+                .0
+        );
+
+        let view = state.view();
+        let screen = view.content_to_screen(pivot);
+        assert_relative_eq!(view.factor, 3., epsilon = 1e-6);
+        assert_relative_eq!(screen.x, screen_anchor.x, epsilon = 1e-6);
+        assert_relative_eq!(screen.y, screen_anchor.y, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn touchscreen_pan_moves_the_zoomed_view_with_the_fingers() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::CursorFollow, clock);
+        state.set_cursor(Point::from((500., 250.)));
+        state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+
+        let content: Point<f64, Logical> = Point::from((600., 250.));
+        let before = state.view().content_to_screen(content);
+        assert!(
+            state
+                .apply_action(ZoomAction::BeginGesture(Some(Point::from((500., 250.)))))
+                .0
+        );
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1., 1., Point::from((10., 0.))))
+                .0
+        );
+
+        let view = state.view();
+        let after = view.content_to_screen(content);
+        assert_relative_eq!(view.factor, 2., epsilon = 1e-6);
+        assert_relative_eq!(after.x, before.x + 10., epsilon = 1e-6);
+        assert_relative_eq!(after.y, before.y, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn touchscreen_pan_does_not_reapply_translation_to_on_edge_anchor() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::OnEdge, clock);
+        state.set_cursor(Point::from((500., 250.)));
+        state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+
+        let pivot = Point::from((500., 250.));
+        let content: Point<f64, Logical> = Point::from((600., 250.));
+        let before = state.view().content_to_screen(content);
+        assert!(state.apply_action(ZoomAction::BeginGesture(Some(pivot))).0);
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1., 1., Point::from((10., 0.))))
+                .0
+        );
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1., 1., Point::from((10., 0.))))
+                .0
+        );
+
+        let view = state.view();
+        let after = view.content_to_screen(content);
+        assert_relative_eq!(view.factor, 2., epsilon = 1e-6);
+        assert_relative_eq!(after.x, before.x + 20., epsilon = 1e-6);
+        assert_relative_eq!(after.y, before.y, epsilon = 1e-6);
+        state.verify_invariants();
+    }
+
+    #[test]
+    fn touchscreen_pan_reverses_immediately_at_viewport_edge() {
+        let clock = Clock::with_time(Duration::ZERO);
+        let mut state = zoom_state(ZoomMovementMode::CursorFollow, clock);
+        state.set_cursor(Point::from((10., 250.)));
+        state.set_level(2., ZoomLevelChangeAnim(anim_off()));
+        state.advance_animations();
+        assert_relative_eq!(state.view().focal.x, 10., epsilon = 1e-6);
+        assert!(
+            state
+                .apply_action(ZoomAction::BeginGesture(Some(Point::from((10., 250.)))))
+                .0
+        );
+
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1., 1., Point::from((30., 0.))))
+                .0
+        );
+        assert_relative_eq!(state.view().focal.x, 0., epsilon = 1e-6);
+
+        assert!(
+            state
+                .apply_action(ZoomAction::UpdateGesture(1., 1., Point::from((-1., 0.))))
+                .0
+        );
+        assert_relative_eq!(state.view().focal.x, 1., epsilon = 1e-6);
+    }
+}
