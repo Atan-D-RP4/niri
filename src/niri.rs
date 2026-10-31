@@ -122,7 +122,7 @@ use wayland_server::protocol::wl_output::WlOutput;
 
 #[cfg(feature = "dbus")]
 use crate::a11y::A11y;
-use crate::animation::Clock;
+use crate::animation::{Animation, Clock};
 use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
@@ -456,9 +456,10 @@ pub struct Niri {
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,
 
-    pub zoom: Zoom,
     pub zoom_active: bool,
-    pub zoom_level: f64,
+    pub target_zoom_level: f64,
+    pub last_zoom_time: Option<Instant>,
+    pub zoom_streak: u32,
 
     #[cfg(feature = "dbus")]
     pub dbus: Option<crate::dbus::DBusServers>,
@@ -551,6 +552,10 @@ pub struct OutputState {
     screen_transition: Option<ScreenTransition>,
     /// Damage tracker used for the debug damage visualization.
     pub debug_damage_tracker: OutputDamageTracker,
+    pub zoom: Zoom,
+    pub zoom_level: f64,
+    pub zoom_animation: Option<Animation>,
+    pub zoom_focal_point: Point<f64, Logical>,
 }
 
 #[derive(Debug, Default)]
@@ -2912,9 +2917,10 @@ impl Niri {
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
-            zoom: Zoom::new(),
             zoom_active: false,
-            zoom_level: 1.0,
+            target_zoom_level: 1.0,
+            last_zoom_time: None,
+            zoom_streak: 0,
 
             #[cfg(feature = "dbus")]
             dbus: None,
@@ -3189,6 +3195,10 @@ impl Niri {
             lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
+            zoom: Zoom::new(),
+            zoom_level: 1.0,
+            zoom_animation: None,
+            zoom_focal_point: Point::default(),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -4389,15 +4399,117 @@ impl Niri {
         self.screenshot_ui.advance_animations();
         self.window_mru_ui.advance_animations();
 
-        if self.zoom_active {
-            self.zoom.damage();
-        }
-
         for state in self.output_state.values_mut() {
+            if let Some(anim) = &mut state.zoom_animation {
+                state.zoom_level = anim.value();
+                state.zoom.damage();
+                if anim.is_done() {
+                    state.zoom_level = anim.to();
+                    state.zoom_animation = None;
+                }
+            } else if state.zoom_level > 1.0 {
+                state.zoom.damage();
+            }
+
             if let Some(transition) = &mut state.screen_transition {
                 if transition.is_done() {
                     state.screen_transition = None;
                 }
+            }
+        }
+    }
+
+    pub fn update_zoom_targets(&mut self, pos_override: Option<Point<f64, Logical>>) {
+        let pointer_pos = pos_override
+            .or(self.tablet_cursor_location)
+            .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+        let active_output = if self.zoom_active {
+            self.global_space.output_under(pointer_pos).next().cloned()
+        } else {
+            None
+        };
+
+        let anim_config = niri_config::Animation {
+            off: self.config.borrow().animations.off,
+            kind: niri_config::animations::Kind::Spring(niri_config::animations::SpringParams {
+                damping_ratio: 1.0,
+                stiffness: 500,
+                epsilon: 0.0001,
+            }),
+        };
+
+        for (output, state) in &mut self.output_state {
+            let is_active = active_output.as_ref() == Some(output);
+            let target = if is_active {
+                self.target_zoom_level.max(1.0)
+            } else {
+                1.0
+            };
+
+            if is_active {
+                if let Some(output_geo) = self.global_space.output_geometry(output) {
+                    state.zoom_focal_point = pointer_pos - output_geo.loc.to_f64();
+                }
+            }
+
+            let current = state.zoom_level;
+            if (current - target).abs() > 0.001 {
+                state.zoom_animation = Some(Animation::new(
+                    self.clock.clone(),
+                    current,
+                    target,
+                    0.0,
+                    anim_config,
+                ));
+                state.zoom.damage();
+            }
+        }
+
+        self.queue_redraw_all();
+    }
+
+    pub fn zoom_step_factor(&mut self) -> f64 {
+        let now = Instant::now();
+        let timeout = Duration::from_millis(300);
+        if let Some(last) = self.last_zoom_time {
+            if now.duration_since(last) < timeout {
+                self.zoom_streak = (self.zoom_streak + 1).min(6);
+            } else {
+                self.zoom_streak = 0;
+            }
+        } else {
+            self.zoom_streak = 0;
+        }
+        self.last_zoom_time = Some(now);
+
+        1.15 + (f64::from(self.zoom_streak) * 0.05)
+    }
+
+    pub const fn reset_zoom_streak(&mut self) {
+        self.zoom_streak = 0;
+        self.last_zoom_time = None;
+    }
+
+    pub fn update_zoom_pointer_motion(
+        &mut self,
+        old_pos: Point<f64, Logical>,
+        new_pos: Point<f64, Logical>,
+    ) {
+        if !self.zoom_active {
+            return;
+        }
+
+        let old_out = self.global_space.output_under(old_pos).next();
+        let new_out = self.global_space.output_under(new_pos).next();
+
+        if old_out != new_out {
+            self.update_zoom_targets(Some(new_pos));
+        } else if let Some(out) = new_out {
+            if let (Some(state), Some(geom)) = (
+                self.output_state.get_mut(out),
+                self.global_space.output_geometry(out),
+            ) {
+                state.zoom_focal_point = new_pos - geom.loc.to_f64();
             }
         }
     }
@@ -4531,7 +4643,6 @@ impl Niri {
         include_pointer: bool,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
-        let state = self.output_state.get(output).unwrap();
         let output_scale = Scale::from(output.current_scale().fractional_scale());
 
         let push = if self.debug_draw_opaque_regions {
@@ -4545,49 +4656,54 @@ impl Niri {
 
         let mut zoom_pointer_pos = None;
 
-        if self.zoom_active {
-            // TODO: Limit zoom effect exclusively to the specific monitor where the cursor
-            // currently resides (e.g., check
-            // `output_geo.to_f64().contains(pointer_pos)`) instead of blitting and
-            // zooming on every connected monitor. This will save significant GPU work on
-            // multi-monitor setups.
-            // TODO: Limit zoom effect exclusively to the specific monitor where the cursor currently
-            // resides (e.g., check `output_geo.to_f64().contains(pointer_pos)`) instead of blitting and
-            // zooming on every connected monitor. This will save significant GPU work on multi-monitor setups.
+        let state = self.output_state.get(output).unwrap();
+        if state.zoom_level > 1.0 {
             if let Some(output_geo) = self.global_space.output_geometry(output) {
                 let pointer_pos = self
                     .tablet_cursor_location
                     .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
-                let pointer_pos_logical = pointer_pos - output_geo.loc.to_f64();
-                let pointer_pos: Point<i32, Physical> =
+
+                let is_on_this_output =
+                    self.global_space.output_under(pointer_pos).next() == Some(output);
+
+                let pointer_pos_logical = if is_on_this_output {
+                    pointer_pos - output_geo.loc.to_f64()
+                } else {
+                    state.zoom_focal_point
+                };
+
+                let pointer_pos_phys: Point<i32, Physical> =
                     pointer_pos_logical.to_physical_precise_round(output_scale);
 
                 let output_size = output_geo.size.to_f64();
                 let geometry = Rectangle::from_size(output_size);
 
-                let zoom = self.zoom_level.max(1.);
                 let dst: Rectangle<i32, Physical> =
                     geometry.to_physical_precise_round(output_scale);
                 let output_size_phys: Size<i32, Physical> =
                     output_size.to_physical_precise_round(output_scale);
 
-                let src_w = ((dst.size.w as f64) / zoom).round().max(1.) as i32;
-                let src_h = ((dst.size.h as f64) / zoom).round().max(1.) as i32;
-                let max_x = (output_size_phys.w - src_w).max(0);
-                let max_y = (output_size_phys.h - src_h).max(0);
-                let src_x = (pointer_pos.x - src_w / 2).clamp(0, max_x);
-                let src_y = (pointer_pos.y - src_h / 2).clamp(0, max_y);
+                if is_on_this_output {
+                    let crop = ZoomElement::crop_rect(
+                        output_size_phys,
+                        pointer_pos_phys,
+                        state.zoom_level,
+                    );
+                    let mapped_x = f64::from(dst.loc.x)
+                        + f64::from(pointer_pos_phys.x - crop.loc.x) / f64::from(crop.size.w)
+                            * f64::from(dst.size.w);
+                    let mapped_y = f64::from(dst.loc.y)
+                        + f64::from(pointer_pos_phys.y - crop.loc.y) / f64::from(crop.size.h)
+                            * f64::from(dst.size.h);
+                    zoom_pointer_pos = Some(Point::from((
+                        mapped_x / output_scale.x,
+                        mapped_y / output_scale.y,
+                    )));
+                }
 
-                let mapped_x = dst.loc.x as f64
-                    + (pointer_pos.x - src_x) as f64 / src_w as f64 * dst.size.w as f64;
-                let mapped_y = dst.loc.y as f64
-                    + (pointer_pos.y - src_y) as f64 / src_h as f64 * dst.size.h as f64;
-                zoom_pointer_pos = Some(Point::from((
-                    mapped_x / output_scale.x,
-                    mapped_y / output_scale.y,
-                )));
-
-                let elem = self.zoom.render(geometry, pointer_pos, self.zoom_level);
+                let elem = state
+                    .zoom
+                    .render(geometry, pointer_pos_phys, state.zoom_level);
                 push(elem.into());
             }
         }
@@ -4980,6 +5096,16 @@ impl Niri {
 
         let mut res = RenderResult::Skipped;
         if self.monitors_active {
+            let is_under_cursor = if self.zoom_active {
+                let pointer_pos = self
+                    .tablet_cursor_location
+                    .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+                self.output_under(pointer_pos)
+                    .is_some_and(|(out, _)| out == output)
+            } else {
+                false
+            };
+
             let state = self.output_state.get_mut(output).unwrap();
             state.unfinished_animations_remain = self.layout.are_animations_ongoing(Some(output));
             state.unfinished_animations_remain |=
@@ -4988,7 +5114,9 @@ impl Niri {
             state.unfinished_animations_remain |= self.screenshot_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= self.window_mru_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= state.screen_transition.is_some();
-            state.unfinished_animations_remain |= self.zoom_active;
+            state.unfinished_animations_remain |= state.zoom_animation.is_some();
+            state.unfinished_animations_remain |=
+                self.zoom_active && state.zoom_level > 1.0 && is_under_cursor;
 
             // Also keep redrawing if the current cursor is animated.
             state.unfinished_animations_remain |= self

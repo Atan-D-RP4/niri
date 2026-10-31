@@ -7,16 +7,13 @@ use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::{Frame as _, FrameContext, Offscreen, Texture as _};
 use smithay::gpu_span_location;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::render_helpers::renderer::AsGlesFrame as _;
 
 /// Fullscreen zoom post-process effect.
 /// Composites the output normally, then blits and zooms the cursor-centered region.
-///
-/// TODO: Optimize multi-monitor setups by restricting the zoom framebuffer effect and intermediate
-/// texture allocation exclusively to the monitor containing the active mouse pointer.
 #[derive(Debug)]
 pub struct Zoom {
     id: Id,
@@ -75,6 +72,26 @@ impl Default for Zoom {
     }
 }
 
+impl ZoomElement {
+    /// Compute the crop rectangle centered on the pointer position within output bounds.
+    #[must_use]
+    pub fn crop_rect(
+        output_size: Size<i32, Physical>,
+        pointer_pos: Point<i32, Physical>,
+        zoom: f64,
+    ) -> Rectangle<i32, Physical> {
+        let zoom = zoom.max(1.0);
+        // Round to even dimensions so integer halving doesn't wobble the center.
+        let src_w = ((f64::from(output_size.w) / zoom / 2.0).round().max(1.0) as i32) * 2;
+        let src_h = ((f64::from(output_size.h) / zoom / 2.0).round().max(1.0) as i32) * 2;
+        let max_x = (output_size.w - src_w).max(0);
+        let max_y = (output_size.h - src_h).max(0);
+        let src_x = (pointer_pos.x - src_w / 2).clamp(0, max_x);
+        let src_y = (pointer_pos.y - src_h / 2).clamp(0, max_y);
+        Rectangle::new((src_x, src_y).into(), (src_w, src_h).into())
+    }
+}
+
 impl Element for ZoomElement {
     fn id(&self) -> &Id {
         &self.id
@@ -118,15 +135,7 @@ impl RenderElement<GlesRenderer> for ZoomElement {
             let mut inner = inner.borrow_mut();
             let inner = &mut *inner;
 
-            // Crop area centered on pointer position, clamped within output bounds.
-            let zoom = self.zoom.max(1.);
-            let src_w = ((dst.size.w as f64) / zoom).round().max(1.) as i32;
-            let src_h = ((dst.size.h as f64) / zoom).round().max(1.) as i32;
-            let max_x = (output_rect.size.w - src_w).max(0);
-            let max_y = (output_rect.size.h - src_h).max(0);
-            let src_x = (self.pointer_pos.x - src_w / 2).clamp(0, max_x);
-            let src_y = (self.pointer_pos.y - src_h / 2).clamp(0, max_y);
-            let capture_rect = Rectangle::new((src_x, src_y).into(), (src_w, src_h).into());
+            let capture_rect = Self::crop_rect(output_rect.size, self.pointer_pos, self.zoom);
 
             // Account for output rotation/transform.
             let capture_rect = transform.transform_rect_in(capture_rect, &output_rect.size);

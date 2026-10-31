@@ -947,39 +947,40 @@ impl State {
                 self.niri.debug_toggle_damage();
             }
             Action::ZoomIn => {
-                if !self.niri.zoom_active || self.niri.zoom_level <= 1.0 {
+                let factor = self.niri.zoom_step_factor();
+                if !self.niri.zoom_active || self.niri.target_zoom_level <= 1.0 {
                     self.niri.zoom_active = true;
-                    self.niri.zoom_level = 1.25;
+                    self.niri.target_zoom_level = 1.25;
                 } else {
-                    self.niri.zoom_level = (self.niri.zoom_level + 0.25).min(10.0);
+                    self.niri.target_zoom_level = (self.niri.target_zoom_level * factor).min(16.0);
                 }
-                self.niri.zoom.damage();
-                self.niri.queue_redraw_all();
+                self.niri.update_zoom_targets(None);
             }
             Action::ZoomOut => {
                 if self.niri.zoom_active {
-                    self.niri.zoom_level -= 0.25;
-                    if self.niri.zoom_level <= 1.0 {
-                        self.niri.zoom_level = 1.0;
+                    let factor = self.niri.zoom_step_factor();
+                    self.niri.target_zoom_level /= factor;
+                    if self.niri.target_zoom_level <= 1.05 {
+                        self.niri.target_zoom_level = 1.0;
                         self.niri.zoom_active = false;
+                        self.niri.reset_zoom_streak();
                     }
-                    self.niri.zoom.damage();
-                    self.niri.queue_redraw_all();
+                    self.niri.update_zoom_targets(None);
                 }
             }
             Action::ResetZoom => {
-                self.niri.zoom_level = 1.0;
+                self.niri.target_zoom_level = 1.0;
                 self.niri.zoom_active = false;
-                self.niri.zoom.damage();
-                self.niri.queue_redraw_all();
+                self.niri.reset_zoom_streak();
+                self.niri.update_zoom_targets(None);
             }
             Action::ToggleZoom => {
                 self.niri.zoom_active = !self.niri.zoom_active;
-                if self.niri.zoom_active && self.niri.zoom_level <= 1.0 {
-                    self.niri.zoom_level = 2.0;
+                if self.niri.zoom_active && self.niri.target_zoom_level <= 1.0 {
+                    self.niri.target_zoom_level = 2.0;
                 }
-                self.niri.zoom.damage();
-                self.niri.queue_redraw_all();
+                self.niri.reset_zoom_streak();
+                self.niri.update_zoom_targets(None);
             }
             Action::ToggleTouchpad => {
                 self.niri.touchpad_disabled_by_toggle = !self.niri.touchpad_disabled_by_toggle;
@@ -2904,6 +2905,8 @@ impl State {
 
         pointer.frame(self);
 
+        self.niri.update_zoom_pointer_motion(pos, new_pos);
+
         // contents_under() will return no surface when the hot corner should trigger, so
         // pointer.motion() will set the current focus to None.
         if under.hot_corner && pointer.current_focus().is_none() {
@@ -2959,6 +2962,7 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
 
         let pointer = self.niri.seat.get_pointer().unwrap();
+        let old_pos = pointer.current_location();
 
         if let Some(output) = self.niri.screenshot_ui.selection_output() {
             let geom = self.niri.global_space.output_geometry(output).unwrap();
@@ -2994,6 +2998,8 @@ impl State {
         );
 
         pointer.frame(self);
+
+        self.niri.update_zoom_pointer_motion(old_pos, pos);
 
         // contents_under() will return no surface when the hot corner should trigger, so
         // pointer.motion() will set the current focus to None.
