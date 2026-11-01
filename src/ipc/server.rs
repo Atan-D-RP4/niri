@@ -469,11 +469,9 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                         (
                             output.name().clone(),
                             niri_ipc::Zoom {
-                                is_locked: zoom_state.locked,
+                                is_locked: zoom_state.locked(),
                                 level,
-                                // FIXME: Hardcoded `false` for gesturing and transitioning.
-                                // update to use checked bools once implemented.
-                                transitioning: false,
+                                transitioning: zoom_state.is_transitioning(),
                             },
                         )
                     })
@@ -1031,18 +1029,16 @@ impl State {
         let mut seen = HashSet::new();
 
         for output in self.niri.layout.outputs() {
-            let zoom_state = &self.niri.output_state[output].zoom;
+            let zoom_state = self.niri.output_state[output].zoom();
             let output_name = output.name().clone();
 
             seen.insert(output_name.clone());
             let zoom = niri_ipc::Zoom {
-                is_locked: zoom_state.locked,
+                is_locked: zoom_state.locked(),
                 level: zoom_state.view().factor,
-                transitioning: zoom_state.are_animations_ongoing(),
+                transitioning: zoom_state.is_transitioning(),
             };
 
-            // FIXME: Hardcoded `false` for gesturing and transitioning.
-            // update to use checked bools once implemented.
             if state.should_emit_zoom_event(&output_name, &zoom) {
                 events.push(Event::ZoomChanged {
                     output: output_name,
