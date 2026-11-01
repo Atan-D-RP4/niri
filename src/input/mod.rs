@@ -2728,8 +2728,26 @@ impl State {
 
         let pos = pointer.current_location();
 
+        let cursor_output = self
+            .niri
+            .output_under(pos)
+            .map(|(output, _)| output.clone());
+
+        let (delta, delta_unaccel) = if let Some(output) = &cursor_output {
+            let level = self.niri.output_state[output].zoom.view().factor;
+            match self.niri.config.borrow().zoom.cursor_velocity {
+                ZoomCursorVelocity::Natural => (
+                    event.delta().downscale(Scale::from(level.max(1.0))),
+                    event.delta_unaccel().downscale(Scale::from(level.max(1.0))),
+                ),
+                ZoomCursorVelocity::HandSpeed => (event.delta(), event.delta_unaccel()),
+            }
+        } else {
+            (event.delta(), event.delta_unaccel())
+        };
+
         // We have an output, so we can compute the new location and focus.
-        let mut new_pos = pos + event.delta();
+        let mut new_pos = pos + delta;
 
         // We received an event for the regular pointer, so show it now.
         self.niri.pointer_visibility = PointerVisibility::Visible;
@@ -2775,8 +2793,8 @@ impl State {
                     self,
                     Some(under.clone()),
                     &RelativeMotionEvent {
-                        delta: event.delta(),
-                        delta_unaccel: event.delta_unaccel(),
+                        delta,
+                        delta_unaccel,
                         time: event.time(),
                     },
                 );
@@ -2874,8 +2892,8 @@ impl State {
                     self,
                     Some(focus_surface),
                     &RelativeMotionEvent {
-                        delta: event.delta(),
-                        delta_unaccel: event.delta_unaccel(),
+                        delta,
+                        delta_unaccel,
                         time: event.time(),
                     },
                 );
@@ -2913,8 +2931,8 @@ impl State {
             self,
             under.surface,
             &RelativeMotionEvent {
-                delta: event.delta(),
-                delta_unaccel: event.delta_unaccel(),
+                delta,
+                delta_unaccel,
                 time: event.time(),
             },
         );
