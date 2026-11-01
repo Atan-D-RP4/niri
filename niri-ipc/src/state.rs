@@ -127,10 +127,12 @@ impl ZoomChangedState {
             return true;
         };
 
-        let state_changed = (previous.level - current.level).abs() > Self::EVENT_EPSILON
-            || previous.is_locked != current.is_locked;
+        let lock_toggled = previous.is_locked != current.is_locked;
+        let zoom_is_static =
+            !current.transitioning && (previous.level - current.level).abs() > Self::EVENT_EPSILON;
+        let transition_toggled = previous.transitioning != current.transitioning;
 
-        previous.is_locked != current.is_locked || (!current.transitioning && state_changed)
+        lock_toggled || transition_toggled || zoom_is_static
     }
 }
 

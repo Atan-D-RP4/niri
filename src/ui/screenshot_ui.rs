@@ -57,6 +57,7 @@ pub enum ScreenshotUi {
     },
     Open {
         selection: (Output, Point<i32, Physical>, Point<i32, Physical>),
+        touch_selection_checkpoint: Option<(Output, Point<i32, Physical>, Point<i32, Physical>)>,
         output_data: HashMap<Output, OutputData>,
         button: Button,
         show_pointer: bool,
@@ -276,6 +277,7 @@ impl ScreenshotUi {
 
         *self = Self::Open {
             selection,
+            touch_selection_checkpoint: None,
             output_data,
             button: Button::Up,
             show_pointer,
@@ -872,6 +874,40 @@ impl ScreenshotUi {
         }
     }
 
+    pub fn rollback_touch_interaction(&mut self) {
+        let restored = if let Self::Open {
+            selection,
+            touch_selection_checkpoint,
+            button,
+            ..
+        } = self
+        {
+            if let Some(previous) = touch_selection_checkpoint.take() {
+                *selection = previous;
+                *button = Button::Up;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if restored {
+            self.update_buffers();
+        }
+    }
+
+    pub fn finish_touch_sequence(&mut self) {
+        if let Self::Open {
+            touch_selection_checkpoint,
+            ..
+        } = self
+        {
+            *touch_selection_checkpoint = None;
+        }
+    }
+
     pub fn output_size(&self, output: &Output) -> Option<(Size<i32, Physical>, f64, Transform)> {
         if let Self::Open { output_data, .. } = self {
             let data = output_data.get(output)?;
@@ -939,6 +975,7 @@ impl ScreenshotUi {
     ) -> bool {
         let Self::Open {
             selection,
+            touch_selection_checkpoint,
             output_data,
             show_pointer,
             button,
@@ -948,15 +985,25 @@ impl ScreenshotUi {
             return false;
         };
 
+        if slot.is_some() && touch_selection_checkpoint.is_none() {
+            *touch_selection_checkpoint = Some(selection.clone());
+        }
+
         // Check if this is a second touch (different slot) while already dragging.
         if let Some(new_slot) = slot {
             if let Button::Down {
+                touch_slot,
                 on_capture_button: false,
                 move_state,
                 last_pos,
                 ..
             } = button
             {
+                if *touch_slot != Some(new_slot) {
+                    // Keep the first finger's selection change, but discard UI movement after
+                    // the second contact is claimed as a zoom gesture.
+                    *touch_selection_checkpoint = Some(selection.clone());
+                }
                 if move_state.is_none() {
                     *move_state = Some(MoveState {
                         pointer_offset: last_pos.1 - selection.1,

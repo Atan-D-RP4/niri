@@ -16,11 +16,10 @@ use calloop::futures::Scheduler;
 use niri_config::debug::PreviewRender;
 use niri_config::input::XkbFile;
 use niri_config::output::MaxBpc;
-use niri_config::utils::MergeWith;
 use niri_config::window_rule::VrrRule;
 use niri_config::{
     Bind, Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
-    WorkspaceReference, Xkb,
+    WorkspaceReference, Xkb, ZoomMovementMode,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::{InputTime, Keycode};
@@ -146,6 +145,7 @@ use crate::handlers::{configure_lock_surface, XDG_ACTIVATION_TOKEN_TIMEOUT};
 use crate::input::pick_color_grab::PickColorGrab;
 use crate::input::scroll_swipe_gesture::ScrollSwipeGesture;
 use crate::input::scroll_tracker::ScrollTracker;
+use crate::input::zoom_gesture::ZoomInputState;
 use crate::input::{
     apply_libinput_settings, mods_with_finger_scroll_binds, mods_with_horizontal_wheel_binds,
     mods_with_mouse_binds, mods_with_tablet_stylus_binds, mods_with_vertical_wheel_binds,
@@ -156,7 +156,7 @@ use crate::layer::mapped::LayerSurfaceRenderElement;
 use crate::layer::MappedLayer;
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
-use crate::layout::zoom::OutputZoomState;
+use crate::layout::zoom::{OutputZoomState, ZoomAction};
 use crate::layout::{
     HitType, Layout, LayoutElement as _, LayoutElementRenderElement, MonitorRenderElement,
 };
@@ -215,6 +215,28 @@ pub struct SavedKeyboardState {
     pub layout: Option<KeyboardLayout>,
     pub caps_lock: Option<bool>,
     pub num_lock: Option<bool>,
+}
+
+pub struct ZoomPointerHandoff {
+    output: Output,
+    pub target: Point<f64, Logical>,
+    origin: Point<f64, Logical>,
+    before: Option<Point<f64, Logical>>,
+}
+
+pub enum ZoomPointerPreparation {
+    Blocked,
+    Track,
+    Handoff(ZoomPointerHandoff),
+}
+
+/// A deferred zoom reprojection, guarded against two races: being superseded by a newer
+/// pending correction, and real motion landing between the schedule and the timer firing.
+#[derive(Debug, Clone, Copy)]
+pub struct ZoomPendingPointerMove {
+    pub generation: u64,
+    pub target: Point<f64, Logical>,
+    pub expected_seat: Point<f64, Logical>,
 }
 
 pub struct Niri {
@@ -430,7 +452,13 @@ pub struct Niri {
     pub pointer_inside_hot_corner: bool,
     pub pointer_constraint_position_hint: Option<Point<f64, Logical>>,
     pub tablet_cursor_location: Option<Point<f64, Logical>>,
+    /// Physical pinch routing, retained independently of output zoom-motion interruption.
+    pub zoom_input: ZoomInputState,
+    /// Deferred zoom reprojection; its timer applies it only while it is still current.
+    pub zoom_pending_pointer_move: Option<ZoomPendingPointerMove>,
+
     pub gesture_swipe_3f_cumulative: Option<(f64, f64)>,
+
     pub overview_scroll_swipe_gesture: ScrollSwipeGesture,
     pub vertical_wheel_tracker: ScrollTracker,
     pub horizontal_wheel_tracker: ScrollTracker,
@@ -558,6 +586,8 @@ pub struct OutputState {
     pub debug_damage_tracker: OutputDamageTracker,
     /// Zoom state used to track screen magnification.
     pub zoom: OutputZoomState,
+    /// Old displayed view for a screen-preserving zoom change not yet applied to the seat.
+    pub pending_zoom_pointer: Option<OutputViewport>,
 }
 
 #[derive(Debug, Default)]
@@ -2109,11 +2139,11 @@ impl State {
             let zoom = full_config.zoom;
 
             if let Some(state) = self.niri.output_state.get_mut(output) {
-                let changed = state.zoom.set_config(
-                    &zoom,
-                    &full_config.animations.zoom_level_change,
-                    &full_config.animations.zoom_focal_pan,
-                );
+                let changed = state.update_zoom(ZoomAction::Configure(
+                    zoom,
+                    full_config.animations.zoom_level_change,
+                    full_config.animations.zoom_focal_pan,
+                ));
                 if changed {
                     recolored_outputs.push(output.clone());
                 }
@@ -2298,6 +2328,7 @@ impl State {
             return;
         };
 
+        self.niri.sync_zoom_cursor();
         self.niri.update_render_elements(None);
 
         let Some(screenshots) = self
@@ -3009,6 +3040,8 @@ impl Niri {
             pointer_constraint_position_hint: None,
             tablet_cursor_location: None,
             gesture_swipe_3f_cumulative: None,
+            zoom_input: ZoomInputState::default(),
+            zoom_pending_pointer_move: None,
             overview_scroll_swipe_gesture: ScrollSwipeGesture::new(),
             vertical_wheel_tracker: ScrollTracker::new(120),
             horizontal_wheel_tracker: ScrollTracker::new(120),
@@ -3119,6 +3152,11 @@ impl Niri {
     /// Repositions all outputs, optionally adding a new output.
     pub fn reposition_outputs(&mut self, new_output: Option<&Output>) {
         let _span = tracy_client::span!("Niri::reposition_outputs");
+
+        // A pending screen point is output-local; output placement changes may jump.
+        for state in self.output_state.values_mut() {
+            state.pending_zoom_pointer = None;
+        }
 
         #[derive(Debug)]
         struct Data {
@@ -3320,6 +3358,7 @@ impl Niri {
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
             zoom: OutputZoomState::new(&output, self.clock.clone(), zoom_config),
+            pending_zoom_pointer: None,
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -3441,7 +3480,7 @@ impl Niri {
             state.backdrop_buffer.resize(output_size);
 
             state.lock_color_buffer.resize(output_size);
-            state.zoom.set_output_size(output_size);
+            state.update_zoom(ZoomAction::Resize(output_size));
             if let Some(lock_surface) = &state.lock_surface {
                 configure_lock_surface(lock_surface, output);
             }
@@ -3489,30 +3528,225 @@ impl Niri {
 
     /// Track the zoom cursor for `output`.
     pub fn zoom_track_cursor(&mut self, output: &Output, pos: Point<f64, Logical>) {
+        if self.zoom_cursor_tracking_is_suppressed() {
+            return;
+        }
         let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
         let pos = pos - output_geo.loc;
         if let Some(state) = self.output_state.get_mut(output) {
-            state.zoom.set_cursor(pos);
+            state.update_zoom(ZoomAction::PointerMove(pos));
         }
     }
 
+    /// Plan the mode handoff after State has synchronously applied any pending reprojection.
+    pub fn prepare_zoom_pointer_input(
+        &mut self,
+        before: Option<Point<f64, Logical>>,
+    ) -> ZoomPointerPreparation {
+        if self.zoom_cursor_tracking_is_suppressed() {
+            return ZoomPointerPreparation::Blocked;
+        }
+        if self.zoom_pointer_is_manipulated() {
+            // A grab prevents synthetic handoff, but accepted physical motion still tracks zoom.
+            return ZoomPointerPreparation::Track;
+        }
+
+        let actual_pointer = self.seat.get_pointer().unwrap().current_location();
+        let Some((output, pos_within_output)) = self.output_under(actual_pointer) else {
+            return ZoomPointerPreparation::Track;
+        };
+        let output = output.clone();
+        let Some(state) = self.output_state.get(&output) else {
+            return ZoomPointerPreparation::Track;
+        };
+        let Some(target) = state.zoom.pointer_handoff_target(pos_within_output) else {
+            return ZoomPointerPreparation::Track;
+        };
+        let output_geo = self.global_space.output_geometry(&output).unwrap();
+        let geometry = output_geo.to_f64();
+        if geometry.size.w <= 0. || geometry.size.h <= 0. {
+            return ZoomPointerPreparation::Blocked;
+        }
+        let Some(target) = self.constrain_pos_to_output(&output, target + geometry.loc) else {
+            return ZoomPointerPreparation::Blocked;
+        };
+
+        ZoomPointerPreparation::Handoff(ZoomPointerHandoff {
+            output,
+            target,
+            origin: geometry.loc,
+            before,
+        })
+    }
+
+    pub fn finish_zoom_pointer_handoff(
+        &mut self,
+        handoff: ZoomPointerHandoff,
+        actual: Point<f64, Logical>,
+    ) -> bool {
+        if actual != handoff.target
+            || self.output_under(actual).map(|(owner, _)| owner) != Some(&handoff.output)
+        {
+            // A rejected dispatch is not a handoff. Retry from actual geometry on later input.
+            return false;
+        }
+        let config = self.config.borrow().animations.zoom_level_change;
+        self.output_state
+            .get_mut(&handoff.output)
+            .unwrap()
+            .update_zoom(ZoomAction::PointerHandoff(actual - handoff.origin, config));
+        // Establish the synthetic hot-corner baseline without activating the overview UI.
+        if handoff.before != Some(actual) {
+            self.pointer_inside_hot_corner =
+                self.is_inside_hot_corner(&handoff.output, actual - handoff.origin);
+        }
+        !self.zoom_pointer_input_is_blocked()
+    }
+
+    /// A gated/rejected physical dispatch may be changed by a grab. Record only the actual seat.
+    pub fn record_zoom_pointer_input(&mut self) {
+        if self.zoom_cursor_tracking_is_suppressed() {
+            return;
+        }
+        let Some(actual) = self.seat.get_pointer().map(|p| p.current_location()) else {
+            return;
+        };
+        if let Some((output, local)) = self.output_under(actual) {
+            let output = output.clone();
+            if let Some(state) = self.output_state.get_mut(&output) {
+                state.zoom.record_cursor(local);
+            }
+        }
+    }
+
+    /// No synthetic zoom motion may run through a drag or active locked/confined pointer.
+    pub fn zoom_pointer_is_manipulated(&self) -> bool {
+        let pick_color_grab = self.seat.get_pointer().is_some_and(|pointer| {
+            pointer
+                .with_grab(|_, grab| grab.as_any().is::<PickColorGrab>())
+                .unwrap_or(false)
+        });
+        let Some(pointer) = self.seat.get_pointer() else {
+            return false;
+        };
+        if pointer.is_grabbed() && !pick_color_grab {
+            return true;
+        }
+        let mut active = false;
+        if let Some(surface) = pointer.current_focus() {
+            with_pointer_constraint(&surface, &pointer, |constraint| {
+                active = constraint.is_some_and(|constraint| constraint.is_active());
+            });
+        }
+        // Pick-color only consumes clicks; it must not interrupt a deliberate zoom gesture.
+        active && !pick_color_grab
+    }
+
+    pub fn zoom_cursor_tracking_is_suppressed(&self) -> bool {
+        self.is_locked()
+            || self.window_mru_ui.is_open()
+            || self.seat.get_touch().is_some_and(|touch| {
+                touch
+                    .with_grab(|_, grab| {
+                        !grab
+                            .as_any()
+                            .is::<smithay::input::touch::TouchDownGrab<State>>()
+                    })
+                    .unwrap_or(false)
+            })
+    }
+
+    fn zoom_pointer_input_is_blocked(&self) -> bool {
+        self.zoom_pointer_is_manipulated() || self.zoom_cursor_tracking_is_suppressed()
+    }
+
+    /// Clamp a global seat candidate into the half-open content bounds of `output`.
+    pub fn constrain_pos_to_output(
+        &self,
+        output: &Output,
+        pos: Point<f64, Logical>,
+    ) -> Option<Point<f64, Logical>> {
+        let geometry = self.global_space.output_geometry(output)?.to_f64();
+        if geometry.size.w <= 0. || geometry.size.h <= 0. {
+            return None;
+        }
+        let extent = geometry.loc + geometry.size;
+        // Global clamping: adding origin only after next_down would be able to round back up
+        // to the exclusive extent for fractional/large outputs.
+        let target = Point::from((
+            pos.x.clamp(geometry.loc.x, extent.x.next_down()),
+            pos.y.clamp(geometry.loc.y, extent.y.next_down()),
+        ));
+        if !target.x.is_finite() || !target.y.is_finite() {
+            return None;
+        }
+        Some(target)
+    }
+
+    /// Constrain an accepted seat candidate against its output and current visible viewport.
+    /// Active unlocked OnEdge tracking may cross the old viewport edge so its detached anchor can
+    /// move the view, but it is still constrained to the output's half-open content bounds.
     pub fn constrain_pos_to_viewport(
         &self,
         output: &Output,
         pos: Point<f64, Logical>,
+        track_zoom: bool,
     ) -> Point<f64, Logical> {
-        if let Some(state) = self.output_state.get(output) {
-            if !state.zoom.locked {
-                return pos;
-            }
-            let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
-            let output_origin = output_geo.loc;
-            let view = self.output_view(output);
-            let viewport = view.visible_viewport(output_geo.size);
-            (pos - output_origin).constrain(viewport) + output_origin
-        } else {
-            pos
+        let Some(pos) = self.constrain_pos_to_output(output, pos) else {
+            return pos;
+        };
+        let Some(state) = self.output_state.get(output) else {
+            return pos;
+        };
+        if track_zoom
+            && !state.zoom.locked()
+            && state.zoom.movement_mode == ZoomMovementMode::OnEdge
+        {
+            return pos;
         }
+        let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
+        let output_origin = output_geo.loc;
+        let view = self.output_view(output);
+        let viewport = view.visible_viewport(output_geo.size);
+        let local = (pos - output_origin).constrain(viewport);
+
+        // Keep the inverse-mapped screen far edge half-open even when converting screen.next_down
+        // back to content rounds to the exact viewport edge at high zoom.
+        let screen_max =
+            Point::from((output_geo.size.w.next_down(), output_geo.size.h.next_down()));
+        let content_max = view.screen_to_content(screen_max).constrain(viewport);
+        let local = Point::from((
+            local.x.min(content_max.x.next_down()),
+            local.y.min(content_max.y.next_down()),
+        ));
+        self.constrain_pos_to_output(output, local + output_origin)
+            .unwrap_or(pos)
+    }
+
+    /// Legalize a tablet tool candidate against its owning output and constrain it to that
+    /// output's zoom view.
+    ///
+    /// A tablet can report its maximal coordinate, landing on the exclusive output edge where
+    /// `output_under` resolves nothing; the tablet's mapped output (else the first output)
+    /// provides fallback half-open content bounds. Tracks zoom on the accepted candidate.
+    pub fn constrain_tablet_pos(&mut self, mut pos: Point<f64, Logical>) -> Point<f64, Logical> {
+        let Some(output) = self
+            .output_under(pos)
+            .map(|(output, _)| output.clone())
+            .or_else(|| self.output_for_tablet().cloned())
+            .or_else(|| self.global_space.outputs().next().cloned())
+        else {
+            return pos;
+        };
+        if self.output_under(pos).is_none() {
+            pos = self.constrain_pos_to_output(&output, pos).unwrap_or(pos);
+        }
+        if let Some((output, _)) = self.output_under(pos) {
+            let output = output.clone();
+            pos = self.constrain_pos_to_viewport(&output, pos, true);
+            self.zoom_track_cursor(&output, pos);
+        }
+        pos
     }
 
     pub fn output_under(&self, pos: Point<f64, Logical>) -> Option<(&Output, Point<f64, Logical>)> {
@@ -4588,14 +4822,24 @@ impl Niri {
         self.screenshot_ui.advance_animations();
         self.window_mru_ui.advance_animations();
 
-        for state in self.output_state.values_mut() {
+        let manipulated = self.zoom_pointer_is_manipulated();
+        let owner = self
+            .seat
+            .get_pointer()
+            .and_then(|pointer| self.output_under(pointer.current_location()))
+            .map(|(output, _)| output.clone());
+        for (output, state) in &mut self.output_state {
             if let Some(transition) = &mut state.screen_transition {
                 if transition.is_done() {
                     state.screen_transition = None;
                 }
             }
-            state.zoom.advance_animations();
+            if manipulated && owner.as_ref() == Some(output) {
+                state.update_zoom(ZoomAction::Interrupt);
+            }
+            state.update_zoom(ZoomAction::Advance);
         }
+        self.sync_zoom_cursor();
     }
 
     pub fn update_render_elements(&mut self, output: Option<&Output>) {
@@ -4680,7 +4924,7 @@ impl Niri {
     /// The output viewport through which contents mapped to the output are presented, sampled at
     /// the moment of the call.
     ///
-    /// Returns the view for the current zoom state (a live sample, not a stored frame value).
+    /// Returns the last committed displayed zoom values, without sampling the clock.
     pub fn output_view(&self, output: &Output) -> OutputViewport {
         let zoom_state = &self.output_state[output].zoom;
         zoom_state.view()
