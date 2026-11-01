@@ -31,6 +31,7 @@ pub struct TouchOverviewGrab {
     workspace_matched_narrow: bool,
     window: Option<Window>,
     gesture: GestureState,
+    zoom_candidate: bool,
 
     // Accumulated and applied in frame().
     new_location: Point<f64, Logical>,
@@ -67,12 +68,22 @@ impl TouchOverviewGrab {
             workspace_matched_narrow,
             window,
             gesture: GestureState::Recognizing,
+            zoom_candidate: false,
             new_location: location,
             event_timestamp: None,
         }
     }
 
+    pub fn is_zoom_candidate(&self) -> bool {
+        self.zoom_candidate
+    }
+
     fn on_frame(&mut self, data: &mut State) -> bool {
+        if self.zoom_candidate {
+            self.event_timestamp = None;
+            return true;
+        }
+
         let Some(timestamp) = self.event_timestamp.take() else {
             return true;
         };
@@ -179,6 +190,10 @@ impl TouchOverviewGrab {
     }
 
     fn on_ungrab(&mut self, state: &mut State) {
+        if self.zoom_candidate {
+            return;
+        }
+
         let layout = &mut state.niri.layout;
         match self.gesture {
             GestureState::Recognizing => {
@@ -253,6 +268,20 @@ impl TouchGrab<State> for TouchOverviewGrab {
             return;
         }
 
+        if self.zoom_candidate {
+            return;
+        }
+
+        if matches!(self.gesture, GestureState::Recognizing)
+            && data.niri.zoom_input.touchscreen_pair().is_some()
+        {
+            // A two-contact sequence is reserved for pinch/pan recognition. Keep forwarding raw
+            // touch events, but don't also turn the same contact motion into overview navigation.
+            self.zoom_candidate = true;
+            self.event_timestamp = None;
+            return;
+        }
+
         if matches!(self.gesture, GestureState::InteractiveMove) {
             if let Some(window) = &self.window.as_ref() {
                 data.niri.layout.toggle_window_floating(Some(window));
@@ -279,6 +308,10 @@ impl TouchGrab<State> for TouchOverviewGrab {
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
+
+        if self.zoom_candidate {
+            return;
+        }
 
         if event.slot != self.start_data.unwrap_touch().slot {
             return;
