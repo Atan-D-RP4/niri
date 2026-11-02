@@ -4050,16 +4050,12 @@ impl Niri {
                     1.,
                     Kind::Cursor,
                     &mut |elem| {
-                        push(
-                            ViewElement::from_element(
-                                elem,
-                                view,
-                                output_scale,
-                                Some(position),
-                                filter,
-                            )
-                            .into(),
-                        )
+                        let elem = RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(elem, position, Relocate::Absolute),
+                            position,
+                            view.factor,
+                        );
+                        push(elem.into())
                     },
                 );
             }
@@ -4084,16 +4080,18 @@ impl Niri {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => push(
-                        ViewElement::from_element(
-                            element,
-                            view,
-                            output_scale,
-                            Some(position),
-                            filter,
-                        )
-                        .into(),
-                    ),
+                    Ok(element) => {
+                        let element = RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(
+                                element,
+                                position,
+                                Relocate::Absolute,
+                            ),
+                            position,
+                            view.factor,
+                        );
+                        push(element.into())
+                    }
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -4113,10 +4111,12 @@ impl Niri {
                 1.,
                 Kind::ScanoutCandidate,
                 &mut |elem| {
-                    push(
-                        ViewElement::from_element(elem, view, output_scale, Some(position), filter)
-                            .into(),
-                    )
+                    let elem = RescaleRenderElement::from_element(
+                        RelocateRenderElement::from_element(elem, position, Relocate::Absolute),
+                        position,
+                        view.factor,
+                    );
+                    push(elem.into())
                 },
             );
         }
@@ -6103,21 +6103,7 @@ impl Niri {
                     output_scale,
                     1.,
                     Kind::Cursor,
-                    &mut |elem| {
-                        // The elements are already shifted to the origin, so apply only an identity
-                        // relocation.
-                        elements.push(
-                            // Identity-mapped capture renders 1:1, so it stays unfiltered.
-                            ViewElement::from_element(
-                                elem,
-                                OutputViewport::identity(),
-                                output_scale,
-                                None,
-                                TextureFilter::Linear,
-                            )
-                            .into(),
-                        )
-                    },
+                    &mut |elem| elements.push(elem.into()),
                 );
             }
             RenderCursor::Named {
@@ -6136,19 +6122,7 @@ impl Niri {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => elements.push(
-                        // The elements are already shifted to the origin, so apply only an
-                        // identity view transform. Identity-mapped capture renders 1:1, so
-                        // it stays unfiltered.
-                        ViewElement::from_element(
-                            element,
-                            OutputViewport::identity(),
-                            output_scale,
-                            None,
-                            TextureFilter::Linear,
-                        )
-                        .into(),
-                    ),
+                    Ok(element) => elements.push(element.into()),
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
                     }
@@ -7491,8 +7465,10 @@ fn view_elements<R: NiriRenderer>(
 
 niri_render_elements! {
     PointerRenderElements<R> => {
-        Wayland = ViewElement<WaylandSurfaceRenderElement<R>>,
-        NamedPointer = ViewElement<MemoryRenderBufferRenderElement<R>>,
+        Wayland = WaylandSurfaceRenderElement<R>,
+        NamedPointer = MemoryRenderBufferRenderElement<R>,
+        RelocatedWayland = RescaleRenderElement<RelocateRenderElement<WaylandSurfaceRenderElement<R>>>,
+        RelocatedNamedPointer = RescaleRenderElement<RelocateRenderElement<MemoryRenderBufferRenderElement<R>>>,
     }
 }
 
