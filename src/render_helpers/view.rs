@@ -1,17 +1,12 @@
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
-use smithay::backend::renderer::{FrameContext, Renderer, TextureFilter};
+use smithay::backend::renderer::TextureFilter;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Coordinate, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::renderer::AsGlesFrame;
 use crate::utils::view::OutputViewport;
-
-/// Number of filter bands encoded into [`ViewElement`]'s commit counter: `Linear`
-/// (the renderer's resting default), then `Nearest`.
-const FILTER_BANDS: usize = 2;
 
 /// Linear below threshold, Nearest at or above.
 ///
@@ -27,45 +22,6 @@ pub fn view_filter(scale_factor: f64, threshold: f64) -> TextureFilter {
     } else {
         TextureFilter::Nearest
     }
-}
-
-/// Runs a draw with the filter set, restoring `Linear` after, even on error.
-macro_rules! with_filter {
-    ($get_guard:expr, $filter:expr, $body:expr $(,)?) => {{
-        let filter = $filter;
-        let set_result = {
-            let mut guard = $get_guard;
-            let upscale = guard.as_mut().upscale_filter(filter);
-            let downscale = guard.as_mut().downscale_filter(filter);
-            upscale.and(downscale)
-        };
-
-        if let Err(err) = set_result {
-            // One setter may have succeeded; reset best-effort.
-            let _ = {
-                let mut guard = $get_guard;
-                let upscale = guard.as_mut().upscale_filter(TextureFilter::Linear);
-                let downscale = guard.as_mut().downscale_filter(TextureFilter::Linear);
-                upscale.and(downscale)
-            };
-            return Err(err.into());
-        }
-
-        let result = $body;
-
-        let restore_result = {
-            let mut guard = $get_guard;
-            let upscale = guard.as_mut().upscale_filter(TextureFilter::Linear);
-            let downscale = guard.as_mut().downscale_filter(TextureFilter::Linear);
-            upscale.and(downscale)
-        };
-
-        match (result, restore_result) {
-            (Err(err), _) => Err(err),
-            (Ok(value), Ok(())) => Ok(value),
-            (Ok(_), Err(err)) => Err(err.into()),
-        }
-    }};
 }
 
 /// Renders an element through an output view transform.
@@ -86,9 +42,6 @@ pub struct ViewElement<E> {
     /// This is used for the cursor, which is positioned by the pointer position
     /// rather than by the view.
     pointer_loc: Option<Point<i32, Physical>>,
-    /// The zoom filter to draw with, sampled at the presentation boundary from the
-    /// same view the element maps through.
-    filter: TextureFilter,
 }
 
 impl<E: Element> ViewElement<E> {
@@ -97,14 +50,12 @@ impl<E: Element> ViewElement<E> {
         viewport: OutputViewport,
         scale: Scale<f64>,
         pointer_loc: Option<Point<i32, Physical>>,
-        filter: TextureFilter,
     ) -> Self {
         Self {
             element,
             viewport,
             scale,
             pointer_loc,
-            filter,
         }
     }
 
@@ -147,20 +98,8 @@ impl<E: Element> Element for ViewElement<E> {
         self.element.id()
     }
 
-    /// The commit counter is encoded with the inner element's commit and the filter band
-    /// index, so the tracker can detect a filter band flip and full-damage the element
-    /// even if the inner element's content and geometry are unchanged.
     fn current_commit(&self) -> CommitCounter {
-        let raw = self
-            .element
-            .current_commit()
-            .distance(Some(CommitCounter::from(0)))
-            .unwrap_or(usize::MAX);
-        let filter_band_index = match self.filter {
-            TextureFilter::Linear => 0,
-            TextureFilter::Nearest => 1,
-        };
-        CommitCounter::from(raw.saturating_mul(FILTER_BANDS) + filter_band_index)
+        self.element.current_commit()
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
@@ -185,43 +124,12 @@ impl<E: Element> Element for ViewElement<E> {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        let full_damage = |geometry: Rectangle<i32, Physical>| {
-            DamageSet::from_slice(&[Rectangle::new(Point::from((0, 0)), geometry.size)])
-        };
-        let Some(previous) = commit else {
-            // Unknown to the tracker: no record to diff against.
-            return full_damage(self.geometry(scale));
-        };
-
-        // Decode the tracked commit (raw = inner * FILTER_BANDS + band).
-        let Some(raw) = previous.distance(Some(CommitCounter::from(0))) else {
-            return full_damage(self.geometry(scale));
-        };
-        let (previous_inner, previous_band) = (raw / FILTER_BANDS, raw % FILTER_BANDS);
-
-        let filter_band_index = match self.filter {
-            TextureFilter::Linear => 0,
-            TextureFilter::Nearest => 1,
-        };
-
-        if previous_band == filter_band_index {
-            // Content change (or no change at all): the inner element's own damage,
-            // rebased through the view. The commit is handed back in the inner
-            // element's own (unencoded) terms.
-            let inner_geometry = self.element.geometry(scale);
-            return self
-                .element
-                .damage_since(scale, Some(CommitCounter::from(previous_inner)))
-                .iter()
-                .map(|rect| self.transform_relative_rect(inner_geometry, *rect))
-                .collect();
-        }
-
-        // Filter band flip: the geometry is unchanged but every pixel re-samples under
-        // the new filter, in either band direction — damage the whole element so the
-        // crossing frame cannot be missed. The damage is element-relative; the tracker
-        // adds the location.
-        full_damage(self.geometry(scale))
+        let inner_geometry = self.element.geometry(scale);
+        self.element
+            .damage_since(scale, commit)
+            .iter()
+            .map(|rect| self.transform_relative_rect(inner_geometry, *rect))
+            .collect()
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
@@ -259,12 +167,8 @@ impl<E: RenderElement<GlesRenderer>> RenderElement<GlesRenderer> for ViewElement
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        with_filter!(
-            frame.as_gles_frame().renderer(),
-            self.filter,
-            self.element
-                .draw(frame, src, dst, damage, opaque_regions, cache)
-        )
+        self.element
+            .draw(frame, src, dst, damage, opaque_regions, cache)
     }
 
     fn underlying_storage(&self, renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
@@ -278,11 +182,7 @@ impl<E: RenderElement<GlesRenderer>> RenderElement<GlesRenderer> for ViewElement
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), GlesError> {
-        with_filter!(
-            frame.renderer(),
-            self.filter,
-            self.element.capture_framebuffer(frame, src, dst, cache),
-        )
+        self.element.capture_framebuffer(frame, src, dst, cache)
     }
 }
 
@@ -298,12 +198,8 @@ impl<'render, E: RenderElement<TtyRenderer<'render>>> RenderElement<TtyRenderer<
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), TtyRendererError<'render>> {
-        with_filter!(
-            frame.as_gles_frame().renderer(),
-            self.filter,
-            self.element
-                .draw(frame, src, dst, damage, opaque_regions, cache)
-        )
+        self.element
+            .draw(frame, src, dst, damage, opaque_regions, cache)
     }
 
     fn underlying_storage(
@@ -320,10 +216,6 @@ impl<'render, E: RenderElement<TtyRenderer<'render>>> RenderElement<TtyRenderer<
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), TtyRendererError<'render>> {
-        with_filter!(
-            frame.as_gles_frame().renderer(),
-            self.filter,
-            self.element.capture_framebuffer(frame, src, dst, cache),
-        )
+        self.element.capture_framebuffer(frame, src, dst, cache)
     }
 }

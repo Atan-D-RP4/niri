@@ -36,7 +36,7 @@ use smithay::backend::renderer::element::{
 };
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::{Color32F, TextureFilter};
+use smithay::backend::renderer::Color32F;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
@@ -4035,7 +4035,6 @@ impl Niri {
         } else {
             view
         };
-        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
 
         match render_cursor {
             RenderCursor::Hidden => (),
@@ -4578,9 +4577,13 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
+        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+
+        let _ = ctx.renderer.upscale_filter(filter);
+        let _ = ctx.renderer.downscale_filter(filter);
+
         let push = &mut move |elem| {
-            let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
-            let elem = view_elements(elem, output, view, filter);
+            let elem = view_elements(elem, output, view);
             if self.debug_draw_opaque_regions {
                 push_opaque_regions(
                     &elem,
@@ -7454,7 +7457,6 @@ fn view_elements<R: NiriRenderer>(
     element: OutputRenderElements<R>,
     output: &Output,
     view: OutputViewport,
-    filter: TextureFilter,
 ) -> OutputRenderElements<R> {
     let scale = Scale::from(output.current_scale().fractional_scale());
     macro_rules! view_variants {
@@ -7467,7 +7469,6 @@ fn view_elements<R: NiriRenderer>(
                             view,
                             Scale::from(scale),
                             None,
-                            filter
                         );
                         ViewportRenderElements::$variant(e).into()
                     }
