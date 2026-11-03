@@ -16,6 +16,7 @@ use calloop::futures::Scheduler;
 use niri_config::debug::PreviewRender;
 use niri_config::input::XkbFile;
 use niri_config::output::MaxBpc;
+use niri_config::utils::MergeWith;
 use niri_config::window_rule::VrrRule;
 use niri_config::{
     Bind, Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
@@ -154,6 +155,7 @@ use crate::layer::mapped::LayerSurfaceRenderElement;
 use crate::layer::MappedLayer;
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
+use crate::layout::zoom::OutputZoomState;
 use crate::layout::{
     HitType, Layout, LayoutElement as _, LayoutElementRenderElement, MonitorRenderElement,
 };
@@ -549,6 +551,8 @@ pub struct OutputState {
     screen_transition: Option<ScreenTransition>,
     /// Damage tracker used for the debug damage visualization.
     pub debug_damage_tracker: OutputDamageTracker,
+    /// Zoom state used to track screen magnification.
+    pub zoom: OutputZoomState,
 }
 
 #[derive(Debug, Default)]
@@ -896,6 +900,7 @@ impl State {
 
         self.niri.refresh_window_rules();
         self.refresh_ipc_outputs();
+        self.ipc_refresh_zoom();
         self.ipc_refresh_layout();
         self.ipc_refresh_keyboard_layout_index();
         self.ipc_refresh_touchpad();
@@ -1275,6 +1280,7 @@ impl State {
             .niri
             .screen_to_content_global(output, center(geo).to_f64());
         self.move_cursor(content_center);
+        self.niri.zoom_track_cursor(output, content_center);
     }
 
     pub fn refresh_popup_grab(&mut self) {
@@ -1760,6 +1766,9 @@ impl State {
                 .set_host_cursor_visible(config.debug.nested_show_host_cursor);
         }
 
+        if config.zoom != old_config.zoom {
+            output_config_changed = true;
+        }
         // We need &mut self to reload the xkb config, so just store it here.
         if config.input.keyboard.xkb != old_config.input.keyboard.xkb {
             reload_xkb = true;
@@ -2055,6 +2064,18 @@ impl State {
                     recolored_outputs.push(output.clone());
                 }
                 break;
+            }
+
+            let mut zoom = full_config.zoom;
+            if let Some(part) = config.and_then(|c| c.zoom.clone()) {
+                zoom.merge_with(&part);
+            }
+
+            if let Some(state) = self.niri.output_state.get_mut(output) {
+                let changed = state.zoom.set_config(&zoom);
+                if changed {
+                    recolored_outputs.push(output.clone());
+                }
             }
         }
 
@@ -3151,6 +3172,12 @@ impl Niri {
                 layout.background_color = c.and_then(|c| c.background_color);
             }
         }
+
+        let mut zoom_config = config.zoom;
+        if let Some(part) = config.outputs.find(name).and_then(|o| o.zoom.clone()) {
+            zoom_config.merge_with(&part);
+        }
+
         drop(config);
 
         // Set scale and transform before adding to the layout since that will read the output size.
@@ -3187,6 +3214,7 @@ impl Niri {
             lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
+            zoom: OutputZoomState::new(&output, zoom_config),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -3308,6 +3336,7 @@ impl Niri {
             state.backdrop_buffer.resize(output_size);
 
             state.lock_color_buffer.resize(output_size);
+            state.zoom.set_output_size(output_size);
             if let Some(lock_surface) = &state.lock_surface {
                 configure_lock_surface(lock_surface, output);
             }
@@ -3351,6 +3380,34 @@ impl Niri {
         backend.set_monitors_active(true);
 
         self.queue_redraw_all();
+    }
+
+    /// Track the zoom cursor for `output`.
+    pub fn zoom_track_cursor(&mut self, output: &Output, pos: Point<f64, Logical>) {
+        let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
+        let pos = pos - output_geo.loc;
+        if let Some(state) = self.output_state.get_mut(output) {
+            state.zoom.set_cursor(pos);
+        }
+    }
+
+    pub fn constrain_pos_to_viewport(
+        &self,
+        output: &Output,
+        pos: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
+        if let Some(state) = self.output_state.get(output) {
+            if !state.zoom.locked {
+                return pos;
+            }
+            let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
+            let output_origin = output_geo.loc;
+            let view = self.output_view(output);
+            let viewport = view.visible_viewport(output_geo.size);
+            (pos - output_origin).constrain(viewport) + output_origin
+        } else {
+            pos
+        }
     }
 
     pub fn output_under(&self, pos: Point<f64, Logical>) -> Option<(&Output, Point<f64, Logical>)> {
@@ -4524,9 +4581,13 @@ impl Niri {
         }
     }
 
-    pub fn output_view(&self, _output: &Output) -> OutputViewport {
-        // FIXME: Should use focal and factor from the zoom state once that is implemented.
-        OutputViewport::identity()
+    /// The output viewport through which contents mapped to the output are presented, sampled at
+    /// the moment of the call.
+    ///
+    /// Returns the view for the current zoom state (a live sample, not a stored frame value).
+    pub fn output_view(&self, output: &Output) -> OutputViewport {
+        let zoom_state = &self.output_state[output].zoom;
+        zoom_state.view()
     }
 
     pub fn screen_to_content_global(
