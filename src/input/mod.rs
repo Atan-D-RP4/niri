@@ -8,9 +8,9 @@ use calloop::RegistrationToken;
 use input::event::gesture::GestureEventCoordinates as _;
 use niri_config::{
     Action, Bind, Binds, BoundAction, Config, Key, ModKey, Modifiers, MruDirection, SwitchBinds,
-    Trigger,
+    Trigger, ZoomCursorVelocity, ZoomIncrementType,
 };
-use niri_ipc::LayoutSwitchTarget;
+use niri_ipc::{LayoutSwitchTarget, ZoomLevelChange};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, DeviceCapability, Event,
     GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _,
@@ -37,7 +37,7 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardDevice;
@@ -58,7 +58,9 @@ use crate::niri::{CastTarget, Niri, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::{spawn, spawn_sh};
-use crate::utils::{center, get_monotonic_time, output_size, CastSessionId, ResizeEdge};
+use crate::utils::{
+    center, center_f64, get_monotonic_time, output_size, CastSessionId, ResizeEdge,
+};
 use crate::window::mapped::MappedId;
 
 pub mod backend_ext;
@@ -2775,11 +2777,48 @@ impl State {
                     self.niri.test_action_count += 1;
                 }
             }
-            Action::SetZoomLevel(_level, _output) => {
-                todo!()
+            Action::SetZoomLevel(level, output) => {
+                let output = self.resolve_output(&output);
+                if let Some(output) = output {
+                    let cursor = match self.niri.seat.get_pointer() {
+                        Some(pointer) => pointer.current_location(),
+                        None => {
+                            let geo = self.niri.global_space.output_geometry(&output).unwrap();
+                            center_f64(geo.to_f64())
+                        }
+                    };
+                    self.niri.zoom_track_cursor(&output, cursor);
+
+                    let zoom_state = &mut self.niri.output_state.get_mut(&output).unwrap().zoom;
+                    let target_level = {
+                        let config = self.niri.config.borrow();
+                        let current_level = zoom_state.view().factor;
+                        let target = match level {
+                            ZoomLevelChange::Set(level) => level,
+                            ZoomLevelChange::Adjust(delta) => match config.zoom.increment_type {
+                                ZoomIncrementType::Linear => current_level + delta,
+                                ZoomIncrementType::Exponential => {
+                                    (current_level.ln() + delta).exp()
+                                }
+                            },
+                        };
+                        if !target.is_finite() {
+                            return;
+                        }
+                        target
+                    };
+
+                    zoom_state.set_level(target_level);
+                    self.niri.queue_redraw(&output);
+                }
             }
-            Action::ToggleZoomLock(_output) => {
-                todo!()
+            Action::ToggleZoomLock(output) => {
+                let output = self.resolve_output(&output);
+                if let Some(output) = output {
+                    let zoom_state = &mut self.niri.output_state.get_mut(&output).unwrap().zoom;
+                    zoom_state.toggle_lock();
+                    self.niri.queue_redraw(&output);
+                }
             }
         }
     }
@@ -2962,6 +3001,15 @@ impl State {
 
         self.niri.pointer_contents.clone_from(&under);
 
+        // Track the final stored position, after boundary clipping, pointer constraints and
+        // the view-offset wrap above. The confined early-return branch stores nothing, so it
+        // tracks nothing.
+        if let Some((output, _)) = self.niri.output_under(new_pos) {
+            let output = output.clone();
+            new_pos = self.niri.constrain_pos_to_viewport(&output, new_pos);
+            self.niri.zoom_track_cursor(&output, new_pos);
+        }
+
         pointer.motion(
             self,
             under.surface.clone(),
@@ -3042,10 +3090,6 @@ impl State {
             return;
         };
 
-        if let Some((output, _)) = self.niri.output_under(pos) {
-            pos = self.niri.screen_to_content_global(output, pos);
-        }
-
         let serial = SERIAL_COUNTER.next_serial();
 
         let pointer = self.niri.seat.get_pointer().unwrap();
@@ -3059,6 +3103,13 @@ impl State {
         self.niri.handle_focus_follows_mouse(&under);
 
         self.niri.pointer_contents.clone_from(&under);
+
+        // Track the final stored content position at the storage point.
+        if let Some((output, _)) = self.niri.output_under(pos) {
+            let output = output.clone();
+            pos = self.niri.constrain_pos_to_viewport(&output, pos);
+            self.niri.zoom_track_cursor(&output, pos);
+        }
 
         pointer.motion(
             self,
@@ -3915,10 +3966,6 @@ impl State {
             return;
         };
 
-        if let Some((output, _)) = self.niri.output_under(pos) {
-            pos = self.niri.screen_to_content_global(output, pos);
-        }
-
         self.update_screenshot_ui(pos, None);
 
         self.mru_pointer_motion(pos);
@@ -3940,6 +3987,13 @@ impl State {
                     .wheel_has_changed()
                     .then(|| (event.wheel_delta(), event.wheel_delta_discrete())),
             };
+
+            // Track the final stored content position at the storage point.
+            if let Some((output, _)) = self.niri.output_under(pos) {
+                let output = output.clone();
+                pos = self.niri.constrain_pos_to_viewport(&output, pos);
+                self.niri.zoom_track_cursor(&output, pos);
+            }
 
             tool.motion(
                 self,
@@ -4115,7 +4169,7 @@ impl State {
     where
         I::Device: 'static, // Needed for downcasting.
     {
-        let Some(pos) = self.compute_tablet_position(&event) else {
+        let Some(mut pos) = self.compute_tablet_position(&event) else {
             return;
         };
 
@@ -4160,6 +4214,13 @@ impl State {
                     // so, then it might be worth delaying this frame() until the loop callback to
                     // batch all of them in.
                     tool.frame(self, time);
+
+                    // Track the final stored content position at the storage point.
+                    if let Some((output, _)) = self.niri.output_under(pos) {
+                        let output = output.clone();
+                        pos = self.niri.constrain_pos_to_viewport(&output, pos);
+                        self.niri.zoom_track_cursor(&output, pos);
+                    }
 
                     self.niri.pointer_visibility = PointerVisibility::Visible;
                     self.niri.tablet_cursor_location = Some(pos);
@@ -4880,6 +4941,21 @@ impl State {
             .output_view(output)
             .content_to_screen(pos_within_output);
         self.niri.window_mru_ui.pointer_motion(screen_within_output)
+    }
+
+    /// Resolve the target output for an action.
+    fn resolve_output(&self, name: &Option<String>) -> Option<Output> {
+        let output = match name {
+            Some(name) => self.niri.output_by_name_match(name).cloned(),
+            None => self
+                .niri
+                .screenshot_ui
+                .selection_output()
+                .cloned()
+                .or_else(|| self.niri.output_under_cursor())
+                .or_else(|| self.niri.layout.active_output().cloned()),
+        };
+        output
     }
 }
 
