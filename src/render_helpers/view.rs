@@ -1,19 +1,11 @@
-use std::cell::RefCell;
-use std::sync::Once;
-
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::element::{Element, Id, RenderElement};
-use smithay::backend::renderer::gles::{
-    ffi, Capability, GlesError, GlesFrame, GlesRenderer, GlesTexture,
-};
-use smithay::backend::renderer::utils::CommitCounter;
-use smithay::backend::renderer::{Frame, FrameContext, Offscreen, Texture, TextureFilter};
-use smithay::gpu_span_location;
+use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
+use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer};
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+use smithay::backend::renderer::TextureFilter;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, Coordinate, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::renderer::AsGlesFrame;
 use crate::utils::view::OutputViewport;
 
 /// Linear below threshold, Nearest at or above.
@@ -32,342 +24,198 @@ pub fn view_filter(scale_factor: f64, threshold: f64) -> TextureFilter {
     }
 }
 
-pub struct Viewport {
-    id: Id,
-    commit: CommitCounter,
-    last: Option<(OutputViewport, TextureFilter)>,
-}
-
-impl Viewport {
-    pub fn new() -> Self {
-        Self {
-            id: Id::new(),
-            commit: CommitCounter::default(),
-            last: None,
-        }
-    }
-
-    pub fn render(
-        &mut self,
-        viewport: OutputViewport,
-        output_size: Size<f64, Logical>,
-        scale: Scale<f64>,
-        filter: TextureFilter,
-    ) -> ViewportElement {
-        let changed = self
-            .last
-            .map(|(v, f)| v != viewport || f != filter)
-            .unwrap_or(true);
-        if changed {
-            self.commit.increment();
-        }
-        self.last = Some((viewport, filter));
-        ViewportElement::new(
-            self.id.clone(),
-            self.commit,
-            viewport,
-            output_size,
-            scale,
-            filter,
-        )
-    }
-}
-
+/// Renders an element through an output view transform.
+///
+/// This Element's damage and opaque regions are relative to the inner element, that is, to the
+/// position the element is drawn at.
 #[derive(Debug)]
-pub struct ViewportElement {
-    id: Id,
-    commit: CommitCounter,
-    viewport: OutputViewport,
-    output_size: Size<f64, Logical>,
+pub struct ViewElement<E> {
+    element: E,
     scale: Scale<f64>,
-    filter: TextureFilter,
+    /// The view to render the element through.
+    ///
+    /// The view maps content space geometry to screen space by scaling the element by
+    /// the viewport factor about the viewport focal point.
+    viewport: OutputViewport,
+    /// Overrides the position of the element. The size still comes from the view.
+    ///
+    /// This is used for the cursor, which is positioned by the pointer position
+    /// rather than by the view.
+    pointer_loc: Option<Point<i32, Physical>>,
 }
 
-#[derive(Debug, Default)]
-struct Inner {
-    intermediate: Option<GlesTexture>,
-}
-
-impl ViewportElement {
-    pub fn new(
-        id: Id,
-        commit: CommitCounter,
+impl<E: Element> ViewElement<E> {
+    pub fn from_element(
+        element: E,
         viewport: OutputViewport,
-        output_size: Size<f64, Logical>,
         scale: Scale<f64>,
-        filter: TextureFilter,
+        pointer_loc: Option<Point<i32, Physical>>,
     ) -> Self {
         Self {
-            id,
-            commit,
+            element,
             viewport,
-            output_size,
             scale,
-            filter,
+            pointer_loc,
         }
     }
 
-    /// The exact (unrounded) crop for this frame and the integer capture window around it,
-    /// resolved in framebuffer space.
-    fn crop_window(
-        &self,
-        fb_size: Size<i32, Physical>,
-        transform: Transform,
-    ) -> Option<(Rectangle<f64, Physical>, Rectangle<i32, Physical>)> {
-        if fb_size.w == 0 || fb_size.h == 0 {
-            return None;
-        }
-        let output_rect = Rectangle::from_size(fb_size);
-        let vv = self
+    /// Maps a rectangle from content space to screen space.
+    fn apply_to_rect<C: Coordinate>(&self, rect: Rectangle<C, Physical>) -> Rectangle<C, Physical> {
+        let rect = rect.to_f64();
+        let transformed = self
             .viewport
-            .visible_viewport(self.output_size)
+            .content_to_screen_rect(rect.to_logical(self.scale))
             .to_physical(self.scale);
-        let vv = vv.intersection(output_rect.to_f64())?;
-        let vv: Rectangle<f64, Physical> = transform.transform_rect_in(vv, &fb_size.to_f64());
+        let transformed_loc = Point::from((
+            C::from_f64(transformed.loc.x.round()),
+            C::from_f64(transformed.loc.y.round()),
+        ));
+        let transaction_size = Size::from((
+            C::from_f64(transformed.size.w.round()),
+            C::from_f64(transformed.size.h.round()),
+        ));
+        Rectangle::new(transformed_loc, transaction_size)
+    }
 
-        let x0 = vv.loc.x.floor().max(0.) as i32;
-        let y0 = vv.loc.y.floor().max(0.) as i32;
-        let x1 = ((vv.loc.x + vv.size.w).floor() + 1.).min(fb_size.w as f64) as i32;
-        let y1 = ((vv.loc.y + vv.size.h).floor() + 1.).min(fb_size.h as f64) as i32;
-        if x1 <= x0 || y1 <= y0 {
-            return None;
-        }
-        let window = Rectangle::new((x0, y0).into(), Size::from((x1 - x0, y1 - y0)));
-
-        Some((vv, window))
+    /// Maps a region relative to the wrapped element into a region relative to this
+    /// element: made absolute in content space, mapped through the view, then made
+    /// relative to the element's origin again.
+    fn transform_relative_rect<C: Coordinate>(
+        &self,
+        inner_geometry: Rectangle<C, Physical>,
+        rect: Rectangle<C, Physical>,
+    ) -> Rectangle<C, Physical> {
+        let mut absolute = rect;
+        absolute.loc += inner_geometry.loc;
+        let mut transformed = self.apply_to_rect(absolute);
+        transformed.loc -= self.apply_to_rect(inner_geometry).loc;
+        transformed
     }
 }
 
-impl Inner {
-    fn new() -> Self {
-        Self { intermediate: None }
-    }
-}
-
-impl Element for ViewportElement {
+impl<E: Element> Element for ViewElement<E> {
     fn id(&self) -> &Id {
-        &self.id
+        self.element.id()
     }
 
     fn current_commit(&self) -> CommitCounter {
-        self.commit
+        self.element.current_commit()
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
-        let viewport_size = self.viewport.visible_viewport(self.output_size).size;
-
-        let size = viewport_size.to_buffer(self.scale, self.transform());
-        Rectangle::from_size(size)
+        self.element.src()
     }
 
-    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        Rectangle::from_size(self.output_size.to_physical_precise_round(self.scale))
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        let inner_geometry = self.element.geometry(scale);
+        let mut mapped = self.apply_to_rect(inner_geometry);
+        if let Some(location) = self.pointer_loc {
+            mapped.loc = location;
+        }
+        mapped
+    }
+
+    fn transform(&self) -> Transform {
+        self.element.transform()
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        let inner_geometry = self.element.geometry(scale);
+        self.element
+            .damage_since(scale, commit)
+            .iter()
+            .map(|rect| self.transform_relative_rect(inner_geometry, *rect))
+            .collect()
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        // The opaque regions are rebased by the element's transformed origin, but the inner rects
+        // are rooted at the raw element geometry.
+        let inner_geometry = self.element.geometry(scale);
+
+        self.element
+            .opaque_regions(scale)
+            .iter()
+            .map(|rect| self.transform_relative_rect(inner_geometry, *rect))
+            .collect()
+    }
+
+    fn alpha(&self) -> f32 {
+        self.element.alpha()
+    }
+
+    fn kind(&self) -> Kind {
+        self.element.kind()
     }
 
     fn is_framebuffer_effect(&self) -> bool {
-        true
+        self.element.is_framebuffer_effect()
     }
 }
 
-impl RenderElement<GlesRenderer> for ViewportElement {
+impl<E: RenderElement<GlesRenderer>> RenderElement<GlesRenderer> for ViewElement<E> {
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,
-        _src: Rectangle<f64, Buffer>,
+        src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-        _opaque_regions: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        let Some(cache) = cache else { return Ok(()) };
-        let Some(inner) = cache.get::<RefCell<Inner>>() else {
-            return Ok(());
-        };
-        let inner = inner.borrow();
-        let Some(texture) = &inner.intermediate else {
-            return Ok(());
-        };
+        self.element
+            .draw(frame, src, dst, damage, opaque_regions, cache)
+    }
 
-        // Clamp dst the same way as capture_framebuffer.
-        let output_rect = Rectangle::from_size(frame.output_size());
-        let clamped_dst = match dst.intersection(output_rect) {
-            Some(clamped) => clamped,
-            None => return Ok(()),
-        };
-
-        let transform = frame.transformation();
-        let Some((vv_fb, window)) = self.crop_window(frame.output_size(), transform) else {
-            return Ok(());
-        };
-        let src: Rectangle<f64, Buffer> = Rectangle::new(
-            (
-                vv_fb.loc.x - window.loc.x as f64,
-                vv_fb.loc.y - window.loc.y as f64,
-            )
-                .into(),
-            Size::from((vv_fb.size.w, vv_fb.size.h)),
-        );
-        frame.render_texture_from_to(
-            texture,
-            src,
-            clamped_dst,
-            damage,
-            &[],
-            transform.invert(),
-            1.,
-            None,
-            &[],
-        )
+    fn underlying_storage(&self, renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
+        self.element.underlying_storage(renderer)
     }
 
     fn capture_framebuffer(
         &self,
         frame: &mut GlesFrame<'_, '_>,
-        _src: Rectangle<f64, Buffer>,
+        src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), GlesError> {
-        let _span = tracy_client::span!("ViewportElement::capture_framebuffer");
-        let location = gpu_span_location!("ViewportElement::capture_framebuffer");
-
-        frame.with_gpu_span(location, |frame| {
-            let output_rect = Rectangle::from_size(frame.output_size());
-            let transform = frame.transformation();
-            let supports_blit = frame.capabilities().contains(&Capability::Blit);
-            let fb_size = frame.output_size();
-
-            let mut guard = frame.renderer();
-            let inner = cache.get_or_insert::<RefCell<Inner>, _>(|| RefCell::new(Inner::new()));
-            let mut inner = inner.borrow_mut();
-            let inner = &mut *inner;
-
-            if !supports_blit {
-                static WARN: Once = Once::new();
-                WARN.call_once(|| {
-                    warn!(
-                        "viewport effect disabled: renderer does not support framebuffer blitting"
-                    );
-                });
-                return Ok(());
-            }
-
-            // Clamp dst to the output, exactly as framebuffer_effect.rs does.
-            let clamped_dst = match dst.intersection(output_rect) {
-                Some(clamped) => clamped,
-                None => return Ok(()),
-            };
-
-            let (_vv, window) = match self.crop_window(fb_size, transform) {
-                Some(crop) => crop,
-                None => return Ok(()),
-            };
-
-            // Size the texture from dst, not from the crop.
-            let tex_size = transform.transform_size(clamped_dst.size);
-            let tex_size = tex_size.to_logical(1).to_buffer(1, Transform::Normal);
-
-            if inner
-                .intermediate
-                .as_ref()
-                .is_some_and(|t| t.size() != tex_size)
-            {
-                inner.intermediate = None;
-            }
-            if inner.intermediate.is_none() {
-                let renderer = guard.as_mut();
-                inner.intermediate = Some(renderer.create_buffer(Fourcc::Abgr8888, tex_size)?);
-            }
-            let texture = inner.intermediate.as_ref().unwrap();
-
-            drop(guard);
-
-            let filter = match self.filter {
-                TextureFilter::Linear => ffi::LINEAR,
-                TextureFilter::Nearest => ffi::NEAREST,
-            };
-
-            // Blit the capture window into the texture 1:1, top-left anchored; the part of
-            // the texture past the window is never sampled.
-            frame.with_context(|gl| unsafe {
-                while gl.GetError() != ffi::NO_ERROR {}
-
-                let mut current_fbo = 0i32;
-                gl.GetIntegerv(ffi::DRAW_FRAMEBUFFER_BINDING, &mut current_fbo as *mut _);
-
-                gl.Disable(ffi::SCISSOR_TEST);
-
-                let mut fbo = 0;
-                gl.GenFramebuffers(1, &mut fbo as *mut _);
-                gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, fbo);
-                gl.FramebufferTexture2D(
-                    ffi::DRAW_FRAMEBUFFER,
-                    ffi::COLOR_ATTACHMENT0,
-                    ffi::TEXTURE_2D,
-                    texture.tex_id(),
-                    0,
-                );
-
-                gl.BlitFramebuffer(
-                    window.loc.x,
-                    window.loc.y,
-                    window.loc.x + window.size.w,
-                    window.loc.y + window.size.h,
-                    0,
-                    0,
-                    window.size.w,
-                    window.size.h,
-                    ffi::COLOR_BUFFER_BIT,
-                    filter,
-                );
-
-                gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, current_fbo as u32);
-                gl.Enable(ffi::SCISSOR_TEST);
-                gl.DeleteFramebuffers(1, &mut fbo as *mut _);
-
-                if gl.GetError() != ffi::NO_ERROR {
-                    Err(GlesError::BlitError)
-                } else {
-                    Ok(())
-                }
-            })??;
-
-            Ok(())
-        })
+        self.element.capture_framebuffer(frame, src, dst, cache)
     }
 }
 
-impl<'render> RenderElement<TtyRenderer<'render>> for ViewportElement {
+impl<'render, E: RenderElement<TtyRenderer<'render>>> RenderElement<TtyRenderer<'render>>
+    for ViewElement<E>
+{
     fn draw(
         &self,
-        frame: &mut TtyFrame<'_, '_, '_>,
+        frame: &mut TtyFrame<'render, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), TtyRendererError<'render>> {
-        let gles_frame = frame.as_gles_frame();
-        RenderElement::<GlesRenderer>::draw(
-            &self,
-            gles_frame,
-            src,
-            dst,
-            damage,
-            opaque_regions,
-            cache,
-        )?;
-        Ok(())
+        self.element
+            .draw(frame, src, dst, damage, opaque_regions, cache)
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &mut TtyRenderer<'render>,
+    ) -> Option<UnderlyingStorage<'_>> {
+        self.element.underlying_storage(renderer)
     }
 
     fn capture_framebuffer(
         &self,
-        frame: &mut TtyFrame<'_, '_, '_>,
+        frame: &mut TtyFrame<'render, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), TtyRendererError<'render>> {
-        let gles_frame = frame.as_gles_frame();
-        RenderElement::<GlesRenderer>::capture_framebuffer(&self, gles_frame, src, dst, cache)?;
-        Ok(())
+        self.element.capture_framebuffer(frame, src, dst, cache)
     }
 }

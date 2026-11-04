@@ -174,7 +174,7 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
-use crate::render_helpers::view::{view_filter, Viewport, ViewportElement};
+use crate::render_helpers::view::{view_filter, ViewElement};
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{
     encompassing_geo, render_to_encompassing_texture, render_to_shm, render_to_texture,
@@ -490,8 +490,6 @@ pub struct Niri {
 
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,
-
-    pub viewport: RefCell<Viewport>,
 
     #[cfg(feature = "dbus")]
     pub dbus: Option<crate::dbus::DBusServers>,
@@ -3076,8 +3074,6 @@ impl Niri {
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
 
-            viewport: RefCell::new(Viewport::new()),
-
             #[cfg(feature = "dbus")]
             dbus: None,
             #[cfg(feature = "dbus")]
@@ -4460,10 +4456,6 @@ impl Niri {
         } else {
             view
         };
-        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
-
-        let _ = renderer.upscale_filter(filter);
-        let _ = renderer.downscale_filter(filter);
 
         match render_cursor {
             RenderCursor::Hidden => (),
@@ -5006,6 +4998,22 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         ctx.xray = Some(&state.xray);
 
+        let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
+
+        let _ = ctx.renderer.upscale_filter(filter);
+        let _ = ctx.renderer.downscale_filter(filter);
+
+        let push = &mut move |elem| {
+            let elem = view_elements(elem, output, view);
+            if self.debug_draw_opaque_regions {
+                push_opaque_regions(
+                    &elem,
+                    Scale::from(output.current_scale().fractional_scale()),
+                    push,
+                );
+            }
+            push(elem);
+        };
         self.render_inner(ctx, output, include_pointer, view, push);
 
         self.clear_xray_elements(output);
@@ -5022,28 +5030,9 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         let output_scale = Scale::from(output.current_scale().fractional_scale());
 
-        let push = if self.debug_draw_opaque_regions {
-            &mut move |elem| {
-                push_opaque_regions(&elem, output_scale, push);
-                push(elem);
-            }
-        } else {
-            push
-        };
-
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
             self.render_pointer(ctx.renderer, output, view, &mut |elem| push(elem.into()));
-        }
-
-        if view.factor > 1.0 {
-            let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
-            let elem =
-                self.viewport
-                    .borrow_mut()
-                    .render(view, output_size(output), output_scale, filter);
-
-            push(elem.into());
         }
 
         // Next, the screen transition texture.
@@ -7972,6 +7961,42 @@ fn scale_relocate_crop<E: Element>(
     CropRenderElement::from_element(elem, output_scale, ws_geo)
 }
 
+fn view_elements<R: NiriRenderer>(
+    element: OutputRenderElements<R>,
+    output: &Output,
+    view: OutputViewport,
+) -> OutputRenderElements<R> {
+    let scale = Scale::from(output.current_scale().fractional_scale());
+    macro_rules! view_variants {
+        ($($variant:ident), *) => {
+            match element {
+                $(
+                    OutputRenderElements::$variant(elem) => {
+                        let e = ViewElement::from_element(
+                            elem,
+                            view,
+                            Scale::from(scale),
+                            None,
+                        );
+                        ViewportRenderElements::$variant(e).into()
+                    }
+                )*
+                _ => element,
+            }
+        }
+    }
+
+    view_variants!(
+        Monitor,
+        RescaledTile,
+        LayerSurface,
+        RelocatedLayerSurface,
+        RelocatedColor,
+        Wayland,
+        SolidColor
+    )
+}
+
 niri_render_elements! {
     PointerRenderElements<R> => {
         Wayland = ViewElement<WaylandSurfaceRenderElement<R>>,
@@ -7994,6 +8019,23 @@ niri_render_elements! {
 }
 
 niri_render_elements! {
+    ViewportRenderElements<R> => {
+        Monitor = ViewElement<MonitorRenderElement<R>>,
+        RescaledTile = ViewElement<RescaleRenderElement<TileRenderElement<R>>>,
+        LayerSurface = ViewElement<LayerSurfaceRenderElement<R>>,
+        RelocatedLayerSurface = ViewElement<CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<LayerSurfaceRenderElement<R>>>
+        >>,
+        RelocatedColor = ViewElement<CropRenderElement<
+            RelocateRenderElement<RescaleRenderElement<SolidColorRenderElement>>
+        >>,
+        // Pointer is not included here because it's handled directly in it's render path.
+        Wayland = ViewElement<WaylandSurfaceRenderElement<R>>,
+        SolidColor = ViewElement<SolidColorRenderElement>,
+    }
+}
+
+niri_render_elements! {
     OutputRenderElements<R> => {
         Monitor = MonitorRenderElement<R>,
         RescaledTile = RescaleRenderElement<TileRenderElement<R>>,
@@ -8011,7 +8053,7 @@ niri_render_elements! {
         WindowMruUi = WindowMruUiRenderElement<R>,
         ExitConfirmDialog = ExitConfirmDialogRenderElement,
         Texture = PrimaryGpuTextureRenderElement,
-        Viewport = ViewportElement,
+        Viewport = ViewportRenderElements<R>,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
     }
