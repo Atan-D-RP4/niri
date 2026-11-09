@@ -2340,7 +2340,11 @@ impl State {
         let path = path.take();
 
         self.backend.with_primary_renderer(|renderer| {
-            match self.niri.screenshot_ui.capture(renderer) {
+            let view = self
+                .niri
+                .output_view(self.niri.screenshot_ui.selection_output().unwrap());
+
+            match self.niri.screenshot_ui.capture(renderer, view) {
                 Ok((size, pixels)) => {
                     if let Err(err) = self.niri.save_screenshot(size, pixels, write_to_disk, path) {
                         warn!("error saving screenshot: {err:?}");
@@ -4772,7 +4776,7 @@ impl Niri {
         // If the screenshot UI is open, draw it.
         if self.screenshot_ui.is_open() {
             self.screenshot_ui
-                .render_output(output, ctx.target, &mut |elem| push(elem.into()));
+                .render_output(output, ctx.target, view, &mut |elem| push(elem.into()));
 
             // Add the backdrop for outputs that were connected while the screenshot UI was open.
             push(backdrop);
@@ -6522,7 +6526,7 @@ impl Niri {
             let size = output.current_mode().unwrap().size;
             let transform = output.current_transform();
             let size = transform.transform_size(size);
-            let view = self.output_view(&output);
+            let view = OutputViewport::identity();
 
             let scale = Scale::from(output.current_scale().fractional_scale());
             let targets = [
@@ -6577,12 +6581,20 @@ impl Niri {
                     res.ok()
                 };
 
+                let pointer_pos = self
+                    .tablet_cursor_location
+                    .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+                let output_pos = self.global_space.output_geometry(&output).unwrap().loc;
+                let pointer_tip =
+                    (pointer_pos - output_pos.to_f64()).to_physical_precise_round(scale);
+
                 res_output.map(|(texture, _)| {
                     OutputScreenshot::from_textures(
                         renderer,
                         scale,
+                        self.output_view(&output).factor,
                         texture,
-                        res_pointer.map(|(texture, _, geo)| (texture, geo)),
+                        res_pointer.map(|(texture, _, geo)| (texture, geo, pointer_tip)),
                     )
                 })
             });
