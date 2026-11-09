@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::f64::consts::TAU;
 use std::rc::Rc;
 
-use anyhow::Context;
 use arrayvec::ArrayVec;
 use niri_config::{Action, Bind, BoundAction, Config, Key, Modifiers, Trigger};
 use niri_ipc::SizeChange;
@@ -15,7 +14,7 @@ use smithay::backend::input::TouchSlot;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
-use smithay::backend::renderer::{ExportMem, Texture as _};
+use smithay::backend::renderer::Texture as _;
 use smithay::input::keyboard::Keysym;
 use smithay::output::{Output, WeakOutput};
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
@@ -26,8 +25,10 @@ use crate::niri_render_elements;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
-use crate::render_helpers::{render_to_texture, RenderTarget};
+use crate::render_helpers::view::ViewElement;
+use crate::render_helpers::{render_to_vec, RenderTarget};
 use crate::utils::to_physical_precise_round;
+use crate::utils::view::OutputViewport;
 
 const SELECTION_BORDER: i32 = 2;
 
@@ -91,14 +92,53 @@ pub struct OutputData {
     transform: Transform,
     // Output, screencast, screen capture.
     screenshot: [OutputScreenshot; 3],
-    buffers: [SolidColorBuffer; 8],
+    buffers: [RefCell<SolidColorBuffer>; 8],
     panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
 }
 
 pub struct OutputScreenshot {
-    texture: GlesTexture,
     buffer: PrimaryGpuTextureRenderElement,
-    pointer: Option<PrimaryGpuTextureRenderElement>,
+    pointer: Option<ScreenshotPointer>,
+    capture_level: f64,
+}
+
+#[derive(Clone)]
+struct ScreenshotPointer {
+    element: PrimaryGpuTextureRenderElement,
+    hotspot: Point<i32, Physical>,
+    tip: Point<i32, Physical>,
+}
+
+impl ScreenshotPointer {
+    fn view_element(
+        &self,
+        view: OutputViewport,
+        scale: Scale<f64>,
+        capture_level: f64,
+        ignore_view_scale: bool,
+    ) -> ViewElement<PrimaryGpuTextureRenderElement> {
+        let element_factor = if ignore_view_scale {
+            view.factor / capture_level
+        } else {
+            view.factor
+        };
+        let element_view = OutputViewport::new(view.focal, element_factor);
+        let tip = view
+            .content_to_screen(self.tip.to_f64().to_logical(scale))
+            .to_physical_precise_round(scale);
+        let hotspot = self
+            .hotspot
+            .to_f64()
+            .upscale(element_view.factor)
+            .to_i32_round();
+
+        ViewElement::from_element(
+            self.element.clone(),
+            element_view,
+            scale,
+            Some(tip - hotspot),
+        )
+    }
 }
 
 niri_render_elements! {
@@ -110,6 +150,7 @@ niri_render_elements! {
 niri_render_elements! {
     ScreenshotUiRenderElement => {
         Screenshot = PrimaryGpuTextureRenderElement,
+        ViewScreenshot = ViewElement<PrimaryGpuTextureRenderElement>,
         SolidColor = SolidColorRenderElement,
         Chrome = ScreenshotChrome,
     }
@@ -196,14 +237,14 @@ impl ScreenshotUi {
                 let size = transform.transform_size(output_mode.size);
                 let scale = output.current_scale().fractional_scale();
                 let buffers = [
-                    SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.]),
-                    SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.]),
-                    SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.]),
-                    SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.]),
-                    SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
-                    SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
-                    SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
-                    SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [1., 1., 1., 1.])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5])),
+                    RefCell::new(SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5])),
                 ];
 
                 let mut render_panel_ = |text| {
@@ -565,7 +606,6 @@ impl ScreenshotUi {
         for (output, data) in output_data {
             let buffers = &mut data.buffers;
             let size = data.size;
-            let scale = data.scale;
 
             if output == selection_output {
                 // Check if the selection is still valid. If not, reset it back to default.
@@ -577,24 +617,18 @@ impl ScreenshotUi {
                     *a = rect.loc;
                     *b = rect.loc + rect.size - Size::from((1, 1));
                 }
-
-                let border_px = to_physical_precise_round(scale, SELECTION_BORDER);
-                let border = Rectangle::from_size(Size::from((border_px, border_px)));
-                let layout = selection_layout(rect, border, size);
-
-                for (buffer, layout_rect) in buffers.iter_mut().zip(layout.iter()) {
-                    buffer.resize(layout_rect.size.to_f64().to_logical(scale));
-                }
             } else {
-                buffers[0].resize((0., 0.));
-                buffers[1].resize((0., 0.));
-                buffers[2].resize((0., 0.));
-                buffers[3].resize((0., 0.));
+                buffers[0].borrow_mut().resize((0., 0.));
+                buffers[1].borrow_mut().resize((0., 0.));
+                buffers[2].borrow_mut().resize((0., 0.));
+                buffers[3].borrow_mut().resize((0., 0.));
 
-                buffers[4].resize(size.to_f64().to_logical(data.scale));
-                buffers[5].resize((0., 0.));
-                buffers[6].resize((0., 0.));
-                buffers[7].resize((0., 0.));
+                buffers[4]
+                    .borrow_mut()
+                    .resize(size.to_f64().to_logical(data.scale));
+                buffers[5].borrow_mut().resize((0., 0.));
+                buffers[6].borrow_mut().resize((0., 0.));
+                buffers[7].borrow_mut().resize((0., 0.));
             }
         }
     }
@@ -603,6 +637,7 @@ impl ScreenshotUi {
         &self,
         output: &Output,
         target: RenderTarget,
+        view: OutputViewport,
         push: &mut dyn FnMut(ScreenshotUiRenderElement),
     ) {
         let _span = tracy_client::span!("ScreenshotUi::render_output");
@@ -612,6 +647,7 @@ impl ScreenshotUi {
             output_data,
             show_pointer,
             button,
+            config,
             open_anim,
             ..
         } = self
@@ -625,6 +661,7 @@ impl ScreenshotUi {
 
         let scale = output_data.scale;
         let progress = open_anim.clamped_value().clamp(0., 1.) as f32;
+        let ignore_view_scale = config.borrow().cursor.ignore_view_scale;
 
         // The help panel goes on top.
         if let Some((show, hide)) = &output_data.panel {
@@ -654,21 +691,43 @@ impl ScreenshotUi {
         let layout = if output == &selection.0 {
             let size = output_data.size;
             let rect = rect_from_corner_points(selection.1, selection.2);
+            // Map the selection to its on-screen rect, rounded once, and lay out the overlays in
+            // screen space: their edges then tile without seams, and the border keeps a constant
+            // thickness on screen regardless of the zoom level.
+            let display_rect = view
+                .content_to_screen_rect(rect.to_f64().to_logical(scale))
+                .to_physical(scale)
+                .to_i32_round()
+                .intersection(Rectangle::from_size(size))
+                .unwrap_or_default();
             let border_px = to_physical_precise_round(scale, SELECTION_BORDER);
             let border = Rectangle::from_size(Size::from((border_px, border_px)));
-            Some(selection_layout(rect, border, size))
+            let mut layout = selection_layout(display_rect, border, size);
+            if display_rect.is_empty() {
+                // The selection is entirely outside the visible viewport: dim the whole output,
+                // but don't draw a border around the default empty rect at the origin.
+                layout[..4].fill(Rectangle::default());
+            }
+            Some(layout)
         } else {
             None
         };
 
         for (index, buffer) in output_data.buffers.iter().enumerate() {
             let location = if let Some(layout) = &layout {
+                buffer
+                    .borrow_mut()
+                    .resize(layout[index].to_f64().to_logical(scale).size);
                 layout[index].to_f64().to_logical(scale).loc
             } else {
                 (0., 0.).into()
             };
-            let elem =
-                SolidColorRenderElement::from_buffer(buffer, location, progress, Kind::Unspecified);
+            let elem = SolidColorRenderElement::from_buffer(
+                &buffer.borrow(),
+                location,
+                progress,
+                Kind::Unspecified,
+            );
 
             push(elem.into());
         }
@@ -681,17 +740,17 @@ impl ScreenshotUi {
         };
         let screenshot = &output_data.screenshot[index];
 
-        if *show_pointer {
-            if let Some(pointer) = screenshot.pointer.clone() {
-                push(pointer.into());
-            }
+        for element in
+            screenshot.content_elements(view, scale.into(), ignore_view_scale, *show_pointer)
+        {
+            push(element);
         }
-        push(screenshot.buffer.clone().into());
     }
 
     pub fn capture(
         &self,
         renderer: &mut GlesRenderer,
+        view: OutputViewport,
     ) -> anyhow::Result<(Size<i32, Physical>, Vec<u8>)> {
         let _span = tracy_client::span!("ScreenshotUi::capture");
 
@@ -699,6 +758,7 @@ impl ScreenshotUi {
             selection,
             output_data,
             show_pointer,
+            config,
             ..
         } = self
         else {
@@ -706,57 +766,37 @@ impl ScreenshotUi {
         };
 
         let data = &output_data[&selection.0];
-        let rect = rect_from_corner_points(selection.1, selection.2);
+        let content_rect = rect_from_corner_points(selection.1, selection.2);
+        let display_rect = view
+            .content_to_screen_rect(content_rect.to_f64().to_logical(data.scale))
+            .to_physical(data.scale)
+            .to_i32_round();
+        anyhow::ensure!(
+            !display_rect.size.is_empty(),
+            "screenshot selection is empty after zoom mapping"
+        );
 
         let screenshot = &data.screenshot[0];
+        let elements = screenshot.content_elements(
+            view,
+            data.scale.into(),
+            config.borrow().cursor.ignore_view_scale,
+            *show_pointer,
+        );
+        let offset = display_rect.loc.upscale(-1);
+        let elements = elements.iter().rev().map(|element| {
+            RelocateRenderElement::from_element(element, offset, Relocate::Relative)
+        });
+        let pixels = render_to_vec(
+            renderer,
+            display_rect.size,
+            data.scale.into(),
+            Transform::Normal,
+            Fourcc::Abgr8888,
+            elements,
+        )?;
 
-        // Composite the pointer on top if needed.
-        let mut tex_rect = None;
-        if *show_pointer {
-            if let Some(pointer) = screenshot.pointer.clone() {
-                let scale = pointer.0.buffer().texture_scale();
-                let offset = rect.loc.upscale(-1);
-
-                let mut elements = ArrayVec::<_, 2>::new();
-                elements.push(pointer);
-                elements.push(screenshot.buffer.clone());
-                let elements = elements.iter().rev().map(|elem| {
-                    RelocateRenderElement::from_element(elem, offset, Relocate::Relative)
-                });
-
-                let res = render_to_texture(
-                    renderer,
-                    rect.size,
-                    scale,
-                    Transform::Normal,
-                    Fourcc::Abgr8888,
-                    elements,
-                );
-                match res {
-                    Ok((texture, _)) => {
-                        tex_rect = Some((texture, Rectangle::from_size(rect.size)));
-                    }
-                    Err(err) => {
-                        warn!("error compositing pointer onto screenshot: {err:?}");
-                    }
-                }
-            }
-        }
-
-        let (texture, rect) = tex_rect.unwrap_or_else(|| (screenshot.texture.clone(), rect));
-        // The size doesn't actually matter because we're not transforming anything.
-        let buf_rect = rect
-            .to_logical(1)
-            .to_buffer(1, Transform::Normal, &Size::from((1, 1)));
-
-        let mapping = renderer
-            .copy_texture(&texture, buf_rect, Fourcc::Abgr8888)
-            .context("error copying texture")?;
-        let copy = renderer
-            .map_texture(&mapping)
-            .context("error mapping texture")?;
-
-        Ok((rect.size, copy.to_vec()))
+        Ok((display_rect.size, pixels))
     }
 
     pub fn binds(&self) -> impl Iterator<Item = &Bind> + Clone {
@@ -1081,17 +1121,12 @@ impl OutputScreenshot {
     pub fn from_textures(
         renderer: &mut GlesRenderer,
         scale: Scale<f64>,
+        capture_level: f64,
         texture: GlesTexture,
-        pointer: Option<(GlesTexture, Rectangle<i32, Physical>)>,
+        pointer: Option<(GlesTexture, Rectangle<i32, Physical>, Point<i32, Physical>)>,
     ) -> Self {
         let buffer = PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
-            TextureBuffer::from_texture(
-                renderer,
-                texture.clone(),
-                scale,
-                Transform::Normal,
-                Vec::new(),
-            ),
+            TextureBuffer::from_texture(renderer, texture, scale, Transform::Normal, Vec::new()),
             (0., 0.),
             1.,
             None,
@@ -1099,28 +1134,55 @@ impl OutputScreenshot {
             Kind::Unspecified,
         ));
 
-        let pointer = pointer.map(|(texture, geo)| {
-            PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
-                TextureBuffer::from_texture(
-                    renderer,
-                    texture,
-                    scale,
-                    Transform::Normal,
-                    Vec::new(),
-                ),
-                geo.to_f64().to_logical(scale).loc,
-                1.,
-                None,
-                None,
-                Kind::Unspecified,
-            ))
+        let pointer = pointer.map(|(texture, geo, tip)| {
+            let element =
+                PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
+                    TextureBuffer::from_texture(
+                        renderer,
+                        texture,
+                        scale,
+                        Transform::Normal,
+                        Vec::new(),
+                    ),
+                    geo.to_f64().to_logical(scale).loc,
+                    1.,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                ));
+            ScreenshotPointer {
+                element,
+                hotspot: tip - geo.loc,
+                tip,
+            }
         });
 
         Self {
-            texture,
             buffer,
             pointer,
+            capture_level,
         }
+    }
+
+    fn content_elements(
+        &self,
+        view: OutputViewport,
+        scale: Scale<f64>,
+        ignore_view_scale: bool,
+        show_pointer: bool,
+    ) -> ArrayVec<ScreenshotUiRenderElement, 2> {
+        let mut elements = ArrayVec::new();
+        if show_pointer {
+            if let Some(pointer) = &self.pointer {
+                elements.push(
+                    pointer
+                        .view_element(view, scale, self.capture_level, ignore_view_scale)
+                        .into(),
+                );
+            }
+        }
+        elements.push(ViewElement::from_element(self.buffer.clone(), view, scale, None).into());
+        elements
     }
 }
 
