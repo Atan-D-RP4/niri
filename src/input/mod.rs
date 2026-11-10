@@ -37,7 +37,7 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardDevice;
@@ -2833,8 +2833,22 @@ impl State {
 
         let pos = pointer.current_location();
 
+        let (delta, delta_unaccel) = if let Some(output) = &self
+            .niri
+            .output_under(pos)
+            .map(|(output, _)| output.clone())
+        {
+            let level = self.niri.output_state[output].zoom.view().factor;
+            (
+                event.delta().downscale(Scale::from(level.max(1.0))),
+                event.delta_unaccel().downscale(Scale::from(level.max(1.0))),
+            )
+        } else {
+            (event.delta(), event.delta_unaccel())
+        };
+
         // We have an output, so we can compute the new location and focus.
-        let mut new_pos = pos + event.delta();
+        let mut new_pos = pos + delta;
 
         // We received an event for the regular pointer, so show it now.
         self.niri.pointer_visibility = PointerVisibility::Visible;
@@ -2880,8 +2894,8 @@ impl State {
                     self,
                     Some(under.clone()),
                     &RelativeMotionEvent {
-                        delta: event.delta(),
-                        delta_unaccel: event.delta_unaccel(),
+                        delta,
+                        delta_unaccel,
                         time: event.time(),
                     },
                 );
@@ -2979,8 +2993,8 @@ impl State {
                     self,
                     Some(focus_surface),
                     &RelativeMotionEvent {
-                        delta: event.delta(),
-                        delta_unaccel: event.delta_unaccel(),
+                        delta,
+                        delta_unaccel,
                         time: event.time(),
                     },
                 );
@@ -3018,8 +3032,8 @@ impl State {
             self,
             under.surface,
             &RelativeMotionEvent {
-                delta: event.delta(),
-                delta_unaccel: event.delta_unaccel(),
+                delta,
+                delta_unaccel,
                 time: event.time(),
             },
         );
