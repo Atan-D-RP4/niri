@@ -1927,7 +1927,8 @@ impl Tty {
             target: RenderTarget::Output,
             xray: None,
         };
-        let mut elements = niri.render_to_vec(ctx, output, true, niri.output_view(output));
+        let view = niri.output_view(output);
+        let mut elements = niri.render_to_vec(ctx, output, true, view);
 
         // Visualize the damage, if enabled.
         if niri.debug_draw_damage {
@@ -1940,7 +1941,13 @@ impl Tty {
         let flags = {
             let debug = &self.config.borrow().debug;
 
-            let primary_scanout_flag = if debug.restrict_primary_scanout_to_matching_format {
+            // Primary plane scanout uses it's scaling filter and has an integer-rounded destination
+            // size. The former causes the threshold based texture filter application to fail, and
+            // the latter causes jitter under fractional viewport scales. So we disable it when the
+            // viewport is not identity.
+            let primary_scanout_flag = if view.factor != 1. {
+                FrameFlags::empty()
+            } else if debug.restrict_primary_scanout_to_matching_format {
                 FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT
             } else {
                 FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
