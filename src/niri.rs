@@ -4476,14 +4476,8 @@ impl Niri {
                     Kind::Cursor,
                     &mut |elem| {
                         push(
-                            ViewElement::from_element(
-                                elem,
-                                view,
-                                output_scale,
-                                Some(position),
-                                None,
-                            )
-                            .into(),
+                            ViewElement::from_element(elem, view, output_scale, Some(position))
+                                .into(),
                         )
                     },
                 );
@@ -4510,14 +4504,8 @@ impl Niri {
                     Kind::Cursor,
                 ) {
                     Ok(element) => push(
-                        ViewElement::from_element(
-                            element,
-                            view,
-                            output_scale,
-                            Some(position),
-                            None,
-                        )
-                        .into(),
+                        ViewElement::from_element(element, view, output_scale, Some(position))
+                            .into(),
                     ),
                     Err(err) => {
                         warn!("error importing a cursor texture: {err:?}");
@@ -4538,10 +4526,7 @@ impl Niri {
                 1.,
                 Kind::ScanoutCandidate,
                 &mut |elem| {
-                    push(
-                        ViewElement::from_element(elem, view, output_scale, Some(position), None)
-                            .into(),
-                    )
+                    push(ViewElement::from_element(elem, view, output_scale, Some(position)).into())
                 },
             );
         }
@@ -6488,19 +6473,13 @@ impl Niri {
             // Recreate the damage tracker if the buffer size or output scale changed.
             reset_damage_tracker_if_changed(&mut s.damage_tracker, size, scale, Transform::Normal);
 
-            let view = self.output_view(output);
-            let filter = view_filter(view.factor, self.config.borrow().zoom.filter_threshold);
-
-            let _ = renderer.upscale_filter(filter);
-            let _ = renderer.downscale_filter(filter);
-
             let mut elements = Vec::new();
             if s.session.draw_cursor() && self.pointer_visibility.is_visible() {
                 // We ignore pointer_pos, but we're drawing in output coordinates, so it's fine.
                 if let Some((_, win_pos)) = self.pointer_pos_for_window_cast(mapped) {
                     let buf_pos = win_pos + bbox.loc.to_f64().to_logical(scale);
                     let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
-                    self.render_pointer(renderer, output, view, &mut |elem| {
+                    self.render_pointer(renderer, output, self.output_view(output), &mut |elem| {
                         elements.push(WindowCaptureRenderElement::Pointer(
                             RelocateRenderElement::from_element(elem, pos, Relocate::Relative),
                         ));
@@ -8009,7 +7988,6 @@ fn view_elements<R: NiriRenderer>(
     view: OutputViewport,
 ) -> OutputRenderElements<R> {
     let scale = Scale::from(output.current_scale().fractional_scale());
-    let output_size = output.current_mode().map(|mode| mode.size);
     macro_rules! view_variants {
         ($($variant:ident), *) => {
             match element {
@@ -8020,7 +7998,6 @@ fn view_elements<R: NiriRenderer>(
                             view,
                             Scale::from(scale),
                             None,
-                            output_size,
                         );
                         ViewportRenderElements::$variant(e).into()
                     }

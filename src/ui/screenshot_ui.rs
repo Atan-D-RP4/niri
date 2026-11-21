@@ -138,7 +138,6 @@ impl ScreenshotPointer {
             element_view,
             scale,
             Some(tip - hotspot),
-            None,
         )
     }
 }
@@ -1229,8 +1228,7 @@ impl OutputScreenshot {
                 );
             }
         }
-        elements
-            .push(ViewElement::from_element(self.buffer.clone(), view, scale, None, None).into());
+        elements.push(ViewElement::from_element(self.buffer.clone(), view, scale, None).into());
         elements
     }
 }

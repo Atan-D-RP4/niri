@@ -3,7 +3,7 @@ use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::backend::renderer::TextureFilter;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, Coordinate, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 use crate::utils::view::OutputViewport;
@@ -42,14 +42,6 @@ pub struct ViewElement<E> {
     /// This is used for the cursor, which is positioned by the pointer position
     /// rather than by the view.
     pointer_loc: Option<Point<i32, Physical>>,
-    /// Enables plane-window mode against an output of this size.
-    ///
-    /// When the element mapped through the view covers the output rectangle entirely, its
-    /// destination is pinned to the output rectangle and src() carries the fractional buffer
-    /// window of the visible content instead. Direct scanout then sees a stable integer
-    /// plane destination with a sub-pixel source window, so zoomed fullscreen content
-    /// animates without destination jitter.
-    output_size: Option<Size<i32, Physical>>,
 }
 
 impl<E: Element> ViewElement<E> {
@@ -58,100 +50,47 @@ impl<E: Element> ViewElement<E> {
         viewport: OutputViewport,
         scale: Scale<f64>,
         pointer_loc: Option<Point<i32, Physical>>,
-        output_size: Option<Size<i32, Physical>>,
     ) -> Self {
         Self {
             element,
             viewport,
             scale,
             pointer_loc,
-            output_size,
         }
     }
 
     /// Maps a rectangle from content space to screen space.
-    fn apply_to_rect(&self, rect: Rectangle<i32, Physical>) -> Rectangle<f64, Physical> {
+    fn apply_to_rect<C: Coordinate>(&self, rect: Rectangle<C, Physical>) -> Rectangle<C, Physical> {
         let rect = rect.to_f64();
-        self.viewport
+        let transformed = self
+            .viewport
             .content_to_screen_rect(rect.to_logical(self.scale))
-            .to_physical(self.scale)
+            .to_physical(self.scale);
+        let transformed_loc = Point::from((
+            C::from_f64(transformed.loc.x.round()),
+            C::from_f64(transformed.loc.y.round()),
+        ));
+        let transaction_size = Size::from((
+            C::from_f64(transformed.size.w.round()),
+            C::from_f64(transformed.size.h.round()),
+        ));
+        Rectangle::new(transformed_loc, transaction_size)
     }
 
     /// Maps a region relative to the wrapped element into a region relative to this
     /// element: made absolute in content space, mapped through the view, then made
     /// relative to the element's origin again.
-    fn transform_relative_rect(
+    fn transform_relative_rect<C: Coordinate>(
         &self,
-        inner_geometry: Rectangle<i32, Physical>,
-        rect: Rectangle<i32, Physical>,
-    ) -> Rectangle<f64, Physical> {
+        inner_geometry: Rectangle<C, Physical>,
+        rect: Rectangle<C, Physical>,
+    ) -> Rectangle<C, Physical> {
         let mut absolute = rect;
         absolute.loc += inner_geometry.loc;
         let mut transformed = self.apply_to_rect(absolute);
         transformed.loc -= self.apply_to_rect(inner_geometry).loc;
         transformed
     }
-
-    /// Plane-window mode: the output rectangle if the element mapped through the view
-    /// covers it entirely, otherwise None.
-    fn plane_window(
-        &self,
-        inner_geometry: Rectangle<i32, Physical>,
-    ) -> Option<Rectangle<i32, Physical>> {
-        let output_size = self.output_size.as_ref()?;
-        if self.pointer_loc.is_some() || inner_geometry.size.w <= 0 || inner_geometry.size.h <= 0 {
-            return None;
-        }
-        let mapped = self.apply_to_rect(inner_geometry);
-        let covers = mapped.loc.x <= 0.
-            && mapped.loc.y <= 0.
-            && mapped.loc.x + mapped.size.w >= f64::from(output_size.w)
-            && mapped.loc.y + mapped.size.h >= f64::from(output_size.h);
-        covers.then(|| Rectangle::new(Point::from((0, 0)), *output_size))
-    }
-}
-
-/// Maps a content-space window into buffer space through the src ↔ geometry correspondence
-/// of an element with the given transform.
-///
-/// `geometry` is the content-space extent corresponding to `src`; `window` is the wanted
-/// window in content space and must lie within `geometry`. Coordinates are normalized
-/// within `geometry` and mapped to buffer axes through the inverse transform, so rotated
-/// and flipped buffers come out right.
-fn buffer_window(
-    transform: Transform,
-    src: Rectangle<f64, Buffer>,
-    geometry: Rectangle<f64, Physical>,
-    window: Rectangle<f64, Physical>,
-) -> Rectangle<f64, Buffer> {
-    let rel_loc: Point<f64, Physical> = Point::from((
-        (window.loc.x - geometry.loc.x) / geometry.size.w,
-        (window.loc.y - geometry.loc.y) / geometry.size.h,
-    ));
-    let rel_size: Size<f64, Physical> = Size::from((
-        window.size.w / geometry.size.w,
-        window.size.h / geometry.size.h,
-    ));
-
-    // The element transform maps buffer axes to content axes; apply its inverse to
-    // normalized coordinates via Transform's own point mapping.
-    let unit: Size<f64, Physical> = Size::from((1., 1.));
-    let inverse = transform.invert();
-    let p1 = inverse.transform_point_in(rel_loc, &unit);
-    let p2 = inverse.transform_point_in(
-        Point::from((rel_loc.x + rel_size.w, rel_loc.y + rel_size.h)),
-        &unit,
-    );
-    let (x_min, x_max) = (p1.x.min(p2.x), p1.x.max(p2.x));
-    let (y_min, y_max) = (p1.y.min(p2.y), p1.y.max(p2.y));
-
-    Rectangle::new(
-        Point::new(
-            src.loc.x + x_min * src.size.w,
-            src.loc.y + y_min * src.size.h,
-        ),
-        Size::new((x_max - x_min) * src.size.w, (y_max - y_min) * src.size.h),
-    )
 }
 
 impl<E: Element> Element for ViewElement<E> {
@@ -164,37 +103,12 @@ impl<E: Element> Element for ViewElement<E> {
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
-        let inner_src = self.element.src();
-        let inner_geometry = self.element.geometry(self.scale);
-        let Some(output_rect) = self.plane_window(inner_geometry) else {
-            return inner_src;
-        };
-
-        // The visible content window: the output rectangle mapped from screen space back
-        // into content space. Coverage guarantees it lies within the inner geometry.
-        // src() has no scale parameter, so the geometry is queried with the construction
-        // scale, matching how the wrapping render path builds this element.
-        let content_window = self
-            .viewport
-            .screen_to_content_rect(output_rect.to_f64().to_logical(self.scale))
-            .to_physical(self.scale);
-
-        buffer_window(
-            self.element.transform(),
-            inner_src,
-            inner_geometry.to_f64(),
-            content_window,
-        )
+        self.element.src()
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         let inner_geometry = self.element.geometry(scale);
-        if let Some(output_rect) = self.plane_window(inner_geometry) {
-            // Destination pinned to the output rectangle: a stable plane destination, with
-            // the visible content carried by the fractional src() window.
-            return output_rect;
-        }
-        let mut mapped = self.apply_to_rect(inner_geometry).to_i32_round();
+        let mut mapped = self.apply_to_rect(inner_geometry);
         if let Some(location) = self.pointer_loc {
             mapped.loc = location;
         }
@@ -211,22 +125,11 @@ impl<E: Element> Element for ViewElement<E> {
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
         let inner_geometry = self.element.geometry(scale);
-        let inner_damage = self.element.damage_since(scale, commit);
-        let mapped = inner_damage.iter().map(|rect| {
-            self.transform_relative_rect(inner_geometry, *rect)
-                .to_i32_round()
-        });
-
-        if let Some(output_rect) = self.plane_window(inner_geometry) {
-            // The destination is pinned to the output rectangle; clip the mapped damage to
-            // it. View-driven damage is carried by src() changes, which the output damage
-            // tracker reports as damage to the element's whole geometry.
-            mapped
-                .filter_map(|rect| rect.intersection(output_rect))
-                .collect()
-        } else {
-            mapped.collect()
-        }
+        self.element
+            .damage_since(scale, commit)
+            .iter()
+            .map(|rect| self.transform_relative_rect(inner_geometry, *rect))
+            .collect()
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
@@ -234,20 +137,11 @@ impl<E: Element> Element for ViewElement<E> {
         // are rooted at the raw element geometry.
         let inner_geometry = self.element.geometry(scale);
 
-        let inner_opaque = self.element.opaque_regions(scale);
-        let mapped = inner_opaque.iter().map(|rect| {
-            self.transform_relative_rect(inner_geometry, *rect)
-                .to_i32_round()
-        });
-
-        if let Some(output_rect) = self.plane_window(inner_geometry) {
-            // Same pinning as damage_since: clip to the output rectangle.
-            mapped
-                .filter_map(|rect| rect.intersection(output_rect))
-                .collect()
-        } else {
-            mapped.collect()
-        }
+        self.element
+            .opaque_regions(scale)
+            .iter()
+            .map(|rect| self.transform_relative_rect(inner_geometry, *rect))
+            .collect()
     }
 
     fn alpha(&self) -> f32 {
